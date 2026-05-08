@@ -97,7 +97,7 @@ export const StrategyMixCard = () => {
   return (
     <div
       data-testid="strategy-mix-card"
-      className="px-3 py-1 bg-zinc-950/40 space-y-1 text-[11px]"
+      className="px-3 py-1 bg-zinc-950/40 space-y-1 text-[14px]"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs">
@@ -201,7 +201,7 @@ export const StrategyMixCard = () => {
       {/* Column legend — only render once strategies are populated. */}
       {visible.length > 0 && (
         <div
-          className="flex items-center justify-end gap-2 text-[11px] text-zinc-600 pl-32 pt-1 v5-mono"
+          className="flex items-center justify-end gap-2 text-[14px] text-zinc-600 pl-32 pt-1 v5-mono"
           data-testid="strategy-mix-legend"
         >
           <span className="w-10 text-right">freq%</span>

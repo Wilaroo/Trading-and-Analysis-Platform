@@ -109,7 +109,7 @@ export const DeepFeedV5 = ({
       {/* Filter bar — sticky, two rows on narrow widths. */}
       <div className="px-3 py-1.5 border-b border-zinc-900 bg-zinc-950/80 sticky top-0 z-10 flex flex-col gap-1.5">
         <div className="flex items-center gap-1 flex-wrap">
-          <span className="v5-mono text-[11px] v5-dim uppercase tracking-widest mr-1">range:</span>
+          <span className="v5-mono text-[14px] v5-dim uppercase tracking-widest mr-1">range:</span>
           {TIME_CHIPS.map((c) => (
             <button
               key={c.label}
@@ -121,7 +121,7 @@ export const DeepFeedV5 = ({
               {c.label}
             </button>
           ))}
-          <span className="ml-auto v5-mono text-[11px] v5-dim">{headerStats}</span>
+          <span className="ml-auto v5-mono text-[14px] v5-dim">{headerStats}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <input

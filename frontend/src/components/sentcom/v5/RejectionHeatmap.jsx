@@ -34,11 +34,11 @@ const ReasonTooltip = ({ byReason }) => {
   if (entries.length === 0) return null;
   return (
     <div className="absolute z-50 left-full top-0 ml-1 px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded shadow-lg min-w-[180px]">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+      <div className="text-[13px] uppercase tracking-wider text-zinc-500 mb-1">
         Reasons
       </div>
       {entries.map(([reason, count]) => (
-        <div key={reason} className="flex justify-between gap-3 text-[11px]">
+        <div key={reason} className="flex justify-between gap-3 text-[14px]">
           <span className="text-zinc-300 truncate">{reason}</span>
           <span className="text-zinc-200 font-semibold v5-mono">{count}</span>
         </div>
@@ -59,7 +59,7 @@ const Cell = ({ row }) => {
       data-testid={`rejection-cell-${row.symbol}-${row.setup_type}`}
     >
       <div
-        className={`px-2 py-1 rounded border text-[11px] v5-mono cursor-default ${cls}`}
+        className={`px-2 py-1 rounded border text-[14px] v5-mono cursor-default ${cls}`}
       >
         {row.total_rejections}
       </div>
@@ -118,10 +118,10 @@ export default function RejectionHeatmap() {
           <h2 className="text-sm uppercase tracking-wider text-zinc-300">
             Rejection Heatmap
           </h2>
-          <span className="text-[10px] text-zinc-600 v5-mono">v19.34.12</span>
-          {loading && <span className="text-[11px] text-zinc-500 italic">refreshing…</span>}
+          <span className="text-[13px] text-zinc-600 v5-mono">v19.34.12</span>
+          {loading && <span className="text-[14px] text-zinc-500 italic">refreshing…</span>}
         </div>
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-[14px]">
           <label className="text-zinc-500" htmlFor="rh-days">days</label>
           <select
             id="rh-days"
@@ -148,7 +148,7 @@ export default function RejectionHeatmap() {
 
       {error && (
         <div
-          className="px-3 py-2 rounded border border-rose-800 bg-rose-950/40 text-rose-200 text-[11px]"
+          className="px-3 py-2 rounded border border-rose-800 bg-rose-950/40 text-rose-200 text-[14px]"
           data-testid="rejection-heatmap-error"
         >
           {error}
@@ -157,7 +157,7 @@ export default function RejectionHeatmap() {
 
       {data && (
         <div
-          className="text-[11px] text-zinc-500 v5-mono flex flex-wrap gap-3"
+          className="text-[14px] text-zinc-500 v5-mono flex flex-wrap gap-3"
           data-testid="rejection-heatmap-summary"
         >
           <span>{data.heatmap?.total_events ?? 0} events</span>
@@ -180,16 +180,16 @@ export default function RejectionHeatmap() {
 
       {!showTable && grid && grid.symbols.length > 0 && (
         <div className="overflow-auto border border-zinc-800 rounded">
-          <table className="text-[11px] border-collapse" data-testid="rejection-heatmap-grid">
+          <table className="text-[14px] border-collapse" data-testid="rejection-heatmap-grid">
             <thead className="sticky top-0 bg-zinc-900 z-10">
               <tr>
-                <th className="text-left px-2 py-1 text-zinc-500 uppercase tracking-wider text-[10px] border-b border-zinc-800">
+                <th className="text-left px-2 py-1 text-zinc-500 uppercase tracking-wider text-[13px] border-b border-zinc-800">
                   symbol \ setup
                 </th>
                 {grid.setups.map((s) => (
                   <th
                     key={s}
-                    className="px-2 py-1 text-zinc-400 v5-mono text-[10px] border-b border-zinc-800 whitespace-nowrap"
+                    className="px-2 py-1 text-zinc-400 v5-mono text-[13px] border-b border-zinc-800 whitespace-nowrap"
                     data-testid={`rejection-col-${s}`}
                   >
                     {s}
@@ -208,7 +208,7 @@ export default function RejectionHeatmap() {
                     if (!row) {
                       return (
                         <td key={stp} className="p-0.5">
-                          <div className="px-2 py-1 rounded border border-zinc-900 text-zinc-800 text-[11px] v5-mono">
+                          <div className="px-2 py-1 rounded border border-zinc-900 text-zinc-800 text-[14px] v5-mono">
                             —
                           </div>
                         </td>
@@ -225,9 +225,9 @@ export default function RejectionHeatmap() {
 
       {showTable && (
         <div className="overflow-auto border border-zinc-800 rounded">
-          <table className="text-[11px] w-full" data-testid="rejection-heatmap-events-table">
+          <table className="text-[14px] w-full" data-testid="rejection-heatmap-events-table">
             <thead className="sticky top-0 bg-zinc-900 z-10">
-              <tr className="text-left text-zinc-500 uppercase tracking-wider text-[10px]">
+              <tr className="text-left text-zinc-500 uppercase tracking-wider text-[13px]">
                 <th className="px-2 py-1">When</th>
                 <th className="px-2 py-1">Symbol</th>
                 <th className="px-2 py-1">Setup</th>

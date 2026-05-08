@@ -999,7 +999,7 @@ const ScannerPage = () => {
                             }`}>{detail.id}</span>
                             <span className="font-medium">{detail.name}</span>
                             {detail.scan_tier && (
-                              <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                              <span className={`text-[12px] px-1.5 py-0.5 rounded font-medium ${
                                 detail.scan_tier === 'intraday' ? 'bg-violet-500/20 text-violet-300' :
                                 detail.scan_tier === 'swing' ? 'bg-blue-500/20 text-blue-300' :
                                 'bg-zinc-500/20 text-zinc-400'

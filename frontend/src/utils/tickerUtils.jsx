@@ -44,7 +44,7 @@ export const TickerLink = ({ symbol, onClick }) => (
       e.stopPropagation();
       onClick(symbol);
     }}
-    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/40 rounded text-cyan-400 font-mono font-bold text-[11px] hover:bg-cyan-500/30 hover:border-cyan-500/60 hover:text-cyan-300 transition-all cursor-pointer shadow-[0_0_8px_rgba(0,212,255,0.2)] hover:shadow-[0_0_12px_rgba(0,212,255,0.4)]"
+    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-cyan-500/20 border border-cyan-500/40 rounded text-cyan-400 font-mono font-bold text-[14px] hover:bg-cyan-500/30 hover:border-cyan-500/60 hover:text-cyan-300 transition-all cursor-pointer shadow-[0_0_8px_rgba(0,212,255,0.2)] hover:shadow-[0_0_12px_rgba(0,212,255,0.4)]"
     data-testid={`ticker-link-${symbol}`}
   >
     {symbol}
@@ -169,7 +169,7 @@ export const renderTickerAwareContent = (text, onTickerClick) => {
       const indent = line.startsWith('  ') ? 'ml-3' : '';
       const bulletColor = line.startsWith('  ') ? 'bg-zinc-500' : 'bg-cyan-400/60';
       return (
-        <div key={i} className={`flex items-start gap-1.5 text-[11px] text-zinc-300 ${indent} py-0.5`}>
+        <div key={i} className={`flex items-start gap-1.5 text-[14px] text-zinc-300 ${indent} py-0.5`}>
           <span className={`w-1 h-1 ${bulletColor} rounded-full mt-1.5 flex-shrink-0`} />
           <span>{rendered}</span>
         </div>
@@ -180,8 +180,8 @@ export const renderTickerAwareContent = (text, onTickerClick) => {
     if (line.match(/^\d+\./)) {
       const num = line.match(/^(\d+)/)[1];
       return (
-        <div key={i} className="flex items-start gap-1.5 text-[11px] text-zinc-300 py-0.5">
-          <span className="text-cyan-400/80 font-mono text-[10px] min-w-[14px]">{num}.</span>
+        <div key={i} className="flex items-start gap-1.5 text-[14px] text-zinc-300 py-0.5">
+          <span className="text-cyan-400/80 font-mono text-[13px] min-w-[14px]">{num}.</span>
           <span>{rendered}</span>
         </div>
       );
@@ -191,7 +191,7 @@ export const renderTickerAwareContent = (text, onTickerClick) => {
     if (line.trim() === '') return <div key={i} className="h-1.5" />;
     
     // Regular text
-    return <p key={i} className="text-[11px] text-zinc-300 py-0.5">{rendered}</p>;
+    return <p key={i} className="text-[14px] text-zinc-300 py-0.5">{rendered}</p>;
   });
 };
 

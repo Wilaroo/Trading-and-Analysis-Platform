@@ -100,7 +100,7 @@ export default function BootReconcilePill() {
       data-claimed={claimed}
       data-age-s={data.age_seconds}
       title={tooltipLines.join('\n')}
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded border ${cls} transition-colors cursor-help`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[13px] font-bold uppercase tracking-wider rounded border ${cls} transition-colors cursor-help`}
     >
       <span data-testid="boot-reconcile-pill-label">{label}</span>
       {ago && (

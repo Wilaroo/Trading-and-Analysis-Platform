@@ -83,16 +83,16 @@ const PremarketGapScannerWidget = ({
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-900 bg-zinc-950/80">
         <div className="flex items-center gap-2">
-          <span className="v5-mono text-[11px] uppercase tracking-widest text-violet-300 font-bold">
+          <span className="v5-mono text-[14px] uppercase tracking-widest text-violet-300 font-bold">
             Gappers · last {windowMinutes}m
           </span>
-          <span className="v5-mono text-[10px] text-zinc-500">
+          <span className="v5-mono text-[13px] text-zinc-500">
             ≥{minGapPct.toFixed(1)}%
           </span>
         </div>
         <div className="flex items-center gap-2">
           {generatedAt && (
-            <span className="v5-mono text-[9px] text-zinc-600 hidden sm:inline">
+            <span className="v5-mono text-[12px] text-zinc-600 hidden sm:inline">
               {new Date(generatedAt).toLocaleTimeString()}
             </span>
           )}
@@ -158,11 +158,11 @@ const PremarketGapScannerWidget = ({
               >
                 {fmtPct(r.gap_pct)}
               </span>
-              <span className="v5-mono text-[11px] text-zinc-400 w-[60px] shrink-0">
+              <span className="v5-mono text-[14px] text-zinc-400 w-[60px] shrink-0">
                 {fmtPrice(r.current_price)}
               </span>
               <span
-                className={`v5-mono text-[10px] uppercase tracking-wider truncate flex-1 ${
+                className={`v5-mono text-[13px] uppercase tracking-wider truncate flex-1 ${
                   isLong ? 'text-emerald-300/80' : 'text-rose-300/80'
                 }`}
                 title={setupPretty}
@@ -171,14 +171,14 @@ const PremarketGapScannerWidget = ({
               </span>
               {isCountertrend && (
                 <span
-                  className="v5-mono text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-amber-500/20 text-amber-300"
+                  className="v5-mono text-[12px] uppercase tracking-wider px-1 py-0.5 rounded bg-amber-500/20 text-amber-300"
                   title="Counter-trend vs market setup"
                   data-testid={`gap-row-countertrend-${sym}`}
                 >
                   CTR
                 </span>
               )}
-              <span className="v5-mono text-[10px] text-zinc-500 w-[32px] text-right shrink-0">
+              <span className="v5-mono text-[13px] text-zinc-500 w-[32px] text-right shrink-0">
                 {fmtAge(r.alert_age_seconds)}
               </span>
             </div>

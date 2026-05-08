@@ -240,13 +240,13 @@ export const CommandPalette = ({ onSelectSymbol }) => {
             data-testid="command-palette-input"
             className="flex-1 bg-transparent outline-none text-zinc-100 v5-mono text-xs placeholder:text-zinc-600"
           />
-          <span className="v5-mono text-[11px] text-zinc-600">esc</span>
+          <span className="v5-mono text-[14px] text-zinc-600">esc</span>
         </div>
         <div className="max-h-[50vh] overflow-y-auto v5-scroll">
           {helpMode && (
             <div
               data-testid="command-palette-help-header"
-              className="v5-mono text-[11px] text-cyan-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-cyan-500/5"
+              className="v5-mono text-[14px] text-cyan-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-cyan-500/5"
             >
               Glossary · {visibleItems.length} match{visibleItems.length === 1 ? '' : 'es'}
             </div>
@@ -254,7 +254,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           {cmdMode && (
             <div
               data-testid="command-palette-cmd-header"
-              className="v5-mono text-[11px] text-violet-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-violet-500/5"
+              className="v5-mono text-[14px] text-violet-400 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900 bg-violet-500/5"
             >
               Commands · {visibleItems.length} available
             </div>
@@ -262,7 +262,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
           {!helpMode && !cmdMode && showRecent && (
             <div
               data-testid="command-palette-recent-header"
-              className="v5-mono text-[11px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
+              className="v5-mono text-[14px] text-zinc-600 uppercase tracking-wide px-3 py-1.5 border-b border-zinc-900"
             >
               Recent
             </div>
@@ -302,7 +302,7 @@ export const CommandPalette = ({ onSelectSymbol }) => {
                       {r.glossary.shortDef}
                     </span>
                   </span>
-                  {i === selectedIdx && <span className="text-[11px] text-zinc-500 mt-0.5">enter ↵</span>}
+                  {i === selectedIdx && <span className="text-[14px] text-zinc-500 mt-0.5">enter ↵</span>}
                 </>
               ) : r.command ? (
                 <>
@@ -313,15 +313,15 @@ export const CommandPalette = ({ onSelectSymbol }) => {
                       {r.command.description}
                     </span>
                   </span>
-                  {i === selectedIdx && <span className="text-[11px] text-zinc-500 mt-0.5">run ↵</span>}
+                  {i === selectedIdx && <span className="text-[14px] text-zinc-500 mt-0.5">run ↵</span>}
                 </>
               ) : (
                 <>
                   <span className="font-bold w-14">{r.symbol}</span>
                   {r.isRecent && (
-                    <span className="text-[11px] text-zinc-600 uppercase tracking-wide">recent</span>
+                    <span className="text-[14px] text-zinc-600 uppercase tracking-wide">recent</span>
                   )}
-                  {i === selectedIdx && <span className="ml-auto text-[11px] text-zinc-500">enter ↵</span>}
+                  {i === selectedIdx && <span className="ml-auto text-[14px] text-zinc-500">enter ↵</span>}
                 </>
               )}
             </button>

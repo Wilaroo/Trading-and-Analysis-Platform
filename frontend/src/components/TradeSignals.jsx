@@ -126,7 +126,7 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
                   <span className={`text-[12px] ${s.direction === 'LONG' || s.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
                     {s.direction === 'LONG' || s.direction === 'long' ? '▲' : '▼'}
                   </span>
-                  <span className={`text-[11px] px-1 py-0.5 rounded ${SETUP_COLORS[s.setup] || 'bg-zinc-700 text-zinc-300'}`}>
+                  <span className={`text-[14px] px-1 py-0.5 rounded ${SETUP_COLORS[s.setup] || 'bg-zinc-700 text-zinc-300'}`}>
                     {s.setup?.replace(/_/g, ' ').split(' ').map(w => w[0]?.toUpperCase()).join('')}
                   </span>
                 </button>

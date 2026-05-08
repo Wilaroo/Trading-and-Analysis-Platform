@@ -206,7 +206,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {memberCount > 1 && (
             <span
               data-testid={`group-multi-badge-${position.symbol}`}
-              className="px-1 py-0 text-[9px] uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700 rounded"
+              className="px-1 py-0 text-[12px] uppercase tracking-wider bg-zinc-800 text-zinc-300 border border-zinc-700 rounded"
               title={`${memberCount} bot trades aggregated`}
             >
               {memberCount}×
@@ -255,7 +255,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {position.prior_verdict_conflict && (
             <span
               data-testid={`prior-verdict-conflict-chip-${position.symbol}`}
-              className="px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border bg-amber-950/70 text-amber-300 border-amber-700 font-bold animate-pulse"
+              className="px-1.5 py-0 text-[13px] uppercase tracking-wider rounded border bg-amber-950/70 text-amber-300 border-amber-700 font-bold animate-pulse"
               title="Bot's recent verdicts on this setup were REJECT — this position contradicts the bot's own logic. Consider closing manually or overriding SL/PT."
             >
               ⚠ CONFLICT
@@ -293,13 +293,13 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {position.entered_by === 'reconciled_external' && (
             <div
               data-testid={`reconcile-callout-${position.symbol}`}
-              className={`px-2 py-1.5 rounded border text-[11px] leading-snug ${
+              className={`px-2 py-1.5 rounded border text-[14px] leading-snug ${
                 position.prior_verdict_conflict
                   ? 'bg-amber-950/40 border-amber-800/60 text-amber-200'
                   : 'bg-fuchsia-950/30 border-fuchsia-800/40 text-fuchsia-200'
               }`}
             >
-              <div className="font-bold uppercase tracking-wider text-[10px] mb-0.5">
+              <div className="font-bold uppercase tracking-wider text-[13px] mb-0.5">
                 {position.prior_verdict_conflict
                   ? '⚠ Reconcile conflict — bot disagreed with this setup'
                   : 'Reconciled from IB orphan'}
@@ -318,11 +318,11 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
                   data-testid={`prior-verdicts-${position.symbol}`}
                   className="mt-1 pt-1 border-t border-zinc-700/40 space-y-0.5"
                 >
-                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                  <div className="text-[13px] uppercase tracking-wider text-zinc-500">
                     Last {Math.min(3, position.prior_verdicts.length)} verdict(s)
                   </div>
                   {position.prior_verdicts.slice(0, 3).map((v, i) => (
-                    <div key={i} className="font-mono text-[10px] text-zinc-400">
+                    <div key={i} className="font-mono text-[13px] text-zinc-400">
                       {v.timestamp ? new Date(v.timestamp).toLocaleTimeString('en-US', {hour12: false}) + ' · ' : ''}
                       <span className="uppercase font-bold text-rose-300">REJECT</span>
                       {v.reason_code && <> · {v.reason_code}</>}
@@ -342,19 +342,19 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* Price grid: Entry / Current / SL / PT */}
           <div className="grid grid-cols-4 gap-1 v5-mono text-[12px]">
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-600">Entry</div>
+              <div className="text-[13px] uppercase tracking-wider text-zinc-600">Entry</div>
               <div className="text-zinc-200">{formatPx(position.entry_price)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-600">Last</div>
+              <div className="text-[13px] uppercase tracking-wider text-zinc-600">Last</div>
               <div className="text-zinc-200">{formatPx(position.current_price)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-600">Stop</div>
+              <div className="text-[13px] uppercase tracking-wider text-zinc-600">Stop</div>
               <div className="text-rose-300">{formatPx(position.stop_price)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-zinc-600">
+              <div className="text-[13px] uppercase tracking-wider text-zinc-600">
                 {targets.length > 1 ? 'PT1' : 'Target'}
               </div>
               <div className="text-emerald-300">
@@ -364,7 +364,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           </div>
 
           {/* Risk / shares row */}
-          <div className="flex items-center gap-3 flex-wrap text-[11px] text-zinc-400">
+          <div className="flex items-center gap-3 flex-wrap text-[14px] text-zinc-400">
             {position.risk_reward_ratio != null && (
               <span>
                 <span className="text-zinc-500">R:R</span>{' '}
@@ -414,7 +414,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* Trail-state line */}
           {trail.enabled && (
             <div
-              className="text-[11px] text-zinc-500"
+              className="text-[14px] text-zinc-500"
               data-testid={`open-position-trail-state-${position.symbol}`}
             >
               <span className="text-cyan-400 font-semibold uppercase">{trail.mode || 'trail'}</span>
@@ -428,7 +428,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* Scale-out targets hit */}
           {scaleOut.enabled && Array.isArray(scaleOut.targets_hit) && scaleOut.targets_hit.length > 0 && (
             <div
-              className="text-[11px] text-emerald-400/80"
+              className="text-[14px] text-emerald-400/80"
               data-testid={`open-position-scaleout-${position.symbol}`}
             >
               Scale-out: {scaleOut.targets_hit.length} target(s) hit
@@ -438,7 +438,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* Plan / exit rule */}
           {position.exit_rule && (
             <div
-              className="text-[11px] text-zinc-500"
+              className="text-[14px] text-zinc-500"
               data-testid={`open-position-exit-rule-${position.symbol}`}
             >
               <span className="text-zinc-600">Plan:</span> {position.exit_rule}
@@ -448,7 +448,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* AI reasoning bullets */}
           {reasoning.length > 0 && (
             <div
-              className="text-[11px] text-zinc-400 space-y-0.5"
+              className="text-[14px] text-zinc-400 space-y-0.5"
               data-testid={`open-position-reasoning-${position.symbol}`}
             >
               {reasoning.slice(0, 4).map((line, i) => (
@@ -460,7 +460,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           )}
 
           {/* Setup + grade footer */}
-          <div className="flex items-center gap-2 flex-wrap text-[10px] uppercase tracking-wider text-zinc-600">
+          <div className="flex items-center gap-2 flex-wrap text-[13px] uppercase tracking-wider text-zinc-600">
             {position.setup_type && (
               <span>setup {position.setup_type}</span>
             )}
@@ -584,7 +584,7 @@ const GroupMemberRow = ({ member, idx }) => {
   return (
     <div
       data-testid={`group-member-${member.symbol}-${idx}`}
-      className="px-2 py-1.5 ml-4 my-1 border-l-2 border-zinc-800 bg-zinc-950/40 text-[11px]"
+      className="px-2 py-1.5 ml-4 my-1 border-l-2 border-zinc-800 bg-zinc-950/40 text-[14px]"
     >
       <div className="flex items-baseline justify-between">
         <div className="flex items-center gap-2 v5-mono text-zinc-300">
@@ -593,7 +593,7 @@ const GroupMemberRow = ({ member, idx }) => {
           <span className="text-zinc-500">@</span>
           <span>${formatPx(member.entry_price)}</span>
           {member.smb_grade && (
-            <span className="px-1 py-0 bg-zinc-800 text-zinc-400 text-[9px] uppercase rounded">
+            <span className="px-1 py-0 bg-zinc-800 text-zinc-400 text-[12px] uppercase rounded">
               SMB {member.smb_grade}
             </span>
           )}
@@ -607,7 +607,7 @@ const GroupMemberRow = ({ member, idx }) => {
           {formatUsd(pnl)}
         </span>
       </div>
-      <div className="flex items-center gap-3 mt-0.5 text-[10px] text-zinc-500">
+      <div className="flex items-center gap-3 mt-0.5 text-[13px] text-zinc-500">
         {stop != null && <span>SL ${formatPx(stop)}</span>}
         {targets.length > 0 && <span>PT ${formatPx(targets[0])}</span>}
         {member.risk_reward_ratio != null && (
@@ -747,7 +747,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
               onClick={handleReconcile}
               disabled={reconcileBusy}
               data-testid="open-positions-reconcile-btn"
-              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border transition-colors ${
+              className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border transition-colors ${
                 reconcileBusy
                   ? 'border-zinc-700 text-zinc-500 cursor-wait'
                   : 'border-amber-700/60 text-amber-300 hover:bg-amber-950/40'
@@ -768,7 +768,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
               data-testid="open-positions-auto-heal-pill"
               data-stale={autoHealCounts.stale}
               data-adopted={autoHealCounts.adopted}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] uppercase tracking-wider rounded border border-zinc-700 bg-zinc-900/60 text-zinc-400 cursor-help"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[13px] uppercase tracking-wider rounded border border-zinc-700 bg-zinc-900/60 text-zinc-400 cursor-help"
               title={[
                 'Auto-healed by bot — no operator action needed.',
                 autoHealCounts.adopted > 0 && `· ${autoHealCounts.adopted} reconciled (adopted from IB orphan)`,
@@ -786,7 +786,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
           {reconcileMsg && (
             <span
               data-testid="open-positions-reconcile-msg"
-              className={`text-[11px] cursor-help ${reconcileMsg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
+              className={`text-[14px] cursor-help ${reconcileMsg.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}
               title={reconcileMsg.tooltip || reconcileMsg.text}
             >
               {reconcileMsg.text}
@@ -825,7 +825,7 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
                   data-testid={`group-members-${g.symbol}`}
                   className="bg-zinc-950/30 pb-1"
                 >
-                  <div className="px-2 pt-1 text-[10px] uppercase tracking-wider text-zinc-600">
+                  <div className="px-2 pt-1 text-[13px] uppercase tracking-wider text-zinc-600">
                     {memberCount} underlying bot trades
                   </div>
                   {g._members.map((m, idx) => (

@@ -313,7 +313,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
           {/* Score Ring + Overall Label */}
           <div className="flex flex-col items-center">
             <ScoreRing score={regime?.composite_score} size={56} />
-            <span className="text-[11px] text-zinc-500 mt-1">
+            <span className="text-[14px] text-zinc-500 mt-1">
               {regime?.composite_score >= 70 ? 'Favorable' :
                regime?.composite_score >= 40 ? 'Mixed' : 'Unfavorable'}
             </span>
@@ -410,7 +410,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
                       {idx.change > 0 ? '+' : ''}{idx.change?.toFixed(2) || '0.00'}%
                     </span>
                   </div>
-                  <span className="text-[11px] text-zinc-500">{idx.name}</span>
+                  <span className="text-[14px] text-zinc-500">{idx.name}</span>
                 </div>
               ))}
             </div>
@@ -460,7 +460,7 @@ const MarketRegimeWidget = ({ className = '', onStateChange = null }) => {
                     { label: 'Growth/Val', val: aiRegime.cross.rotation_qqq_iwm, desc: 'QQQ vs IWM' },
                   ].map(({ label, val, desc }) => (
                     <div key={label} className="p-1.5 bg-black/30 rounded-lg text-center">
-                      <span className="text-[11px] text-zinc-500 block">{label}</span>
+                      <span className="text-[14px] text-zinc-500 block">{label}</span>
                       <span className={`text-xs font-mono font-medium ${val > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {val > 0 ? '+' : ''}{(val * 100).toFixed(1)}%
                       </span>

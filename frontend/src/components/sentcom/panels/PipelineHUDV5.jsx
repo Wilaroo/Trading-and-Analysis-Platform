@@ -50,16 +50,16 @@ const Stage = ({ stage, label, count, sub, accent, onClick, dataTestId }) => {
       className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block ${interactive ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-center justify-between gap-1.5">
-        <span className={`text-[11px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
+        <span className={`text-[14px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
         <div className="flex items-baseline gap-1">
           {accent && (
-            <span className={`v5-mono text-[11px] font-bold ${accent.color}`}>{accent.text}</span>
+            <span className={`v5-mono text-[14px] font-bold ${accent.color}`}>{accent.text}</span>
           )}
           <span className="v5-mono text-xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
         </div>
       </div>
       {sub && (
-        <div className="text-[11px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
+        <div className="text-[14px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
       )}
     </div>
   );
@@ -67,7 +67,7 @@ const Stage = ({ stage, label, count, sub, accent, onClick, dataTestId }) => {
 
 const Metric = ({ label, value, color = 'text-zinc-100' }) => (
   <div className="text-right">
-    <div className="text-[11px] uppercase tracking-widest text-zinc-500">{label}</div>
+    <div className="text-[14px] uppercase tracking-widest text-zinc-500">{label}</div>
     <div className={`font-mono text-sm font-bold ${color}`}>{value}</div>
   </div>
 );
@@ -276,12 +276,12 @@ export const PipelineHUDV5 = ({
               }
             >
               <div className="flex items-baseline gap-1">
-                <span className="text-[9px] uppercase tracking-wider text-zinc-500">P&L</span>
+                <span className="text-[12px] uppercase tracking-wider text-zinc-500">P&L</span>
                 <span data-testid="pipeline-pnl-day" className={`v5-mono text-[13px] font-semibold ${pnlColor}`}>
                   {formatMoney(dayTotal)}
                 </span>
               </div>
-              <div className="flex items-baseline gap-2 text-[10px] v5-mono">
+              <div className="flex items-baseline gap-2 text-[13px] v5-mono">
                 <span data-testid="pipeline-pnl-realized" className={realizedColor}>
                   R {formatMoney(realizedNum)}
                 </span>

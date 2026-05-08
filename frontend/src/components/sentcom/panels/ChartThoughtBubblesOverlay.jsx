@@ -264,7 +264,7 @@ export const ChartThoughtBubblesOverlay = ({
             >
               <div className="px-2 py-1">
                 <div
-                  className="flex items-baseline gap-1.5 v5-mono text-[10px] uppercase tracking-wider"
+                  className="flex items-baseline gap-1.5 v5-mono text-[13px] uppercase tracking-wider"
                   style={{ color: style.color }}
                 >
                   <span>{fmtET12Sec(b.time_sec * 1000)}</span>
@@ -272,7 +272,7 @@ export const ChartThoughtBubblesOverlay = ({
                   <span className="font-semibold">{titleFor(b, style)}</span>
                 </div>
                 {(isOpen || b.lane === 'top') && (
-                  <div className="mt-0.5 text-[11px] text-zinc-300 leading-snug">
+                  <div className="mt-0.5 text-[14px] text-zinc-300 leading-snug">
                     {isOpen ? truncate(b.content, 240) : truncate(b.content, 70)}
                   </div>
                 )}

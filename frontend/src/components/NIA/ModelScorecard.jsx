@@ -233,7 +233,7 @@ export default function ModelScorecard({ scorecard, onClose }) {
 
       {/* Footer */}
       {scorecard.validated_at && (
-        <div className="mt-2 pt-1 border-t border-zinc-800/40 text-[11px] text-zinc-600 flex justify-between">
+        <div className="mt-2 pt-1 border-t border-zinc-800/40 text-[14px] text-zinc-600 flex justify-between">
           <span>Validated {new Date(scorecard.validated_at).toLocaleString()}</span>
           {scorecard.is_statistically_significant ? (
             <span className="text-emerald-500/70">✓ Statistically significant</span>

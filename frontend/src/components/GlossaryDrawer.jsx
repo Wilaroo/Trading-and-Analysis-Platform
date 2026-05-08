@@ -238,7 +238,7 @@ export const GlossaryDrawer = () => {
               {selected.tags?.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1">
                   {selected.tags.map((t) => (
-                    <span key={t} className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-500 uppercase tracking-wide">
+                    <span key={t} className="text-[14px] px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-500 uppercase tracking-wide">
                       {t}
                     </span>
                   ))}
@@ -312,7 +312,7 @@ export const GlossaryDrawer = () => {
                       <div className="text-[13px] text-zinc-500 line-clamp-2 leading-snug">
                         {e.shortDef}
                       </div>
-                      <div className="text-[11px] text-zinc-600 uppercase tracking-wide mt-1">
+                      <div className="text-[14px] text-zinc-600 uppercase tracking-wide mt-1">
                         {categories.find((c) => c.id === e.category)?.name || e.category}
                       </div>
                     </button>

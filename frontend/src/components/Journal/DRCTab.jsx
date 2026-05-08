@@ -232,7 +232,7 @@ const DRCTab = () => {
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-zinc-500 uppercase">Today's Grade</p>
                   {drc?.auto_generated && (
-                    <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                    <span className="text-[14px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
                       <Zap className="w-2.5 h-2.5" />
                       AI Generated
                     </span>

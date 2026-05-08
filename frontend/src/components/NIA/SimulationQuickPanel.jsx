@@ -246,16 +246,16 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                         {job.status === 'completed' && (
                           <div className="px-3 pb-3 pt-1 border-t border-white/5">
                             <div className="grid grid-cols-5 gap-2 text-center">
-                              <div><div className="text-sm font-bold text-white">{job.total_trades || 0}</div><div className="text-[11px] text-zinc-500">Trades</div></div>
-                              <div><div className={`text-sm font-bold ${(job.win_rate || 0) >= 0.5 ? 'text-green-400' : (job.win_rate || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? `${(job.win_rate * 100).toFixed(0)}%` : '--'}</div><div className="text-[11px] text-zinc-500">Win Rate</div></div>
-                              <div><div className={`text-sm font-bold ${(job.profit_factor || 0) >= 1 ? 'text-green-400' : (job.profit_factor || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? (job.profit_factor || 0).toFixed(2) : '--'}</div><div className="text-[11px] text-zinc-500">PF</div></div>
-                              <div><div className={`text-sm font-bold ${(job.total_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{job.total_trades > 0 ? `$${(job.total_pnl || 0).toFixed(0)}` : '--'}</div><div className="text-[11px] text-zinc-500">P&L</div></div>
-                              <div><div className="text-sm font-bold text-white">{job.symbols_total || symbols.length || 0}</div><div className="text-[11px] text-zinc-500">Symbols</div></div>
+                              <div><div className="text-sm font-bold text-white">{job.total_trades || 0}</div><div className="text-[14px] text-zinc-500">Trades</div></div>
+                              <div><div className={`text-sm font-bold ${(job.win_rate || 0) >= 0.5 ? 'text-green-400' : (job.win_rate || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? `${(job.win_rate * 100).toFixed(0)}%` : '--'}</div><div className="text-[14px] text-zinc-500">Win Rate</div></div>
+                              <div><div className={`text-sm font-bold ${(job.profit_factor || 0) >= 1 ? 'text-green-400' : (job.profit_factor || 0) > 0 ? 'text-yellow-400' : 'text-zinc-400'}`}>{job.total_trades > 0 ? (job.profit_factor || 0).toFixed(2) : '--'}</div><div className="text-[14px] text-zinc-500">PF</div></div>
+                              <div><div className={`text-sm font-bold ${(job.total_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{job.total_trades > 0 ? `$${(job.total_pnl || 0).toFixed(0)}` : '--'}</div><div className="text-[14px] text-zinc-500">P&L</div></div>
+                              <div><div className="text-sm font-bold text-white">{job.symbols_total || symbols.length || 0}</div><div className="text-[14px] text-zinc-500">Symbols</div></div>
                             </div>
                             {symbols.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
-                                {symbols.slice(0, 6).map((sym, idx) => <span key={idx} className="px-1.5 py-0.5 rounded text-[11px] bg-white/5 text-zinc-400">{sym}</span>)}
-                                {symbols.length > 6 && <span className="px-1.5 py-0.5 rounded text-[11px] bg-white/5 text-zinc-500">+{symbols.length - 6} more</span>}
+                                {symbols.slice(0, 6).map((sym, idx) => <span key={idx} className="px-1.5 py-0.5 rounded text-[14px] bg-white/5 text-zinc-400">{sym}</span>)}
+                                {symbols.length > 6 && <span className="px-1.5 py-0.5 rounded text-[14px] bg-white/5 text-zinc-500">+{symbols.length - 6} more</span>}
                               </div>
                             )}
                             {job.total_trades === 0 && (
@@ -284,7 +284,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                 <div className="mt-4 space-y-3">
                   <h4 className="text-xs text-zinc-500 uppercase flex items-center gap-2">
                     Advanced Backtests
-                    <span className="px-1.5 py-0.5 rounded-full text-[11px] bg-violet-500/20 text-violet-400">{backtestResults.length}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[14px] bg-violet-500/20 text-violet-400">{backtestResults.length}</span>
                   </h4>
                   {backtestResults.slice(0, 6).map((result, idx) => {
                     const setup = result.setup_only || {};
@@ -306,7 +306,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                           <div className={`grid ${hasGate ? 'grid-cols-4' : hasAi ? 'grid-cols-3' : 'grid-cols-1'} gap-1`}>
                             {/* Setup Only */}
                             <div className="p-2 rounded bg-white/[0.03] border border-white/5">
-                              <div className="text-[11px] text-zinc-500 uppercase mb-1">Setup Only</div>
+                              <div className="text-[14px] text-zinc-500 uppercase mb-1">Setup Only</div>
                               <div className="text-sm font-bold text-white">{setup.total_trades || 0}</div>
                               <div className="text-[12px] text-zinc-400">trades</div>
                               <div className={`text-xs font-medium mt-1 ${(setup.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
@@ -320,7 +320,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* AI Filtered */}
                             {hasAi && (
                               <div className="p-2 rounded bg-cyan-500/[0.05] border border-cyan-500/20">
-                                <div className="text-[11px] text-cyan-500 uppercase mb-1">AI Filter</div>
+                                <div className="text-[14px] text-cyan-500 uppercase mb-1">AI Filter</div>
                                 <div className="text-sm font-bold text-white">{aiFiltered.total_trades || 0}</div>
                                 <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(aiFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
@@ -335,7 +335,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* Gate Filtered */}
                             {hasGate && (
                               <div className="p-2 rounded bg-amber-500/[0.05] border border-amber-500/20">
-                                <div className="text-[11px] text-amber-500 uppercase mb-1">Gate Filter</div>
+                                <div className="text-[14px] text-amber-500 uppercase mb-1">Gate Filter</div>
                                 <div className="text-sm font-bold text-white">{gateFiltered.total_trades || 0}</div>
                                 <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(gateFiltered.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>
@@ -350,7 +350,7 @@ const SimulationQuickPanel = memo(({ jobs, backtestResults, backtestJobs, loadin
                             {/* AI Only (if available) */}
                             {hasAi && (result.ai_only?.total_trades || 0) > 0 && (
                               <div className="p-2 rounded bg-violet-500/[0.05] border border-violet-500/20">
-                                <div className="text-[11px] text-violet-500 uppercase mb-1">AI Only</div>
+                                <div className="text-[14px] text-violet-500 uppercase mb-1">AI Only</div>
                                 <div className="text-sm font-bold text-white">{result.ai_only.total_trades}</div>
                                 <div className="text-[12px] text-zinc-400">trades</div>
                                 <div className={`text-xs font-medium mt-1 ${(result.ai_only.win_rate || 0) >= 50 ? 'text-emerald-400' : 'text-yellow-400'}`}>

@@ -90,7 +90,7 @@ export const DayRollupBannerV5 = ({ apiBase = '' }) => {
     >
       <div className="flex items-center justify-between gap-2 text-[12px] v5-mono">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <span className="text-zinc-500 uppercase tracking-widest text-[11px]">Today:</span>
+          <span className="text-zinc-500 uppercase tracking-widest text-[14px]">Today:</span>
           <Stat label="alerts" value={summary.alerts} />
           <Sep />
           <Stat label="HIGH" value={summary.high} color="text-blue-400" />
@@ -101,7 +101,7 @@ export const DayRollupBannerV5 = ({ apiBase = '' }) => {
         </div>
         {summary.first_dead && summary.orders === 0 && summary.alerts > 0 && (
           <span
-            className="shrink-0 v5-mono text-[11px] text-zinc-500 truncate"
+            className="shrink-0 v5-mono text-[14px] text-zinc-500 truncate"
             title={summary.diagnosis}
           >
             killed at: <span className="text-rose-400 font-bold">{_stageLabel(summary.first_dead)}</span>

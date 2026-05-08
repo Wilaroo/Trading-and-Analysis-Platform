@@ -70,7 +70,7 @@ export const LastRunsTimeline = ({ refreshToken = 0, limit = 5 }) => {
         {latest && (
           <span
             data-testid="last-runs-latest-summary"
-            className="v5-mono text-[11px] text-zinc-500 uppercase tracking-wider"
+            className="v5-mono text-[14px] text-zinc-500 uppercase tracking-wider"
           >
             latest · {latest.models_trained_count} models · {latest.elapsed_human}
           </span>
@@ -120,14 +120,14 @@ export const LastRunsTimeline = ({ refreshToken = 0, limit = 5 }) => {
                   title={label}
                   className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0"
                 >
-                  <div className="v5-mono text-[11px] text-zinc-400 tabular-nums truncate w-full text-center">
+                  <div className="v5-mono text-[14px] text-zinc-400 tabular-nums truncate w-full text-center">
                     {r.models_trained_count}
                   </div>
                   <div
                     className={`w-full rounded-sm transition-all ${bgClass} ${ringClass}`}
                     style={{ height: `${pct}%` }}
                   />
-                  <div className="v5-mono text-[8px] text-zinc-600 tabular-nums">
+                  <div className="v5-mono text-[11px] text-zinc-600 tabular-nums">
                     {trophy ? '★' : '×'}
                   </div>
                 </div>

@@ -112,7 +112,7 @@ const ChatMessage = React.memo(({ message, index }) => {
             }`}>
               {isUser ? 'YOU' : 'SENTCOM'}
             </span>
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-[14px] text-zinc-500">
               {formatRelativeTime(message.timestamp)}
             </span>
           </div>

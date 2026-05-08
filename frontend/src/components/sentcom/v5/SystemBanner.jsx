@@ -159,7 +159,7 @@ const SystemBanner = () => {
                     type="button"
                     data-testid="system-banner-dismiss"
                     onClick={handleDismiss}
-                    className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded border border-white/30 hover:bg-white/10 transition-colors"
+                    className="flex-shrink-0 text-[14px] px-2 py-0.5 rounded border border-white/30 hover:bg-white/10 transition-colors"
                     title="Dismiss for 60s — banner reappears if problem persists"
                 >
                     Dismiss

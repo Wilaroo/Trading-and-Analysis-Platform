@@ -403,7 +403,7 @@ export const SentComV5View = ({
               data-help-id="cmd-k"
               title="Press ⌘K (Mac) or Ctrl+K to open the symbol search palette"
               onClick={() => window.dispatchEvent(new CustomEvent('sentcom:open-command-palette'))}
-              className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 v5-mono text-[11px] text-zinc-500 uppercase tracking-wide select-none hover:border-violet-700 hover:text-violet-300 transition-colors"
+              className="hidden md:inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 v5-mono text-[14px] text-zinc-500 uppercase tracking-wide select-none hover:border-violet-700 hover:text-violet-300 transition-colors"
             >
               <kbd className="font-bold text-zinc-400">⌘K</kbd>
               <span className="opacity-60">search</span>
@@ -506,12 +506,12 @@ export const SentComV5View = ({
             </div>
             <div className="flex items-center gap-2">
               <span
-                className="text-[10px] v5-mono text-zinc-600 hidden sm:inline"
+                className="text-[13px] v5-mono text-zinc-600 hidden sm:inline"
                 title="Keyboard navigation: ↓/↑ move cursor, Enter opens chart"
               >
                 ↓↑ ⏎
               </span>
-              <div className="text-[11px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
+              <div className="text-[14px] v5-mono text-zinc-500" data-testid="v5-scanner-hits-count">
                 {(() => {
                   // 2026-04-30 v19.10 — when the scanner has cards,
                   // show "X / N hits" with X = topmost-visible card.

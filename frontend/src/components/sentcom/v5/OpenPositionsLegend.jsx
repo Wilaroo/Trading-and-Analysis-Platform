@@ -79,7 +79,7 @@ export default function OpenPositionsLegend() {
         data-testid="open-positions-legend-toggle"
         onClick={() => setOpen(v => !v)}
         title="Legend: REAL vs SHADOW vs MIXED (paper/live chip semantics + quote freshness)"
-        className={`inline-flex items-center justify-center w-4 h-4 rounded-full border text-[10px] font-bold transition-colors ${
+        className={`inline-flex items-center justify-center w-4 h-4 rounded-full border text-[13px] font-bold transition-colors ${
           open
             ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700'
             : 'bg-zinc-900 text-zinc-500 border-zinc-700 hover:text-zinc-200'
@@ -95,7 +95,7 @@ export default function OpenPositionsLegend() {
           className="absolute right-0 top-6 z-50 w-[420px] max-w-[90vw] bg-zinc-950 border border-zinc-700 rounded-md shadow-2xl"
         >
           <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-200">
+            <span className="text-[14px] font-bold uppercase tracking-wider text-zinc-200">
               Open Positions · Legend
             </span>
             <button
@@ -106,13 +106,13 @@ export default function OpenPositionsLegend() {
               aria-label="Close legend"
             >×</button>
           </div>
-          <div className="px-3 py-2.5 text-[11px] leading-relaxed text-zinc-300 space-y-3">
+          <div className="px-3 py-2.5 text-[14px] leading-relaxed text-zinc-300 space-y-3">
             <section>
-              <div className="text-zinc-500 uppercase tracking-wider text-[10px] mb-1">Provenance chip (RECONCILED / CONFLICT)</div>
+              <div className="text-zinc-500 uppercase tracking-wider text-[13px] mb-1">Provenance chip (RECONCILED / CONFLICT)</div>
               <ul className="space-y-1.5">
                 {_PROVENANCE_ROWS.map((r) => (
                   <li key={r.name} className="flex items-start gap-2">
-                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-bold ${r.cls}`}>
+                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[13px] uppercase tracking-wider font-bold ${r.cls}`}>
                       {r.name}
                     </span>
                     <span className="text-zinc-300">{r.desc}</span>
@@ -122,11 +122,11 @@ export default function OpenPositionsLegend() {
             </section>
 
             <section>
-              <div className="text-zinc-500 uppercase tracking-wider text-[10px] mb-1">Trade origin (mode chip)</div>
+              <div className="text-zinc-500 uppercase tracking-wider text-[13px] mb-1">Trade origin (mode chip)</div>
               <ul className="space-y-1.5">
                 {_ROWS.map((r) => (
                   <li key={r.name} className="flex items-start gap-2">
-                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-bold ${r.chip}`}>
+                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[13px] uppercase tracking-wider font-bold ${r.chip}`}>
                       {r.name}
                     </span>
                     <span>
@@ -141,11 +141,11 @@ export default function OpenPositionsLegend() {
             </section>
 
             <section>
-              <div className="text-zinc-500 uppercase tracking-wider text-[10px] mb-1">Quote freshness (right-side chip)</div>
+              <div className="text-zinc-500 uppercase tracking-wider text-[13px] mb-1">Quote freshness (right-side chip)</div>
               <ul className="space-y-1.5">
                 {_QUOTE_ROWS.map((r) => (
                   <li key={r.state} className="flex items-start gap-2">
-                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-bold ${r.cls}`}>
+                    <span className={`shrink-0 px-1.5 py-0 rounded border text-[13px] uppercase tracking-wider font-bold ${r.cls}`}>
                       {r.state}
                     </span>
                     <span className="text-zinc-300">{r.desc}</span>
@@ -154,7 +154,7 @@ export default function OpenPositionsLegend() {
               </ul>
             </section>
 
-            <section className="border-t border-zinc-800 pt-2 text-[10px] text-zinc-500">
+            <section className="border-t border-zinc-800 pt-2 text-[13px] text-zinc-500">
               <div>
                 Looking for what-would-have-happened on the trades the bot
                 <em className="not-italic"> didn't </em>

@@ -31,7 +31,7 @@ const phaseChip = (phase, success) => {
     ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800'
     : 'bg-rose-950/40 text-rose-300 border-rose-800';
   return (
-    <span className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${cls}`}>
+    <span className={`px-1.5 py-0.5 rounded border text-[12px] uppercase tracking-wider ${cls}`}>
       {success ? 'OK' : (phase || 'fail')}
     </span>
   );
@@ -62,24 +62,24 @@ const EventRow = ({ event }) => {
       data-testid={`bracket-history-event-${event.trade_id || 'unknown'}-${event.created_at_iso || event.created_at}`}
     >
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[10px] text-zinc-500 v5-mono">
+        <span className="text-[13px] text-zinc-500 v5-mono">
           {fmtTime(event.created_at_iso || event.created_at)}
         </span>
         <span
-          className={`px-1.5 py-0.5 rounded border text-[9px] uppercase tracking-wider ${reasonChipClass(event.reason)}`}
+          className={`px-1.5 py-0.5 rounded border text-[12px] uppercase tracking-wider ${reasonChipClass(event.reason)}`}
           data-testid={`reason-chip-${event.reason}`}
         >
           {event.reason || 'unknown'}
         </span>
         {phaseChip(event.phase, event.success)}
         {event.error && (
-          <span className="text-[10px] text-rose-300 truncate max-w-[180px]" title={event.error}>
+          <span className="text-[13px] text-rose-300 truncate max-w-[180px]" title={event.error}>
             {event.error}
           </span>
         )}
       </div>
       {(plan.new_stop_price != null || targets.length > 0) && (
-        <div className="text-[10px] text-zinc-500 v5-mono pl-3">
+        <div className="text-[13px] text-zinc-500 v5-mono pl-3">
           {plan.remaining_shares != null && (
             <span>{plan.remaining_shares}sh </span>
           )}
@@ -150,12 +150,12 @@ export default function BracketHistoryPanel({ tradeId, symbol }) {
         type="button"
         onClick={toggle}
         data-testid="bracket-history-toggle"
-        className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1.5"
+        className="text-[13px] uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1.5"
       >
         <span>📜</span>
         <span>Bracket History</span>
         {summary && summary.total > 0 && (
-          <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[9px]">
+          <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[12px]">
             {summary.total}
           </span>
         )}
@@ -168,15 +168,15 @@ export default function BracketHistoryPanel({ tradeId, symbol }) {
           data-testid="bracket-history-events"
         >
           {loading && (
-            <div className="text-[11px] text-zinc-500 italic">Loading…</div>
+            <div className="text-[14px] text-zinc-500 italic">Loading…</div>
           )}
           {error && (
-            <div className="text-[11px] text-rose-400" data-testid="bracket-history-error">
+            <div className="text-[14px] text-rose-400" data-testid="bracket-history-error">
               {error}
             </div>
           )}
           {!loading && !error && events.length === 0 && (
-            <div className="text-[11px] text-zinc-600 italic" data-testid="bracket-history-empty">
+            <div className="text-[14px] text-zinc-600 italic" data-testid="bracket-history-empty">
               No bracket re-issue events yet for this trade.
             </div>
           )}
@@ -185,7 +185,7 @@ export default function BracketHistoryPanel({ tradeId, symbol }) {
           ))}
           {summary && summary.total > 0 && (
             <div
-              className="text-[10px] text-zinc-600 v5-mono mt-1 pt-1 border-t border-zinc-800/40"
+              className="text-[13px] text-zinc-600 v5-mono mt-1 pt-1 border-t border-zinc-800/40"
               data-testid="bracket-history-summary"
             >
               {summary.total} event(s) · {summary.success_count} ok · {summary.failure_count} failed

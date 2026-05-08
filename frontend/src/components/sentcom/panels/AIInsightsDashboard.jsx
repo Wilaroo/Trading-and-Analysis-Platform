@@ -200,23 +200,23 @@ export const AIInsightsDashboard = ({ onClose }) => {
                   <div className="grid grid-cols-4 gap-4 text-center">
                     <div>
                       <p className="text-lg font-bold text-white">{timeseriesStatus.model.version}</p>
-                      <p className="text-[11px] text-zinc-500">Version</p>
+                      <p className="text-[14px] text-zinc-500">Version</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-cyan-400" data-testid="model-accuracy">
                         {((timeseriesStatus.model.metrics?.accuracy || 0) * 100).toFixed(1)}%
                       </p>
-                      <p className="text-[11px] text-zinc-500">Accuracy</p>
+                      <p className="text-[14px] text-zinc-500">Accuracy</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-amber-400">{timeseriesStatus.model.feature_count}</p>
-                      <p className="text-[11px] text-zinc-500">Features</p>
+                      <p className="text-[14px] text-zinc-500">Features</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-violet-400">
                         {(timeseriesStatus.model.metrics?.training_samples || 0).toLocaleString()}
                       </p>
-                      <p className="text-[11px] text-zinc-500">Samples</p>
+                      <p className="text-[14px] text-zinc-500">Samples</p>
                     </div>
                   </div>
                 )}
@@ -349,23 +349,23 @@ export const AIInsightsDashboard = ({ onClose }) => {
                   <div className="grid grid-cols-4 gap-4 text-center">
                     <div>
                       <p className="text-2xl font-bold text-white">{predictionAccuracy.total_predictions}</p>
-                      <p className="text-[11px] text-zinc-500">Total Predictions</p>
+                      <p className="text-[14px] text-zinc-500">Total Predictions</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-emerald-400">{predictionAccuracy.correct_predictions || 0}</p>
-                      <p className="text-[11px] text-zinc-500">Correct</p>
+                      <p className="text-[14px] text-zinc-500">Correct</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-cyan-400">
                         {(predictionAccuracy.accuracy * 100).toFixed(1)}%
                       </p>
-                      <p className="text-[11px] text-zinc-500">Accuracy</p>
+                      <p className="text-[14px] text-zinc-500">Accuracy</p>
                     </div>
                     <div>
                       <p className={`text-2xl font-bold ${(predictionAccuracy.avg_return_when_correct || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {((predictionAccuracy.avg_return_when_correct || 0) * 100).toFixed(2)}%
                       </p>
-                      <p className="text-[11px] text-zinc-500">Avg Return (Correct)</p>
+                      <p className="text-[14px] text-zinc-500">Avg Return (Correct)</p>
                     </div>
                   </div>
                 ) : (
@@ -385,7 +385,7 @@ export const AIInsightsDashboard = ({ onClose }) => {
                             {dir.toUpperCase()}
                           </span>
                           <p className="text-lg font-bold text-white mt-1">{(stats.accuracy * 100).toFixed(0)}%</p>
-                          <p className="text-[8px] text-zinc-500">{stats.correct}/{stats.total}</p>
+                          <p className="text-[11px] text-zinc-500">{stats.correct}/{stats.total}</p>
                         </div>
                       ))}
                     </div>
@@ -488,19 +488,19 @@ export const AIInsightsDashboard = ({ onClose }) => {
                     <div className="grid grid-cols-4 gap-4 text-center">
                       <div>
                         <p className="text-lg font-bold text-white">{perf.total_decisions}</p>
-                        <p className="text-[11px] text-zinc-500">Total</p>
+                        <p className="text-[14px] text-zinc-500">Total</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-emerald-400">{perf.correct_decisions}</p>
-                        <p className="text-[11px] text-zinc-500">Correct</p>
+                        <p className="text-[14px] text-zinc-500">Correct</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-rose-400">{perf.incorrect_decisions}</p>
-                        <p className="text-[11px] text-zinc-500">Incorrect</p>
+                        <p className="text-[14px] text-zinc-500">Incorrect</p>
                       </div>
                       <div>
                         <p className="text-lg font-bold text-amber-400">{perf.pending_outcomes}</p>
-                        <p className="text-[11px] text-zinc-500">Pending</p>
+                        <p className="text-[14px] text-zinc-500">Pending</p>
                       </div>
                     </div>
                     
@@ -510,13 +510,13 @@ export const AIInsightsDashboard = ({ onClose }) => {
                           <p className={`text-sm font-bold ${perf.avg_pnl_correct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {perf.avg_pnl_correct >= 0 ? '+' : ''}{perf.avg_pnl_correct?.toFixed(2) || 0}%
                           </p>
-                          <p className="text-[11px] text-zinc-500">Avg P&L (Correct)</p>
+                          <p className="text-[14px] text-zinc-500">Avg P&L (Correct)</p>
                         </div>
                         <div>
                           <p className={`text-sm font-bold ${perf.avg_pnl_incorrect >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                             {perf.avg_pnl_incorrect >= 0 ? '+' : ''}{perf.avg_pnl_incorrect?.toFixed(2) || 0}%
                           </p>
-                          <p className="text-[11px] text-zinc-500">Avg P&L (Incorrect)</p>
+                          <p className="text-[14px] text-zinc-500">Avg P&L (Incorrect)</p>
                         </div>
                       </div>
                     )}

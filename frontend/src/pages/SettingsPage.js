@@ -266,7 +266,7 @@ export default function SettingsPage({ audioEnabled, setAudioEnabled, alertThres
                     <span className={`text-sm font-semibold ${selectedModel === model.id ? 'text-cyan-400' : 'text-white'}`}>
                       {model.name}
                     </span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    <span className={`text-[13px] px-1.5 py-0.5 rounded ${
                       model.speed === 'Fast' ? 'bg-green-500/20 text-green-400' :
                       'bg-yellow-500/20 text-yellow-400'
                     }`}>

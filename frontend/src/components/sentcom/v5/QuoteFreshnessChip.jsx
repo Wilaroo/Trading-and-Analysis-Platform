@@ -60,7 +60,7 @@ export default function QuoteFreshnessChip({
   const t = String(state || 'unknown').toLowerCase();
   const conf = _STATE[t] || _STATE.unknown;
   const ageLabel = _fmtAge(ageSeconds);
-  const padding = size === 'xs' ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0 text-[11px]';
+  const padding = size === 'xs' ? 'px-1.5 py-0 text-[13px]' : 'px-2 py-0 text-[14px]';
   const pulse = t === 'fresh' && Number(ageSeconds) < 2 ? 'animate-pulse' : '';
   return (
     <span

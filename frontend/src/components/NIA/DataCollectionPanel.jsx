@@ -553,7 +553,7 @@ const FailedRequestsSection = memo(({ forwardRef, expanded, onToggle, onRefresh,
                   <div className="flex items-start justify-between gap-3 mb-1">
                     <div className="flex-1 min-w-0">
                       <div className="text-[13px] text-rose-300 font-mono break-all">{err}</div>
-                      <div className="text-[11px] text-zinc-500 font-mono mt-0.5">
+                      <div className="text-[14px] text-zinc-500 font-mono mt-0.5">
                         {info.count.toLocaleString()} failures · {info.bar_sizes?.join(', ') || '?'}
                       </div>
                     </div>
@@ -604,7 +604,7 @@ const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, prio
           <span className="text-xs font-medium text-cyan-400">
             {collectionMode?.collection_mode?.active ? 'Collecting' : 'Script Processing'}
           </span>
-          {priorityCollection && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[11px] text-amber-400 font-medium">PRIORITY</span>}
+          {priorityCollection && <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-[14px] text-amber-400 font-medium">PRIORITY</span>}
         </div>
         <div className="flex items-center gap-3 text-[12px] text-zinc-400">
           {rate > 0 && <span>{Math.round(rate)}/hr</span>}
@@ -631,7 +631,7 @@ const CollectionProgress = memo(({ queue, collectionMode, detailedProgress, prio
                 <div className="flex-1 h-1 bg-black/40 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all ${bsPct >= 90 ? 'bg-emerald-500' : bsPct >= 50 ? 'bg-cyan-500' : 'bg-amber-500'}`} style={{ width: `${bsPct}%` }} />
                 </div>
-                <span className={`text-[11px] font-mono ${bsPct >= 90 ? 'text-emerald-400' : 'text-zinc-500'}`}>{bsPct}%</span>
+                <span className={`text-[14px] font-mono ${bsPct >= 90 ? 'text-emerald-400' : 'text-zinc-500'}`}>{bsPct}%</span>
               </div>
             );
           })}
@@ -727,7 +727,7 @@ const TimeframeRow = memo(({ tf, barColorClass, progress }) => {
       {/* Collection progress for this timeframe */}
       {progress && progress.pending > 0 && (
         <div className="w-16 flex-shrink-0 text-right">
-          <span className="text-[11px] text-cyan-400 font-mono">{progress.progress_pct || 0}%</span>
+          <span className="text-[14px] text-cyan-400 font-mono">{progress.progress_pct || 0}%</span>
         </div>
       )}
     </div>

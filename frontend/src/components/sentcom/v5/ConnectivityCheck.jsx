@@ -227,8 +227,8 @@ export const ConnectivityCheck = () => {
       >
         <Activity className="w-2.5 h-2.5" />
         <span>Wires</span>
-        {counts.fail > 0 && <span className="ml-1 v5-mono text-[11px]">· {counts.fail} fail</span>}
-        {counts.fail === 0 && counts.warn > 0 && <span className="ml-1 v5-mono text-[11px]">· {counts.warn} warn</span>}
+        {counts.fail > 0 && <span className="ml-1 v5-mono text-[14px]">· {counts.fail} fail</span>}
+        {counts.fail === 0 && counts.warn > 0 && <span className="ml-1 v5-mono text-[14px]">· {counts.warn} warn</span>}
       </button>
 
       {open && (
@@ -312,7 +312,7 @@ const ConnectivityGroup = ({ title, rows }) => {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-medium text-zinc-200 truncate">{r.name}</span>
                   {r.latency_ms != null && (
-                    <span className="text-[11px] text-zinc-500 v5-mono shrink-0">{r.latency_ms}ms</span>
+                    <span className="text-[14px] text-zinc-500 v5-mono shrink-0">{r.latency_ms}ms</span>
                   )}
                 </div>
                 <div className={`text-[12px] ${m.text} truncate`} title={r.summary}>

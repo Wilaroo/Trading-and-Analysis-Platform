@@ -47,8 +47,8 @@ export default function TradeTypeChip({
   const cls = TYPE_STYLE[t] || TYPE_STYLE.unknown;
   const label = TYPE_LABEL[t] || TYPE_LABEL.unknown;
   const padding = size === 'xs'
-    ? 'px-1 py-0 text-[9px]'
-    : 'px-1.5 py-0 text-[10px]';
+    ? 'px-1 py-0 text-[12px]'
+    : 'px-1.5 py-0 text-[13px]';
   return (
     <span
       data-testid={`trade-type-chip${testIdSuffix ? `-${testIdSuffix}` : ''}`}

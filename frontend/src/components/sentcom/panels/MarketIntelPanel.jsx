@@ -89,7 +89,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ClickableTicker symbol={setup.symbol} variant="inline" className="font-bold text-sm" />
-                    <span className="text-[11px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
+                    <span className="text-[14px] px-1.5 py-0.5 bg-violet-500/20 text-violet-400 rounded-full">
                       {setup.setup_type || setup.type}
                     </span>
                   </div>
@@ -142,7 +142,7 @@ export const MarketIntelPanel = ({ context, setups, alerts, contextLoading, setu
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ClickableTicker symbol={alert.symbol} variant="inline" className="font-bold text-sm" />
-                    <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${
+                    <span className={`text-[14px] px-1.5 py-0.5 rounded-full ${
                       alert.direction === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' :
                       alert.direction === 'SHORT' ? 'bg-rose-500/20 text-rose-400' :
                       'bg-zinc-500/20 text-zinc-400'

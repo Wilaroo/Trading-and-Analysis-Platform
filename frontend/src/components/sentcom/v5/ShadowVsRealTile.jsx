@@ -137,7 +137,7 @@ export const ShadowVsRealTile = () => {
   return (
     <div
       data-testid="shadow-vs-real-tile"
-      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/40 border-t border-zinc-900 text-[11px] text-zinc-300 whitespace-nowrap overflow-hidden"
+      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/40 border-t border-zinc-900 text-[14px] text-zinc-300 whitespace-nowrap overflow-hidden"
       title={
         // ── v19.34.25 (2026-05-06) — collapsed to a single line.
         // Pre-fix used a 2-column grid with 4 lines per column → forced
@@ -154,7 +154,7 @@ export const ShadowVsRealTile = () => {
       }
     >
       <Eye className="w-3 h-3 text-zinc-500 flex-shrink-0" />
-      <span className="text-zinc-400 font-semibold uppercase tracking-wide text-[10px]">
+      <span className="text-zinc-400 font-semibold uppercase tracking-wide text-[13px]">
         S vs R
       </span>
       {divergence !== null && (
@@ -163,7 +163,7 @@ export const ShadowVsRealTile = () => {
           className={`flex items-center gap-0.5 ${divergenceClass}`}
         >
           <DivergenceIcon className="w-3 h-3" />
-          <span className="font-mono text-[10px]">
+          <span className="font-mono text-[13px]">
             {divergence > 0 ? '+' : ''}{divergence.toFixed(0)}pp
           </span>
         </span>
@@ -173,11 +173,11 @@ export const ShadowVsRealTile = () => {
         data-testid="shadow-vs-real-shadow-col"
         className="flex items-center gap-1 text-violet-300"
       >
-        <span className="text-[10px] uppercase tracking-wide">Shadow</span>
+        <span className="text-[13px] uppercase tracking-wide">Shadow</span>
         <span className="font-mono font-bold text-violet-200">
           {_fmtPct(shadowWr)}
         </span>
-        <span className="text-zinc-500 text-[10px]">
+        <span className="text-zinc-500 text-[13px]">
           ({_fmtCount(shadowOutcomes)})
         </span>
       </span>
@@ -187,16 +187,16 @@ export const ShadowVsRealTile = () => {
         className="flex items-center gap-1 text-emerald-300"
       >
         <Activity className="w-3 h-3" />
-        <span className="text-[10px] uppercase tracking-wide">Real</span>
+        <span className="text-[13px] uppercase tracking-wide">Real</span>
         <span className="font-mono font-bold text-emerald-200">
           {_fmtPct(realWr)}
         </span>
-        <span className="text-zinc-500 text-[10px]">
+        <span className="text-zinc-500 text-[13px]">
           ({_fmtCount(realTotal)})
         </span>
         {realPnl !== null && (
           <span
-            className={`font-mono text-[10px] ${
+            className={`font-mono text-[13px] ${
               realPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
             }`}
           >

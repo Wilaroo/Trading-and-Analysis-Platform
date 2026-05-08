@@ -244,7 +244,7 @@ const CollapsedStreamRow = ({ group, onExpandToggle, onSymbolClick, hoveredSymbo
           <b className="text-zinc-200">
             {sym ? headline.replace(new RegExp(`^${sym}\\s*·\\s*`, 'i'), '') : headline}
           </b>
-          <span className={`ml-2 px-1.5 py-0.5 rounded-sm text-[11px] font-bold ${TIME_COLOR_BY_SEV[sev]} bg-zinc-900/60 border border-zinc-800`}>
+          <span className={`ml-2 px-1.5 py-0.5 rounded-sm text-[14px] font-bold ${TIME_COLOR_BY_SEV[sev]} bg-zinc-900/60 border border-zinc-800`}>
             ×{group.count}
           </span>
           {ageText && <span className="ml-2 text-zinc-500">· {ageText}</span>}
@@ -261,7 +261,7 @@ const CollapsedStreamRow = ({ group, onExpandToggle, onSymbolClick, hoveredSymbo
           <button
             type="button"
             onClick={() => onExpandToggle(group.key)}
-            className="text-[11px] v5-mono text-zinc-500 hover:text-cyan-300 transition-colors"
+            className="text-[14px] v5-mono text-zinc-500 hover:text-cyan-300 transition-colors"
             data-testid={`stream-collapsed-expand-${group.key}`}
             title="Expand to see all events"
           >
@@ -380,7 +380,7 @@ export const UnifiedStreamV5 = ({ messages, loading, onSymbolClick, hoveredSymbo
 
 const StreamFilterBar = ({ filters, toggle, options }) => (
   <div className="flex items-center gap-1 px-3 py-1.5 border-b border-zinc-900 bg-zinc-950/80 sticky top-0 z-10">
-    <span className="v5-mono text-[11px] v5-dim uppercase tracking-widest mr-1">filter:</span>
+    <span className="v5-mono text-[14px] v5-dim uppercase tracking-widest mr-1">filter:</span>
     {options.map(o => (
       <button
         key={o.key}

@@ -77,14 +77,14 @@ const ScoreBreakdown = memo(({ decision }) => {
     <div className="mt-1.5 space-y-0.5" data-testid="score-breakdown">
       {components.map((c, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <span className="text-[11px] text-zinc-500 w-16 text-right truncate">{c.label}</span>
+          <span className="text-[14px] text-zinc-500 w-16 text-right truncate">{c.label}</span>
           <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden relative">
             <div
               className={`h-full rounded-full ${c.pts >= 0 ? 'bg-emerald-500/60' : 'bg-red-500/60'}`}
               style={{ width: `${Math.min(100, (Math.abs(c.pts) / maxPts) * 100)}%` }}
             />
           </div>
-          <span className={`text-[11px] font-mono w-6 text-right ${
+          <span className={`text-[14px] font-mono w-6 text-right ${
             c.pts > 0 ? 'text-emerald-400' : c.pts < 0 ? 'text-red-400' : 'text-zinc-500'
           }`}>
             {c.pts > 0 ? '+' : ''}{c.pts}

@@ -43,7 +43,7 @@ const NeonChip = ({ tone = 'cyan', children, dot = true, pulse = false }) => {
     amber: 'bg-amber-400', rose: 'bg-rose-400', zinc: 'bg-zinc-500',
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-mono uppercase tracking-wider ${palette[tone]}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[13px] font-mono uppercase tracking-wider ${palette[tone]}`}>
       {dot && <span className={`w-1.5 h-1.5 rounded-full ${dotPalette[tone]} ${pulse ? 'animate-pulse' : ''}`} />}
       {children}
     </span>
@@ -61,7 +61,7 @@ const GlassCard = ({ children, glow = 'cyan', className = '', title = null, acti
     <div className={`relative rounded-xl border border-zinc-800/80 bg-zinc-950/60 backdrop-blur-md p-3 ${glowMap[glow]} ${className}`}>
       {title && (
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[10px] font-mono uppercase tracking-[0.18em] text-zinc-500">{title}</h3>
+          <h3 className="text-[13px] font-mono uppercase tracking-[0.18em] text-zinc-500">{title}</h3>
           {action}
         </div>
       )}
@@ -78,7 +78,7 @@ const AuraWordmark = ({ size = 'md' }) => {
       <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center font-bold text-zinc-950 shadow-[0_0_16px_rgba(34,211,238,0.5)]">A</div>
       <div className="flex flex-col leading-none">
         <span className={`${sz} font-bold tracking-wide bg-gradient-to-r from-cyan-300 via-violet-300 to-cyan-300 bg-clip-text text-transparent`} style={{ backgroundSize: '200% auto', animation: 'auraShimmer 4s linear infinite' }}>AURA</span>
-        <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-[0.25em] mt-0.5">Autonomous Intelligence</span>
+        <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-[0.25em] mt-0.5">Autonomous Intelligence</span>
       </div>
     </div>
   );
@@ -145,7 +145,7 @@ const DecisionFeed = () => {
   const rotated = [...lines.slice(tick % lines.length), ...lines.slice(0, tick % lines.length)];
   const palette = { cyan: 'text-cyan-300', emerald: 'text-emerald-300', violet: 'text-violet-300', amber: 'text-amber-300', rose: 'text-rose-300' };
   return (
-    <div className="font-mono text-[10px] space-y-1 overflow-hidden h-[200px]">
+    <div className="font-mono text-[13px] space-y-1 overflow-hidden h-[200px]">
       {rotated.slice(0, 10).map((l, i) => (
         <div key={`${tick}-${i}`} className={`flex gap-2 ${palette[l.tone]}`} style={{ opacity: 1 - i * 0.07, transform: `translateX(${i === 0 ? -2 : 0}px)`, transition: 'opacity 800ms, transform 800ms' }}>
           <span className="text-zinc-600 shrink-0">{l.t}</span>
@@ -170,11 +170,11 @@ const TradeTimeline = () => {
       <div className="absolute left-1.5 top-2 bottom-2 w-px bg-gradient-to-b from-cyan-500/60 via-violet-500/40 to-zinc-700" />
       <div className="space-y-2.5">
         {events.map((e, i) => (
-          <div key={i} className="relative flex items-baseline gap-2 text-[11px]">
+          <div key={i} className="relative flex items-baseline gap-2 text-[14px]">
             <span className={`absolute -left-[14px] top-1 w-2.5 h-2.5 rounded-full ${dotMap[e.tone]}`} />
             <span className={`font-mono font-bold w-12 ${e.tone === 'emerald' ? 'text-emerald-300' : e.tone === 'rose' ? 'text-rose-300' : e.tone === 'violet' ? 'text-violet-300' : 'text-zinc-400'}`}>{e.type}</span>
             <span className="text-zinc-200 truncate flex-1">{e.sym}{e.px ? ` @ ${e.px}` : ''}</span>
-            <span className="font-mono text-[9px] text-zinc-500">{e.time}</span>
+            <span className="font-mono text-[12px] text-zinc-500">{e.time}</span>
           </div>
         ))}
       </div>
@@ -452,7 +452,7 @@ export const AuraMockupPreview = () => {
           <h1 className="text-3xl font-bold text-zinc-100">SentCom · AURA Concept Preview</h1>
           <p className="text-sm text-zinc-500 mt-1">Unified mockup combining the production HUD, anatomical brain hero, and steal-list components into one cohesive showcase.</p>
         </div>
-        <div className="text-right text-[10px] font-mono text-zinc-600">
+        <div className="text-right text-[13px] font-mono text-zinc-600">
           <div>Reachable via <span className="text-cyan-300">?preview=aura</span></div>
           <div>Built with existing stack only · zero side-effects</div>
           <div className="mt-1"><NeonChip tone="emerald">All concepts merged · no overlap</NeonChip></div>
@@ -462,22 +462,22 @@ export const AuraMockupPreview = () => {
       {/* ── Top HUD strip ────────────────────────────────────────────── */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 flex items-center gap-4 shadow-[0_0_24px_-12px_rgba(34,211,238,0.4)]">
         <AuraWordmark size="sm" />
-        <div className="flex-1 grid grid-cols-7 gap-3 text-[11px]">
+        <div className="flex-1 grid grid-cols-7 gap-3 text-[14px]">
           {[['Scan', '14', 'cyan'], ['Eval', '6', 'violet'], ['Order', '2', 'emerald'], ['Manage', '4', 'cyan'], ['Close', '11', 'zinc'], ['Latency', '1.2s', 'emerald'], ['Phase', 'RTH', 'cyan']].map(([k, v, t]) => (
             <div key={k} className="flex flex-col">
-              <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-wider">{k}</span>
+              <span className="text-[12px] font-mono text-zinc-500 uppercase tracking-wider">{k}</span>
               <span className={`font-bold text-sm ${t === 'cyan' ? 'text-cyan-300' : t === 'violet' ? 'text-violet-300' : t === 'emerald' ? 'text-emerald-300' : 'text-zinc-300'}`}>{v}</span>
             </div>
           ))}
         </div>
         <div className="flex items-center gap-3">
           <div className="text-center">
-            <div className="text-[9px] font-mono text-zinc-500 uppercase">Confidence</div>
-            <div className="text-cyan-300 font-bold text-lg leading-none">88<span className="text-[10px] text-zinc-500">%</span></div>
+            <div className="text-[12px] font-mono text-zinc-500 uppercase">Confidence</div>
+            <div className="text-cyan-300 font-bold text-lg leading-none">88<span className="text-[13px] text-zinc-500">%</span></div>
           </div>
           <div className="text-center">
-            <div className="text-[9px] font-mono text-zinc-500 uppercase">Risk OK</div>
-            <div className="text-emerald-300 font-bold text-lg leading-none">92<span className="text-[10px] text-zinc-500">%</span></div>
+            <div className="text-[12px] font-mono text-zinc-500 uppercase">Risk OK</div>
+            <div className="text-emerald-300 font-bold text-lg leading-none">92<span className="text-[13px] text-zinc-500">%</span></div>
           </div>
           <NeonChip tone="emerald" pulse>LIVE · 3s</NeonChip>
           <NeonChip tone="cyan" dot={false}>⌘K</NeonChip>
@@ -490,7 +490,7 @@ export const AuraMockupPreview = () => {
           <GlassCard glow="cyan" title="Portfolio Performance" action={<NeonChip tone="emerald" dot={false}>+1.28%</NeonChip>}>
             <div className="text-2xl font-bold text-zinc-100">$2,450,780</div>
             <svg viewBox="0 0 200 60" className="w-full mt-2"><polyline fill="none" stroke="url(#pp1)" strokeWidth="2" points="0,40 20,38 40,42 60,30 80,32 100,22 120,28 140,18 160,20 180,12 200,8" /><defs><linearGradient id="pp1"><stop offset="0%" stopColor="#22d3ee" /><stop offset="100%" stopColor="#a78bfa" /></linearGradient></defs></svg>
-            <div className="text-[9px] font-mono text-zinc-600 mt-1 flex justify-between"><span>24H</span><span>1AM</span><span>12PM</span><span>3PM</span><span>6PM</span></div>
+            <div className="text-[12px] font-mono text-zinc-600 mt-1 flex justify-between"><span>24H</span><span>1AM</span><span>12PM</span><span>3PM</span><span>6PM</span></div>
           </GlassCard>
           <GlassCard glow="cyan" title="Watchlist">
             {[['AAPL', '+1.1%', 'emerald'], ['NVDA', '+2.5%', 'emerald'], ['MSFT', '+0.9%', 'emerald'], ['TSLA', '-0.3%', 'rose']].map(([s, p, t]) => (
@@ -509,7 +509,7 @@ export const AuraMockupPreview = () => {
           </GlassCard>
           <GlassCard glow="emerald" title="Risk Control">
             <ArcGauge value={92} tone="emerald" sublabel="Risk Level" size="sm" />
-            <div className="text-[10px] text-zinc-500 mt-1 text-center">Max Drawdown: <span className="text-emerald-300 font-mono">3.1%</span></div>
+            <div className="text-[13px] text-zinc-500 mt-1 text-center">Max Drawdown: <span className="text-emerald-300 font-mono">3.1%</span></div>
           </GlassCard>
           <GlassCard glow="cyan" title="AI Confidence">
             <ArcGauge value={88} tone="cyan" sublabel="High Confidence" size="sm" />
@@ -525,7 +525,7 @@ export const AuraMockupPreview = () => {
               <div key={s} className="flex items-center gap-2 p-1.5 rounded border border-zinc-900 bg-zinc-900/30 hover:border-cyan-500/40 transition-colors">
                 <span className="font-bold text-zinc-200 text-xs w-12">{s}</span>
                 <NeonChip tone={sc >= 80 ? 'emerald' : sc >= 60 ? 'cyan' : sc >= 40 ? 'amber' : 'rose'} dot={false}>{t}·{sc}</NeonChip>
-                <span className={`ml-auto font-mono text-[10px] ${tn === 'emerald' ? 'text-emerald-300' : tn === 'rose' ? 'text-rose-300' : 'text-amber-300'}`}>{ch}</span>
+                <span className={`ml-auto font-mono text-[13px] ${tn === 'emerald' ? 'text-emerald-300' : tn === 'rose' ? 'text-rose-300' : 'text-amber-300'}`}>{ch}</span>
               </div>
             ))}
           </div>
@@ -540,15 +540,15 @@ export const AuraMockupPreview = () => {
             <polyline fill="none" stroke="#22d3ee" strokeWidth="1.5" points="0,180 40,160 80,170 120,140 160,150 200,120 240,130 280,90 320,100 360,70 400,80 440,60 480,70 520,40 560,50 600,30" style={{ filter: 'drop-shadow(0 0 4px #22d3ee)' }} />
             <polyline fill="none" stroke="#a78bfa" strokeWidth="1" strokeDasharray="3,3" points="0,140 600,90" opacity="0.7" />
           </svg>
-          <div className="flex justify-between text-[10px] font-mono text-zinc-500 mt-1"><span>09:30</span><span>10:00</span><span>10:30</span><span>11:00</span><span>11:30</span><span>12:00</span></div>
+          <div className="flex justify-between text-[13px] font-mono text-zinc-500 mt-1"><span>09:30</span><span>10:00</span><span>10:30</span><span>11:00</span><span>11:30</span><span>12:00</span></div>
         </GlassCard>
 
         <div className="col-span-3 flex flex-col gap-3">
           <GlassCard glow="violet" title="Briefings" className="flex-shrink-0">
-            <div className="space-y-1 text-[10px]">
+            <div className="space-y-1 text-[13px]">
               {[['08:30', 'Morning Prep', 'PASSED', 'zinc'], ['12:00', 'Mid-Day Recap', 'NEW', 'emerald'], ['15:00', 'Power Hour', '15:00', 'amber'], ['16:00', 'Close Recap', '16:00', 'zinc']].map(([t, n, s, tone]) => (
                 <div key={n} className="flex items-center justify-between p-1.5 rounded border border-zinc-900">
-                  <div><div className="text-zinc-300 text-xs">{n}</div><div className="text-[9px] font-mono text-zinc-600">{t} ET</div></div>
+                  <div><div className="text-zinc-300 text-xs">{n}</div><div className="text-[12px] font-mono text-zinc-600">{t} ET</div></div>
                   <NeonChip tone={tone} dot={false}>{s}</NeonChip>
                 </div>
               ))}
@@ -562,7 +562,7 @@ export const AuraMockupPreview = () => {
       <div className="grid grid-cols-12 gap-3">
         <GlassCard glow="emerald" className="col-span-4" title="Open Positions · 4">
           {[['NVDA', 'LONG', 200, '+2.4R', 'emerald'], ['AAPL', 'LONG', 100, '+0.6R', 'emerald'], ['LABD', 'SHORT', 300, '-0.4R', 'rose'], ['META', 'LONG', 50, '+1.1R', 'emerald']].map(([s, side, qty, r, t]) => (
-            <div key={s} className="flex items-center gap-2 py-1 border-b border-zinc-900 text-[11px]">
+            <div key={s} className="flex items-center gap-2 py-1 border-b border-zinc-900 text-[14px]">
               <span className="font-bold text-zinc-200 w-12">{s}</span><NeonChip tone={side === 'LONG' ? 'emerald' : 'rose'} dot={false}>{side}</NeonChip><span className="text-zinc-500 font-mono">{qty}</span>
               <span className={`ml-auto font-mono font-bold ${t === 'emerald' ? 'text-emerald-300' : 'text-rose-300'}`}>{r}</span>
             </div>
@@ -572,7 +572,7 @@ export const AuraMockupPreview = () => {
         <GlassCard glow="violet" className="col-span-4" title="Backfill Readiness">
           <div className="flex items-center gap-2 mb-2">
             <ArcGauge value={97} tone="violet" sublabel="Ready" size="sm" />
-            <div className="flex-1 grid grid-cols-1 gap-1 text-[9px] font-mono">
+            <div className="flex-1 grid grid-cols-1 gap-1 text-[12px] font-mono">
               {[['Queue Drained', 'emerald'], ['Critical Fresh', 'emerald'], ['Overall 98.7%', 'emerald'], ['No Duplicates', 'emerald'], ['Density 94%', 'amber']].map(([c, tone]) => (
                 <div key={c} className={`px-1.5 py-0.5 rounded border flex items-center gap-1 ${tone === 'amber' ? 'border-amber-500/30 text-amber-300 bg-amber-500/5' : 'border-emerald-500/30 text-emerald-300 bg-emerald-500/5'}`}>
                   <span className={`w-1 h-1 rounded-full ${tone === 'amber' ? 'bg-amber-400' : 'bg-emerald-400'}`} />
@@ -584,7 +584,7 @@ export const AuraMockupPreview = () => {
         </GlassCard>
       </div>
 
-      <footer className="pt-6 text-[10px] font-mono text-zinc-600 text-center border-t border-zinc-900">
+      <footer className="pt-6 text-[13px] font-mono text-zinc-600 text-center border-t border-zinc-900">
         Mockup file: <span className="text-zinc-400">/app/frontend/src/pages/AuraMockupPreview.jsx</span> · delete the file + the App.js URL-param check to remove. No production code paths touched.
       </footer>
     </div>

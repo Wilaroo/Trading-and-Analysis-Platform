@@ -144,7 +144,7 @@ const CriticalSymbolsDrawer = ({ check, onAction, busy }) => {
         onClick={() => onAction('smart-backfill', { freshness_days: 1, tier_filter: 'intraday' })}
         label={`POST smart-backfill?freshness_days=1`}
       />
-      <div className="v5-mono text-[11px] text-zinc-500">
+      <div className="v5-mono text-[14px] text-zinc-500">
         Smart-backfill now plans the union of (a) tier-required AND (b) bar_sizes
         the symbol already has data for — guaranteed to refresh these.
       </div>
@@ -166,7 +166,7 @@ const FreshnessDrawer = ({ check, onAction, busy }) => {
       )}
       {tfs.length > 0 && (
         <div className="space-y-1">
-          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[14px] uppercase text-zinc-500 tracking-wide">
             By timeframe (worst-offender first)
           </div>
           {[...tfs].sort((a, b) => (a.fresh_pct ?? 0) - (b.fresh_pct ?? 0)).map((row) => {
@@ -207,7 +207,7 @@ const FreshnessDrawer = ({ check, onAction, busy }) => {
 const NoDupesDrawer = ({ check }) => (
   <div data-testid="readiness-drawer-no_duplicates" className="v5-mono text-[12px] text-zinc-300">
     {check.detail}
-    <div className="mt-1 text-[11px] text-zinc-500">
+    <div className="mt-1 text-[14px] text-zinc-500">
       O(1) check: the unique compound index on `(symbol, bar_size, date)` is
       asserted at write time, so duplicate bars are impossible by construction.
     </div>
@@ -225,19 +225,19 @@ const DensityDrawer = ({ check }) => {
       )}
       {sample.length > 0 ? (
         <>
-          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[14px] uppercase text-zinc-500 tracking-wide">
             Low-density sample (will be dropped from training)
           </div>
           <div className="flex flex-wrap gap-1">
             {sample.slice(0, 30).map((row, i) => (
               <span key={i}
-                    className="px-1.5 py-0.5 rounded border bg-amber-900/20 border-amber-800/50 text-amber-200 v5-mono text-[11px]"
+                    className="px-1.5 py-0.5 rounded border bg-amber-900/20 border-amber-800/50 text-amber-200 v5-mono text-[14px]"
                     title={`${row.bars ?? '?'} bars`}>
                 {row.symbol ?? row}{row.bars ? ` (${row.bars})` : ''}
               </span>
             ))}
             {sample.length > 30 && (
-              <span className="v5-mono text-[11px] text-zinc-500">
+              <span className="v5-mono text-[14px] text-zinc-500">
                 +{sample.length - 30} more
               </span>
             )}
@@ -328,7 +328,7 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
             · loading…
           </span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[14px]">
           tip: click a tile to drill in
         </span>
       </div>
@@ -411,14 +411,14 @@ export const BackfillReadinessCard = ({ refreshToken = 0 }) => {
               <div className="flex items-center gap-2">
                 <span className={`w-1.5 h-1.5 rounded-full ${cs.dot}`} />
                 <span className="v5-mono text-[12px] font-bold">{label}</span>
-                <span className="v5-mono text-[11px] uppercase opacity-70 ml-auto">
+                <span className="v5-mono text-[14px] uppercase opacity-70 ml-auto">
                   {c.status}
                 </span>
                 <span className="v5-mono text-[12px] opacity-60 ml-1" aria-hidden>
                   {isOpen ? '▾' : '▸'}
                 </span>
               </div>
-              <div className="v5-mono text-[11px] opacity-75 mt-0.5">
+              <div className="v5-mono text-[14px] opacity-75 mt-0.5">
                 {c.detail}
               </div>
               {isOpen && Drawer && (

@@ -77,11 +77,11 @@ const PerModuleStrip = ({ summary }) => {
             data-testid={`ai-audit-summary-${mod}`}
             className="flex flex-col items-center gap-0.5"
           >
-            <div className="text-[11px] uppercase tracking-wider text-zinc-500">
+            <div className="text-[14px] uppercase tracking-wider text-zinc-500">
               {MODULE_DISPLAY[mod]}
             </div>
             <div className={`v5-mono text-sm ${cls}`}>{_fmtPct(rate)}</div>
-            <div className="text-[11px] text-zinc-600">
+            <div className="text-[14px] text-zinc-600">
               {consulted > 0 ? `n=${consulted}` : 'no data'}
             </div>
           </div>
@@ -211,7 +211,7 @@ export const AIDecisionAuditCard = ({ limit = 20, className = '' }) => {
         data-testid="ai-decision-audit-trade-list"
         className="grid"
       >
-        <div className="grid grid-cols-12 gap-1 px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800/40">
+        <div className="grid grid-cols-12 gap-1 px-3 py-1 text-[14px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800/40">
           <span className="col-span-2">Sym</span>
           <span className="col-span-2">Setup</span>
           <span className="col-span-2 text-right">PnL</span>

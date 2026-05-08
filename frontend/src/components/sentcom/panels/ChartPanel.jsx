@@ -978,7 +978,7 @@ export const ChartPanel = ({
                   ? 'WebSocket failed 3x — using REST polling'
                   : 'REST polling (5s during RTH)'
               }
-              className={`inline-flex items-center gap-1 px-1.5 py-0 rounded border text-[10px] uppercase tracking-wider font-mono ${
+              className={`inline-flex items-center gap-1 px-1.5 py-0 rounded border text-[13px] uppercase tracking-wider font-mono ${
                 wsStatus === 'connected'
                   ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800'
                   : wsStatus === 'connecting'

@@ -618,7 +618,7 @@ const SOCEntry = React.memo(({ entry, index, isNew = false }) => {
                 />
               </div>
               <span 
-                className="text-[11px] text-zinc-500"
+                className="text-[14px] text-zinc-500"
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               >
                 {entry.confidence}%
@@ -710,14 +710,14 @@ const StreamOfConsciousness = ({ className = '' }) => {
             <span className="text-sm font-bold text-emerald-400 tracking-wide">
               SentCom S.O.C.
             </span>
-            <p className="text-[11px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
+            <p className="text-[14px] text-zinc-500 tracking-wider">STREAM OF CONSCIOUSNESS</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Connection status indicator */}
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-black/30" title={`Last update: ${lastUpdateStr}`}>
             <Radio className={`w-3 h-3 ${isConnected ? 'text-emerald-400' : 'text-zinc-600'}`} />
-            <span className={`text-[11px] font-mono ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
+            <span className={`text-[14px] font-mono ${isConnected ? 'text-emerald-400' : 'text-zinc-500'}`}>
               {isConnected ? 'LIVE' : 'SYNC'}
             </span>
           </div>

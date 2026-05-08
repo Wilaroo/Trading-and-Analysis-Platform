@@ -204,21 +204,21 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
           {/* Top HUD — quick summary strip */}
           <div className="grid grid-cols-3 gap-px bg-zinc-900">
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Open P&L</div>
+              <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Open P&L</div>
               <div className={`v5-mono text-lg font-bold ${quotesReady ? (totalUnrealizedPnl >= 0 ? 'v5-up' : 'v5-down') : 'v5-warn'}`}>
                 {quotesReady ? fmtUsd(totalUnrealizedPnl) : 'pending'}
               </div>
-              <div className="text-[11px] text-zinc-500">{open.length} position{open.length === 1 ? '' : 's'}</div>
+              <div className="text-[14px] text-zinc-500">{open.length} position{open.length === 1 ? '' : 's'}</div>
             </div>
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Closed today</div>
+              <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Closed today</div>
               <div className={`v5-mono text-lg font-bold ${closed.length === 0 ? 'text-zinc-500' : (totalRealizedPnl >= 0 ? 'v5-up' : 'v5-down')}`}>
                 {closed.length === 0 ? '—' : fmtUsd(totalRealizedPnl)}
               </div>
-              <div className="text-[11px] text-zinc-500">{closed.length} fill{closed.length === 1 ? '' : 's'}</div>
+              <div className="text-[14px] text-zinc-500">{closed.length} fill{closed.length === 1 ? '' : 's'}</div>
             </div>
             <div className="bg-zinc-950 px-4 py-2">
-              <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">DRC</div>
+              <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">DRC</div>
               <div className={`v5-mono text-lg font-bold ${
                 !drcHealth ? 'text-zinc-500'
                 : (drcHealth === 'green' || drcHealth === 'healthy') ? 'v5-up'
@@ -227,7 +227,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
               }`}>
                 {drcHealth ? drcHealth.toUpperCase() : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500">{maxRisk != null ? `cap $${Math.round(maxRisk)}` : 'no cap set'}</div>
+              <div className="text-[14px] text-zinc-500">{maxRisk != null ? `cap $${Math.round(maxRisk)}` : 'no cap set'}</div>
             </div>
           </div>
 
@@ -245,7 +245,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
               testid="briefing-section-top-movers"
               right={
                 live.marketState && (
-                  <span data-testid="briefing-top-movers-market-state" className="v5-mono text-[11px] text-zinc-500 uppercase">
+                  <span data-testid="briefing-top-movers-market-state" className="v5-mono text-[14px] text-zinc-500 uppercase">
                     {live.marketState}
                   </span>
                 )
@@ -295,7 +295,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                   {live.yesterdayCloseHours != null && live.yesterdayCloseHours > 10 && (
                     <span
                       data-testid="briefing-weekend-catchup-badge"
-                      className="v5-mono text-[11px] text-amber-400 uppercase tracking-wide"
+                      className="v5-mono text-[14px] text-amber-400 uppercase tracking-wide"
                       title={`Window widened to catch weekend / holiday news since ${live.yesterdayCloseStart || 'last close'}`}
                     >
                       since {Math.round(live.yesterdayCloseHours)}h ago
@@ -334,10 +334,10 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                         <span className="v5-mono text-[12px] font-bold text-zinc-100 w-10 shrink-0">
                           {r.symbol}
                         </span>
-                        <span className={`${chipCls} v5-mono text-[11px] shrink-0`} data-testid={`briefing-sentiment-chip-${r.symbol}`}>
+                        <span className={`${chipCls} v5-mono text-[14px] shrink-0`} data-testid={`briefing-sentiment-chip-${r.symbol}`}>
                           {fmtSwing(r.swing)}
                         </span>
-                        <span className="v5-mono text-[11px] text-zinc-500 shrink-0">
+                        <span className="v5-mono text-[14px] text-zinc-500 shrink-0">
                           y.close {fmtSwing(r.sentiment_yesterday_close)} · pre {fmtSwing(r.sentiment_premarket)}
                         </span>
                         {r.top_headline && (
@@ -515,33 +515,33 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
               >
                 <div className="grid grid-cols-2 gap-px bg-zinc-900 -mx-4 -my-3">
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Kill switch</div>
+                    <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Kill switch</div>
                     <div className={`v5-mono text-xs font-bold ${safety?.state?.kill_switch_tripped ? 'v5-down' : 'v5-up'}`}>
                       {safety?.state?.kill_switch_tripped ? 'TRIPPED' : 'ARMED'}
                     </div>
                     {safety?.state?.kill_switch_reason && (
-                      <div className="text-[11px] text-zinc-400 truncate">{safety.state.kill_switch_reason}</div>
+                      <div className="text-[14px] text-zinc-400 truncate">{safety.state.kill_switch_reason}</div>
                     )}
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Open positions</div>
+                    <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Open positions</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       {safety?.live?.open_positions_count ?? 0}
                     </div>
                     {safety?.live?.awaiting_quotes && (
-                      <div className="text-[11px] text-amber-400 truncate" data-testid="briefing-awaiting-quotes">
+                      <div className="text-[14px] text-amber-400 truncate" data-testid="briefing-awaiting-quotes">
                         awaiting: {(safety.live.positions_missing_quotes || []).slice(0, 3).join(', ') || '—'}
                       </div>
                     )}
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Daily loss cap</div>
+                    <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Daily loss cap</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       ${Math.round(safety?.config?.max_daily_loss_usd ?? 0)}
                     </div>
                   </div>
                   <div className="bg-zinc-950 px-3 py-2">
-                    <div className="v5-mono text-[11px] uppercase tracking-widest text-zinc-500">Max positions</div>
+                    <div className="v5-mono text-[14px] uppercase tracking-widest text-zinc-500">Max positions</div>
                     <div className="v5-mono text-xs font-bold text-zinc-200">
                       {safety?.config?.max_positions ?? '—'}
                     </div>
@@ -619,7 +619,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                   <div className={`v5-mono text-xs font-bold ${scanner?.mode || scanner?.running ? 'v5-up' : 'text-zinc-500'}`}>
                     {scanner?.mode || (scanner?.running ? 'ACTIVE' : 'IDLE')}
                   </div>
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Scanner</div>
+                  <div className="text-[14px] text-zinc-500 uppercase tracking-wider">Scanner</div>
                   {scanner?.total_hits != null && (
                     <div className="text-[12px] text-zinc-400 v5-mono">{scanner.total_hits} hits</div>
                   )}
@@ -628,12 +628,12 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
                   <div className={`v5-mono text-xs font-bold ${bot?.is_active || bot?.running ? 'v5-up' : 'text-zinc-500'}`}>
                     {bot?.is_active || bot?.running ? 'ACTIVE' : 'IDLE'}
                   </div>
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Trading bot</div>
+                  <div className="text-[14px] text-zinc-500 uppercase tracking-wider">Trading bot</div>
                   {bot?.mode && <div className="text-[12px] text-zinc-400 v5-mono">{bot.mode}</div>}
                 </div>
                 <div className="bg-zinc-950 px-3 py-2">
                   <div className="v5-mono text-xs font-bold v5-warn">PAPER</div>
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Account mode</div>
+                  <div className="text-[14px] text-zinc-500 uppercase tracking-wider">Account mode</div>
                   <div className="text-[12px] text-zinc-400 v5-mono">{timeLabel}</div>
                 </div>
               </div>
@@ -677,7 +677,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
 
           {/* Footer — single CTA */}
           <div className="px-4 py-3 border-t border-zinc-800 bg-zinc-950/90 flex items-center justify-between">
-            <span className="v5-mono text-[11px] v5-dim">
+            <span className="v5-mono text-[14px] v5-dim">
               Auto-popup disabled · opens only via the briefing button
             </span>
             <button

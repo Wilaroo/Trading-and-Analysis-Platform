@@ -109,11 +109,11 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="whitespace-nowrap flex items-center gap-1.5 text-[11px] font-medium"
+                    className="whitespace-nowrap flex items-center gap-1.5 text-[14px] font-medium"
                   >
                     {item.label}
                     {item.isNew && (
-                      <span className="px-1.5 py-0.5 text-[8px] font-bold bg-violet-500/30 text-violet-300 rounded-full animate-pulse">
+                      <span className="px-1.5 py-0.5 text-[11px] font-bold bg-violet-500/30 text-violet-300 rounded-full animate-pulse">
                         NEW
                       </span>
                     )}
@@ -138,7 +138,7 @@ export const Sidebar = ({ activeTab, setActiveTab }) => {
               exit={{ opacity: 0 }}
               className="text-center"
             >
-              <p className="text-[11px] font-mono text-zinc-500">
+              <p className="text-[14px] font-mono text-zinc-500">
                 v2.0 • <span className="text-cyan-400">Compact</span>
               </p>
             </motion.div>

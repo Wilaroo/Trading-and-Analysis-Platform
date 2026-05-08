@@ -105,7 +105,7 @@ const ChatMessage = ({ msg }) => {
             : 'bg-zinc-800/80 border border-zinc-700/50 text-zinc-200 rounded-tl-sm'
         }`}>
           {/* Label */}
-          <span className={`text-[11px] font-bold uppercase tracking-wider block mb-1 ${
+          <span className={`text-[14px] font-bold uppercase tracking-wider block mb-1 ${
             showAsUser ? 'text-cyan-400/70' : 'text-emerald-400/70'
           }`}>
             {showAsUser ? 'YOU' : 'SENTCOM'}
@@ -126,7 +126,7 @@ const ChatMessage = ({ msg }) => {
             </button>
           )}
         </div>
-        <span className={`text-[11px] text-zinc-600 mt-0.5 block ${showAsUser ? 'text-right' : ''}`}>
+        <span className={`text-[14px] text-zinc-600 mt-0.5 block ${showAsUser ? 'text-right' : ''}`}>
           {formatRelativeTime(msg.timestamp)}
         </span>
       </div>

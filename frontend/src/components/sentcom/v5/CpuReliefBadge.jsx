@@ -58,7 +58,7 @@ const CpuReliefBadge = ({ pollMs = 15_000 }) => {
       onClick={toggle}
       disabled={busy}
       title={tooltip}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md v5-mono text-[10px] uppercase tracking-widest border transition-colors ${
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md v5-mono text-[13px] uppercase tracking-widest border transition-colors ${
         active
           ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
           : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-300'

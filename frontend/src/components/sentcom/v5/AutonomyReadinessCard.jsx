@@ -56,7 +56,7 @@ export const AutonomyReadinessCard = () => {
         {loading && (
           <span data-testid="autonomy-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[14px]">
           go/no-go before flipping auto-execute
         </span>
       </div>
@@ -110,7 +110,7 @@ export const AutonomyReadinessCard = () => {
                   <span className="v5-mono text-[12px] font-bold flex-1 truncate">
                     {CHECK_LABELS[k] || k}
                   </span>
-                  <span className={`v5-mono text-[11px] tabular-nums opacity-70`}>
+                  <span className={`v5-mono text-[14px] tabular-nums opacity-70`}>
                     {STATUS_LABEL[tone] || '—'}
                   </span>
                   <span className="v5-mono text-[12px] opacity-60 ml-1" aria-hidden>
@@ -165,7 +165,7 @@ export const AutonomyReadinessCard = () => {
       {/* Next steps (if any) */}
       {data?.next_steps?.length > 0 && (
         <div data-testid="autonomy-next-steps" className="space-y-0.5">
-          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[14px] uppercase text-zinc-500 tracking-wide">
             Next steps
           </div>
           {data.next_steps.slice(0, 5).map((s, i) => (

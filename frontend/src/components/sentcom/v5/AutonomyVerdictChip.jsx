@@ -71,7 +71,7 @@ export const AutonomyVerdictChip = () => {
         className={`group inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded-full ring-1 ${tone.ring} transition-colors cursor-pointer`}
       >
         <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
-        <span className="v5-mono text-[8px] uppercase tracking-wider text-zinc-300/80 group-hover:text-zinc-100 hidden sm:inline">
+        <span className="v5-mono text-[11px] uppercase tracking-wider text-zinc-300/80 group-hover:text-zinc-100 hidden sm:inline">
           AUTO · {tone.label}
         </span>
       </button>

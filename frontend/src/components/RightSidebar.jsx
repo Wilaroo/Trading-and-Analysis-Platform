@@ -163,12 +163,12 @@ const EarningsWidget = ({ onTickerSelect }) => {
 
               {/* Heat Legend */}
               <div className="flex items-center justify-center gap-1.5 mb-2 px-1">
-                <span className="text-[11px] text-zinc-500">Light</span>
+                <span className="text-[14px] text-zinc-500">Light</span>
                 <div className="w-3 h-2 rounded-sm bg-emerald-500/30" />
                 <div className="w-3 h-2 rounded-sm bg-amber-500/30" />
                 <div className="w-3 h-2 rounded-sm bg-orange-500/30" />
                 <div className="w-3 h-2 rounded-sm bg-red-500/30" />
-                <span className="text-[11px] text-zinc-500">Heavy</span>
+                <span className="text-[14px] text-zinc-500">Heavy</span>
               </div>
 
               {/* Column Layout: Day headers + companies underneath */}
@@ -191,12 +191,12 @@ const EarningsWidget = ({ onTickerSelect }) => {
                     >
                       {/* Day Header */}
                       <div className="p-1.5 text-center" style={{ backgroundColor: heat.bg }}>
-                        <div className="text-[11px] text-zinc-500 leading-none">{day.dayName}</div>
+                        <div className="text-[14px] text-zinc-500 leading-none">{day.dayName}</div>
                         <div className={`text-sm font-bold leading-tight ${day.isToday ? 'text-cyan-400' : 'text-white'}`}>
                           {day.dayNum}
                         </div>
                         {count > 0 && (
-                          <div className={`text-[11px] font-semibold leading-none mt-0.5 ${heat.text}`}>
+                          <div className={`text-[14px] font-semibold leading-none mt-0.5 ${heat.text}`}>
                             {count} report{count !== 1 ? 's' : ''}
                           </div>
                         )}
@@ -205,7 +205,7 @@ const EarningsWidget = ({ onTickerSelect }) => {
                       {/* Company list */}
                       <div className="flex-1 px-0.5 pb-1 max-h-48 overflow-y-auto scrollbar-thin space-y-0.5">
                         {allItems.length === 0 ? (
-                          <div className="text-[11px] text-zinc-600 text-center py-2">—</div>
+                          <div className="text-[14px] text-zinc-600 text-center py-2">—</div>
                         ) : (
                           allItems.map((item, idx) => (
                             <button
@@ -227,25 +227,25 @@ const EarningsWidget = ({ onTickerSelect }) => {
                               </div>
                               {/* Expected Move */}
                               <div className="flex items-center justify-between mt-0.5">
-                                <span className="text-[8px] text-zinc-500">Exp</span>
-                                <span className="text-[8px] text-zinc-400">
+                                <span className="text-[11px] text-zinc-500">Exp</span>
+                                <span className="text-[11px] text-zinc-400">
                                   {item.expected_move?.percent?.toFixed(1)}% <span className="text-zinc-500">${item.expected_move?.dollar?.toFixed(2)}</span>
                                 </span>
                               </div>
                               {/* Earnings Score */}
                               <div className="flex items-center justify-between mt-0.5">
-                                <span className="text-[8px] text-zinc-500">
+                                <span className="text-[11px] text-zinc-500">
                                   {item.has_reported ? 'Result' : 'Proj'}
                                 </span>
-                                <span className={`text-[8px] font-bold px-1 rounded border ${getScoreColor(item.earnings_score?.label)}`}>
+                                <span className={`text-[11px] font-bold px-1 rounded border ${getScoreColor(item.earnings_score?.label)}`}>
                                   {item.earnings_score?.label || '—'}
                                 </span>
                               </div>
                               {/* EPS surprise if reported */}
                               {item.has_reported && item.eps_surprise && (
                                 <div className="flex items-center justify-between mt-0.5">
-                                  <span className="text-[8px] text-zinc-500">EPS</span>
-                                  <span className={`text-[8px] font-medium ${item.eps_surprise.percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  <span className="text-[11px] text-zinc-500">EPS</span>
+                                  <span className={`text-[11px] font-medium ${item.eps_surprise.percent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                     {item.eps_surprise.percent >= 0 ? '+' : ''}{item.eps_surprise.percent?.toFixed(1)}%
                                   </span>
                                 </div>
@@ -356,10 +356,10 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
 
   const getSourceBadge = (item) => {
     if (item.is_sticky || item.source === 'manual') {
-      return <span className="text-[11px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400">PIN</span>;
+      return <span className="text-[14px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400">PIN</span>;
     }
     if (item.source === 'scanner') {
-      return <span className="text-[11px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400">SCAN</span>;
+      return <span className="text-[14px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400">SCAN</span>;
     }
     return null;
   };
@@ -371,7 +371,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
       swing: 'bg-emerald-500/20 text-emerald-400',
       position: 'bg-blue-500/20 text-blue-400'
     };
-    return <span className={`text-[11px] px-1 py-0.5 rounded ${colors[tf] || 'bg-zinc-500/20 text-zinc-400'}`}>
+    return <span className={`text-[14px] px-1 py-0.5 rounded ${colors[tf] || 'bg-zinc-500/20 text-zinc-400'}`}>
       {tf?.toUpperCase() || 'DAY'}
     </span>;
   };
@@ -475,7 +475,7 @@ const WatchlistWidget = ({ onTickerSelect, onViewChart, wsWatchlist = [] }) => {
                   </div>
                   <div className="flex items-center gap-2">
                     {item.signal_count > 1 && (
-                      <span className="text-[11px] text-zinc-500">{item.signal_count}x</span>
+                      <span className="text-[14px] text-zinc-500">{item.signal_count}x</span>
                     )}
                     <div className={`flex items-center gap-1 text-[12px] font-mono ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
                       {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -666,7 +666,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                 const s = styles[style];
                 if (!s) return null;
                 return (
-                  <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${s.color}`} title={s.title}>
+                  <span className={`text-[11px] px-1 py-0.5 rounded font-bold ${s.color}`} title={s.title}>
                     {s.label}
                   </span>
                 );
@@ -690,7 +690,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                 const color = numScore >= 7 ? 'text-emerald-400' : numScore >= 5 ? 'text-yellow-400' : 'text-red-400';
                 const label = numScore >= 7 ? 'STRONG' : numScore >= 5 ? 'OK' : 'WEAK';
                 return (
-                  <span className={`text-[8px] ${color}`} title={`Tape Score: ${formattedScore}/10`}>
+                  <span className={`text-[11px] ${color}`} title={`Tape Score: ${formattedScore}/10`}>
                     T:{formattedScore}
                   </span>
                 );
@@ -702,7 +702,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                 // Show warning if trade direction doesn't match setup's primary direction
                 if (bias !== direction) {
                   return (
-                    <span className="text-[8px] px-1 py-0.5 rounded bg-red-500/30 text-red-400" title={`Setup is primarily ${bias}, but this is ${direction}`}>
+                    <span className="text-[11px] px-1 py-0.5 rounded bg-red-500/30 text-red-400" title={`Setup is primarily ${bias}, but this is ${direction}`}>
                       !{bias.toUpperCase()}
                     </span>
                   );
@@ -717,7 +717,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                   className="p-2 bg-zinc-800/40 rounded hover:bg-zinc-800/70 cursor-pointer transition-colors group"
                 >
                   {/* Timestamp row */}
-                  <div className="flex items-center gap-2 mb-1 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-2 mb-1 text-[14px] text-zinc-500">
                     <Clock className="w-2.5 h-2.5" />
                     <span>{formatTime(alert.created_at)}</span>
                     {alert.simulated && (
@@ -738,7 +738,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                     <div className="flex items-center gap-2">
                       {getDirectionIcon(alert.direction)}
                       <span className="text-xs font-bold text-white">{alert.symbol}</span>
-                      <span className={`text-[11px] px-1 py-0.5 rounded border ${getPriorityColor(alert.priority)}`}>
+                      <span className={`text-[14px] px-1 py-0.5 rounded border ${getPriorityColor(alert.priority)}`}>
                         {alert.priority?.toUpperCase()}
                       </span>
                       {/* SMB Integration: Trade Style Badge */}
@@ -749,14 +749,14 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                     <div className="flex items-center gap-1">
                       {/* SMB Integration: SMB Grade */}
                       {(alert.smb_grade || alert.trade_grade) && (
-                        <span className={`text-[11px] font-bold ${getSmbGradeColor(alert.smb_grade || alert.trade_grade)}`} title="SMB Grade">
+                        <span className={`text-[14px] font-bold ${getSmbGradeColor(alert.smb_grade || alert.trade_grade)}`} title="SMB Grade">
                           {alert.smb_grade || alert.trade_grade}
                         </span>
                       )}
                       {/* SMB Integration: Tape Score */}
                       {getTapeIndicator(alert.tape_score)}
                       {alert.tape_confirmation && !alert.tape_score && (
-                        <span className="text-[11px] text-emerald-400">TAPE</span>
+                        <span className="text-[14px] text-emerald-400">TAPE</span>
                       )}
                       {/* Quick Actions */}
                       <QuickActionsMenu 
@@ -798,7 +798,7 @@ const ScannerResultsWidget = ({ onTickerSelect, onViewChart, wsAlerts = [], wsSt
                     </span>
                   </div>
                   {/* SMB Integration: Enhanced stats row */}
-                  <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-3 mt-1 text-[14px] text-zinc-500">
                     {alert.strategy_win_rate > 0 && (
                       <span>WR: <span className="text-zinc-300">{(alert.strategy_win_rate * 100).toFixed(0)}%</span></span>
                     )}

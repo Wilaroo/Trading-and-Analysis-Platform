@@ -175,7 +175,7 @@ export const EodCountdownBannerV5 = () => {
     >
       <div className="flex items-center justify-between gap-3 text-[12px]">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <span className={`${tone.accent} font-bold tracking-widest text-[11px]`}>
+          <span className={`${tone.accent} font-bold tracking-widest text-[14px]`}>
             {tone.icon} {tone.label}
           </span>
           {status === 'imminent' && (
@@ -204,7 +204,7 @@ export const EodCountdownBannerV5 = () => {
               {symbols && symbols.length > 0 && (
                 <>
                   <Sep />
-                  <span className="truncate text-zinc-400 text-[11px]" title={symbols.join(', ')}>
+                  <span className="truncate text-zinc-400 text-[14px]" title={symbols.join(', ')}>
                     {symbols.slice(0, 8).join(' · ')}
                     {symbols.length > 8 ? ` +${symbols.length - 8}` : ''}
                   </span>
@@ -243,7 +243,7 @@ export const EodCountdownBannerV5 = () => {
           {is_half_day && (
             <>
               <Sep />
-              <span className="text-orange-300 text-[11px] font-bold tracking-widest">HALF-DAY</span>
+              <span className="text-orange-300 text-[14px] font-bold tracking-widest">HALF-DAY</span>
             </>
           )}
         </div>
@@ -255,19 +255,19 @@ export const EodCountdownBannerV5 = () => {
                 type="button"
                 data-testid="v5-eod-close-all-btn"
                 onClick={() => setConfirming(true)}
-                className="px-2 py-0.5 text-[11px] font-bold tracking-widest border border-rose-500/50 text-rose-300 hover:bg-rose-500/20 transition-colors"
+                className="px-2 py-0.5 text-[14px] font-bold tracking-widest border border-rose-500/50 text-rose-300 hover:bg-rose-500/20 transition-colors"
               >
                 CLOSE ALL NOW
               </button>
             ) : (
               <>
-                <span className="text-rose-300 text-[11px]">Confirm?</span>
+                <span className="text-rose-300 text-[14px]">Confirm?</span>
                 <button
                   type="button"
                   data-testid="v5-eod-close-all-confirm-btn"
                   onClick={handleCloseAllNow}
                   disabled={closingNow}
-                  className="px-2 py-0.5 text-[11px] font-bold bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50 transition-colors"
+                  className="px-2 py-0.5 text-[14px] font-bold bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50 transition-colors"
                 >
                   {closingNow ? 'CLOSING…' : 'YES — CLOSE'}
                 </button>
@@ -276,7 +276,7 @@ export const EodCountdownBannerV5 = () => {
                   data-testid="v5-eod-close-all-cancel-btn"
                   onClick={() => setConfirming(false)}
                   disabled={closingNow}
-                  className="px-2 py-0.5 text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                  className="px-2 py-0.5 text-[14px] text-zinc-400 hover:text-zinc-200 transition-colors"
                 >
                   cancel
                 </button>

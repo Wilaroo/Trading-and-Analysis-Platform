@@ -158,7 +158,7 @@ const PanelSwapDropdown = ({ currentHandle, allHandles, wallHandles, onSwap }) =
                 style={{ backgroundColor: CATEGORY_COLORS[h.category] || '#6b7280' }}
               />
               <span className="truncate">@{h.handle}</span>
-              <span className="text-[11px] text-zinc-500 ml-auto flex-shrink-0">{h.category}</span>
+              <span className="text-[14px] text-zinc-500 ml-auto flex-shrink-0">{h.category}</span>
             </button>
           ))}
         </div>
@@ -252,14 +252,14 @@ const WallPanel = ({ handle, allHandles, wallHandles, onSwap, panelHeight, refre
           >
             @{handle}
           </a>
-          <span className="text-[8px] px-1 py-0.5 rounded font-medium capitalize flex-shrink-0"
+          <span className="text-[11px] px-1 py-0.5 rounded font-medium capitalize flex-shrink-0"
             style={{ backgroundColor: `${catColor}15`, color: catColor, border: `1px solid ${catColor}25` }}
           >
             {info?.category}
           </span>
         </div>
         <div className="flex items-center gap-1">
-          <span className="text-[8px] text-zinc-600 font-mono" data-testid={`refresh-time-${handle}`}>
+          <span className="text-[11px] text-zinc-600 font-mono" data-testid={`refresh-time-${handle}`}>
             {timeAgoText}
           </span>
           <button
@@ -677,7 +677,7 @@ const SocialFeedWidget = () => {
                           <div className="text-xs font-medium text-white truncate flex items-center gap-1">
                             @{h.handle}
                             {isPriority && (
-                              <span className="text-[8px] px-1 rounded bg-amber-500/15 text-amber-400 font-mono">P{h.priority}</span>
+                              <span className="text-[11px] px-1 rounded bg-amber-500/15 text-amber-400 font-mono">P{h.priority}</span>
                             )}
                           </div>
                           <div className="text-[12px] text-zinc-500 truncate">{h.label}</div>
@@ -696,7 +696,7 @@ const SocialFeedWidget = () => {
                     return (
                       <div key={cat} className="flex items-center gap-1">
                         <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
-                        <span className="text-[11px] text-zinc-500 capitalize">{cat} ({count})</span>
+                        <span className="text-[14px] text-zinc-500 capitalize">{cat} ({count})</span>
                       </div>
                     );
                   })}

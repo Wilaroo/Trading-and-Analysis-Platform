@@ -117,7 +117,7 @@ const PhaseRow = memo(({ phase, phaseData, isActive, currentModel, phaseProgress
           <>
             <span className={`text-[12px] font-mono ${isActive ? 'text-cyan-400' : 'text-zinc-400'}`}>{trained}/{expected}</span>
             {skipped > 0 && (
-              <span className="text-[11px] font-mono text-zinc-600" title="Skipped (already trained)">({skipped} cached)</span>
+              <span className="text-[14px] font-mono text-zinc-600" title="Skipped (already trained)">({skipped} cached)</span>
             )}
             {avgAcc > 0 && (
               <span className={`text-[12px] font-mono ${avgAcc > 0.6 ? 'text-emerald-400' : avgAcc > 0.5 ? 'text-amber-400' : 'text-zinc-500'}`}>
@@ -201,7 +201,7 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
               <span className="text-[12px] text-zinc-500 uppercase">ETA</span>
               <span className={`text-xs font-mono ${etaSource === 'estimated' ? 'text-amber-400/70' : 'text-amber-400'}`}>
                 ~{formatDuration(eta)}
-                {etaSource === 'estimated' && <span className="text-[11px] text-zinc-600 ml-1">*</span>}
+                {etaSource === 'estimated' && <span className="text-[14px] text-zinc-600 ml-1">*</span>}
               </span>
             </div>
           )}
@@ -300,7 +300,7 @@ const CategoryRow = memo(({ categoryKey, category }) => {
           <Icon className={`w-3.5 h-3.5 ${color}`} />
           <span className="text-xs font-medium text-white">{category.label}</span>
           {validation && validation.total_validated > 0 && (
-            <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
+            <span className={`text-[14px] px-1.5 py-0.5 rounded font-medium ${
               validation.promoted === validation.total_validated ? 'bg-emerald-500/15 text-emerald-400' :
               validation.promoted > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'
             }`} data-testid={`validation-badge-${categoryKey}`}>
@@ -341,10 +341,10 @@ const CategoryRow = memo(({ categoryKey, category }) => {
                     </span>
                   )}
                   {m.training_samples > 0 && (
-                    <span className="text-[11px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
+                    <span className="text-[14px] text-zinc-600">{m.training_samples.toLocaleString()}</span>
                   )}
                   {valStatus && (
-                    <span className={`text-[11px] font-mono px-1 py-0.5 rounded ${
+                    <span className={`text-[14px] font-mono px-1 py-0.5 rounded ${
                       valStatus.status === 'promoted' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
                     }`}>{valStatus.phases_passed}/3</span>
                   )}
@@ -431,7 +431,7 @@ const TrainingReadinessCard = memo(({ readiness, preflight, onRunPreflight, onTe
             title={`${bs.bar_size} — ${bs.symbol_count} symbols (target ${bs.target_symbols}, min ${bs.min_bars_per_symbol} bars each)`}
             data-testid={`readiness-bar-${bs.bar_size.replace(/\s+/g, '-')}`}
           >
-            <span className={`text-[11px] font-mono ${bs.ready ? 'text-emerald-400' : 'text-zinc-500'}`}>
+            <span className={`text-[14px] font-mono ${bs.ready ? 'text-emerald-400' : 'text-zinc-500'}`}>
               {bs.bar_size}
             </span>
             <span className={`text-[13px] font-mono font-semibold ${bs.ready ? 'text-emerald-300' : 'text-zinc-600'}`}>
@@ -834,10 +834,10 @@ const TrainingPipelinePanel = memo(({ onRefresh, wsTrainingStatus }) => {
               {gpuInfo.cuda ? <Monitor className="w-3 h-3 text-fuchsia-400" /> : <Cpu className="w-3 h-3 text-zinc-500" />}
             </div>
             <span className="text-xs text-white truncate">{gpuInfo.cuda ? gpuInfo.gpu : 'CPU'}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
+            <span className={`px-1.5 py-0.5 rounded text-[14px] font-mono ${gpuInfo.cuda ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-500/15 text-zinc-500'}`}>
               {gpuInfo.cuda ? 'CUDA' : 'NO GPU'}
             </span>
-            <span className="px-1.5 py-0.5 rounded text-[11px] font-mono bg-cyan-500/15 text-cyan-400" data-testid="engine-label">
+            <span className="px-1.5 py-0.5 rounded text-[14px] font-mono bg-cyan-500/15 text-cyan-400" data-testid="engine-label">
               XGBoost
             </span>
           </div>

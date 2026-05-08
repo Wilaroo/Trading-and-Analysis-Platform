@@ -80,7 +80,7 @@ const DashboardHeader = ({
             {/* AI Credits indicator */}
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-violet-500/10 border border-violet-500/20">
               <Sparkles className="w-3 h-3 text-violet-400" />
-              <span className="text-[11px] text-zinc-400">AI</span>
+              <span className="text-[14px] text-zinc-400">AI</span>
               <div className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full" style={{ width: '70%' }} />
               </div>
@@ -113,7 +113,7 @@ const DashboardHeader = ({
           
           {/* Account Value */}
           <div className="text-right">
-            <div className="text-[11px] text-zinc-500 uppercase">Account</div>
+            <div className="text-[14px] text-zinc-500 uppercase">Account</div>
             <div className="font-mono text-sm text-white">
               ${accountData?.net_liquidation?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -121,7 +121,7 @@ const DashboardHeader = ({
           
           {/* Buying Power */}
           <div className="text-right">
-            <div className="text-[11px] text-zinc-500 uppercase">BP</div>
+            <div className="text-[14px] text-zinc-500 uppercase">BP</div>
             <div className="font-mono text-sm text-white">
               ${accountData?.buying_power?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -129,7 +129,7 @@ const DashboardHeader = ({
           
           {/* Today P&L */}
           <div className="text-right">
-            <div className="text-[11px] text-zinc-500 uppercase">Today</div>
+            <div className="text-[14px] text-zinc-500 uppercase">Today</div>
             <div className={`font-mono text-sm ${todayPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {todayPnl >= 0 ? '+' : ''}${todayPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>
@@ -137,7 +137,7 @@ const DashboardHeader = ({
           
           {/* Open P&L */}
           <div className="text-right">
-            <div className="text-[11px] text-zinc-500 uppercase">Open</div>
+            <div className="text-[14px] text-zinc-500 uppercase">Open</div>
             <div className={`font-mono text-sm ${openPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               {openPnl >= 0 ? '+' : ''}${openPnl?.toLocaleString(undefined, { maximumFractionDigits: 0 }) || '0'}
             </div>

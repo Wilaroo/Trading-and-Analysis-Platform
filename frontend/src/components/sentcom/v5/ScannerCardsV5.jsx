@@ -757,10 +757,10 @@ export const ScannerCardsV5 = ({
                 data-testid={`v5-scanner-group-header-${setupKey ?? 'OTHER'}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="v5-mono text-[11px] uppercase tracking-widest text-zinc-300 font-bold truncate">
+                  <span className="v5-mono text-[14px] uppercase tracking-widest text-zinc-300 font-bold truncate">
                     {label}
                   </span>
-                  <span className="v5-mono text-[11px] text-zinc-500">
+                  <span className="v5-mono text-[14px] text-zinc-500">
                     ({groupCards.length})
                   </span>
                   {ctCount > 0 && (
@@ -769,7 +769,7 @@ export const ScannerCardsV5 = ({
                     </span>
                   )}
                 </div>
-                <span className="v5-mono text-[11px] text-zinc-500">
+                <span className="v5-mono text-[14px] text-zinc-500">
                   {isCollapsed ? '▸' : '▾'}
                 </span>
               </button>

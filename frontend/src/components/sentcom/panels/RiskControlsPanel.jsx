@@ -132,7 +132,7 @@ export const RiskControlsPanel = ({ botStatus, onUpdateRisk, loading }) => {
             >
               <span className="text-lg">{preset.icon}</span>
               <div className="text-xs font-medium mt-1">{preset.label}</div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">{preset.description}</div>
+              <div className="text-[14px] text-zinc-500 mt-0.5">{preset.description}</div>
             </button>
           ))}
         </div>

@@ -75,7 +75,7 @@ const Section = ({ title, icon: Icon, count, children, defaultOpen = false }) =>
         {Icon && <Icon className="w-3 h-3 text-zinc-400" />}
         <span className="v5-mono text-[12px] uppercase tracking-wider text-zinc-300 font-bold">{title}</span>
         {count != null && (
-          <span className="v5-mono text-[11px] text-zinc-500 ml-auto">
+          <span className="v5-mono text-[14px] text-zinc-500 ml-auto">
             {count}
           </span>
         )}
@@ -106,7 +106,7 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
     <div className="space-y-3">
       {recapWatches.length > 0 && (
         <div data-testid="gameplan-recap">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+          <div className="text-[14px] uppercase tracking-wider text-zinc-500 mb-1">
             last week's gameplan grade
             {recap?.iso_week && <span className="ml-1 text-zinc-600">· {recap.iso_week}</span>}
           </div>
@@ -124,7 +124,7 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
                 <span className="truncate">
                   <ClickableSymbol symbol={w.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200 font-medium" />
                   {w.thesis && (
-                    <span className="ml-1.5 text-zinc-500 text-[11px] truncate">
+                    <span className="ml-1.5 text-zinc-500 text-[14px] truncate">
                       {w.thesis}
                     </span>
                   )}
@@ -143,13 +143,13 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
       )}
       {sectors.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">sector returns (7d)</div>
+          <div className="text-[14px] uppercase tracking-wider text-zinc-500 mb-1">sector returns (7d)</div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {sectors.slice(0, 11).map((s) => (
               <div key={s.symbol} className="flex justify-between">
                 <span>
                   <ClickableSymbol symbol={s.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200" />
-                  <span className="ml-1.5 text-zinc-500 text-[11px]">{s.name}</span>
+                  <span className="ml-1.5 text-zinc-500 text-[14px]">{s.name}</span>
                 </span>
                 <span className={(s.change_pct || 0) >= 0 ? 'v5-up' : 'v5-down'}>
                   {fmtPctSigned(s.change_pct)}
@@ -161,7 +161,7 @@ const LastWeekRecap = ({ data, onSymbolClick }) => {
       )}
       {trades.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">your closed trades (7d)</div>
+          <div className="text-[14px] uppercase tracking-wider text-zinc-500 mb-1">your closed trades (7d)</div>
           <div className="text-[12px] mb-1.5">
             {summary.wins ?? 0}W · {summary.losses ?? 0}L
             {summary.win_rate != null && <span> · {(summary.win_rate * 100).toFixed(0)}% WR</span>}
@@ -206,7 +206,7 @@ const NewsList = ({ items }) => {
           >
             {n.headline || '(no headline)'}
           </a>
-          <span className="text-zinc-600 text-[11px] ml-1.5">— {n.source || '?'}</span>
+          <span className="text-zinc-600 text-[14px] ml-1.5">— {n.source || '?'}</span>
         </div>
       ))}
     </div>
@@ -227,12 +227,12 @@ const EarningsList = ({ items, onSymbolClick }) => {
     <div className="space-y-2">
       {sortedDates.map((d) => (
         <div key={d}>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-0.5">{fmtDate(d)}</div>
+          <div className="text-[14px] uppercase tracking-wider text-zinc-500 mb-0.5">{fmtDate(d)}</div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {groups[d].map((e, i) => (
               <div key={i} className="flex items-center justify-between">
                 <ClickableSymbol symbol={e.symbol} onSymbolClick={onSymbolClick} className="text-zinc-200 font-medium" />
-                <span className="text-zinc-500 text-[11px]">{e.timing || 'TBD'}</span>
+                <span className="text-zinc-500 text-[14px]">{e.timing || 'TBD'}</span>
               </div>
             ))}
           </div>
@@ -301,7 +301,7 @@ const Catalysts = ({ items }) => {
             {c.headline}
           </a>
           {c.matched_keywords?.length > 0 && (
-            <span className="ml-1.5 text-amber-400/70 text-[11px] uppercase tracking-wider">
+            <span className="ml-1.5 text-amber-400/70 text-[14px] uppercase tracking-wider">
               [{c.matched_keywords.join(', ')}]
             </span>
           )}
@@ -351,7 +351,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
     <div className="space-y-3">
       {watches.length > 0 && (
         <div data-testid="gameplan-watches">
-          <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1.5">
+          <div className="text-[14px] uppercase tracking-wider text-zinc-500 mb-1.5">
             top {watches.length} watch{watches.length === 1 ? '' : 'es'}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -377,7 +377,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                       />
                       {isLive && (
                         <span
-                          className="v5-mono text-[8px] uppercase tracking-wider text-cyan-300 px-1 rounded bg-cyan-500/15 border border-cyan-500/30"
+                          className="v5-mono text-[11px] uppercase tracking-wider text-cyan-300 px-1 rounded bg-cyan-500/15 border border-cyan-500/30"
                           title="Auto-framed on the chart by the Monday 09:25 ET hook"
                         >
                           LIVE
@@ -386,7 +386,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                     </div>
                     {w.key_level && (
                       <span
-                        className="text-cyan-400 text-[11px] tabular-nums truncate max-w-[60%]"
+                        className="text-cyan-400 text-[14px] tabular-nums truncate max-w-[60%]"
                         title={w.key_level}
                       >
                         {w.key_level}
@@ -397,7 +397,7 @@ const GameplanBlock = ({ gameplan, onSymbolClick, isoWeek }) => {
                     <div className="text-zinc-300 text-[12px] leading-snug">{w.thesis}</div>
                   )}
                   {w.invalidation && (
-                    <div className="text-rose-400/80 text-[11px] leading-snug mt-0.5">
+                    <div className="text-rose-400/80 text-[14px] leading-snug mt-0.5">
                       × {w.invalidation}
                     </div>
                   )}
@@ -486,12 +486,12 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
           <Trophy className="w-3.5 h-3.5 text-amber-400" />
           <span className="v5-mono font-bold text-xs text-amber-300">WEEK AHEAD</span>
           {isoWeek && (
-            <span className="v5-mono text-[11px] text-zinc-500">{isoWeek}</span>
+            <span className="v5-mono text-[14px] text-zinc-500">{isoWeek}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {generatedAtLabel && (
-            <span className="v5-mono text-[11px] text-zinc-600" title={`Generated ${generatedAt}`}>
+            <span className="v5-mono text-[14px] text-zinc-600" title={`Generated ${generatedAt}`}>
               {generatedAtLabel}
             </span>
           )}
@@ -577,7 +577,7 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
           </Section>
 
           {/* Sources footer — operator can see what data went in. */}
-          <div className="px-3 py-1.5 border-t border-zinc-800/60 v5-mono text-[8px] text-zinc-600 flex flex-wrap gap-x-2 gap-y-0.5">
+          <div className="px-3 py-1.5 border-t border-zinc-800/60 v5-mono text-[11px] text-zinc-600 flex flex-wrap gap-x-2 gap-y-0.5">
             {Object.entries(sources).map(([k, v]) => (
               <span key={k} title={`${k} source`}>
                 {k}=<span className={v === 'unavailable' || v === 'skipped' ? 'text-rose-400/70' : 'text-emerald-400/70'}>{v}</span>

@@ -62,12 +62,12 @@ const Badge = ({ label, value, accentFn, testid }) => {
   const v = value || 'unknown';
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="v5-mono text-[9px] uppercase tracking-widest text-zinc-500">
+      <span className="v5-mono text-[12px] uppercase tracking-widest text-zinc-500">
         {label}
       </span>
       <span
         data-testid={testid}
-        className={`v5-mono text-[11px] uppercase tracking-wider px-2 py-1 rounded border ${accentFn(v)}`}
+        className={`v5-mono text-[14px] uppercase tracking-wider px-2 py-1 rounded border ${accentFn(v)}`}
       >
         {v.replace(/_/g, ' ')}
       </span>
@@ -141,7 +141,7 @@ const MLFeatureAuditPanel = ({ defaultSymbol = '' }) => {
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-900 bg-zinc-950/80">
         <div className="flex items-center gap-2">
           <Activity className="w-3.5 h-3.5 text-violet-300" />
-          <span className="v5-mono text-[11px] uppercase tracking-widest text-violet-300 font-bold">
+          <span className="v5-mono text-[14px] uppercase tracking-widest text-violet-300 font-bold">
             ML Feature Audit
           </span>
         </div>
@@ -176,7 +176,7 @@ const MLFeatureAuditPanel = ({ defaultSymbol = '' }) => {
             type="submit"
             data-testid="ml-audit-submit"
             disabled={!draft || loading}
-            className="v5-mono text-[10px] uppercase tracking-widest px-2 py-1 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30 hover:bg-violet-500/25 disabled:opacity-50 transition-colors"
+            className="v5-mono text-[13px] uppercase tracking-widest px-2 py-1 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30 hover:bg-violet-500/25 disabled:opacity-50 transition-colors"
           >
             Audit
           </button>
@@ -238,14 +238,14 @@ const MLFeatureAuditPanel = ({ defaultSymbol = '' }) => {
             {/* Active feature pills */}
             {hasAnyActive && (
               <div data-testid="ml-audit-active-features">
-                <div className="v5-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
+                <div className="v5-mono text-[13px] uppercase tracking-widest text-zinc-500 mb-1">
                   Active feature bins
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {active.map((feat) => (
                     <span
                       key={feat}
-                      className="v5-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
+                      className="v5-mono text-[13px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
                     >
                       {feat.replace(/^setup_label_/, 'setup:')
                           .replace(/^regime_label_/, 'regime:')
@@ -259,7 +259,7 @@ const MLFeatureAuditPanel = ({ defaultSymbol = '' }) => {
 
             {/* Quick-jump links to related symbols (when narrative supplied any) */}
             {data?.symbol && (
-              <div className="text-[10px] text-zinc-600 v5-mono pt-1">
+              <div className="text-[13px] text-zinc-600 v5-mono pt-1">
                 Audited {' '}
                 <button
                   type="button"

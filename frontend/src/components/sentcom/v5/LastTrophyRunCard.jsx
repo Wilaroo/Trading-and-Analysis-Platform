@@ -98,7 +98,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
         {loading && (
           <span data-testid="trophy-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[14px]">
           last completed pipeline · 0-failure SLA
         </span>
       </div>
@@ -172,7 +172,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
                     p.ok ? 'bg-emerald-400' : 'bg-rose-400'}`} />
                   <span className="font-bold">{p.phase}</span>
                   {p.is_recurrence_watch && (
-                    <span className="text-emerald-300 text-[8px] ml-auto">★</span>
+                    <span className="text-emerald-300 text-[11px] ml-auto">★</span>
                   )}
                 </div>
                 <div className="opacity-75 truncate">{p.label}</div>
@@ -191,7 +191,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
       {/* Headline accuracies — top performers from this run */}
       {data?.found && data.headline_accuracies?.length > 0 && (
         <div data-testid="trophy-headline-accuracies" className="space-y-0.5">
-          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[14px] uppercase text-zinc-500 tracking-wide">
             Top accuracies this run
           </div>
           {data.headline_accuracies.slice(0, 5).map((m, i) => {
@@ -219,7 +219,7 @@ export const LastTrophyRunCard = ({ refreshToken = 0 }) => {
 
       {/* Footer note when synthesized from live status (pre-archive runs) */}
       {data?.found && data._synthesized_from_live && (
-        <div className="v5-mono text-[11px] text-zinc-500">
+        <div className="v5-mono text-[14px] text-zinc-500">
           (Synthesized from live status — future runs will be archived
           automatically.)
         </div>

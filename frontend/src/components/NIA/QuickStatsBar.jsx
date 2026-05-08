@@ -146,7 +146,7 @@ const QuickStatsBar = memo(({ data }) => {
                 <div className={`text-sm font-bold leading-tight ${stat.active ? colors.text : 'text-zinc-400'}`}>
                   {stat.value}
                 </div>
-                <div className="text-[11px] text-zinc-500 leading-tight truncate">
+                <div className="text-[14px] text-zinc-500 leading-tight truncate">
                   {stat.sub}
                 </div>
               </div>

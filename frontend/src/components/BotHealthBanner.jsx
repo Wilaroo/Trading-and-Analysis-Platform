@@ -78,7 +78,7 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
         <div className="flex-1 flex items-center gap-3 overflow-x-auto">
           {topSetups.length > 0 && (
             <div className="flex items-center gap-2 px-2.5 py-1 rounded bg-black/30 border border-red-500/20">
-              <span className="text-[11px] text-red-300/70 uppercase font-bold">
+              <span className="text-[14px] text-red-300/70 uppercase font-bold">
                 Top failing
               </span>
               {topSetups.map(([setup, count]) => (
@@ -95,7 +95,7 @@ const BotHealthBanner = memo(({ onClickDetails }) => {
 
           {report.total_R_bled > 0 && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-black/30 border border-red-500/20">
-              <span className="text-[11px] text-red-300/70 uppercase font-bold">
+              <span className="text-[14px] text-red-300/70 uppercase font-bold">
                 Excess R bled
               </span>
               <span className="text-xs font-mono font-bold text-red-300">

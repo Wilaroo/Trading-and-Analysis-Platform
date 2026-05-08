@@ -84,7 +84,7 @@ const HealthTile = ({ row, active, retraining, onClick }) => {
       title={`${row.setup_type} · ${row.bar_size} · ${meta.label}${retraining ? ' · retraining' : ''}`}
     >
       <div className="flex items-center justify-between gap-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-300 truncate max-w-[72px]">
+        <span className="text-[14px] font-semibold uppercase tracking-wider text-zinc-300 truncate max-w-[72px]">
           {label}
         </span>
         {retraining ? (
@@ -94,8 +94,8 @@ const HealthTile = ({ row, active, retraining, onClick }) => {
         )}
       </div>
       <div className="flex items-center justify-between gap-1 mt-0.5">
-        <span className="text-[11px] text-zinc-500">{row.bar_size.replace(' mins', 'm').replace(' min', 'm').replace(' hour', 'h').replace(' day', 'd')}</span>
-        <span className={`text-[11px] font-medium ${meta.text}`}>{retraining ? 'TRAIN…' : meta.label}</span>
+        <span className="text-[14px] text-zinc-500">{row.bar_size.replace(' mins', 'm').replace(' min', 'm').replace(' hour', 'h').replace(' day', 'd')}</span>
+        <span className={`text-[14px] font-medium ${meta.text}`}>{retraining ? 'TRAIN…' : meta.label}</span>
       </div>
     </button>
   );
@@ -316,7 +316,7 @@ export const ModelHealthScorecard = ({
                 <span
                   key={mode}
                   data-testid={`model-health-count-${mode}`}
-                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${meta.bg} ${meta.text}`}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[14px] font-medium ${meta.bg} ${meta.text}`}
                 >
                   <span className={`w-1 h-1 rounded-full ${meta.dot}`} />
                   {n} {meta.label}

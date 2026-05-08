@@ -69,7 +69,7 @@ export class PanelErrorBoundary extends React.Component {
             type="button"
             onClick={this.copyError}
             data-testid={`panel-error-copy-${label}`}
-            className="ml-auto v5-mono text-[11px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            className="ml-auto v5-mono text-[14px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
             title="Copy error + stack trace to clipboard"
           >
             copy error ⧉
@@ -78,7 +78,7 @@ export class PanelErrorBoundary extends React.Component {
             type="button"
             onClick={this.reset}
             data-testid={`panel-error-reset-${label}`}
-            className="v5-mono text-[11px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
+            className="v5-mono text-[14px] px-1.5 py-0.5 rounded bg-rose-900/50 hover:bg-rose-800 transition-colors"
           >
             reload panel ↻
           </button>

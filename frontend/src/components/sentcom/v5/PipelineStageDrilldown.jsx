@@ -180,7 +180,7 @@ export const PipelineStageDrilldown = ({
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-baseline gap-3 flex-wrap min-w-0">
-          <span className="text-[11px] uppercase tracking-wider font-bold text-slate-300 shrink-0">
+          <span className="text-[14px] uppercase tracking-wider font-bold text-slate-300 shrink-0">
             {title}
           </span>
           <span data-testid={`${testIdPrefix}-count`} className="v5-mono text-sm text-zinc-100">
@@ -219,7 +219,7 @@ export const PipelineStageDrilldown = ({
                 data-testid={`${testIdPrefix}-filter-row-${g.key}`}
                 className="flex items-center gap-1 flex-wrap py-0.5"
               >
-                <span className="text-[10px] uppercase tracking-wider text-zinc-600 mr-1 shrink-0">
+                <span className="text-[13px] uppercase tracking-wider text-zinc-600 mr-1 shrink-0">
                   {g.label}
                 </span>
                 {g.values.map(v => {
@@ -230,7 +230,7 @@ export const PipelineStageDrilldown = ({
                       type="button"
                       data-testid={`${testIdPrefix}-filter-${g.key}-${v}`}
                       onClick={() => toggleFilter(g.key, v)}
-                      className={`px-1.5 py-0.5 text-[10px] rounded border transition-colors ${
+                      className={`px-1.5 py-0.5 text-[13px] rounded border transition-colors ${
                         on
                           ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
                           : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
@@ -241,7 +241,7 @@ export const PipelineStageDrilldown = ({
                   );
                 })}
                 {g.overflow > 0 && (
-                  <span className="text-[10px] text-zinc-600 ml-1">+{g.overflow}</span>
+                  <span className="text-[13px] text-zinc-600 ml-1">+{g.overflow}</span>
                 )}
               </div>
             );
@@ -252,7 +252,7 @@ export const PipelineStageDrilldown = ({
                 type="button"
                 data-testid={`${testIdPrefix}-filters-clear`}
                 onClick={clearAllFilters}
-                className="text-[10px] text-zinc-500 hover:text-zinc-200 underline-offset-2 hover:underline"
+                className="text-[13px] text-zinc-500 hover:text-zinc-200 underline-offset-2 hover:underline"
               >
                 clear filters ({totalActive})
               </button>
@@ -267,7 +267,7 @@ export const PipelineStageDrilldown = ({
         </div>
       ) : (
         <div className="max-h-[320px] overflow-y-auto v5-scroll">
-          <table className="w-full text-[11px] v5-mono">
+          <table className="w-full text-[14px] v5-mono">
             <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800">
               <tr>
                 {columns.map(col => {
@@ -281,7 +281,7 @@ export const PipelineStageDrilldown = ({
                       key={col.key}
                       data-testid={`${testIdPrefix}-col-${col.key}`}
                       onClick={() => handleSort(col)}
-                      className={`px-2 py-1.5 ${col.width || ''} text-${align} cursor-pointer select-none uppercase tracking-wider text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors`}
+                      className={`px-2 py-1.5 ${col.width || ''} text-${align} cursor-pointer select-none uppercase tracking-wider text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors`}
                     >
                       <span className="inline-flex items-center gap-1">
                         {col.label}
@@ -325,7 +325,7 @@ export const PipelineStageDrilldown = ({
         </div>
       )}
 
-      <div className="px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600 flex items-center justify-between">
+      <div className="px-3 py-1.5 border-t border-zinc-800 text-[13px] text-zinc-600 flex items-center justify-between">
         <span>{footerHint || 'Click row for context · Esc to close'}</span>
         {versionTag && <span className="opacity-70">{versionTag}</span>}
       </div>

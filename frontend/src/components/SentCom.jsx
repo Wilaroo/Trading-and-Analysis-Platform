@@ -497,7 +497,7 @@ const SentCom = ({ embedded = false }) => {
                   </div>
                   <span className="text-zinc-600">•</span>
                   {/* Market Session Badge */}
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
+                  <span className={`text-[14px] px-1.5 py-0.5 rounded-full font-bold ${
                     marketSession.is_open 
                       ? marketSession.name === 'MARKET OPEN' 
                         ? 'bg-emerald-500/20 text-emerald-400'
@@ -509,7 +509,7 @@ const SentCom = ({ embedded = false }) => {
                   {regime !== 'UNKNOWN' && (
                     <>
                       <span className="text-zinc-600">•</span>
-                      <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-bold ${
+                      <span className={`text-[14px] px-1.5 py-0.5 rounded-full font-bold ${
                         regime === 'RISK_ON' ? 'bg-emerald-500/20 text-emerald-400' :
                         regime === 'RISK_OFF' ? 'bg-rose-500/20 text-rose-400' :
                         'bg-zinc-500/20 text-zinc-400'
@@ -543,7 +543,7 @@ const SentCom = ({ embedded = false }) => {
               {mode === 'autonomous' ? <Zap className="w-3 h-3" /> :
                mode === 'confirmation' ? <Eye className="w-3 h-3" /> :
                <Pause className="w-3 h-3" />}
-              <span className="text-[11px] font-bold uppercase">{mode}</span>
+              <span className="text-[14px] font-bold uppercase">{mode}</span>
             </div>
             
             {/* Dynamic Risk Badge */}
@@ -660,7 +660,7 @@ const SentCom = ({ embedded = false }) => {
                   >
                     AI Modules
                     {aiModulesStatus?.active_modules > 0 && (
-                      <span className="ml-1.5 px-1.5 py-0.5 text-[11px] bg-violet-500/30 text-violet-300 rounded-full">
+                      <span className="ml-1.5 px-1.5 py-0.5 text-[14px] bg-violet-500/30 text-violet-300 rounded-full">
                         {aiModulesStatus.active_modules}
                       </span>
                     )}

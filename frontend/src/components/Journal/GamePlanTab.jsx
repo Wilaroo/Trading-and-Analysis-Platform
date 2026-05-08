@@ -331,12 +331,12 @@ const GamePlanTab = () => {
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-bold text-white">{stock.symbol}</span>
-                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+                            <span className={`text-[14px] px-1.5 py-0.5 rounded ${
                               stock.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
                             }`}>
                               {stock.direction?.toUpperCase()}
                             </span>
-                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+                            <span className={`text-[14px] px-1.5 py-0.5 rounded ${
                               stock.priority === 'primary' ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-500/20 text-zinc-400'
                             }`}>
                               {stock.priority}

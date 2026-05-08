@@ -114,7 +114,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                 Freshness Inspector
               </span>
               {health && (
-                <span className={`v5-mono text-[11px] px-1.5 py-0.5 rounded border uppercase ${STATUS_PILL[health.overall] || STATUS_PILL.yellow}`}>
+                <span className={`v5-mono text-[14px] px-1.5 py-0.5 rounded border uppercase ${STATUS_PILL[health.overall] || STATUS_PILL.yellow}`}>
                   {health.overall}
                 </span>
               )}
@@ -198,9 +198,9 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="v5-mono text-[12px] font-bold">{s.name}</span>
-                        <span className="v5-mono text-[11px] uppercase opacity-70">{s.status}</span>
+                        <span className="v5-mono text-[14px] uppercase opacity-70">{s.status}</span>
                       </div>
-                      <div className="v5-mono text-[11px] opacity-75 mt-0.5 truncate" title={s.detail}>
+                      <div className="v5-mono text-[14px] opacity-75 mt-0.5 truncate" title={s.detail}>
                         {s.detail}
                       </div>
                     </div>
@@ -232,7 +232,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                       <span className="font-bold text-zinc-100 w-12">{s.symbol}</span>
                       <span className="text-zinc-500">ref×{s.ref_count}</span>
                       <span className="text-zinc-600">idle {Math.round(s.idle_seconds)}s</span>
-                      <span className={`ml-auto text-[11px] ${s.pusher_ok ? 'text-emerald-500' : 'text-amber-500'}`}>
+                      <span className={`ml-auto text-[14px] ${s.pusher_ok ? 'text-emerald-500' : 'text-amber-500'}`}>
                         {s.pusher_ok ? 'pusher ok' : 'no pusher'}
                       </span>
                     </div>
@@ -240,7 +240,7 @@ export const FreshnessInspector = ({ isOpen, onClose, scrollToTestId = null }) =
                   {subs.subscriptions.length > 20 && (
                     <div
                       data-testid="inspector-subs-more"
-                      className="px-2 py-1 text-[11px] text-zinc-600 uppercase tracking-wide"
+                      className="px-2 py-1 text-[14px] text-zinc-600 uppercase tracking-wide"
                     >
                       +{subs.subscriptions.length - 20} more not shown
                     </div>

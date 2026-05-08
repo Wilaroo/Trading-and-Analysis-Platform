@@ -181,7 +181,7 @@ const ScoreRing = React.memo(({ score, size = 64 }) => {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="font-mono text-xl font-bold text-cyan-400">{score?.toFixed(0) || '--'}</span>
-        <span className="text-[11px] text-zinc-400">{grade}</span>
+        <span className="text-[14px] text-zinc-400">{grade}</span>
       </div>
     </div>
   );
@@ -271,19 +271,19 @@ const BotTakeCard = ({ trade, symbol }) => {
         {entryPrice && (
           <div className="grid grid-cols-4 gap-2 mb-3">
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[11px] text-zinc-500 uppercase">Entry</p>
+              <p className="text-[14px] text-zinc-500 uppercase">Entry</p>
               <p className="text-sm font-bold text-white">${entryPrice.toFixed(2)}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[11px] text-zinc-500 uppercase">Stop</p>
+              <p className="text-[14px] text-zinc-500 uppercase">Stop</p>
               <p className="text-sm font-bold text-rose-400">${stopPrice?.toFixed(2) || '--'}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[11px] text-zinc-500 uppercase">Target</p>
+              <p className="text-[14px] text-zinc-500 uppercase">Target</p>
               <p className="text-sm font-bold text-emerald-400">${targetPrice?.toFixed(2) || '--'}</p>
             </div>
             <div className="p-2 rounded-lg bg-black/40 text-center">
-              <p className="text-[11px] text-zinc-500 uppercase">R:R</p>
+              <p className="text-[14px] text-zinc-500 uppercase">R:R</p>
               <p className="text-sm font-bold text-cyan-400">{rrRatio ? `${rrRatio}:1` : '--'}</p>
             </div>
           </div>
@@ -440,19 +440,19 @@ const HypotheticalBotTakeCard = ({ analysis, symbol, onAskAI }) => {
             {/* Trade Parameters Grid */}
             <div className="grid grid-cols-4 gap-2 mb-3">
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[11px] text-zinc-500 uppercase">Entry</p>
+                <p className="text-[14px] text-zinc-500 uppercase">Entry</p>
                 <p className="text-sm font-bold text-white">${hypothetical.entry?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[11px] text-zinc-500 uppercase">Stop</p>
+                <p className="text-[14px] text-zinc-500 uppercase">Stop</p>
                 <p className="text-sm font-bold text-rose-400">${hypothetical.stop?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[11px] text-zinc-500 uppercase">Target</p>
+                <p className="text-[14px] text-zinc-500 uppercase">Target</p>
                 <p className="text-sm font-bold text-emerald-400">${hypothetical.target?.toFixed(2)}</p>
               </div>
               <div className="p-2 rounded-lg bg-black/40 text-center">
-                <p className="text-[11px] text-zinc-500 uppercase">R:R</p>
+                <p className="text-[14px] text-zinc-500 uppercase">R:R</p>
                 <p className="text-sm font-bold text-cyan-400">{hypothetical.rrRatio}:1</p>
               </div>
             </div>
@@ -1068,7 +1068,7 @@ const EnhancedTickerModal = ({
                     {formatPercent(liveChangePct)}
                   </span>
                   {analysis?.data_freshness && (
-                    <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                    <span className={`text-[14px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
                       analysis.data_freshness === 'live' 
                         ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' 
                         : 'bg-amber-500/15 text-amber-400 border border-amber-500/20'

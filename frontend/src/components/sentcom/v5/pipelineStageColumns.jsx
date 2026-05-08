@@ -186,19 +186,19 @@ export const closeStageConfig = ({ totalRealized, winsToday, lossesToday, sorted
     headerExtras: (
       <>
         {winRate != null && (
-          <span data-testid="drilldown-winrate" className="v5-mono text-[11px] text-zinc-500">
+          <span data-testid="drilldown-winrate" className="v5-mono text-[14px] text-zinc-500">
             WR {winRate}% · {winsToday}W / {lossesToday}L
           </span>
         )}
         <span
           data-testid="drilldown-realized"
-          className={`v5-mono text-[11px] ${(totalRealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
+          className={`v5-mono text-[14px] ${(totalRealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
         >
           {formatMoney(totalRealized)}
         </span>
         <span
           data-testid="drilldown-sum-r"
-          className={`v5-mono text-[11px] ${sumR >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
+          className={`v5-mono text-[14px] ${sumR >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
         >
           {formatR(sumR)}
         </span>
@@ -248,12 +248,12 @@ export const manageStageConfig = ({ totalUnrealized, sumR }) => ({
   headerExtras: (
     <>
       <span
-        className={`v5-mono text-[11px] ${(totalUnrealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
+        className={`v5-mono text-[14px] ${(totalUnrealized ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
       >
         {formatMoney(totalUnrealized)}
       </span>
       <span
-        className={`v5-mono text-[11px] ${(sumR ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
+        className={`v5-mono text-[14px] ${(sumR ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}
       >
         {formatR(sumR)}
       </span>
@@ -311,8 +311,8 @@ export const orderStageConfig = ({ filledCount, pendingCount }) => ({
   ],
   headerExtras: (
     <>
-      <span className="v5-mono text-[11px] text-emerald-400">{filledCount} filled</span>
-      <span className="v5-mono text-[11px] text-sky-400">{pendingCount} pending</span>
+      <span className="v5-mono text-[14px] text-emerald-400">{filledCount} filled</span>
+      <span className="v5-mono text-[14px] text-sky-400">{pendingCount} pending</span>
     </>
   ),
   columns: [
@@ -351,10 +351,10 @@ export const evalStageConfig = ({ avgGate, gatePassPct }) => ({
   headerExtras: (
     <>
       {avgGate != null && (
-        <span className="v5-mono text-[11px] text-zinc-500">avg {avgGate}</span>
+        <span className="v5-mono text-[14px] text-zinc-500">avg {avgGate}</span>
       )}
       {gatePassPct != null && (
-        <span className="v5-mono text-[11px] text-emerald-400">{gatePassPct}% pass</span>
+        <span className="v5-mono text-[14px] text-emerald-400">{gatePassPct}% pass</span>
       )}
     </>
   ),
@@ -393,7 +393,7 @@ export const scanStageConfig = ({ scanCount }) => ({
     { key: 'phase',      label: 'Phase', values: 'auto', format: (v) => v || '?' },
   ],
   headerExtras: (
-    <span className="v5-mono text-[11px] text-zinc-500">{scanCount} hits</span>
+    <span className="v5-mono text-[14px] text-zinc-500">{scanCount} hits</span>
   ),
   columns: [
     { key: 'symbol',     label: 'Sym',     align: 'left',  width: 'w-14',

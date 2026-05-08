@@ -102,13 +102,13 @@ const PositionRow = ({ pos, onClick }) => {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <ClickableTicker symbol={pos.symbol} variant="inline" className="text-sm font-bold" />
-          <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold uppercase ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded font-bold uppercase ${
             pos.direction === 'long' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
           }`}>
             {pos.direction === 'long' ? <ArrowUp className="w-2.5 h-2.5 inline" /> : <ArrowDown className="w-2.5 h-2.5 inline" />}
             {' '}{pos.direction}
           </span>
-          <span className={`text-[11px] px-1.5 py-0.5 rounded font-medium ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded font-medium ${
             pos.source === 'bot' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
           }`}>
             {pos.source === 'bot' ? 'BOT' : 'IB'}
@@ -118,7 +118,7 @@ const PositionRow = ({ pos, onClick }) => {
           )}
           {/* Portfolio weight */}
           {pos.portfolio_weight > 0 && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/5">
+            <span className="text-[14px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-500 border border-white/5">
               {pos.portfolio_weight.toFixed(1)}%
             </span>
           )}
@@ -144,35 +144,35 @@ const PositionRow = ({ pos, onClick }) => {
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         {/* Risk level badge */}
         {risk.label && (
-          <span className={`text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider ${risk.bg} ${risk.text} border ${risk.border} flex items-center gap-0.5`}>
+          <span className={`text-[11px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider ${risk.bg} ${risk.text} border ${risk.border} flex items-center gap-0.5`}>
             <ShieldAlert className="w-2.5 h-2.5" />
             {risk.label}
           </span>
         )}
         {/* No stop warning for IB positions */}
         {noStop && (
-          <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-500/15 text-amber-400 border border-amber-500/20 flex items-center gap-0.5">
+          <span className="text-[11px] px-1.5 py-0.5 rounded font-bold uppercase bg-amber-500/15 text-amber-400 border border-amber-500/20 flex items-center gap-0.5">
             <AlertTriangle className="w-2.5 h-2.5" />
             NO STOP
           </span>
         )}
         {pos.setup_type && pos.setup_type !== 'unknown' && pos.setup_type !== '' && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
+          <span className="text-[14px] px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
             {(pos.setup_variant || pos.setup_type).replace(/_/g, ' ')}
           </span>
         )}
         {pos.trade_style && pos.trade_style !== '' && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
+          <span className="text-[14px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
             {pos.trade_style.replace(/_/g, ' ')}
           </span>
         )}
         {pos.timeframe && pos.timeframe !== '' && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
+          <span className="text-[14px] px-1.5 py-0.5 rounded bg-white/5 text-zinc-400 border border-white/10">
             {pos.timeframe}
           </span>
         )}
         {pos.market_regime && pos.market_regime !== '' && pos.market_regime !== 'UNKNOWN' && (
-          <span className={`text-[11px] px-1.5 py-0.5 rounded border ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded border ${
             pos.market_regime === 'RISK_ON' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
             pos.market_regime === 'RISK_OFF' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
             'bg-white/5 text-zinc-400 border-white/10'
@@ -191,28 +191,28 @@ const PositionRow = ({ pos, onClick }) => {
       {/* Row 3: Price levels — responsive grid */}
       <div className="grid grid-cols-4 gap-2 mb-2">
         <div>
-          <p className="text-[11px] text-zinc-600 uppercase">Entry</p>
+          <p className="text-[14px] text-zinc-600 uppercase">Entry</p>
           <p className="text-[12px] text-zinc-300 font-mono">${pos.entry_price?.toFixed(2)}</p>
         </div>
         <div>
-          <p className="text-[11px] text-zinc-600 uppercase">Current</p>
+          <p className="text-[14px] text-zinc-600 uppercase">Current</p>
           <p className="text-[12px] text-white font-mono font-medium">${pos.current_price?.toFixed(2)}</p>
         </div>
         <div>
-          <p className="text-[11px] text-zinc-600 uppercase">Stop</p>
+          <p className="text-[14px] text-zinc-600 uppercase">Stop</p>
           <div className="flex items-center gap-1">
             <p className="text-[12px] text-zinc-300 font-mono">
               {pos.stop_price ? `$${pos.stop_price.toFixed(2)}` : <span className="text-zinc-600">--</span>}
             </p>
             {sd != null && (
-              <span className={`text-[8px] ${sd > 3 ? 'text-emerald-400' : sd > 1 ? 'text-amber-400' : 'text-rose-400'}`}>
+              <span className={`text-[11px] ${sd > 3 ? 'text-emerald-400' : sd > 1 ? 'text-amber-400' : 'text-rose-400'}`}>
                 ({sd.toFixed(1)}%)
               </span>
             )}
           </div>
         </div>
         <div>
-          <p className="text-[11px] text-zinc-600 uppercase">R:R</p>
+          <p className="text-[14px] text-zinc-600 uppercase">R:R</p>
           <p className={`text-[12px] font-mono ${
             rr ? (parseFloat(rr) >= 2 ? 'text-emerald-400' : parseFloat(rr) >= 1 ? 'text-amber-400' : 'text-rose-400') : 'text-zinc-600'
           }`}>
@@ -226,19 +226,19 @@ const PositionRow = ({ pos, onClick }) => {
         {(pos.mfe_pct > 0 || pos.mae_pct < 0) && (
           <>
             {pos.mfe_pct > 0 && (
-              <span className="text-[11px] text-emerald-400 flex items-center gap-0.5">
+              <span className="text-[14px] text-emerald-400 flex items-center gap-0.5">
                 <TrendingUp className="w-2.5 h-2.5" /> +{pos.mfe_pct?.toFixed(1)}%
               </span>
             )}
             {pos.mae_pct < 0 && (
-              <span className="text-[11px] text-rose-400 flex items-center gap-0.5">
+              <span className="text-[14px] text-rose-400 flex items-center gap-0.5">
                 <TrendingDown className="w-2.5 h-2.5" /> {pos.mae_pct?.toFixed(1)}%
               </span>
             )}
           </>
         )}
         {pos.quality_grade && pos.quality_grade !== '' && (
-          <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
             pos.quality_grade.startsWith('A') ? 'bg-emerald-500/15 text-emerald-400' :
             pos.quality_grade.startsWith('B') ? 'bg-cyan-500/15 text-cyan-400' :
             pos.quality_grade.startsWith('C') ? 'bg-amber-500/15 text-amber-400' :
@@ -248,7 +248,7 @@ const PositionRow = ({ pos, onClick }) => {
           </span>
         )}
         {gate && (
-          <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
             gate.decision === 'GO' ? 'bg-emerald-500/15 text-emerald-400' :
             gate.decision === 'REDUCE' ? 'bg-amber-500/15 text-amber-400' :
             'bg-rose-500/15 text-rose-400'
@@ -257,7 +257,7 @@ const PositionRow = ({ pos, onClick }) => {
           </span>
         )}
         {ai?.tqs_score != null && (
-          <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ${
             ai.tqs_score >= 70 ? 'bg-emerald-500/15 text-emerald-400' :
             ai.tqs_score >= 50 ? 'bg-amber-500/15 text-amber-400' :
             'bg-rose-500/15 text-rose-400'
@@ -267,7 +267,7 @@ const PositionRow = ({ pos, onClick }) => {
         )}
         {/* Today's change (intraday) */}
         {pos.today_change !== 0 && pos.today_change != null && (
-          <span className={`text-[11px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ml-auto ${
+          <span className={`text-[14px] px-1.5 py-0.5 rounded flex items-center gap-0.5 ml-auto ${
             pos.today_change >= 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
           }`}>
             <Activity className="w-2.5 h-2.5" />
@@ -331,7 +331,7 @@ const DetailedPositionsPanel = ({
             <span className="text-sm font-bold text-white">Positions</span>
             <span className="text-[12px] text-zinc-500">({openPositions.length})</span>
             {positionsAtRisk > 0 && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-0.5 font-bold">
+              <span className="text-[14px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 flex items-center gap-0.5 font-bold">
                 <ShieldAlert className="w-2.5 h-2.5" /> {positionsAtRisk} at risk
               </span>
             )}
@@ -353,12 +353,12 @@ const DetailedPositionsPanel = ({
         <div className="flex items-center justify-between gap-2">
           {/* Sort buttons */}
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-zinc-600 uppercase mr-1">Sort:</span>
+            <span className="text-[14px] text-zinc-600 uppercase mr-1">Sort:</span>
             {SORT_OPTIONS.map(opt => (
               <button
                 key={opt.id}
                 onClick={() => toggleSort(opt.id)}
-                className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+                className={`text-[14px] px-2 py-0.5 rounded transition-colors ${
                   sortBy === opt.id
                     ? 'bg-white/10 text-white font-medium'
                     : 'text-zinc-500 hover:text-zinc-300'
@@ -378,7 +378,7 @@ const DetailedPositionsPanel = ({
               <button
                 key={src}
                 onClick={() => setFilterSource(src)}
-                className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+                className={`text-[14px] px-2 py-0.5 rounded transition-colors ${
                   filterSource === src
                     ? src === 'bot' ? 'bg-purple-500/20 text-purple-400'
                     : src === 'ib' ? 'bg-blue-500/20 text-blue-400'

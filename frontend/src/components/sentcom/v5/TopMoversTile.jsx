@@ -107,16 +107,16 @@ export const TopMoversTile = ({
     <div
       data-testid="top-movers-tile"
       data-help-id="top-movers-tile"
-      className={`v5-panel flex items-center gap-2 px-2 py-0.5 text-[11px] bg-zinc-950 ${className}`}
+      className={`v5-panel flex items-center gap-2 px-2 py-0.5 text-[14px] bg-zinc-950 ${className}`}
     >
       <div className="flex items-center gap-1.5 min-w-fit">
-        <span className="v5-mono text-[10px] text-zinc-500 uppercase tracking-wide">
+        <span className="v5-mono text-[13px] text-zinc-500 uppercase tracking-wide">
           Top Movers
         </span>
         {marketState && (
           <span
             data-testid="top-movers-market-state"
-            className="v5-mono text-[10px] text-zinc-600 uppercase"
+            className="v5-mono text-[13px] text-zinc-600 uppercase"
           >
             · {marketState}
           </span>
@@ -125,15 +125,15 @@ export const TopMoversTile = ({
 
       <div className="flex-1 flex items-center gap-2 overflow-x-auto v5-scroll">
         {loading && rows.length === 0 && (
-          <span className="v5-mono text-[11px] text-zinc-600">loading…</span>
+          <span className="v5-mono text-[14px] text-zinc-600">loading…</span>
         )}
         {!loading && rows.length === 0 && !error && (
-          <span data-testid="top-movers-empty" className="v5-mono text-[11px] text-zinc-600">
+          <span data-testid="top-movers-empty" className="v5-mono text-[14px] text-zinc-600">
             no live data (pusher offline or pre-trade)
           </span>
         )}
         {error && (
-          <span data-testid="top-movers-error" className="v5-mono text-[11px] text-rose-500">
+          <span data-testid="top-movers-error" className="v5-mono text-[14px] text-rose-500">
             {error}
           </span>
         )}

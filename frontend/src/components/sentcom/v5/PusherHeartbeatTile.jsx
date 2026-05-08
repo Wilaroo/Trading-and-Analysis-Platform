@@ -68,7 +68,7 @@ export const PusherHeartbeatTile = () => {
   return (
     <div
       data-testid="pusher-heartbeat-tile"
-      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/60 text-[11px] leading-none whitespace-nowrap overflow-hidden"
+      className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/60 text-[14px] leading-none whitespace-nowrap overflow-hidden"
     >
       {/* ── v19.34.25 (2026-05-06) — collapsed to a single horizontal line.
           Pre-fix used flex-col for status+age stack + 4 separate flex
@@ -87,7 +87,7 @@ export const PusherHeartbeatTile = () => {
           data-testid="pusher-heartbeat-pulse"
         />
       </span>
-      <span className={`text-[10px] font-bold tracking-wider ${palette.text}`}>
+      <span className={`text-[13px] font-bold tracking-wider ${palette.text}`}>
         PUSHER {data.health?.toUpperCase() || '—'}
       </span>
       <span className="text-zinc-500 v5-mono">
@@ -108,7 +108,7 @@ export const PusherHeartbeatTile = () => {
         <span className="text-zinc-500">/min</span>
         {rateHealth && rateHealth !== 'healthy' && pushesPerMin != null && (
           <span
-            className={`ml-1 px-1 py-0 rounded text-[10px] font-bold tracking-wider ${
+            className={`ml-1 px-1 py-0 rounded text-[13px] font-bold tracking-wider ${
               rateHealth === 'degraded'
                 ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                 : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
@@ -158,7 +158,7 @@ export const PusherHeartbeatTile = () => {
       </span>
       {data.pusher_dead && (
         <span
-          className="flex items-center gap-1 text-[10px] text-rose-300/80 ml-1"
+          className="flex items-center gap-1 text-[13px] text-rose-300/80 ml-1"
           data-testid="pusher-heartbeat-dead-hint"
         >
           <Clock className="w-3 h-3" />

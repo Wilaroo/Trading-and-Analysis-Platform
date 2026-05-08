@@ -73,7 +73,7 @@ const Badge = ({ children, variant = 'info', className = '' }) => {
   };
   
   return (
-    <span className={`px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide border rounded-sm ${variants[variant]} ${className}`}>
+    <span className={`px-2 py-0.5 text-[13px] font-mono uppercase tracking-wide border rounded-sm ${variants[variant]} ${className}`}>
       {children}
     </span>
   );
@@ -466,7 +466,7 @@ const ActiveTradesPanel = ({ trades, onRemove }) => {
             <div key={idx} className="bg-zinc-900 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <span className={`px-1.5 py-0.5 text-[10px] font-bold rounded ${
+                  <span className={`px-1.5 py-0.5 text-[13px] font-bold rounded ${
                     trade.action === 'BUY' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
                   }`}>
                     {trade.action}
@@ -495,7 +495,7 @@ const ActiveTradesPanel = ({ trades, onRemove }) => {
                   <span className="text-zinc-500">P&L</span>
                   <p className={`font-mono font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
                     {isProfit ? '+' : ''}{formatPrice(pnl)}
-                    <span className="text-[10px] ml-1">
+                    <span className="text-[13px] ml-1">
                       ({(trade.action === 'BUY' ? 1 : -1) * pnlPercent >= 0 ? '+' : ''}{((trade.action === 'BUY' ? 1 : -1) * pnlPercent).toFixed(2)}%)
                     </span>
                   </p>
@@ -675,7 +675,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                   <button
                     key={tf.id}
                     onClick={(e) => { e.stopPropagation(); setTimeframe(tf.id); }}
-                    className={`px-2 py-1 text-[10px] rounded transition-all
+                    className={`px-2 py-1 text-[13px] rounded transition-all
                       ${timeframe === tf.id 
                         ? 'bg-cyan-400 text-black font-medium' 
                         : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
@@ -697,7 +697,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                   <button
                     key={d.id}
                     onClick={(e) => { e.stopPropagation(); setDirection(d.id); }}
-                    className={`px-2 py-1 text-[10px] rounded transition-all
+                    className={`px-2 py-1 text-[13px] rounded transition-all
                       ${direction === d.id 
                         ? d.id === 'long' ? 'bg-green-500 text-black font-medium'
                           : d.id === 'short' ? 'bg-red-500 text-white font-medium'
@@ -762,7 +762,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                     </div>
 
                     {/* Middle Row: Stats */}
-                    <div className="flex items-center gap-4 text-[10px] mb-2">
+                    <div className="flex items-center gap-4 text-[13px] mb-2">
                       <span className="text-zinc-500">
                         RVOL: <span className="text-white">{pick.quick_stats?.rvol?.toFixed(1) || '-'}</span>
                       </span>
@@ -786,7 +786,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                     {/* Success Probability */}
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-zinc-500">Success:</span>
+                        <span className="text-[13px] text-zinc-500">Success:</span>
                         <div className="flex items-center gap-1">
                           <div className="w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
                             <div 
@@ -803,7 +803,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                           </span>
                         </div>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      <span className={`text-[13px] px-1.5 py-0.5 rounded ${
                         pick.success_probability?.confidence === 'HIGH' ? 'bg-green-500/20 text-green-400' :
                         pick.success_probability?.confidence === 'MEDIUM' ? 'bg-yellow-500/20 text-yellow-400' :
                         'bg-red-500/20 text-red-400'
@@ -814,7 +814,7 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
 
                     {/* Key Levels */}
                     {pick.key_levels && (
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div className="grid grid-cols-2 gap-2 text-[13px]">
                         <div>
                           <span className="text-green-400">Support:</span>
                           <div className="flex gap-1 mt-0.5">
@@ -849,13 +849,13 @@ const TopPicksPanel = ({ opportunities, isConnected, onTrade, onSelectTicker }) 
                       <div className="flex gap-2 mt-2 pt-2 border-t border-white/5">
                         <button
                           onClick={(e) => { e.stopPropagation(); onTrade && onTrade({ symbol: pick.symbol, quote: {} }, 'BUY'); }}
-                          className="flex-1 py-1.5 text-[10px] font-bold uppercase bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
+                          className="flex-1 py-1.5 text-[13px] font-bold uppercase bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
                         >
                           Buy
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); onTrade && onTrade({ symbol: pick.symbol, quote: {} }, 'SELL'); }}
-                          className="flex-1 py-1.5 text-[10px] font-bold uppercase bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors"
+                          className="flex-1 py-1.5 text-[13px] font-bold uppercase bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-colors"
                         >
                           Short
                         </button>
@@ -942,12 +942,12 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
       {/* High Conviction Badge */}
       {highConviction && (
         <div className="flex items-center gap-1.5 mb-2 -mt-1">
-          <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 border border-green-500/30 rounded-full text-[10px] font-bold uppercase text-green-400">
+          <span className="flex items-center gap-1 px-2 py-0.5 bg-green-500/20 border border-green-500/30 rounded-full text-[13px] font-bold uppercase text-green-400">
             <Zap className="w-3 h-3" />
             HIGH CONVICTION
           </span>
           {conviction?.confidence && (
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[13px] text-zinc-500">
               {conviction.score?.toFixed(0)} pts
             </span>
           )}
@@ -970,7 +970,7 @@ const OpportunityCard = ({ opportunity, onSelect, onTrade }) => {
       {conviction?.signals && conviction.signals.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {conviction.signals.slice(0, 3).map((signal, idx) => (
-            <span key={idx} className="px-1.5 py-0.5 text-[10px] bg-cyan-500/10 text-cyan-400 rounded">
+            <span key={idx} className="px-1.5 py-0.5 text-[13px] bg-cyan-500/10 text-cyan-400 rounded">
               {signal}
             </span>
           ))}
@@ -1498,7 +1498,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                   {showLevels && (
                     <div className="grid grid-cols-4 gap-2 p-3 bg-zinc-900 rounded-lg">
                       <div>
-                        <label className="text-[10px] text-zinc-500 uppercase">Entry</label>
+                        <label className="text-[13px] text-zinc-500 uppercase">Entry</label>
                         <input
                           type="number"
                           value={entryPrice || ''}
@@ -1508,7 +1508,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] text-zinc-500 uppercase">Stop Loss</label>
+                        <label className="text-[13px] text-zinc-500 uppercase">Stop Loss</label>
                         <input
                           type="number"
                           value={stopLoss || ''}
@@ -1518,7 +1518,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] text-zinc-500 uppercase">Take Profit</label>
+                        <label className="text-[13px] text-zinc-500 uppercase">Take Profit</label>
                         <input
                           type="number"
                           value={takeProfit || ''}
@@ -1528,7 +1528,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] text-zinc-500 uppercase">R:R Ratio</label>
+                        <label className="text-[13px] text-zinc-500 uppercase">R:R Ratio</label>
                         <div className={`w-full bg-zinc-800 rounded px-2 py-1.5 text-sm font-mono font-bold ${
                           parseFloat(rrRatio) >= 2 ? 'text-green-400' : 
                           parseFloat(rrRatio) >= 1 ? 'text-yellow-400' : 'text-red-400'
@@ -1707,23 +1707,23 @@ const MarketContextPanel = ({ context }) => {
         
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-zinc-900 rounded-lg p-2">
-            <span className="text-[10px] text-zinc-500 uppercase">SPY</span>
+            <span className="text-[13px] text-zinc-500 uppercase">SPY</span>
             <p className={`text-sm font-mono ${context?.spy_change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {formatPercent(context?.spy_change)}
             </p>
           </div>
           <div className="bg-zinc-900 rounded-lg p-2">
-            <span className="text-[10px] text-zinc-500 uppercase">QQQ</span>
+            <span className="text-[13px] text-zinc-500 uppercase">QQQ</span>
             <p className={`text-sm font-mono ${context?.qqq_change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {formatPercent(context?.qqq_change)}
             </p>
           </div>
           <div className="bg-zinc-900 rounded-lg p-2">
-            <span className="text-[10px] text-zinc-500 uppercase">VIX</span>
+            <span className="text-[13px] text-zinc-500 uppercase">VIX</span>
             <p className="text-sm font-mono text-zinc-300">{context?.vix || '--'}</p>
           </div>
           <div className="bg-zinc-900 rounded-lg p-2">
-            <span className="text-[10px] text-zinc-500 uppercase">RVOL</span>
+            <span className="text-[13px] text-zinc-500 uppercase">RVOL</span>
             <p className="text-sm font-mono text-zinc-300">{context?.rvol || '--'}</p>
           </div>
         </div>
@@ -1750,11 +1750,11 @@ const AccountPanel = ({ account, positions }) => (
       
       <div className="grid grid-cols-2 gap-2">
         <div className="bg-zinc-900 rounded-lg p-2">
-          <span className="text-[10px] text-zinc-500 uppercase">Buying Power</span>
+          <span className="text-[13px] text-zinc-500 uppercase">Buying Power</span>
           <p className="text-sm font-mono text-white">${formatPrice(account?.buying_power)}</p>
         </div>
         <div className="bg-zinc-900 rounded-lg p-2">
-          <span className="text-[10px] text-zinc-500 uppercase">P&L</span>
+          <span className="text-[13px] text-zinc-500 uppercase">P&L</span>
           <p className={`text-sm font-mono ${
             account?.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'
           }`}>
@@ -2172,7 +2172,7 @@ const TradeOpportunitiesPage = () => {
             </button>
             
             {lastScanTime && (
-              <p className="text-[10px] text-zinc-500 text-center mt-2">
+              <p className="text-[13px] text-zinc-500 text-center mt-2">
                 Last scan: {lastScanTime.toLocaleTimeString()}
               </p>
             )}

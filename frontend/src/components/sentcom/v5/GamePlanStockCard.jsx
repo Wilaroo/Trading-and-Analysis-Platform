@@ -87,7 +87,7 @@ const LevelCell = ({ label, value, highlight = false, testid }) => (
     data-testid={testid}
     className={`flex flex-col gap-0.5 py-1.5 px-2 rounded ${highlight ? 'bg-zinc-900/70 border border-zinc-800' : ''}`}
   >
-    <span className="v5-mono text-[10px] uppercase tracking-widest text-zinc-500">
+    <span className="v5-mono text-[13px] uppercase tracking-widest text-zinc-500">
       {label}
     </span>
     <span className={`v5-mono text-[13px] ${value === '—' ? 'text-zinc-600' : 'text-zinc-200'}`}>
@@ -199,11 +199,11 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
           ${symbol}
         </button>
         <DirIcon className={`w-3.5 h-3.5 ${dirAccent}`} />
-        <span className="v5-mono text-[11px] uppercase tracking-wider text-zinc-400 truncate flex-1">
+        <span className="v5-mono text-[14px] uppercase tracking-wider text-zinc-400 truncate flex-1">
           {prettySetup}
         </span>
         {levels.entry && (
-          <span className="v5-mono text-[11px] text-zinc-500 hidden sm:inline">
+          <span className="v5-mono text-[14px] text-zinc-500 hidden sm:inline">
             @ {fmtPrice(levels.entry)}
           </span>
         )}
@@ -272,7 +272,7 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
           {/* AI narrative paragraph */}
           <div data-testid={`gp-card-narrative-wrap-${symbol}`}>
             <div className="flex items-center justify-between mb-1">
-              <span className="v5-mono text-[10px] uppercase tracking-widest text-zinc-500">
+              <span className="v5-mono text-[13px] uppercase tracking-widest text-zinc-500">
                 AI Read {card?.llm_used ? '(gpt-oss 120B)' : ''}
               </span>
               {loading && (

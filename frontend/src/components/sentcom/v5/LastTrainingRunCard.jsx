@@ -169,7 +169,7 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
 
       {ours.length > 0 ? (
         <div className="space-y-0.5">
-          <div className="v5-mono text-[11px] uppercase text-zinc-500 tracking-wide">
+          <div className="v5-mono text-[14px] uppercase text-zinc-500 tracking-wide">
             Recently completed
           </div>
           {ours.slice(0, 12).map((m, i) => {
@@ -198,7 +198,7 @@ const PhaseDrawer = ({ phaseKey, phase, recentlyCompleted = [] }) => {
             );
           })}
           {ours.length > 12 && (
-            <div className="v5-mono text-[11px] text-zinc-500">+{ours.length - 12} more</div>
+            <div className="v5-mono text-[14px] text-zinc-500">+{ours.length - 12} more</div>
           )}
         </div>
       ) : (phase.models ?? 0) === 0 ? (
@@ -271,7 +271,7 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
         {loading && (
           <span data-testid="training-loading" className="text-zinc-600">· loading…</span>
         )}
-        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[11px]">
+        <span className="ml-auto text-zinc-600 normal-case tracking-normal text-[14px]">
           tip: click a phase tile to drill in
         </span>
       </div>
@@ -364,7 +364,7 @@ export const LastTrainingRunCard = ({ refreshToken = 0 }) => {
                   </span>
                 </div>
                 {phase.acc != null && phase.acc !== '-' && (
-                  <div className="v5-mono text-[11px] opacity-75 mt-0.5">
+                  <div className="v5-mono text-[14px] opacity-75 mt-0.5">
                     avg acc {typeof phase.acc === 'number' ? `${(phase.acc * 100).toFixed(1)}%` : phase.acc}
                     {phase.failed > 0 ? ` · ${phase.failed} failed` : ''}
                   </div>

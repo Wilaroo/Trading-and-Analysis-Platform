@@ -222,7 +222,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
           />
           {/* Chart metadata overlay */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-3 py-2">
-            <div className="flex items-center justify-between text-[10px] text-zinc-400">
+            <div className="flex items-center justify-between text-[13px] text-zinc-400">
               <span>{snapshot.timeframe} chart</span>
               <span>{snapshot.bars_count > 0 ? `${snapshot.bars_count} bars` : 'No data'}{snapshot.bars_source === 'synthetic' ? ' (simulated)' : snapshot.bars_source === 'historical' ? ' (live data)' : ''}</span>
               <span>Generated {new Date(snapshot.generated_at).toLocaleDateString()}</span>
@@ -263,7 +263,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                       <span className="text-xs font-mono text-zinc-400">${ann.price?.toFixed(2)}</span>
                     )}
                     {ann.time && (
-                      <span className="text-[10px] text-zinc-500 ml-auto flex items-center gap-1">
+                      <span className="text-[13px] text-zinc-500 ml-auto flex items-center gap-1">
                         <Clock className="w-2.5 h-2.5" />
                         {new Date(ann.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -285,7 +285,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                           {ann.reasons?.length > 0 && (
                             <div className="space-y-0.5">
                               {ann.reasons.map((reason, ri) => (
-                                <p key={ri} className="text-[11px] text-zinc-400 leading-relaxed pl-4">
+                                <p key={ri} className="text-[14px] text-zinc-400 leading-relaxed pl-4">
                                   {reason}
                                 </p>
                               ))}
@@ -297,16 +297,16 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                             <div className="mt-2 p-2.5 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
                               <div className="flex items-center gap-1.5 mb-1.5">
                                 <Zap className="w-3 h-3 text-cyan-400" />
-                                <span className="text-[10px] font-semibold text-cyan-400">AI Analysis</span>
+                                <span className="text-[13px] font-semibold text-cyan-400">AI Analysis</span>
                               </div>
-                              <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                              <p className="text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
                                 {explanation.text}
                               </p>
                             </div>
                           )}
 
                           {explanation?.error && (
-                            <p className="text-[10px] text-red-400 pl-4">{explanation.error}</p>
+                            <p className="text-[13px] text-red-400 pl-4">{explanation.error}</p>
                           )}
 
                           {/* Action buttons */}
@@ -314,7 +314,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                             <button
                               onClick={(e) => { e.stopPropagation(); explainAnnotation(i); }}
                               disabled={explanation?.loading}
-                              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all ${
+                              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[13px] font-medium transition-all ${
                                 explanation?.loading
                                   ? 'bg-cyan-500/10 text-cyan-500/50 cursor-wait'
                                   : 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/20'
@@ -341,7 +341,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
 
                             <button
                               onClick={(e) => { e.stopPropagation(); openInChat(i); }}
-                              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 border border-violet-500/20 transition-all"
+                              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[13px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 border border-violet-500/20 transition-all"
                               data-testid={`chat-about-${ann.type}-${i}`}
                             >
                               <MessageSquare className="w-2.5 h-2.5" />
@@ -362,7 +362,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
       {/* Inline Chat Thread — contextual conversation about this trade */}
       {chatThread.length > 0 && (
         <div className="space-y-2 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3" data-testid={`snapshot-chat-${tradeId}`}>
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-violet-400">
+          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-violet-400">
             <MessageSquare className="w-3 h-3" />
             Trade Discussion
           </div>
@@ -378,7 +378,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                     {msg.role === 'context' ? <Target className="w-2.5 h-2.5 text-violet-400" /> : <Zap className="w-2.5 h-2.5 text-cyan-400" />}
                   </div>
                 )}
-                <div className={`rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed max-w-[85%] ${
+                <div className={`rounded-lg px-2.5 py-1.5 text-[14px] leading-relaxed max-w-[85%] ${
                   msg.role === 'user'
                     ? 'bg-cyan-500/20 text-cyan-200'
                     : msg.role === 'context'
@@ -386,7 +386,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                     : 'bg-white/5 text-zinc-300'
                 }`}>
                   {msg.role === 'context' ? (
-                    <span className="text-[10px]">{msg.text}</span>
+                    <span className="text-[13px]">{msg.text}</span>
                   ) : (
                     <span className="whitespace-pre-wrap">{msg.text}</span>
                   )}
@@ -398,7 +398,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                 <div className="w-5 h-5 rounded bg-cyan-500/20 flex items-center justify-center">
                   <RefreshCw className="w-2.5 h-2.5 text-cyan-400 animate-spin" />
                 </div>
-                <div className="bg-white/5 rounded-lg px-2.5 py-1.5 text-[11px] text-zinc-500">
+                <div className="bg-white/5 rounded-lg px-2.5 py-1.5 text-[14px] text-zinc-500">
                   Thinking...
                 </div>
               </div>
@@ -414,7 +414,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') sendChatMessage(chatInput); }}
               placeholder="Ask a follow-up about this trade..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/40"
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[14px] text-white placeholder-zinc-500 focus:outline-none focus:border-violet-500/40"
               disabled={chatLoading}
               data-testid={`snapshot-chat-input-${tradeId}`}
             />
@@ -460,7 +460,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
             <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/10 bg-amber-500/10">
               <Activity className="w-3.5 h-3.5 text-amber-400" />
               <span className="text-xs font-bold text-amber-400">Hindsight Analysis</span>
-              <span className="text-[10px] text-amber-500/60 ml-auto">vs current model</span>
+              <span className="text-[13px] text-amber-500/60 ml-auto">vs current model</span>
             </div>
 
             <div className="p-3 space-y-3">
@@ -468,9 +468,9 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
               <div className="grid grid-cols-3 gap-2">
                 {/* Similar trades stat */}
                 <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
-                  <div className="text-[10px] text-zinc-500">Similar Trades</div>
+                  <div className="text-[13px] text-zinc-500">Similar Trades</div>
                   <div className="text-sm font-bold text-white">{hindsight.data.similar_trades?.count || 0}</div>
-                  <div className={`text-[10px] font-medium ${
+                  <div className={`text-[13px] font-medium ${
                     (hindsight.data.similar_trades?.win_rate || 0) >= 55 ? 'text-emerald-400' : 
                     (hindsight.data.similar_trades?.win_rate || 0) >= 45 ? 'text-amber-400' : 'text-red-400'
                   }`}>
@@ -480,23 +480,23 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
 
                 {/* Gate stance */}
                 <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
-                  <div className="text-[10px] text-zinc-500">Gate Today</div>
+                  <div className="text-[13px] text-zinc-500">Gate Today</div>
                   <div className={`text-sm font-bold ${
                     hindsight.data.current_gate_stance?.would_take_today === 'GO' ? 'text-emerald-400' :
                     hindsight.data.current_gate_stance?.would_take_today === 'REDUCE' ? 'text-amber-400' : 'text-red-400'
                   }`}>
                     {hindsight.data.current_gate_stance?.would_take_today || '?'}
                   </div>
-                  <div className="text-[10px] text-zinc-500">
+                  <div className="text-[13px] text-zinc-500">
                     {hindsight.data.current_gate_stance?.avg_confidence || 0}% conf
                   </div>
                 </div>
 
                 {/* Learning loop */}
                 <div className="rounded-md bg-white/5 px-2.5 py-2 text-center">
-                  <div className="text-[10px] text-zinc-500">Outcomes Tracked</div>
+                  <div className="text-[13px] text-zinc-500">Outcomes Tracked</div>
                   <div className="text-sm font-bold text-white">{hindsight.data.learning_loop?.total_outcomes_tracked || 0}</div>
-                  <div className="text-[10px] text-zinc-500">
+                  <div className="text-[13px] text-zinc-500">
                     {hindsight.data.learning_loop?.win_rate_from_outcomes || 0}% WR
                   </div>
                 </div>
@@ -505,9 +505,9 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
               {/* Improvements list */}
               {hindsight.data.improvements?.length > 0 && (
                 <div className="space-y-1">
-                  <div className="text-[10px] font-semibold text-amber-400">Key Takeaways:</div>
+                  <div className="text-[13px] font-semibold text-amber-400">Key Takeaways:</div>
                   {hindsight.data.improvements.map((imp, ii) => (
-                    <div key={ii} className="flex items-start gap-1.5 text-[11px] text-zinc-300 leading-relaxed">
+                    <div key={ii} className="flex items-start gap-1.5 text-[14px] text-zinc-300 leading-relaxed">
                       <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
                       <span>{imp}</span>
                     </div>
@@ -520,9 +520,9 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                 <div className="pt-2 border-t border-amber-500/10">
                   <div className="flex items-center gap-1.5 mb-1.5">
                     <Zap className="w-3 h-3 text-amber-400" />
-                    <span className="text-[10px] font-semibold text-amber-400">AI Self-Review</span>
+                    <span className="text-[13px] font-semibold text-amber-400">AI Self-Review</span>
                   </div>
-                  <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
+                  <p className="text-[14px] text-zinc-300 leading-relaxed whitespace-pre-wrap">
                     {hindsight.narrative}
                   </p>
                 </div>
@@ -533,7 +533,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                 <button
                   onClick={fetchHindsight}
                   disabled={hindsight.loading}
-                  className="flex items-center gap-1 text-[10px] text-amber-500/60 hover:text-amber-400 transition-colors"
+                  className="flex items-center gap-1 text-[13px] text-amber-500/60 hover:text-amber-400 transition-colors"
                 >
                   <RefreshCw className={`w-2.5 h-2.5 ${hindsight.loading ? 'animate-spin' : ''}`} />
                   Re-analyze
@@ -544,7 +544,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
         )}
 
         {hindsight.error && (
-          <p className="text-[10px] text-red-400 px-1">{hindsight.error}</p>
+          <p className="text-[13px] text-red-400 px-1">{hindsight.error}</p>
         )}
       </div>
 
@@ -553,7 +553,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
         <button
           onClick={generateSnapshot}
           disabled={generating}
-          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="flex items-center gap-1 text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors"
           data-testid={`regenerate-snapshot-${tradeId}`}
         >
           <RefreshCw className={`w-2.5 h-2.5 ${generating ? 'animate-spin' : ''}`} />
@@ -1019,19 +1019,19 @@ const PerformanceMatrix = ({ matrix, aiInsights }) => {
               {(combo.ai_win_rate || combo.gate_go > 0 || edgeTrend) && (
                 <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5 flex-wrap">
                   {combo.ai_win_rate > 0 && (
-                    <span className="text-[10px] flex items-center gap-1 text-violet-400">
+                    <span className="text-[13px] flex items-center gap-1 text-violet-400">
                       <Zap className="w-3 h-3" />
                       AI WR: {combo.ai_win_rate}%
                     </span>
                   )}
                   {(combo.gate_go > 0 || combo.gate_reduce > 0) && (
-                    <span className="text-[10px] text-zinc-400">
+                    <span className="text-[13px] text-zinc-400">
                       Gate: <span className="text-green-400">{combo.gate_go || 0} GO</span>
                       {combo.gate_reduce > 0 && <span className="text-amber-400 ml-1">{combo.gate_reduce} RED</span>}
                     </span>
                   )}
                   {edgeTrend?.trend && (
-                    <span className={`text-[10px] flex items-center gap-1 ${
+                    <span className={`text-[13px] flex items-center gap-1 ${
                       edgeTrend.trend === 'improving' ? 'text-green-400' :
                       edgeTrend.trend === 'declining' ? 'text-red-400' :
                       'text-zinc-500'
@@ -1076,7 +1076,7 @@ const PerformanceMatrix = ({ matrix, aiInsights }) => {
                   </div>
                   {edgeTrend?.trend && (
                     <div className="mt-2 pt-2 border-t border-red-500/10">
-                      <span className={`text-[10px] flex items-center gap-1 ${
+                      <span className={`text-[13px] flex items-center gap-1 ${
                         edgeTrend.trend === 'declining' ? 'text-red-400' : 'text-zinc-500'
                       }`}>
                         {edgeTrend.trend === 'declining' ? <TrendingDown className="w-3 h-3" /> : <Activity className="w-3 h-3" />}
@@ -1109,15 +1109,15 @@ const PerformanceMatrix = ({ matrix, aiInsights }) => {
                 </div>
                 <div className="grid grid-cols-3 gap-2 mb-2 text-center">
                   <div>
-                    <p className="text-[9px] text-zinc-600 uppercase">Trades</p>
+                    <p className="text-[12px] text-zinc-600 uppercase">Trades</p>
                     <p className="text-xs font-bold text-white">{data.total_trades}</p>
                   </div>
                   <div>
-                    <p className="text-[9px] text-zinc-600 uppercase">W/L</p>
+                    <p className="text-[12px] text-zinc-600 uppercase">W/L</p>
                     <p className="text-xs"><span className="text-green-400">{data.wins}</span>/<span className="text-red-400">{data.losses}</span></p>
                   </div>
                   <div>
-                    <p className="text-[9px] text-zinc-600 uppercase">Avg P&L</p>
+                    <p className="text-[12px] text-zinc-600 uppercase">Avg P&L</p>
                     <p className={`text-xs font-bold ${data.avg_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       ${data.avg_pnl?.toFixed(0)}
                     </p>
@@ -1126,7 +1126,7 @@ const PerformanceMatrix = ({ matrix, aiInsights }) => {
                 {/* Gate distribution bar */}
                 {data.gate_stats?.total > 0 && (
                   <div className="mb-2">
-                    <p className="text-[9px] text-zinc-600 uppercase mb-1">Gate Decisions</p>
+                    <p className="text-[12px] text-zinc-600 uppercase mb-1">Gate Decisions</p>
                     <div className="flex h-2 rounded-full overflow-hidden bg-zinc-800">
                       {data.gate_stats.GO > 0 && (
                         <div className="bg-green-500 h-full" style={{ width: `${(data.gate_stats.GO / data.gate_stats.total * 100)}%` }} title={`GO: ${data.gate_stats.GO}`} />
@@ -1139,15 +1139,15 @@ const PerformanceMatrix = ({ matrix, aiInsights }) => {
                       )}
                     </div>
                     <div className="flex justify-between mt-0.5">
-                      <span className="text-[8px] text-green-400">{data.gate_stats.GO || 0} GO</span>
-                      <span className="text-[8px] text-amber-400">{data.gate_stats.REDUCE || 0} RED</span>
-                      <span className="text-[8px] text-red-400">{data.gate_stats.SKIP || 0} SKIP</span>
+                      <span className="text-[11px] text-green-400">{data.gate_stats.GO || 0} GO</span>
+                      <span className="text-[11px] text-amber-400">{data.gate_stats.REDUCE || 0} RED</span>
+                      <span className="text-[11px] text-red-400">{data.gate_stats.SKIP || 0} SKIP</span>
                     </div>
                   </div>
                 )}
                 {/* Edge trend */}
                 {data.edge_trend?.trend && (
-                  <div className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-md ${
+                  <div className={`flex items-center gap-1 text-[13px] px-2 py-1 rounded-md ${
                     data.edge_trend.trend === 'improving' ? 'bg-green-500/10 text-green-400' :
                     data.edge_trend.trend === 'declining' ? 'bg-red-500/10 text-red-400' :
                     'bg-zinc-500/10 text-zinc-400'
@@ -1516,25 +1516,25 @@ const TradeJournalPage = () => {
           {ibAccount && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="ib-account-summary">
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Net Liquidation</p>
+                <p className="text-[13px] text-zinc-500 uppercase tracking-wider">Net Liquidation</p>
                 <p className="text-xl font-bold text-primary">${ibAccount.net_liquidation?.toLocaleString()}</p>
-                <p className="text-[10px] text-zinc-500">{ibAccount.account_id}</p>
+                <p className="text-[13px] text-zinc-500">{ibAccount.account_id}</p>
               </div>
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Buying Power</p>
+                <p className="text-[13px] text-zinc-500 uppercase tracking-wider">Buying Power</p>
                 <p className="text-xl font-bold text-blue-400">${ibAccount.buying_power?.toLocaleString()}</p>
               </div>
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Daily P&L</p>
+                <p className="text-[13px] text-zinc-500 uppercase tracking-wider">Daily P&L</p>
                 <p className={`text-xl font-bold ${(ibAccount.daily_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   ${ibAccount.daily_pnl?.toLocaleString() || '0.00'}
                 </p>
-                <p className={`text-[10px] ${(ibAccount.daily_pnl_percent || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                <p className={`text-[13px] ${(ibAccount.daily_pnl_percent || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   {(ibAccount.daily_pnl_percent || 0) >= 0 ? '+' : ''}{ibAccount.daily_pnl_percent?.toFixed(2)}%
                 </p>
               </div>
               <div className="p-3 rounded-lg bg-white/5 border border-white/10">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Unrealized P&L</p>
+                <p className="text-[13px] text-zinc-500 uppercase tracking-wider">Unrealized P&L</p>
                 <p className={`text-xl font-bold ${(ibAccount.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                   ${ibAccount.unrealized_pnl?.toLocaleString() || '0.00'}
                 </p>
@@ -1552,7 +1552,7 @@ const TradeJournalPage = () => {
               </summary>
               <div className="mt-2 overflow-x-auto rounded-lg border border-white/10 bg-white/5">
                 <table className="w-full text-sm">
-                  <thead className="text-[10px] text-zinc-500 uppercase border-b border-white/10">
+                  <thead className="text-[13px] text-zinc-500 uppercase border-b border-white/10">
                     <tr>
                       <th className="text-left px-3 py-2">Symbol</th>
                       <th className="text-right px-3 py-2">Shares</th>

@@ -249,7 +249,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
             <p className="text-xs text-zinc-500">Trade Styles</p>
             <div className="flex gap-1 mt-1">
               {Object.entries(summary.by_trade_style || {}).slice(0, 3).map(([style, data]) => (
-                <span key={style} className={`text-[11px] px-1.5 py-0.5 rounded ${getTradeStyleColor(style)}`}>
+                <span key={style} className={`text-[14px] px-1.5 py-0.5 rounded ${getTradeStyleColor(style)}`}>
                   {style}: {data.count}
                 </span>
               ))}

@@ -43,7 +43,7 @@ const RISK_COLORS = {
 
 // ─── Small stat component ─────────────────
 const Stat = ({ label, value, color = 'text-zinc-300' }) => (
-  <div className="flex justify-between text-[11px]">
+  <div className="flex justify-between text-[14px]">
     <span className="text-zinc-500">{label}</span>
     <span className={`font-mono ${color}`}>{value}</span>
   </div>
@@ -56,7 +56,7 @@ const PhaseBadge = ({ phase, label, icon: Icon, status }) => {
   const skip = status === 'skip';
   return (
     <div
-      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium border ${
+      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[14px] font-medium border ${
         ok ? 'text-green-400 bg-green-500/10 border-green-500/20'
         : fail ? 'text-red-400 bg-red-500/10 border-red-500/20'
         : skip ? 'text-zinc-500 bg-zinc-500/10 border-zinc-500/20'
@@ -94,7 +94,7 @@ const ValidationSummary = memo(({ validation }) => {
     <div className="mt-1.5 p-2 rounded bg-black/30 border border-white/5 space-y-1.5" data-testid={`validation-summary-${v.setup_type}-${v.bar_size}`}>
       {/* Status + phases */}
       <div className="flex items-center justify-between">
-        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded border ${statusColor}`}>
+        <span className={`text-[14px] font-semibold px-1.5 py-0.5 rounded border ${statusColor}`}>
           {v.status?.toUpperCase()} ({v.phases_passed || 0}/{v.phases_total || 3})
         </span>
         <div className="flex gap-1">
@@ -108,9 +108,9 @@ const ValidationSummary = memo(({ validation }) => {
       <div className="grid grid-cols-3 gap-1">
         {/* AI Comparison */}
         <div className="space-y-0.5">
-          <div className="text-[8px] text-zinc-500 uppercase tracking-wider">AI Edge</div>
+          <div className="text-[11px] text-zinc-500 uppercase tracking-wider">AI Edge</div>
           {ai.error ? (
-            <div className="text-[11px] text-red-400">Error</div>
+            <div className="text-[14px] text-red-400">Error</div>
           ) : (
             <>
               <Stat label="WR" value={`${ai.ai_edge_win_rate > 0 ? '+' : ''}${(ai.ai_edge_win_rate || 0).toFixed(1)}%`}
@@ -124,11 +124,11 @@ const ValidationSummary = memo(({ validation }) => {
 
         {/* Monte Carlo */}
         <div className="space-y-0.5">
-          <div className="text-[8px] text-zinc-500 uppercase tracking-wider">Risk</div>
+          <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Risk</div>
           {mc.error ? (
-            <div className="text-[11px] text-red-400">Error</div>
+            <div className="text-[14px] text-red-400">Error</div>
           ) : mc.skipped ? (
-            <div className="text-[11px] text-zinc-500">Skipped</div>
+            <div className="text-[14px] text-zinc-500">Skipped</div>
           ) : (
             <>
               <Stat label="P(profit)" value={`${(mc.probability_of_profit || 0).toFixed(0)}%`}
@@ -143,11 +143,11 @@ const ValidationSummary = memo(({ validation }) => {
 
         {/* Walk-Forward */}
         <div className="space-y-0.5">
-          <div className="text-[8px] text-zinc-500 uppercase tracking-wider">Robust</div>
+          <div className="text-[11px] text-zinc-500 uppercase tracking-wider">Robust</div>
           {wf.error ? (
-            <div className="text-[11px] text-red-400">Error</div>
+            <div className="text-[14px] text-red-400">Error</div>
           ) : wf.skipped ? (
-            <div className="text-[11px] text-zinc-500">Skipped</div>
+            <div className="text-[14px] text-zinc-500">Skipped</div>
           ) : (
             <>
               <Stat label="Efficiency" value={`${(wf.avg_efficiency_ratio || 0).toFixed(0)}%`}
@@ -161,13 +161,13 @@ const ValidationSummary = memo(({ validation }) => {
 
       {/* Reason */}
       {v.reason && (
-        <div className="text-[8px] text-zinc-500 leading-relaxed truncate" title={v.reason}>
+        <div className="text-[11px] text-zinc-500 leading-relaxed truncate" title={v.reason}>
           {v.reason}
         </div>
       )}
 
       {/* Duration */}
-      <div className="text-[8px] text-zinc-600 text-right">
+      <div className="text-[11px] text-zinc-600 text-right">
         {(v.total_duration_seconds || 0) > 60
           ? `${(v.total_duration_seconds / 60).toFixed(1)}min`
           : `${(v.total_duration_seconds || 0).toFixed(0)}s`}
@@ -313,7 +313,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Validation status summary line */}
         {hasValidations && (
-          <div className="flex items-center gap-2 mb-1.5 text-[11px]">
+          <div className="flex items-center gap-2 mb-1.5 text-[14px]">
             <Shield className="w-3 h-3 text-zinc-500" />
             {promotedCount > 0 && (
               <span className="text-green-400">{promotedCount} promoted</span>
@@ -357,7 +357,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
 
         {/* Market-wide signal density (from batch) */}
         {mwData && !mwData.error && (
-          <div className="flex items-center gap-2 mb-1.5 text-[11px]">
+          <div className="flex items-center gap-2 mb-1.5 text-[14px]">
             <Globe className="w-3 h-3 text-zinc-500" />
             <span className="text-zinc-400">
               {mwData.symbols_with_signals}/{mwData.symbols_scanned} symbols
@@ -413,8 +413,8 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                         <span className="text-[12px] text-zinc-500">Not trained</span>
                       )}
                     </div>
-                    <div className="text-[11px] text-zinc-500">{p.description}</div>
-                    <div className="flex gap-2 mt-1 text-[11px] flex-wrap">
+                    <div className="text-[14px] text-zinc-500">{p.description}</div>
+                    <div className="flex gap-2 mt-1 text-[14px] flex-wrap">
                       <span className="text-zinc-600">h={p.forecast_horizon}</span>
                       <span className="text-zinc-600">thr={((p.noise_threshold || 0) * 100).toFixed(2)}%</span>
                       {p.label_scheme === "triple_barrier_3class" && (
@@ -438,7 +438,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       })()}
                     </div>
                     {p.trained && (
-                      <div className="flex gap-3 mt-1 text-[11px] items-center">
+                      <div className="flex gap-3 mt-1 text-[14px] items-center">
                         <span className="text-zinc-500">{(p.training_samples || 0).toLocaleString()} samples</span>
                         {p.version && <span className="text-zinc-600">{p.version}</span>}
                         <button
@@ -451,7 +451,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                       </div>
                     )}
                     {pTraining?.status === 'running' && pTraining.message && (
-                      <div className="text-[11px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
+                      <div className="text-[14px] text-cyan-400/70 mt-1 truncate">{pTraining.message}</div>
                     )}
 
                     {/* Scorecard expander */}
@@ -490,7 +490,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
             >
               {Object.entries(profileValidations).map(([barSize, val]) => (
                 <div key={barSize}>
-                  <div className="text-[11px] text-zinc-400 font-mono mb-0.5">{BAR_SIZE_LABELS[barSize] || barSize}</div>
+                  <div className="text-[14px] text-zinc-400 font-mono mb-0.5">{BAR_SIZE_LABELS[barSize] || barSize}</div>
                   <ValidationSummary validation={val} />
                 </div>
               ))}
@@ -562,7 +562,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
                   <BarChart2 className="w-3 h-3 text-cyan-400" />
                   Phase 4: Multi-Strategy Comparison
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-2 text-[11px]">
+                <div className="grid grid-cols-3 gap-2 mb-2 text-[14px]">
                   <Stat label="Combined WR" value={`${(ms.combined_win_rate || 0).toFixed(1)}%`}
                     color={ms.combined_win_rate > 50 ? 'text-green-400' : 'text-yellow-400'} />
                   <Stat label="Combined Sharpe" value={`${(ms.combined_sharpe || 0).toFixed(2)}`}
@@ -572,7 +572,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
                 {/* Per-strategy table */}
                 <div className="space-y-0.5">
                   {(ms.strategy_summaries || []).map(s => (
-                    <div key={s.setup_type} className="flex items-center justify-between text-[11px] py-0.5 border-b border-white/5 last:border-0">
+                    <div key={s.setup_type} className="flex items-center justify-between text-[14px] py-0.5 border-b border-white/5 last:border-0">
                       <span className="text-zinc-400">{(s.setup_type || '').replace(/_/g, ' ')}</span>
                       <div className="flex gap-3">
                         <span className={s.win_rate > 50 ? 'text-green-400' : 'text-zinc-400'}>{s.win_rate?.toFixed(1)}%</span>
@@ -594,7 +594,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
                 </div>
                 <div className="space-y-0.5">
                   {mw.filter(m => !m.error).map(m => (
-                    <div key={m.setup_type} className="flex items-center justify-between text-[11px] py-0.5 border-b border-white/5 last:border-0">
+                    <div key={m.setup_type} className="flex items-center justify-between text-[14px] py-0.5 border-b border-white/5 last:border-0">
                       <span className="text-zinc-400">{(m.setup_type || '').replace(/_/g, ' ')}</span>
                       <div className="flex gap-3">
                         <span className="text-zinc-500">{m.symbols_with_signals}/{m.symbols_scanned}</span>
@@ -610,7 +610,7 @@ const BatchValidationPanel = memo(({ batchData }) => {
 
             {/* Duration */}
             {batchData.total_duration_seconds && (
-              <div className="text-[11px] text-zinc-600 text-right">
+              <div className="text-[14px] text-zinc-600 text-right">
                 Total: {(batchData.total_duration_seconds / 60).toFixed(1)} min
               </div>
             )}

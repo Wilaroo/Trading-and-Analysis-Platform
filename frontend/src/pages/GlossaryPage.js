@@ -731,7 +731,7 @@ const GlossaryPage = () => {
                             <div className="flex items-center gap-2 mb-1">
                               <IconComponent className="w-4 h-4 text-cyan-400" />
                               <h3 className="font-semibold text-white">{entry.term}</h3>
-                              <span className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded">
+                              <span className="text-[13px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded">
                                 {category?.name}
                               </span>
                             </div>
@@ -765,7 +765,7 @@ const GlossaryPage = () => {
                                     {entry.tags?.slice(0, 5).map((tag, i) => (
                                       <span 
                                         key={i} 
-                                        className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded cursor-pointer hover:bg-zinc-700"
+                                        className="text-[13px] px-1.5 py-0.5 bg-zinc-800 text-zinc-500 rounded cursor-pointer hover:bg-zinc-700"
                                         onClick={(e) => { e.stopPropagation(); setSearchQuery(tag); }}
                                       >
                                         #{tag}
@@ -785,7 +785,7 @@ const GlossaryPage = () => {
                                 {/* Quick related terms */}
                                 {entry.relatedTerms?.length > 0 && (
                                   <div className="mt-3 pt-3 border-t border-white/5">
-                                    <span className="text-[10px] text-zinc-500 uppercase">Related: </span>
+                                    <span className="text-[13px] text-zinc-500 uppercase">Related: </span>
                                     {getRelatedEntries(entry.relatedTerms).slice(0, 4).map((related, i) => (
                                       <button
                                         key={related.id}

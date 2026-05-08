@@ -286,10 +286,10 @@ const TradeCard = ({ trade, onConfirm, onReject, onClose, onTickerClick, showClo
               <span className="text-zinc-500 flex items-center gap-1">
                 Stop
                 {trade.trailing_stop_config?.mode === 'breakeven' && (
-                  <span className="text-[11px] px-1 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">BE</span>
+                  <span className="text-[14px] px-1 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">BE</span>
                 )}
                 {trade.trailing_stop_config?.mode === 'trailing' && (
-                  <span className="text-[11px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">TRAIL</span>
+                  <span className="text-[14px] px-1 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">TRAIL</span>
                 )}
               </span>
               <p className={`font-mono ${
@@ -1082,14 +1082,14 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                         <span className="text-[13px] font-medium text-white">
                                           {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                         </span>
-                                        <span className={`text-[11px] px-1 py-0.5 rounded border ${tfStyle}`}>
+                                        <span className={`text-[14px] px-1 py-0.5 rounded border ${tfStyle}`}>
                                           {config.timeframe?.toUpperCase()}
                                         </span>
                                       </div>
                                       {!isEditing ? (
                                         <button
                                           onClick={() => startEditingStrategy(key, config)}
-                                          className="text-[11px] text-cyan-400 hover:text-cyan-300 px-1 py-0.5 rounded bg-cyan-500/10"
+                                          className="text-[14px] text-cyan-400 hover:text-cyan-300 px-1 py-0.5 rounded bg-cyan-500/10"
                                           data-testid={`edit-strategy-${key}`}
                                         >
                                           Edit
@@ -1099,14 +1099,14 @@ const TradingBotPanel = ({ className = '', onTickerSelect }) => {
                                           <button
                                             onClick={() => saveStrategyConfig(key)}
                                             disabled={actionLoading === `strategy-${key}`}
-                                            className="text-[11px] text-emerald-400 hover:text-emerald-300 px-1 py-0.5 rounded bg-emerald-500/10"
+                                            className="text-[14px] text-emerald-400 hover:text-emerald-300 px-1 py-0.5 rounded bg-emerald-500/10"
                                             data-testid={`save-strategy-${key}`}
                                           >
                                             {actionLoading === `strategy-${key}` ? '...' : 'Save'}
                                           </button>
                                           <button
                                             onClick={() => { setEditingStrategy(null); setStrategyForm({}); }}
-                                            className="text-[11px] text-zinc-400 hover:text-zinc-300 px-1 py-0.5 rounded bg-zinc-600/30"
+                                            className="text-[14px] text-zinc-400 hover:text-zinc-300 px-1 py-0.5 rounded bg-zinc-600/30"
                                           >
                                             ✕
                                           </button>

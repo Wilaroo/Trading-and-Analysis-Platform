@@ -184,7 +184,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
   //     (no fixed positioning, matches the v5-chip scale).
   //   • inline=false → legacy floating button in the bottom-left corner.
   const btnClass = inline
-    ? "flex items-center gap-1 px-2 py-0.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/60 border border-rose-500/60 text-rose-100 v5-mono text-[11px] font-bold uppercase tracking-widest transition-all"
+    ? "flex items-center gap-1 px-2 py-0.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/60 border border-rose-500/60 text-rose-100 v5-mono text-[14px] font-bold uppercase tracking-widest transition-all"
     : "fixed bottom-3 left-[64px] z-[55] flex items-center gap-1.5 px-3 py-1.5 rounded-sm bg-rose-600/25 hover:bg-rose-600/50 border border-rose-500/60 text-rose-100 v5-mono text-[12px] font-bold uppercase tracking-widest transition-all backdrop-blur-sm";
 
   return (
@@ -244,7 +244,7 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                     </span>
                   </label>
                   {alsoHaltBot && (
-                    <p className="text-[11px] text-amber-300/80 leading-relaxed pl-2 border-l-2 border-amber-500/40">
+                    <p className="text-[14px] text-amber-300/80 leading-relaxed pl-2 border-l-2 border-amber-500/40">
                       After flatten completes, the kill-switch will latch. Bot will refuse new entries
                       until you manually reset via the Safety panel. Scanner keeps finding setups
                       (paused separately via the scanner toggle).
@@ -304,17 +304,17 @@ export const FlattenAllButtonV5 = ({ safety, inline = false }) => {
                           doesn't have to dig through backend logs to see WHY closes failed. */}
                       {Array.isArray(result.summary.close_errors) && result.summary.close_errors.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-zinc-800">
-                          <div className="v5-mono text-[11px] uppercase tracking-widest text-rose-400 mb-1.5">Close errors (top {Math.min(5, result.summary.close_errors.length)})</div>
+                          <div className="v5-mono text-[14px] uppercase tracking-widest text-rose-400 mb-1.5">Close errors (top {Math.min(5, result.summary.close_errors.length)})</div>
                           <div className="space-y-1 max-h-48 overflow-y-auto pr-1">
                             {result.summary.close_errors.slice(0, 5).map((e, i) => (
-                              <div key={i} className="v5-mono text-[10px] text-zinc-400 leading-tight">
+                              <div key={i} className="v5-mono text-[13px] text-zinc-400 leading-tight">
                                 <span className="text-rose-300">{e.trade_id || e.trade || e.stage || '?'}</span>
                                 <span className="text-zinc-600"> — </span>
                                 <span className="text-amber-300 break-all">{e.err}</span>
                               </div>
                             ))}
                             {result.summary.close_errors.length > 5 && (
-                              <div className="v5-why-dim text-[10px] italic">…and {result.summary.close_errors.length - 5} more (see backend log)</div>
+                              <div className="v5-why-dim text-[13px] italic">…and {result.summary.close_errors.length - 5} more (see backend log)</div>
                             )}
                           </div>
                         </div>
@@ -635,7 +635,7 @@ export const ScannerPauseToggleV5 = ({ safety, compact = false }) => {
       title={title}
       className={[
         'v5-mono inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm border transition-colors',
-        compact ? 'text-[10px]' : 'text-[11px]',
+        compact ? 'text-[13px]' : 'text-[14px]',
         busy ? 'opacity-60 cursor-wait' : 'cursor-pointer',
         paused
           ? 'bg-amber-500/15 border-amber-400/40 text-amber-200 hover:bg-amber-500/25'
@@ -852,7 +852,7 @@ export const ScannerPausedBannerV5 = ({ safety }) => {
       title={`Scanner alert intake paused since ${pausedAt ? fmtET12Sec(pausedAt * 1000) : '—'}${reasonLabel}. Open-position management continues normally.`}
     >
       <Power size={11} className="flex-shrink-0 text-amber-300" />
-      <div className="flex-1 min-w-0 v5-mono text-[11px] truncate">
+      <div className="flex-1 min-w-0 v5-mono text-[14px] truncate">
         <span className="font-bold">Scanner paused</span>
         <span className="opacity-70"> · {elapsedText}{reasonLabel} · open positions keep managing</span>
       </div>
@@ -861,7 +861,7 @@ export const ScannerPausedBannerV5 = ({ safety }) => {
         data-testid="v5-scanner-paused-banner-resume"
         onClick={onResume}
         disabled={resuming}
-        className="v5-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 border border-amber-400/40 hover:bg-amber-500/25 text-amber-100 rounded-sm flex-shrink-0 disabled:opacity-50"
+        className="v5-mono text-[13px] uppercase tracking-wider px-1.5 py-0.5 border border-amber-400/40 hover:bg-amber-500/25 text-amber-100 rounded-sm flex-shrink-0 disabled:opacity-50"
       >
         {resuming ? '…' : 'resume'}
       </button>

@@ -69,13 +69,13 @@ const TrailRow = ({ row, active, onClick }) => {
       <div className="flex items-baseline justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-mono text-sm text-zinc-200">{row.symbol || '?'}</span>
-          <span className={`px-1 py-0 text-[9px] uppercase tracking-wider border rounded ${o.cls}`}>
+          <span className={`px-1 py-0 text-[12px] uppercase tracking-wider border rounded ${o.cls}`}>
             {o.label}
           </span>
           {row.has_trade ? (
-            <span className="text-[9px] text-zinc-500 uppercase">trade</span>
+            <span className="text-[12px] text-zinc-500 uppercase">trade</span>
           ) : (
-            <span className="text-[9px] text-zinc-600 uppercase">shadow</span>
+            <span className="text-[12px] text-zinc-600 uppercase">shadow</span>
           )}
         </div>
         <span className={`font-mono text-xs ${
@@ -85,10 +85,10 @@ const TrailRow = ({ row, active, onClick }) => {
         </span>
       </div>
       <div className="flex items-baseline justify-between mt-1">
-        <span className="text-[11px] text-zinc-500 truncate max-w-[60%]">
+        <span className="text-[14px] text-zinc-500 truncate max-w-[60%]">
           {row.setup || '—'}
         </span>
-        <span className="text-[10px] text-zinc-600">
+        <span className="text-[13px] text-zinc-600">
           {(row.scanned_at || '').replace('T', ' ').slice(0, 19)}
         </span>
       </div>
@@ -152,10 +152,10 @@ const TrailDetailPane = ({ identifier }) => {
         <div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-lg text-zinc-100">{trail.alert?.symbol || '?'}</span>
-            <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider border rounded ${outcome.cls}`}>
+            <span className={`px-2 py-0.5 text-[13px] uppercase tracking-wider border rounded ${outcome.cls}`}>
               {outcome.label}
             </span>
-            <span className="text-[10px] text-zinc-500 font-mono">
+            <span className="text-[13px] text-zinc-500 font-mono">
               {trail.identifier_type}: {trail.identifier}
             </span>
           </div>
@@ -166,7 +166,7 @@ const TrailDetailPane = ({ identifier }) => {
           </div>
         </div>
         {trail.meta?.time_to_decision_s != null && (
-          <div className="text-[11px] text-zinc-500">
+          <div className="text-[14px] text-zinc-500">
             decided in {trail.meta.time_to_decision_s.toFixed(1)}s
           </div>
         )}
@@ -174,7 +174,7 @@ const TrailDetailPane = ({ identifier }) => {
 
       {/* Section 1 — Scanner alert */}
       <section data-testid="trail-section-alert">
-        <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">1. Scanner Alert</h4>
+        <h4 className="text-[13px] uppercase tracking-wider text-zinc-500 mb-1">1. Scanner Alert</h4>
         {trail.alert ? (
           <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2 text-xs space-y-1">
             <div className="flex justify-between">
@@ -192,12 +192,12 @@ const TrailDetailPane = ({ identifier }) => {
               <span className="font-mono text-zinc-200">{(trail.alert.scanned_at || '').slice(0, 19)}</span>
             </div>
             {trail.alert.exit_rule && (
-              <div className="text-[11px] text-zinc-500 pt-1 border-t border-zinc-800">
+              <div className="text-[14px] text-zinc-500 pt-1 border-t border-zinc-800">
                 <span className="text-zinc-400">Exit rule:</span> {trail.alert.exit_rule}
               </div>
             )}
             {Array.isArray(trail.alert.reasoning) && trail.alert.reasoning.length > 0 && (
-              <ul className="text-[11px] text-zinc-400 pt-1 space-y-0.5 list-disc pl-4">
+              <ul className="text-[14px] text-zinc-400 pt-1 space-y-0.5 list-disc pl-4">
                 {trail.alert.reasoning.slice(0, 5).map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             )}
@@ -209,13 +209,13 @@ const TrailDetailPane = ({ identifier }) => {
 
       {/* Section 2 — AI module votes */}
       <section data-testid="trail-section-modules">
-        <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">2. AI Module Votes</h4>
+        <h4 className="text-[13px] uppercase tracking-wider text-zinc-500 mb-1">2. AI Module Votes</h4>
         {Array.isArray(trail.module_votes) && trail.module_votes.length > 0 ? (
           <div className="space-y-1">
             {trail.module_votes.map((v, i) => (
               <div key={`${v.module}-${i}`} className="bg-zinc-900/50 border border-zinc-800 rounded p-2 text-xs">
                 <div className="flex justify-between items-baseline mb-0.5">
-                  <span className="font-mono text-zinc-200 uppercase text-[11px]">{v.module}</span>
+                  <span className="font-mono text-zinc-200 uppercase text-[14px]">{v.module}</span>
                   <span className="font-mono text-zinc-300">
                     {v.recommendation || '—'}
                     {v.confidence != null && (
@@ -224,7 +224,7 @@ const TrailDetailPane = ({ identifier }) => {
                   </span>
                 </div>
                 {v.reasoning && (
-                  <div className="text-[11px] text-zinc-500 mt-1">{v.reasoning}</div>
+                  <div className="text-[14px] text-zinc-500 mt-1">{v.reasoning}</div>
                 )}
               </div>
             ))}
@@ -236,7 +236,7 @@ const TrailDetailPane = ({ identifier }) => {
 
       {/* Section 3 — Bot action */}
       <section data-testid="trail-section-action">
-        <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">3. Bot Decision</h4>
+        <h4 className="text-[13px] uppercase tracking-wider text-zinc-500 mb-1">3. Bot Decision</h4>
         {trail.trade ? (
           <div className="bg-zinc-900/50 border border-zinc-800 rounded p-2 text-xs space-y-1">
             <div className="flex justify-between">
@@ -268,7 +268,7 @@ const TrailDetailPane = ({ identifier }) => {
               </div>
             )}
             {trail.trade.close_reason && (
-              <div className="flex justify-between text-[11px] text-zinc-500">
+              <div className="flex justify-between text-[14px] text-zinc-500">
                 <span>Closed by</span>
                 <span className="font-mono">{trail.trade.close_reason}</span>
               </div>
@@ -299,12 +299,12 @@ const TrailDetailPane = ({ identifier }) => {
       {/* Section 4 — Bot thoughts in window */}
       {Array.isArray(trail.thoughts) && trail.thoughts.length > 0 && (
         <section data-testid="trail-section-thoughts">
-          <h4 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+          <h4 className="text-[13px] uppercase tracking-wider text-zinc-500 mb-1">
             4. Bot Thoughts ({trail.thoughts.length})
           </h4>
           <div className="bg-zinc-900/30 border border-zinc-800 rounded p-2 max-h-72 overflow-y-auto space-y-1">
             {trail.thoughts.map((t, i) => (
-              <div key={i} className="text-[11px] flex gap-2 border-b border-zinc-900 pb-1">
+              <div key={i} className="text-[14px] flex gap-2 border-b border-zinc-900 pb-1">
                 <span className="text-zinc-600 font-mono">{(t.timestamp || '').slice(11, 19)}</span>
                 <span className="text-zinc-400 truncate">{t.text || t.reasoning || '—'}</span>
               </div>
@@ -370,7 +370,7 @@ const TrailExplorer = () => {
             type="button"
             onClick={() => setOnlyDisagreements(v => !v)}
             data-testid="trail-toggle-disagreements"
-            className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${
+            className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border ${
               onlyDisagreements
                 ? 'bg-amber-900/40 text-amber-300 border-amber-800/60'
                 : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
@@ -454,7 +454,7 @@ const ModuleScorecard = () => {
               type="button"
               onClick={() => setDays(d)}
               data-testid={`scorecard-days-${d}`}
-              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${
+              className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border ${
                 days === d
                   ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
                   : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
@@ -473,7 +473,7 @@ const ModuleScorecard = () => {
       {data && (
         <div className="border border-zinc-800 rounded overflow-hidden">
           <table className="w-full text-xs">
-            <thead className="bg-zinc-900 text-zinc-500 uppercase tracking-wider text-[10px]">
+            <thead className="bg-zinc-900 text-zinc-500 uppercase tracking-wider text-[13px]">
               <tr>
                 <th className="px-3 py-2 text-left">Module</th>
                 <th className="px-3 py-2 text-right">Decisions</th>
@@ -529,7 +529,7 @@ const ModuleScorecard = () => {
           </table>
         </div>
       )}
-      <div className="mt-3 text-[10px] text-zinc-600">
+      <div className="mt-3 text-[13px] text-zinc-600">
         🔴 = Kill candidate — accuracy &lt; 50% AND followed-P&L worse than ignored-P&L. Consider retiring or downweighting.
       </div>
 
@@ -572,8 +572,8 @@ const ModuleVoteBreakdownPanel = ({ breakdown }) => {
   return (
     <div data-testid="vote-breakdown-panel" className="mt-5 border border-zinc-800 rounded overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-zinc-300 font-bold">Module Vote Breakdown</span>
-        <span className="text-[10px] text-zinc-500">how each AI module is voting before consensus</span>
+        <span className="text-[14px] uppercase tracking-wider text-zinc-300 font-bold">Module Vote Breakdown</span>
+        <span className="text-[13px] text-zinc-500">how each AI module is voting before consensus</span>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-0">
         {Object.entries(breakdown).map(([moduleKey, m]) => {
@@ -590,10 +590,10 @@ const ModuleVoteBreakdownPanel = ({ breakdown }) => {
             >
               <div className="flex items-baseline justify-between mb-2">
                 <span className="text-xs font-mono text-zinc-200">{moduleKey}</span>
-                <span className="text-[10px] text-zinc-500">{total.toLocaleString()} votes</span>
+                <span className="text-[13px] text-zinc-500">{total.toLocaleString()} votes</span>
               </div>
               {total === 0 ? (
-                <div className="text-[10px] text-zinc-600 italic">no decisions in window</div>
+                <div className="text-[13px] text-zinc-600 italic">no decisions in window</div>
               ) : (
                 <>
                   {/* Stacked bar — width = pct of total, color = direction */}
@@ -622,7 +622,7 @@ const ModuleVoteBreakdownPanel = ({ breakdown }) => {
                         <span
                           key={k}
                           data-testid={`vote-chip-${moduleKey}-${k}`}
-                          className={`px-1.5 py-0 rounded text-[10px] font-mono ${VOTE_COLOR[k] || 'bg-zinc-800 text-zinc-400'}`}
+                          className={`px-1.5 py-0 rounded text-[13px] font-mono ${VOTE_COLOR[k] || 'bg-zinc-800 text-zinc-400'}`}
                           title={`${v} votes`}
                         >
                           {_humanizeVoteKey(k)} {pct}%
@@ -633,7 +633,7 @@ const ModuleVoteBreakdownPanel = ({ breakdown }) => {
                   {disagreementPct != null && (
                     <div
                       data-testid={`vote-disagreement-${moduleKey}`}
-                      className={`mt-1.5 text-[10px] v5-mono ${
+                      className={`mt-1.5 text-[13px] v5-mono ${
                         disagreementPct > 40 ? 'text-amber-400' :
                         disagreementPct > 20 ? 'text-zinc-400' : 'text-zinc-500'
                       }`}
@@ -648,7 +648,7 @@ const ModuleVoteBreakdownPanel = ({ breakdown }) => {
           );
         })}
       </div>
-      <div className="px-3 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+      <div className="px-3 py-1.5 border-t border-zinc-800 text-[13px] text-zinc-600">
         Disagreement % = how often this module's vote went against the final consensus. High disagreement (≥40%) on a kill-candidate is a strong retire signal.
       </div>
     </div>
@@ -699,7 +699,7 @@ const PipelineFunnel = () => {
               key={d}
               type="button"
               onClick={() => setDays(d)}
-              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${
+              className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border ${
                 days === d
                   ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
                   : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
@@ -748,17 +748,17 @@ const PipelineFunnel = () => {
                     counts shown next to the warning. */}
                 {s.stage === 'fired' && (s.fired_via_shadow != null || s.fired_via_trades != null) && (
                   <div className="ml-32 pl-3 mt-1 flex items-center gap-2 flex-wrap">
-                    <span data-testid="funnel-fired-shadow" className="text-[10px] v5-mono text-zinc-500">
+                    <span data-testid="funnel-fired-shadow" className="text-[13px] v5-mono text-zinc-500">
                       via shadow.was_executed: <span className="text-zinc-300">{Number(s.fired_via_shadow ?? 0).toLocaleString()}</span>
                     </span>
-                    <span className="text-[10px] text-zinc-700">·</span>
-                    <span data-testid="funnel-fired-trades" className="text-[10px] v5-mono text-zinc-500">
+                    <span className="text-[13px] text-zinc-700">·</span>
+                    <span data-testid="funnel-fired-trades" className="text-[13px] v5-mono text-zinc-500">
                       via bot_trades: <span className="text-zinc-300">{Number(s.fired_via_trades ?? 0).toLocaleString()}</span>
                     </span>
                     {s.drift_warning && (
                       <span
                         data-testid="funnel-drift-warning"
-                        className="px-1.5 py-0 rounded border bg-rose-950/50 text-rose-300 border-rose-800 text-[10px] uppercase tracking-wider font-bold"
+                        className="px-1.5 py-0 rounded border bg-rose-950/50 text-rose-300 border-rose-800 text-[13px] uppercase tracking-wider font-bold"
                         title={s.drift_warning}
                       >
                         ⚠ Shadow drift
@@ -771,7 +771,7 @@ const PipelineFunnel = () => {
           })}
         </div>
       )}
-      <div className="mt-3 text-[10px] text-zinc-600">
+      <div className="mt-3 text-[13px] text-zinc-600">
         Conversion % shown vs the previous stage. <span className="text-rose-400">Red</span> = abnormal drop (&lt;30%). Drill into specific decisions via Trail Explorer.
       </div>
     </div>
@@ -871,7 +871,7 @@ const DayTapeView = () => {
                 type="button"
                 data-testid={`day-tape-range-${r.id}`}
                 onClick={() => setDays(r.id)}
-                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                className={`px-2.5 py-1 text-[14px] uppercase tracking-wider rounded border ${
                   days === r.id
                     ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
@@ -886,7 +886,7 @@ const DayTapeView = () => {
                 type="button"
                 data-testid={`day-tape-direction-${d || 'all'}`}
                 onClick={() => setDirection(d)}
-                className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+                className={`px-2 py-1 text-[13px] uppercase tracking-wider rounded border ${
                   direction === d
                     ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
                     : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
@@ -900,7 +900,7 @@ const DayTapeView = () => {
             type="button"
             data-testid="day-tape-refresh"
             onClick={load}
-            className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+            className="px-2 py-1 text-[14px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
           >
             <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
@@ -908,7 +908,7 @@ const DayTapeView = () => {
             type="button"
             data-testid="day-tape-csv"
             onClick={handleCsv}
-            className="px-2 py-1 text-[11px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
+            className="px-2 py-1 text-[14px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
           >
             Download CSV
           </button>
@@ -916,7 +916,7 @@ const DayTapeView = () => {
       </div>
 
       {/* Summary chips */}
-      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[11px] v5-mono">
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[14px] v5-mono">
         <span data-testid="day-tape-summary-count" className="text-zinc-500">
           <span className="text-zinc-200 font-semibold">{summary.count ?? 0}</span> trades
         </span>
@@ -955,7 +955,7 @@ const DayTapeView = () => {
           </div>
         )}
         {sorted.length > 0 && (
-          <table className="w-full text-[11px] v5-mono">
+          <table className="w-full text-[14px] v5-mono">
             <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800">
               <tr>
                 {[
@@ -975,7 +975,7 @@ const DayTapeView = () => {
                     key={k}
                     onClick={() => sortBy(k)}
                     data-testid={`day-tape-col-${k}`}
-                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[10px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
+                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[13px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
                   >
                     {l}{sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
                   </th>
@@ -1021,7 +1021,7 @@ const DayTapeView = () => {
 
       {/* Setup breakdown footer */}
       {summary.by_setup && Object.keys(summary.by_setup).length > 0 && (
-        <div data-testid="day-tape-by-setup" className="px-4 py-2 border-t border-zinc-800 text-[10px] flex flex-wrap gap-3">
+        <div data-testid="day-tape-by-setup" className="px-4 py-2 border-t border-zinc-800 text-[13px] flex flex-wrap gap-3">
           <span className="text-zinc-500 uppercase tracking-wider">By setup:</span>
           {Object.entries(summary.by_setup)
             .sort(([, a], [, b]) => (b.gross_pnl ?? 0) - (a.gross_pnl ?? 0))
@@ -1092,7 +1092,7 @@ const ExportReport = () => {
               key={d}
               type="button"
               onClick={() => setDays(d)}
-              className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${
+              className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border ${
                 days === d
                   ? 'bg-zinc-800 text-zinc-100 border-zinc-700'
                   : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
@@ -1106,20 +1106,20 @@ const ExportReport = () => {
             onClick={handleCopy}
             data-testid="export-copy-btn"
             disabled={!report}
-            className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border border-cyan-800 text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+            className="px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border border-cyan-800 text-cyan-300 hover:bg-cyan-950/40 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
           >
             <Copy size={10} /> {copied ? 'Copied!' : 'Copy markdown'}
           </button>
         </div>
       </div>
-      <div className="text-[11px] text-zinc-500 mb-2">
+      <div className="text-[14px] text-zinc-500 mb-2">
         Paste this into the chat with Emergent for tuning suggestions.
       </div>
       {loading && <div className="text-xs text-zinc-500">Building report…</div>}
       {error && <div className="text-xs text-rose-400">⚠ {error}</div>}
       <pre
         data-testid="export-report-text"
-        className="flex-1 overflow-auto bg-zinc-950 border border-zinc-800 rounded p-3 font-mono text-[11px] text-zinc-300 whitespace-pre-wrap"
+        className="flex-1 overflow-auto bg-zinc-950 border border-zinc-800 rounded p-3 font-mono text-[14px] text-zinc-300 whitespace-pre-wrap"
       >
         {report || (loading ? '' : '(empty)')}
       </pre>
@@ -1252,7 +1252,7 @@ const TradeForensicsView = () => {
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-zinc-300">Trade Forensics</span>
-          <span className="text-[11px] text-zinc-500 ml-1">real vs phantom · ledger drift</span>
+          <span className="text-[14px] text-zinc-500 ml-1">real vs phantom · ledger drift</span>
           <div className="flex items-center gap-1 ml-3">
             {FORENSICS_RANGES.map(r => (
               <button
@@ -1260,7 +1260,7 @@ const TradeForensicsView = () => {
                 type="button"
                 data-testid={`forensics-range-${r.id}`}
                 onClick={() => setDays(r.id)}
-                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                className={`px-2.5 py-1 text-[14px] uppercase tracking-wider rounded border ${
                   days === r.id
                     ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
@@ -1273,14 +1273,14 @@ const TradeForensicsView = () => {
           type="button"
           data-testid="forensics-refresh"
           onClick={load}
-          className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+          className="px-2 py-1 text-[14px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
         >
           <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
 
       {/* Verdict filter chips — show counts */}
-      <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-1 flex-wrap text-[11px]">
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-1 flex-wrap text-[14px]">
         <button
           type="button"
           data-testid="forensics-filter-all"
@@ -1342,7 +1342,7 @@ const TradeForensicsView = () => {
                     {/* Verdict badge */}
                     <span
                       data-testid={`forensics-row-${row.symbol}-verdict`}
-                      className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border ${m.color} ${m.border} ${m.bg} font-bold`}
+                      className={`px-2 py-0.5 text-[13px] uppercase tracking-wider rounded border ${m.color} ${m.border} ${m.bg} font-bold`}
                     >
                       {m.icon} {m.label}
                     </span>
@@ -1365,24 +1365,24 @@ const TradeForensicsView = () => {
                       const driftClass2 = Math.abs(drift) > 5 ? 'text-rose-400' : 'text-zinc-500';
                       return (
                         <>
-                          <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                          <span className="text-[14px] v5-mono text-zinc-500 w-44 shrink-0">
                             Bot: <span className="text-zinc-300">{row.bot.trade_count}t</span>
                             {' '}({row.bot.open_count}o · {row.bot.closed_count}c){' '}
                             <span className={pnlColor(botPnl)}>{signed(botPnl)}</span>
                           </span>
-                          <span className="text-[11px] v5-mono text-zinc-500 w-44 shrink-0">
+                          <span className="text-[14px] v5-mono text-zinc-500 w-44 shrink-0">
                             IB: <span className="text-zinc-300">{row.ib.current_position}sh</span>
                             {' · realized '}
                             <span className={pnlColor(ibPnl)}>{signed(ibPnl)}</span>
                           </span>
-                          <span className={`text-[11px] v5-mono ${driftClass2} w-24 shrink-0`}>
+                          <span className={`text-[14px] v5-mono ${driftClass2} w-24 shrink-0`}>
                             Δ {signed(drift)}
                           </span>
                         </>
                       );
                     })()}
                     {/* Explanation */}
-                    <span className="text-[11px] text-zinc-400 flex-1 truncate" title={row.explanation}>
+                    <span className="text-[14px] text-zinc-400 flex-1 truncate" title={row.explanation}>
                       {row.explanation}
                     </span>
                     {/* Recalc button — only shown for unexplained_drift rows */}
@@ -1392,20 +1392,20 @@ const TradeForensicsView = () => {
                         data-testid={`forensics-recalc-${row.symbol}`}
                         onClick={(e) => handleRecalc(e, row.symbol)}
                         disabled={recalcBusy === row.symbol}
-                        className="px-2 py-0.5 text-[10px] text-emerald-300 border border-emerald-900/60 rounded hover:bg-emerald-950/40 disabled:opacity-50 shrink-0"
+                        className="px-2 py-0.5 text-[13px] text-emerald-300 border border-emerald-900/60 rounded hover:bg-emerald-950/40 disabled:opacity-50 shrink-0"
                         title="Recalc bot's realized_pnl from IB realizedPNL (apportions across closed rows by share count)"
                       >
                         {recalcBusy === row.symbol ? '…' : '↻ Recalc'}
                       </button>
                     )}
-                    <span className="text-[10px] text-zinc-600 shrink-0">
+                    <span className="text-[13px] text-zinc-600 shrink-0">
                       {isExpanded ? '▼' : '▶'} timeline
                     </span>
                   </div>
                   {recalcMsg[row.symbol] && (
                     <div
                       data-testid={`forensics-recalc-msg-${row.symbol}`}
-                      className={`px-4 pb-2 text-[10px] ${recalcMsg[row.symbol].ok ? 'text-emerald-300' : 'text-rose-300'}`}
+                      className={`px-4 pb-2 text-[13px] ${recalcMsg[row.symbol].ok ? 'text-emerald-300' : 'text-rose-300'}`}
                     >
                       {recalcMsg[row.symbol].text}
                     </div>
@@ -1417,9 +1417,9 @@ const TradeForensicsView = () => {
                       className="bg-zinc-950/50 px-4 py-2 border-t border-zinc-900"
                     >
                       {row.timeline?.length ? (
-                        <table className="w-full text-[11px] v5-mono">
+                        <table className="w-full text-[14px] v5-mono">
                           <thead>
-                            <tr className="text-zinc-600 uppercase text-[10px] tracking-wider">
+                            <tr className="text-zinc-600 uppercase text-[13px] tracking-wider">
                               <th className="text-left pb-1 w-20">Time</th>
                               <th className="text-left pb-1 w-48">Event</th>
                               <th className="text-left pb-1">Detail</th>
@@ -1445,10 +1445,10 @@ const TradeForensicsView = () => {
                           </tbody>
                         </table>
                       ) : (
-                        <div className="text-zinc-600 text-[11px]">No timeline events.</div>
+                        <div className="text-zinc-600 text-[14px]">No timeline events.</div>
                       )}
                       {row.reset_touched && (
-                        <div className="mt-1.5 text-[10px] text-orange-400">
+                        <div className="mt-1.5 text-[13px] text-orange-400">
                           ⚠ This row was touched by the morning reset script.
                         </div>
                       )}
@@ -1461,7 +1461,7 @@ const TradeForensicsView = () => {
         )}
       </div>
 
-      <div className="px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+      <div className="px-4 py-1.5 border-t border-zinc-800 text-[13px] text-zinc-600">
         Sorted by verdict severity (drift / orphaned / phantom / clean). Click any row to expand timeline. v19.31.11
       </div>
     </div>
@@ -1568,7 +1568,7 @@ const ShadowDecisionsView = () => {
       <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-bold text-zinc-300">Shadow Decisions</span>
-          <span className="text-[11px] text-zinc-500 ml-1">AI council verdicts (executed + passed)</span>
+          <span className="text-[14px] text-zinc-500 ml-1">AI council verdicts (executed + passed)</span>
           <div className="flex items-center gap-1 ml-3">
             {SHADOW_RANGES.map(r => (
               <button
@@ -1576,7 +1576,7 @@ const ShadowDecisionsView = () => {
                 type="button"
                 data-testid={`shadow-range-${r.id}`}
                 onClick={() => setDays(r.id)}
-                className={`px-2.5 py-1 text-[11px] uppercase tracking-wider rounded border ${
+                className={`px-2.5 py-1 text-[14px] uppercase tracking-wider rounded border ${
                   days === r.id
                     ? 'bg-zinc-100 text-zinc-950 border-zinc-100'
                     : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
@@ -1595,7 +1595,7 @@ const ShadowDecisionsView = () => {
             type="button"
             data-testid="shadow-toggle-executed"
             onClick={() => setOnlyExecuted(v => !v)}
-            className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+            className={`px-2 py-1 text-[13px] uppercase tracking-wider rounded border ${
               onlyExecuted
                 ? 'bg-emerald-900/40 text-emerald-300 border-emerald-800/60'
                 : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
@@ -1605,7 +1605,7 @@ const ShadowDecisionsView = () => {
             type="button"
             data-testid="shadow-toggle-passed"
             onClick={() => setOnlyPassed(v => !v)}
-            className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded border ${
+            className={`px-2 py-1 text-[13px] uppercase tracking-wider rounded border ${
               onlyPassed
                 ? 'bg-cyan-900/40 text-cyan-300 border-cyan-800/60'
                 : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-200'
@@ -1617,7 +1617,7 @@ const ShadowDecisionsView = () => {
             type="button"
             data-testid="shadow-refresh"
             onClick={load}
-            className="px-2 py-1 text-[11px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
+            className="px-2 py-1 text-[14px] text-zinc-400 hover:text-zinc-200 border border-zinc-800 rounded inline-flex items-center gap-1"
           >
             <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
@@ -1625,7 +1625,7 @@ const ShadowDecisionsView = () => {
             type="button"
             data-testid="shadow-csv"
             onClick={handleCsv}
-            className="px-2 py-1 text-[11px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
+            className="px-2 py-1 text-[14px] text-emerald-300 hover:text-emerald-200 border border-emerald-900/60 rounded"
           >
             Download CSV
           </button>
@@ -1633,7 +1633,7 @@ const ShadowDecisionsView = () => {
       </div>
 
       {/* Summary chips */}
-      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[11px] v5-mono">
+      <div className="px-4 py-2 border-b border-zinc-800 flex items-baseline gap-4 flex-wrap text-[14px] v5-mono">
         <span data-testid="shadow-summary-total" className="text-zinc-500">
           <span className="text-zinc-200 font-semibold">{summary.total ?? 0}</span> decisions
         </span>
@@ -1685,7 +1685,7 @@ const ShadowDecisionsView = () => {
           </div>
         )}
         {sorted.length > 0 && (
-          <table className="w-full text-[11px] v5-mono">
+          <table className="w-full text-[14px] v5-mono">
             <thead className="sticky top-0 bg-zinc-950 border-b border-zinc-800">
               <tr>
                 {[
@@ -1705,7 +1705,7 @@ const ShadowDecisionsView = () => {
                     key={k}
                     onClick={() => sortBy(k)}
                     data-testid={`shadow-col-${k}`}
-                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[10px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
+                    className={`px-2 py-2 cursor-pointer select-none uppercase text-[13px] tracking-wider text-zinc-500 hover:text-zinc-300 text-${a}`}
                   >
                     {l}{sortKey === k ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
                   </th>
@@ -1724,7 +1724,7 @@ const ShadowDecisionsView = () => {
                     <td className="px-2 py-1 text-right text-zinc-500">{fmtShadowTime(r.trigger_time)}</td>
                     <td className="px-2 py-1 font-bold text-zinc-100">{r.symbol || '—'}</td>
                     <td className="px-2 py-1">
-                      <span className={`px-1.5 py-0 text-[10px] uppercase tracking-wider rounded border font-bold ${verdict.cls}`}>
+                      <span className={`px-1.5 py-0 text-[13px] uppercase tracking-wider rounded border font-bold ${verdict.cls}`}>
                         {verdict.label}
                       </span>
                     </td>
@@ -1762,7 +1762,7 @@ const ShadowDecisionsView = () => {
         )}
       </div>
 
-      <div className="px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600">
+      <div className="px-4 py-1.5 border-t border-zinc-800 text-[13px] text-zinc-600">
         Sorted by {sortKey} ({sortDir}). Click any column header to sort. v19.31.13
       </div>
     </div>
@@ -1779,7 +1779,7 @@ export default function DiagnosticsPage() {
         <div className="flex items-center gap-2">
           <Microscope size={16} className="text-cyan-400" />
           <span className="text-sm uppercase tracking-wider">Diagnostics</span>
-          <span className="text-[10px] text-zinc-600 uppercase">v19.31.13</span>
+          <span className="text-[13px] text-zinc-600 uppercase">v19.31.13</span>
         </div>
         <nav className="flex items-center gap-1">
           {SUB_TABS.map(t => (
@@ -1788,7 +1788,7 @@ export default function DiagnosticsPage() {
               type="button"
               onClick={() => setTab(t.id)}
               data-testid={`diag-subtab-${t.id}`}
-              className={`px-3 py-1 text-[11px] uppercase tracking-wider rounded transition-colors ${
+              className={`px-3 py-1 text-[14px] uppercase tracking-wider rounded transition-colors ${
                 tab === t.id
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-500 hover:text-zinc-300'

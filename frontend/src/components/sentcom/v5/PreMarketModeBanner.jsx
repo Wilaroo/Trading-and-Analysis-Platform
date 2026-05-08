@@ -83,13 +83,13 @@ export default function PreMarketModeBanner() {
       />
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="v5-mono text-[11px] uppercase tracking-widest font-bold text-amber-300">
+          <span className="v5-mono text-[14px] uppercase tracking-widest font-bold text-amber-300">
             Pre-Market Mode
           </span>
           {countdown && (
             <span
               data-testid="v5-scanner-premarket-countdown"
-              className="v5-mono text-[11px] text-amber-400/80 tabular-nums"
+              className="v5-mono text-[14px] text-amber-400/80 tabular-nums"
             >
               · {countdown}
             </span>
