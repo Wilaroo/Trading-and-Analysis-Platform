@@ -4691,6 +4691,14 @@ async def import_position(request: ImportPositionRequest):
         # Set additional fields
         trade.fill_price = request.entry_price
         trade.executed_at = datetime.now(timezone.utc).isoformat()
+        # v19.34.61 (2026-02-09) — initialize rs/original_shares at create
+        # time. Pre-fix: relied on manage-loop self-heal at
+        # `position_manager.py:494` which has been narrowed to a 60s
+        # freshness window. Imported-position creation must stamp rs
+        # itself or its first manage tick will fall outside the window
+        # and the trade gets permanently flagged as a zombie.
+        trade.remaining_shares = request.shares
+        trade.original_shares = request.shares
         trade.notes = f"[IMPORTED] Imported from IB - {request.notes or 'manual import'}"
         
         # Initialize trailing stop config

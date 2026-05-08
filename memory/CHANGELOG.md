@@ -2,6 +2,67 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-09 (v19.34.61) — Killed the upstream zombie creator (manage-loop self-heal)
+
+### The smoking gun
+
+`position_manager.py:494` had been doing this on every fresh-quote tick of every OPEN BotTrade:
+
+```python
+if trade.remaining_shares == 0:
+    trade.remaining_shares = trade.shares       # ← re-animates dead trades
+    trade.original_shares = trade.shares
+```
+
+The intent (defensive code from pre-v19.34.21) was to backfill `remaining_shares` for trades whose persistence layer didn't hydrate it correctly. v19.34.21 fixed persistence; the heal became obsolete *and* actively harmful. Symptom (2026-02-09 EFA): 2 zombies (rs=0, status=OPEN) were re-animated by line 494 on the first post-restart fresh tick → bot tracked 1923sh phantom across 3 fragments while IB only had 963 → drift loop's Case 2 partial-close-LIFO had to clean up every 30s.
+
+### Fix
+
+Replaced the unconditional self-heal with a 4-state decision:
+
+1. `close_reason` set → skip silently (respect close intent)
+2. `_loaded_as_zombie_v19_34_59` flag set → skip silently (drift loop owns it)
+3. `executed_at` (or `entry_time` fallback) within `RS_HEAL_WINDOW_S=60s` → heal + warn
+4. Outside window → log one-shot ERROR `[SKIP-HEAL-ZOMBIE]` with grep hint, mark `_v19_34_61_skip_warned`, and `continue` past the rest of the manage tick (rs=0 means there's nothing to manage anyway)
+
+### Companion fix
+
+`trading_bot.py:4672` (imported-position endpoint) was relying on the old self-heal to backfill rs. Now sets `trade.remaining_shares` and `trade.original_shares` explicitly at create time, alongside `executed_at`. (`opportunity_evaluator.py` already does this for bot-fired entries since v19.13; `_spawn_excess_slice` does it; orphan reconciler does it.)
+
+### Tests
+
+- `tests/test_rs_heal_conditional_v19_34_61.py` — 11 cases covering the full decision matrix:
+  - Fresh-fill within window heals
+  - Edge of window (60s exactly) heals
+  - Outside window skips + warns
+  - `close_reason` set → silent skip
+  - `_loaded_as_zombie_v19_34_59` → silent skip
+  - No `executed_at` → safe skip (cannot prove freshness)
+  - `entry_time` fallback when `executed_at` missing
+  - `shares=0, rs=0` → no action (not a zombie)
+  - Already healthy (rs > 0) → block never enters
+  - Future `executed_at` (clock skew) → outside window
+  - Malformed timestamp → safe skip without crash
+
+**Cumulative reconciler/safety/boot suite: 102/102 pytests passing.**
+
+### Operator deploy notes
+
+- Deployed during market hours behind kill-switch trip (no new entries entered the system during the swap window).
+- Hot-reload picked up the change without restart.
+- All currently-tracked positions had `rs > 0` at deploy time, so the change had zero effect on them.
+- After untripping the kill switch, only **fresh** trades (within 60s of executed_at) can have rs auto-healed; older zombies stay rs=0 and route to v19.34.19 zombie cleanup → v19.34.59 tripwire → v19.34.60 fragment-free spawn.
+
+### What this closes
+
+The full chain of zombie-related bugs is now defended at three layers:
+1. **Don't create zombies** — manage loop no longer re-animates rs=0 trades as a side effect (v19.34.61).
+2. **Detect any that slip through** — boot tripwire logs `[ZOMBIE-LOAD]` with grep hint (v19.34.59).
+3. **Heal cleanly when found** — drift loop's spawn skips zombies as grow candidates (v19.34.60).
+
+---
+
+
 ## 2026-02-09 (v19.34.60) — Zombie sweep finished the job
 
 ### Symptom

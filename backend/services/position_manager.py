@@ -490,10 +490,91 @@ class PositionManager:
 
                 trade.current_price = quote.get('price', trade.current_price)
 
-                # Initialize remaining_shares if not set
-                if trade.remaining_shares == 0:
-                    trade.remaining_shares = trade.shares
-                    trade.original_shares = trade.shares
+                # ── v19.34.61 (2026-02-09) — Conditional rs/original self-heal ──
+                # OLD (pre-fix): unconditionally `rs = trade.shares` whenever
+                # rs == 0. This was defensive code from pre-v19.34.21 days
+                # when persistence didn't hydrate `remaining_shares`
+                # correctly. Now that v19.34.21 round-trips rs through
+                # Mongo AND every entry path (`opportunity_evaluator.py`,
+                # `_spawn_excess_slice`, orphan-reconciler, imported-position
+                # endpoint) explicitly initializes rs at create time, the
+                # unconditional self-heal does more harm than good: it
+                # RE-ANIMATES zombie BotTrades (rs=0, status=OPEN,
+                # original_shares > 0) on the first fresh quote, inflating
+                # tracked share count beyond what's actually at IB.
+                # Symptom (2026-02-09 EFA): tracked 1923sh phantom across
+                # 3 fragments while IB only had 963.
+                #
+                # NEW: only self-heal in the narrow window the heal was
+                # originally written for — a freshly-created trade whose
+                # entry path forgot to mirror `shares -> remaining_shares`
+                # AND whose status is OPEN AND has no close_reason set
+                # AND was executed within the last RS_HEAL_WINDOW_S
+                # seconds. Outside that window, leave rs=0 alone — it's
+                # either a real zombie (drift loop / v19.34.59 cleanup
+                # will heal) or a genuine close-in-progress (don't fight
+                # the close). One-shot ERROR log so operator can hunt
+                # the upstream creator.
+                RS_HEAL_WINDOW_S = 60
+                if trade.remaining_shares == 0 and int(getattr(trade, "shares", 0) or 0) > 0:
+                    if getattr(trade, "close_reason", None):
+                        # Trade is being closed — respect close intent.
+                        pass
+                    elif getattr(trade, "_loaded_as_zombie_v19_34_59", False):
+                        # Boot-time zombie tagged by v19.34.59 tripwire —
+                        # let drift loop clean it.
+                        pass
+                    else:
+                        executed_at = getattr(trade, "executed_at", None) \
+                            or getattr(trade, "entry_time", None)
+                        age_s = None
+                        if executed_at:
+                            try:
+                                if isinstance(executed_at, str):
+                                    ts = datetime.fromisoformat(
+                                        executed_at.replace("Z", "+00:00")
+                                    )
+                                else:
+                                    ts = executed_at
+                                if ts.tzinfo is None:
+                                    ts = ts.replace(tzinfo=timezone.utc)
+                                age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+                            except Exception:
+                                age_s = None
+                        if age_s is not None and 0 <= age_s <= RS_HEAL_WINDOW_S:
+                            logger.warning(
+                                "v19.34.61 [HEAL-FRESH] %s id=%s rs=0->%d "
+                                "(executed_at=%s, age=%.1fs). Within %ss "
+                                "fresh-fill window.",
+                                trade.symbol, trade.id, int(trade.shares),
+                                executed_at, age_s, RS_HEAL_WINDOW_S,
+                            )
+                            trade.remaining_shares = trade.shares
+                            trade.original_shares = trade.shares
+                        else:
+                            # Outside fresh-fill window → suspected zombie.
+                            # Log once per trade and skip the heal.
+                            if not getattr(trade, "_v19_34_61_skip_warned", False):
+                                logger.error(
+                                    "v19.34.61 [SKIP-HEAL-ZOMBIE] %s id=%s "
+                                    "rs=0 outside %ss fresh-fill window "
+                                    "(executed_at=%s, age=%s, shares=%d, "
+                                    "original=%d, entered_by=%s). NOT "
+                                    "re-animating; drift loop / v19.34.19 "
+                                    "zombie cleanup should handle. Hunt "
+                                    "upstream creator: grep '%s' /tmp/backend.log",
+                                    trade.symbol, trade.id, RS_HEAL_WINDOW_S,
+                                    executed_at,
+                                    f"{age_s:.1f}s" if age_s is not None else "?",
+                                    int(getattr(trade, "shares", 0) or 0),
+                                    int(getattr(trade, "original_shares", 0) or 0),
+                                    getattr(trade, "entered_by", "?"),
+                                    trade.id,
+                                )
+                                trade._v19_34_61_skip_warned = True
+                            # Skip the rest of the manage tick for this
+                            # zombie — there's nothing to manage with rs=0.
+                            continue
 
                 # Initialize trailing stop config if not set
                 if trade.trailing_stop_config.get('original_stop', 0) == 0:
