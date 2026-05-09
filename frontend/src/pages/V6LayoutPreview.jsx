@@ -81,35 +81,69 @@ const HSplit = ({ topPct, onChange, containerRef }) => {
 };
 
 // ─── ① TOP STRIP (slim — pipeline pills + system health) ───────
-const TopStrip = () => (
-  <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-shrink-0 text-[13px]">
-    <span className="text-cyan-400 font-bold tracking-wider">SENTCOM</span>
-    {/* Pipeline pills — were 80px-tall cards, now ~24px inline */}
-    <div className="flex items-center gap-0.5 ml-2">
-      <Pill color="zinc"><span className="text-zinc-500">SCAN</span> <span className="font-mono font-bold text-zinc-100 ml-1">6</span></Pill>
-      <span className="text-zinc-700 mx-0.5">→</span>
-      <Pill color="cyan"><span className="text-zinc-500">EVAL</span> <span className="font-mono font-bold ml-1">5</span></Pill>
-      <span className="text-zinc-700 mx-0.5">→</span>
-      <Pill color="zinc"><span className="text-zinc-500">ORDER</span> <span className="font-mono font-bold text-zinc-100 ml-1">0</span></Pill>
-      <span className="text-zinc-700 mx-0.5">→</span>
-      <Pill color="emerald"><span className="text-zinc-500">MANAGE</span> <span className="font-mono font-bold ml-1">7</span> <span className="text-emerald-400 font-mono">+0.3R</span></Pill>
-      <span className="text-zinc-700 mx-0.5">→</span>
-      <Pill color="emerald"><span className="text-zinc-500">CLOSE</span> <span className="font-mono font-bold ml-1">9</span> <span className="text-zinc-400 font-mono">WR 44%</span></Pill>
-    </div>
-    {/* Right cluster — system health (consolidated), phase, account */}
-    <div className="ml-auto flex items-center gap-2">
-      <Pill color="amber">PAPER · DUN615665</Pill>
-      <Pill color="orange">AFTER-HOURS</Pill>
-      {/* ALL SYSTEMS pill — now absorbs Wires + drift + throttle + orphan-GTC + safety */}
-      <button className="flex items-center gap-1.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/60 rounded px-2 py-0.5 text-[13px] text-emerald-300 font-medium">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        <span>ALL SYSTEMS</span>
-        <span className="text-zinc-500 font-mono text-[12px]">· 0 drift · 0 thr · 0 orph</span>
+const TopStrip = ({ activeFilter, onFilter, onAskAi }) => {
+  const Pill = ({ id, color, children }) => {
+    const isActive = activeFilter === id;
+    return (
+      <button
+        onClick={() => onFilter(isActive ? null : id)}
+        className={`text-[12px] inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border transition ${
+          isActive
+            ? 'bg-cyan-700/60 border-cyan-400 text-cyan-50 ring-1 ring-cyan-400/50'
+            : color === 'cyan'    ? 'bg-cyan-900/40 border-cyan-700/40 text-cyan-300 hover:border-cyan-600'
+            : color === 'emerald' ? 'bg-emerald-900/40 border-emerald-700/40 text-emerald-300 hover:border-emerald-600'
+            : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+        }`}
+        title={isActive ? 'click to clear filter' : `click to drill into ${id.toUpperCase()}`}
+      >
+        {children}
+        {isActive && <span className="text-cyan-200 text-[10px]">×</span>}
       </button>
-      <span className="text-zinc-700 text-[12px]">⌘K to search</span>
+    );
+  };
+
+  return (
+    <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-shrink-0 text-[13px]">
+      <span className="text-cyan-400 font-bold tracking-wider">SENTCOM</span>
+      <div className="flex items-center gap-0.5 ml-2">
+        <Pill id="scan"   color="zinc"><span className="text-zinc-500">SCAN</span> <span className="font-mono font-bold text-zinc-100 ml-1">6</span><AskAiNudge ctx="pipeline:scan" onAskAi={onAskAi} /></Pill>
+        <span className="text-zinc-700 mx-0.5">→</span>
+        <Pill id="eval"   color="cyan"><span className="text-zinc-500">EVAL</span> <span className="font-mono font-bold ml-1">5</span><AskAiNudge ctx="pipeline:eval" onAskAi={onAskAi} /></Pill>
+        <span className="text-zinc-700 mx-0.5">→</span>
+        <Pill id="order"  color="zinc"><span className="text-zinc-500">ORDER</span> <span className="font-mono font-bold text-zinc-100 ml-1">0</span></Pill>
+        <span className="text-zinc-700 mx-0.5">→</span>
+        <Pill id="manage" color="emerald"><span className="text-zinc-500">MANAGE</span> <span className="font-mono font-bold ml-1">7</span> <span className="text-emerald-400 font-mono">+0.3R</span><AskAiNudge ctx="pipeline:manage" onAskAi={onAskAi} /></Pill>
+        <span className="text-zinc-700 mx-0.5">→</span>
+        <Pill id="close"  color="emerald"><span className="text-zinc-500">CLOSE</span> <span className="font-mono font-bold ml-1">9</span> <span className="text-zinc-400 font-mono">WR 44%</span><AskAiNudge ctx="pipeline:close" onAskAi={onAskAi} /></Pill>
+      </div>
+      <div className="ml-auto flex items-center gap-2">
+        <span className="text-[12px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-amber-900/40 border-amber-700/40 text-amber-300">PAPER · DUN615665</span>
+        <span className="text-[12px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-orange-900/40 border-orange-700/40 text-orange-300">AFTER-HOURS</span>
+        <button onClick={() => onAskAi('safety')} className="flex items-center gap-1.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/60 rounded px-2 py-0.5 text-[13px] text-emerald-300 font-medium" title="Open System Health (formerly Wires + ALL SYSTEMS) — drift / throttle / orphan-GTC / kill switch">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>ALL SYSTEMS</span>
+          <span className="text-zinc-500 font-mono text-[12px]">· 0 drift · 0 thr · 0 orph</span>
+        </button>
+        {/* NEW V6.2 — global AI button (also opens on ⌘K) */}
+        <button onClick={() => onAskAi('global')} className="flex items-center gap-1.5 bg-cyan-900/30 hover:bg-cyan-900/60 border border-cyan-700/60 rounded px-2 py-0.5 text-[13px] text-cyan-300 font-medium" title="Open AI chat (⌘K)">
+          <span>🤖</span>
+          <span>AI</span>
+          <span className="text-zinc-500 font-mono text-[11px]">⌘K</span>
+        </button>
+      </div>
     </div>
-  </div>
+  );
+};
+
+// Tiny inline AskAi nudge — appears INSIDE a pipeline pill, doesn't affect the pill click.
+const AskAiNudge = ({ ctx, onAskAi }) => (
+  <span
+    onClick={(e) => { e.stopPropagation(); onAskAi(ctx); }}
+    className="ml-1 text-cyan-400 hover:text-cyan-200 cursor-pointer text-[10px]"
+    title={`Ask the bot about this stage (${ctx})`}
+  >🤖</span>
 );
+
 
 // ─── ② P&L STAT BLOCK (prominent, 2 rows) ────────────────────────
 const PnlStatBlock = () => (
@@ -282,8 +316,12 @@ const ScannerCard = ({ row, expanded, onToggle, onFocus, isFocused }) => (
   </div>
 );
 
-const ScannerPane = ({ focused, onFocus }) => {
+const ScannerPane = ({ focused, onFocus, activePipelineFilter }) => {
+  // V6.2 — sticky drill: if a top-strip pipeline filter is active, mirror it here.
+  const FILTER_TO_STAGE = { scan: 'scanning', eval: 'evaluating', manage: 'managing', close: 'closed' };
+  const effectiveStage = activePipelineFilter ? (FILTER_TO_STAGE[activePipelineFilter] || 'all') : null;
   const [stage, setStage] = useState('all');
+  const stageActive = effectiveStage || stage;
   const [expanded, setExpanded] = useState(new Set());
   const stages = [
     { id: 'all', label: 'All', count: SCANNER.length },
@@ -293,19 +331,32 @@ const ScannerPane = ({ focused, onFocus }) => {
     { id: 'closed', label: '✓ Done', count: 0 },
     { id: 'cooldown', label: '⏸ Cool', count: 0 },
   ];
-  const filtered = stage === 'all' ? SCANNER : SCANNER.filter(s => s.stage === stage);
+  const filtered = stageActive === 'all' ? SCANNER : SCANNER.filter(s => s.stage === stageActive);
   const toggle = (sym) => setExpanded(p => { const n = new Set(p); n.has(sym) ? n.delete(sym) : n.add(sym); return n; });
-  const grouped = stage === 'all' ? ['evaluating', 'managing'].map(s => ({ stage: s, rows: filtered.filter(r => r.stage === s) })).filter(g => g.rows.length) : [{ stage, rows: filtered }];
+  const grouped = stageActive === 'all' ? ['evaluating', 'managing'].map(s => ({ stage: s, rows: filtered.filter(r => r.stage === s) })).filter(g => g.rows.length) : [{ stage: stageActive, rows: filtered }];
 
   return (
     <div className="bg-zinc-950 flex flex-col overflow-hidden h-full">
       <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2"><span className="text-xs font-semibold text-zinc-400 uppercase">Scanner · Live</span><Pill color="emerald">● 6s</Pill></div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-zinc-400 uppercase">Scanner · Live</span>
+          <Pill color="emerald">● 6s</Pill>
+          {effectiveStage && (
+            <Pill color="cyan">📌 {activePipelineFilter.toUpperCase()} · drilled</Pill>
+          )}
+          <AskAi context="scanner:row" />
+        </div>
         <div className="flex items-center gap-2"><span className="text-[13px] text-zinc-500 font-mono">↑↓ {filtered.length}/12 hits</span><button className="text-[13px] px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded text-zinc-400">FLAT</button></div>
       </div>
       <div className="px-2 py-1 border-b border-zinc-800/50 flex flex-wrap items-center gap-1 flex-shrink-0">
         {stages.map(s => (
-          <button key={s.id} onClick={() => setStage(s.id)} className={`text-[12px] px-1.5 py-0.5 rounded border ${stage === s.id ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700' : 'text-zinc-400 border-zinc-800 hover:bg-zinc-900'}`}>
+          <button
+            key={s.id}
+            onClick={() => setStage(s.id)}
+            disabled={!!effectiveStage}
+            className={`text-[12px] px-1.5 py-0.5 rounded border ${stageActive === s.id ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700' : 'text-zinc-400 border-zinc-800 hover:bg-zinc-900'} ${effectiveStage ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={effectiveStage ? 'Pipeline filter active — clear it in the top strip to use these' : ''}
+          >
             {s.label} <span className="text-[11px] text-zinc-500 ml-0.5">{s.count}</span>
           </button>
         ))}
@@ -335,6 +386,7 @@ const ThinkingPane = ({ focused }) => {
 
   const TABS = [
     { id: 'verdict',  label: '🎯 Verdict' },
+    { id: 'fullintel', label: '🧬 Full Intel' },
     { id: 'gates',    label: '✓ Gates' },
     { id: 'sentcom',  label: '🧠 SentCom' },
     { id: 'audit',    label: '🔬 ML Audit' },
@@ -349,6 +401,7 @@ const ThinkingPane = ({ focused }) => {
           <span className="text-xs font-semibold text-zinc-400 uppercase">🧠 Thinking</span>
           <Pill color="cyan">{focused}</Pill>
           <span className="text-[12px] text-zinc-500">eval cycle #14 · 0.3s ago</span>
+          <AskAi context="thinking:focused" />
         </div>
         <div className="flex items-center gap-1 bg-zinc-900 rounded p-0.5">
           <button onClick={() => setMode('pinned')} className={`text-[12px] px-2 py-0.5 rounded ${mode === 'pinned' ? 'bg-cyan-900/50 text-cyan-300' : 'text-zinc-500'}`}>📍 Pin</button>
@@ -412,8 +465,52 @@ const ThinkingPane = ({ focused }) => {
             </div>
           </div>
         )}
+        {/* ── FULL INTEL — synthesized monologue across all sources ── */}
+        {tab === 'fullintel' && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[12px] text-zinc-500 uppercase">Full Intel · synthesized</span>
+                <Pill color="cyan">{focused}</Pill>
+                <span className="text-[11px] text-zinc-600">refreshed 0.3s ago</span>
+              </div>
+              <AskAi context={`fullintel:${focused}`} label="Ask" />
+            </div>
+            <div className="bg-gradient-to-br from-zinc-900/80 to-zinc-950 border border-cyan-700/30 rounded p-2.5 text-[13px] leading-relaxed text-zinc-300 space-y-2">
+              <p>
+                <span className="text-cyan-300 font-semibold">Bottom line:</span>{' '}
+                I'm <span className="text-amber-300 font-bold">watching, not firing yet</span> on{' '}
+                <span className="font-mono font-bold text-zinc-100">{focused}</span>{' '}
+                <span className="text-zinc-500">(gap_fade LONG, TQS 80, A+, ML 78%)</span>.
+                Two of six gates are still failing — vol confirm and VWAP reclaim — so the bot is in <span className="text-violet-300">trigger-watch</span>, not <span className="text-emerald-300">execute</span> mode.
+              </p>
+              <p>
+                <span className="text-cyan-300 font-semibold">Why the setup is interesting:</span>{' '}
+                Regime is risk-on-strong (SentCom +10), 14-model consensus is bullish at 100% with avg accuracy 57% (+15), and cross-model agreement on the gap_fade direction is unanimous (+8). Quality signal pulls another +12 from the setup's pattern memory <span className="text-zinc-500">(18 PASS / 6 FAIL · 75% WR on this exact pattern at this regime)</span>. Net SentCom score is <span className="text-emerald-300 font-mono">+43</span> → <span className="text-emerald-300 font-bold">GO</span>.
+              </p>
+              <p>
+                <span className="text-cyan-300 font-semibold">Why I haven't pulled the trigger yet:</span>{' '}
+                Volume is running 0.9× the 1.5× threshold I want to see before committing — that's a <span className="text-amber-300">−67% gap to confirmation</span>. Price is also <span className="text-rose-300">$0.12 below VWAP</span> at the entry zone, and my gap_fade rule needs the <span className="font-mono">VWAP reclaim</span> held for 8s before firing. The live general-purpose model sees <span className="text-rose-300">NO EDGE</span> on the immediate next bar (94% conf flat) — that's <span className="text-rose-300">−2 pts</span> in the SentCom score, partial reason consensus isn't unanimous yet.
+              </p>
+              <p>
+                <span className="text-cyan-300 font-semibold">If both triggers fire:</span>{' '}
+                Auto-entry at <span className="font-mono">$368.04</span>, stop <span className="font-mono text-rose-300">$352.84</span>, target <span className="font-mono text-emerald-300">$374.44</span>, R:R <span className="font-mono">2.8</span>, size <span className="font-mono">256sh</span>{' '}
+                <span className="text-zinc-500">($94K notional, ~$2K risk = 0.85% of equity, well under 2% DLP cap)</span>. NVDA correlation is +0.74 — flagging because we're already long-biased on tech, but no hard veto.
+              </p>
+              <p>
+                <span className="text-cyan-300 font-semibold">If conditions break down:</span>{' '}
+                Past 14:30 with vol still thin, I'll downgrade to Tier B and reduce size to 100sh. Past 15:55 the EOD-no-new-entries gate hard-vetoes regardless of every other signal.
+              </p>
+              <p>
+                <span className="text-cyan-300 font-semibold">Recent track record on this exact decision-shape:</span>{' '}
+                last 5 verdicts on {focused} → 3 REJECTs (R:R, vol, unstable) and 2 PASSes (+$340 target hit, +$118 scratch). Win rate trending <span className="text-emerald-300">positive</span> over the last 20 sessions on this gap_fade pattern. v19.34.65 cooldown is clean (last entry 312s ago) so no idempotency veto in play.
+              </p>
+            </div>
+            <div className="text-[11px] text-zinc-600 italic px-1">Synthesized from: Verdict · Gates (4/6) · SentCom (+43, GO) · ML Audit (7 active features) · Log (last 5). Backed by GET /api/ai/synthesize/{focused}.</div>
+          </div>
+        )}
 
-        {/* ── GATES tab ── */}
+
         {tab === 'gates' && (
           <div className="space-y-2">
             <div className="text-[12px] text-zinc-500 uppercase">Gates · 4 of 6 open</div>
@@ -558,6 +655,7 @@ const ChartPane = ({ focused }) => (
       <Pill color="emerald">● LIVE · 6s</Pill>
       <Pill color="violet">OPEN · 5h</Pill>
       <span className="text-zinc-500">$362.55 <span className="text-emerald-400">+8.7%</span></span>
+      <AskAi context="chart" />
       <span className="text-zinc-700">·</span>
       <span className="text-zinc-500">Entry <span className="text-zinc-300 font-mono">368.04</span></span>
       <span className="text-zinc-500">SL <span className="text-rose-300 font-mono">352.84</span></span>
@@ -678,6 +776,7 @@ const OpenPositions = () => {
           <span className="font-mono text-zinc-100 font-bold">6</span>
           <Pill color="emerald">● 6s</Pill>
           <span className="text-[13px] font-mono text-emerald-400 ml-1">+$657</span>
+          <AskAi context="positions" />
         </div>
         <div className="flex items-center gap-1">
           <button className="text-[11px] px-1.5 py-0.5 bg-cyan-900/40 hover:bg-cyan-900/60 text-cyan-300 rounded font-medium">RECONCILE 6</button>
@@ -687,13 +786,14 @@ const OpenPositions = () => {
       </div>
       <div className="flex-1 overflow-y-auto">
         {positions.map((p, i) => (
-          <div key={i} className="px-3 py-1.5 border-b border-zinc-900/50 hover:bg-zinc-900/30 cursor-pointer">
+          <div key={i} className="px-3 py-1.5 border-b border-zinc-900/50 hover:bg-zinc-900/30 cursor-pointer group">
             <div className="flex items-center gap-1 mb-0.5 flex-wrap">
               <span className="text-sm font-bold font-mono text-zinc-100">{p.sym}</span>
               <Pill color={p.dir.includes('LONG') || p.dir.includes('long') ? 'emerald' : 'rose'}>{p.dir}</Pill>
               {p.mult && <Pill color="violet">{p.mult}</Pill>}
               {p.tag && <Pill color="amber">{p.tag}</Pill>}
               <span className={`ml-auto text-[13px] font-mono ${p.pnl.includes('+') ? 'text-emerald-400' : 'text-rose-400'}`}>{p.pnl}</span>
+              <span className="opacity-40 group-hover:opacity-100 transition"><AskAi context="positions:row" /></span>
             </div>
             <div className="text-[11px] text-zinc-500 font-mono pl-1">{p.sh}sh{p.sl ? ` · SL ${p.sl} · PT ${p.pt}` : ''}{p.smb ? ` · SMB ${p.smb}` : ''}</div>
           </div>
@@ -745,18 +845,105 @@ const StatusStrip = () => (
   </div>
 );
 
-// ─── ⌘K FLOATING SEARCH OVERLAY ───────────────────────────────────
-const SearchOverlay = ({ open, onClose }) => {
+// ─── INLINE "ASK AI" BUTTON — sprinkled near every contextful surface ─
+const AskAi = ({ context, label = '🤖' }) => {
+  // Calls the global setter installed by V6LayoutPreview root.
+  const open = () => window.__sentcomChatOpen?.(context);
+  return (
+    <button
+      onClick={open}
+      title={`Ask the bot · context: ${context}`}
+      className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border border-cyan-700/40 bg-cyan-900/20 text-cyan-300 hover:bg-cyan-900/50 hover:border-cyan-600 transition"
+    >
+      <span>{label}</span>
+      {label !== '🤖' && <span className="text-cyan-200">▸</span>}
+    </button>
+  );
+};
+
+// ─── CHAT DRAWER — slides in from the right, persistent rolling dialogue ─
+const ChatDrawer = ({ open, onClose, seedContext }) => {
+  const [history, setHistory] = useState([
+    { role: 'system', text: 'SentCom AI · ready. Click any 🤖 icon in the UI to seed a contextual question, or type freely below.' },
+    { role: 'user',   text: 'Why did we skip WULF earlier?', t: '14:21' },
+    { role: 'bot',    text: 'WULF gap_fade scored 38 pts — below the 40-pt SentCom GO threshold. Live general model saw NO EDGE (94% flat conf, −2 pts) and VAE regime gave +0 alignment in a risk-off window. R:R was acceptable (2.1) but volume was 0.7×. I logged it as a SKIP with confidence_gate_veto.', t: '14:21' },
+  ]);
+  const [draft, setDraft] = useState('');
+
+  // Context-aware seed prompts.
+  const SEEDS = {
+    'global':            { prefix: '',                                  hint: 'Ask anything about today\'s session, the bot, or a symbol.' },
+    'pipeline:scan':     { prefix: 'On the SCAN stage right now, ',     hint: 'about the 6 candidates currently scanning' },
+    'pipeline:eval':     { prefix: 'On the EVAL stage right now, ',     hint: 'about the 5 candidates being evaluated' },
+    'pipeline:order':    { prefix: 'On the ORDER pipeline, ',           hint: 'about pending or recently filled orders' },
+    'pipeline:manage':   { prefix: 'On open-position management, ',     hint: 'about the 7 open positions' },
+    'pipeline:close':    { prefix: 'On today\'s closed trades, ',       hint: 'about the 9 closed trades and 44% WR' },
+    'scanner:row':       { prefix: 'On this scanner row, ',             hint: 'about why this symbol was picked / its score' },
+    'thinking:focused':  { prefix: 'For the focused symbol, ',          hint: 'about the current Thinking-pane evaluation' },
+    'positions':         { prefix: 'On the open-positions panel, ',     hint: 'about open / closing logic / drift' },
+    'positions:row':     { prefix: 'On this open position, ',           hint: 'about why this is held / current management plan' },
+    'chart':             { prefix: 'Looking at the chart, ',            hint: 'about the focused symbol\'s technical state' },
+    'fullintel':         { prefix: 'About the full-intel synthesis, ',  hint: 'follow-up questions on the synthesized rationale' },
+    'pnl':               { prefix: 'About today\'s P&L picture, ',      hint: 'about the equity curve / risk allocation / drawdown' },
+    'safety':            { prefix: 'On safety / system health, ',       hint: 'about reconciliation, throttle, drift, kill switch' },
+  };
+  // Fall back to global if context is "fullintel:FDX" etc — split before colon.
+  const seedKey = seedContext ? (SEEDS[seedContext] ? seedContext : seedContext.split(':')[0]) : 'global';
+  const seed = SEEDS[seedKey] || SEEDS['global'];
+  const ctxLabel = seedContext || 'global';
+
+  const send = () => {
+    if (!draft.trim()) return;
+    const fullText = (seed.prefix || '') + draft.trim();
+    setHistory(h => [...h, { role: 'user', text: fullText, t: 'now' }, { role: 'bot', text: '… thinking …', t: 'now' }]);
+    setDraft('');
+  };
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-start justify-center pt-32" onClick={onClose}>
-      <div className="bg-zinc-950 border border-cyan-700/50 rounded-lg shadow-2xl w-[640px] max-w-[90vw] overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
-          <span className="text-cyan-400">⌕</span>
-          <input autoFocus placeholder="Symbol · setup · keyword · 'WULF skip', 'gate', 'reconcile' …" className="flex-1 bg-transparent border-0 outline-0 text-[14px] text-zinc-100 placeholder:text-zinc-500" />
-          <span className="text-[11px] text-zinc-500">esc</span>
+    <div className="fixed top-0 right-0 bottom-0 z-[80] w-[420px] bg-zinc-950 border-l border-cyan-800/50 shadow-2xl flex flex-col">
+      {/* Header */}
+      <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2 flex-shrink-0">
+        <span className="text-cyan-400">🤖</span>
+        <span className="text-[13px] font-semibold text-zinc-100">SentCom AI</span>
+        <Pill color="cyan">{ctxLabel}</Pill>
+        <span className="text-[11px] text-zinc-500 ml-auto">⌘K · esc</span>
+        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">×</button>
+      </div>
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+        {history.map((m, i) => (
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[88%] rounded px-2 py-1.5 text-[12.5px] leading-relaxed ${
+              m.role === 'user'    ? 'bg-cyan-900/40 text-cyan-100 border border-cyan-700/40' :
+              m.role === 'bot'     ? 'bg-zinc-900 text-zinc-200 border border-zinc-800' :
+                                     'text-zinc-500 italic text-[11px]'
+            }`}>
+              {m.text}
+              {m.t && <div className="text-[10px] text-zinc-600 mt-0.5">{m.t}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Input */}
+      <div className="border-t border-zinc-800 p-2 flex-shrink-0">
+        {seed.prefix && (
+          <div className="text-[11px] text-zinc-500 px-1 pb-1">
+            <span className="text-zinc-600">prefix:</span> <span className="text-cyan-400 italic">"{seed.prefix.trim()}"</span>
+          </div>
+        )}
+        <div className="flex items-end gap-1.5">
+          <textarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder={seed.hint}
+            rows={2}
+            className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-[12.5px] text-zinc-100 placeholder:text-zinc-600 resize-none outline-none focus:border-cyan-700"
+          />
+          <button onClick={send} className="bg-cyan-900/50 hover:bg-cyan-800 text-cyan-200 border border-cyan-700/60 rounded px-2 py-1.5 text-[12px] font-medium">▶</button>
         </div>
-        <div className="p-2 text-[12px] text-zinc-500 italic">type to search across symbols, decisions, trades, gates, and the Stream Deep Feed…</div>
+        <div className="text-[10px] text-zinc-600 italic mt-1">enter to send · shift+enter for newline · history persists across navigation</div>
       </div>
     </div>
   );
@@ -769,7 +956,11 @@ export const V6LayoutPreview = () => {
   const [rightPct, setRightPct] = useState(20);
   const [centerTopPct, setCenterTopPct] = useState(70);
   const [chartPct, setChartPct] = useState(58);
-  const [searchOpen, setSearchOpen] = useState(false);
+
+  // V6.2 — chat drawer + sticky drill-state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatContext, setChatContext] = useState('global');
+  const [activePipelineFilter, setActivePipelineFilter] = useState(null); // 'scan' | 'eval' | 'order' | 'manage' | 'close'
 
   const outerRef = useRef(null);
   const centerRef = useRef(null);
@@ -777,14 +968,24 @@ export const V6LayoutPreview = () => {
   const onFocusSym = useCallback((s) => setFocused(s), []);
   const centerPct = 100 - leftPct - rightPct;
 
-  // ⌘K / Ctrl+K to open search
+  // Install global chat-opener so AskAi buttons anywhere can call it
+  useEffect(() => {
+    window.__sentcomChatOpen = (ctx) => {
+      setChatContext(ctx || 'global');
+      setChatOpen(true);
+    };
+    return () => { delete window.__sentcomChatOpen; };
+  }, []);
+
+  // ⌘K / Ctrl+K to toggle chat (global context)
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSearchOpen(o => !o);
+        setChatContext('global');
+        setChatOpen(o => !o);
       }
-      if (e.key === 'Escape') setSearchOpen(false);
+      if (e.key === 'Escape') setChatOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -794,22 +995,22 @@ export const V6LayoutPreview = () => {
     <div className="min-h-screen bg-zinc-900 text-zinc-100 flex flex-col relative">
       <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-1.5 flex items-center justify-between flex-shrink-0 text-[13px]">
         <div className="flex items-center gap-2">
-          <span className="text-cyan-300 font-bold text-xs">SentCom V6.1 — Layout Preview (revised after operator review)</span>
-          <Pill color="amber">drag any divider · ⌘K to search</Pill>
+          <span className="text-cyan-300 font-bold text-xs">SentCom V6.2 — Layout Preview (Full Intel + Chat AI + sticky drills)</span>
+          <Pill color="amber">drag any divider · click 🤖 anywhere · ⌘K to chat</Pill>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => { setLeftPct(15); setRightPct(20); setCenterTopPct(70); setChartPct(58); }} className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-900">reset layout</button>
+          <button onClick={() => { setLeftPct(15); setRightPct(20); setCenterTopPct(70); setChartPct(58); setActivePipelineFilter(null); }} className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-900">reset layout</button>
           <a href="?" className="text-violet-400 hover:underline">← back to V5</a>
         </div>
       </div>
 
-      <TopStrip />
+      <TopStrip activeFilter={activePipelineFilter} onFilter={setActivePipelineFilter} onAskAi={(ctx) => { setChatContext(ctx); setChatOpen(true); }} />
       <PnlStatBlock />
       <DensityStrip />
 
       <div ref={outerRef} className="flex-1 flex overflow-hidden relative">
         <EodAlarm />
-        <div style={{ width: `${leftPct}%` }} className="flex-shrink-0 overflow-hidden"><ScannerPane focused={focused} onFocus={onFocusSym} /></div>
+        <div style={{ width: `${leftPct}%` }} className="flex-shrink-0 overflow-hidden"><ScannerPane focused={focused} onFocus={onFocusSym} activePipelineFilter={activePipelineFilter} /></div>
         <VSplit leftPct={leftPct} onChange={setLeftPct} containerRef={outerRef} />
         <div style={{ width: `${centerPct}%` }} className="flex flex-col overflow-hidden flex-shrink-0" ref={centerRef}>
           <div style={{ height: `${centerTopPct}%` }} className="flex overflow-hidden flex-shrink-0" ref={topRef}>
@@ -824,7 +1025,7 @@ export const V6LayoutPreview = () => {
         <div style={{ width: `${rightPct}%` }} className="flex-shrink-0 overflow-hidden"><RightSidebar /></div>
       </div>
       <StatusStrip />
-      <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} seedContext={chatContext} />
     </div>
   );
 };
