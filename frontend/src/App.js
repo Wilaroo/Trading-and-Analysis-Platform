@@ -13,6 +13,7 @@ import { HelpCircle } from 'lucide-react';
 import { AuraMockupPreview } from './pages/AuraMockupPreview';
 import { V6LayoutPreview } from './pages/V6LayoutPreview';
 import { V6BrainstormPreview } from './pages/V6BrainstormPreview';
+import { V6ConceptsExplained } from './pages/V6ConceptsExplained';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -121,10 +122,13 @@ function App() {
     typeof window !== 'undefined' && window.location.search.includes('preview=aura');
   const isV6BrainstormPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6next');
+  const isV6ConceptsPreview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=v6concepts');
   const isV6Preview =
     typeof window !== 'undefined' &&
     window.location.search.includes('preview=v6') &&
-    !isV6BrainstormPreview;
+    !isV6BrainstormPreview &&
+    !isV6ConceptsPreview;
 
   // Startup status dashboard - shows system initialization progress
   const [showStartupStatus, setShowStartupStatus] = useState(false);
@@ -473,6 +477,8 @@ function App() {
           until consumed) so the preview is isolated and reversible. */}
       {isAuraPreview ? (
         <AuraMockupPreview />
+      ) : isV6ConceptsPreview ? (
+        <V6ConceptsExplained />
       ) : isV6BrainstormPreview ? (
         <V6BrainstormPreview />
       ) : isV6Preview ? (
