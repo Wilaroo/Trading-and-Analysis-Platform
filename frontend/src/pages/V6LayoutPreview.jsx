@@ -80,86 +80,105 @@ const HSplit = ({ topPct, onChange, containerRef }) => {
   return <div onMouseDown={onDown} title={`${topPct.toFixed(0)}% — drag`} className="h-[4px] cursor-row-resize bg-zinc-800/50 hover:bg-cyan-700 transition-colors flex-shrink-0" />;
 };
 
-// ─── ① TOP KPI RIBBON (preserved from production) ─────────────
-const KpiRibbon = () => (
-  <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-2 flex items-center gap-2 flex-shrink-0 text-xs">
-    <div className="text-cyan-400 font-bold mr-1">SENTCOM</div>
-    <div className="bg-zinc-900 rounded border border-zinc-800 px-2 py-1 flex items-center gap-2">
-      <span className="text-zinc-500 text-[13px] uppercase">Scan</span>
-      <span className="font-mono text-zinc-100 font-bold">6</span>
-      <span className="text-zinc-600 text-[13px]">multi · 1234 symbols</span>
+// ─── ① TOP STRIP (slim — pipeline pills + system health) ───────
+const TopStrip = () => (
+  <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-1.5 flex items-center gap-2 flex-shrink-0 text-[13px]">
+    <span className="text-cyan-400 font-bold tracking-wider">SENTCOM</span>
+    {/* Pipeline pills — were 80px-tall cards, now ~24px inline */}
+    <div className="flex items-center gap-0.5 ml-2">
+      <Pill color="zinc"><span className="text-zinc-500">SCAN</span> <span className="font-mono font-bold text-zinc-100 ml-1">6</span></Pill>
+      <span className="text-zinc-700 mx-0.5">→</span>
+      <Pill color="cyan"><span className="text-zinc-500">EVAL</span> <span className="font-mono font-bold ml-1">5</span></Pill>
+      <span className="text-zinc-700 mx-0.5">→</span>
+      <Pill color="zinc"><span className="text-zinc-500">ORDER</span> <span className="font-mono font-bold text-zinc-100 ml-1">0</span></Pill>
+      <span className="text-zinc-700 mx-0.5">→</span>
+      <Pill color="emerald"><span className="text-zinc-500">MANAGE</span> <span className="font-mono font-bold ml-1">7</span> <span className="text-emerald-400 font-mono">+0.3R</span></Pill>
+      <span className="text-zinc-700 mx-0.5">→</span>
+      <Pill color="emerald"><span className="text-zinc-500">CLOSE</span> <span className="font-mono font-bold ml-1">9</span> <span className="text-zinc-400 font-mono">WR 44%</span></Pill>
     </div>
-    <span className="text-zinc-700">→</span>
-    <div className="bg-zinc-900 rounded border border-zinc-800 px-2 py-1 flex items-center gap-2">
-      <span className="text-zinc-500 text-[13px] uppercase">Evaluate</span>
-      <span className="font-mono text-cyan-300 font-bold">5</span>
-      <span className="text-zinc-600 text-[13px]">5 alerts</span>
+    {/* Right cluster — system health (consolidated), phase, account */}
+    <div className="ml-auto flex items-center gap-2">
+      <Pill color="amber">PAPER · DUN615665</Pill>
+      <Pill color="orange">AFTER-HOURS</Pill>
+      {/* ALL SYSTEMS pill — now absorbs Wires + drift + throttle + orphan-GTC + safety */}
+      <button className="flex items-center gap-1.5 bg-emerald-900/30 hover:bg-emerald-900/50 border border-emerald-700/60 rounded px-2 py-0.5 text-[13px] text-emerald-300 font-medium">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <span>ALL SYSTEMS</span>
+        <span className="text-zinc-500 font-mono text-[12px]">· 0 drift · 0 thr · 0 orph</span>
+      </button>
+      <span className="text-zinc-700 text-[12px]">⌘K to search</span>
     </div>
-    <span className="text-zinc-700">→</span>
-    <div className="bg-zinc-900 rounded border border-zinc-800 px-2 py-1 flex items-center gap-2">
-      <span className="text-zinc-500 text-[13px] uppercase">Order</span>
-      <span className="font-mono text-zinc-100 font-bold">0</span>
-      <span className="text-zinc-600 text-[13px]">0 filled · 0 pending</span>
-    </div>
-    <span className="text-zinc-700">→</span>
-    <div className="bg-zinc-900 rounded border border-emerald-700/40 px-2 py-1 flex items-center gap-2">
-      <span className="text-zinc-500 text-[13px] uppercase">Manage</span>
-      <span className="font-mono text-emerald-300 font-bold">+0.3R</span>
-      <span className="font-mono text-zinc-100">7</span>
-      <span className="text-zinc-600 text-[13px]">FDX · UPS · FDX · no stops breached</span>
-    </div>
-    <span className="text-zinc-700">→</span>
-    <div className="bg-zinc-900 rounded border border-emerald-700/40 px-2 py-1 flex items-center gap-2">
-      <span className="text-zinc-500 text-[13px] uppercase">Close Today</span>
-      <span className="font-mono text-emerald-300 font-bold">+0.0R</span>
-      <span className="font-mono text-zinc-100">9</span>
-      <span className="text-zinc-600 text-[13px]">WR 44% · worst 0.0R</span>
-    </div>
-    <button className="ml-auto bg-zinc-900 border border-zinc-800 hover:border-cyan-700 rounded px-2 py-1 text-[13px] text-zinc-300">⚙ SEARCH</button>
-    <Pill color="emerald">ALL SYSTEMS</Pill>
-    <Pill color="emerald">↯ Wires</Pill>
-    <button className="bg-amber-900/30 border border-amber-700/60 rounded px-2 py-1 text-[13px] text-amber-300 font-bold">FLATTEN ALL</button>
-    <Pill color="amber">PAPER · DUN615665</Pill>
-    <Pill color="emerald">Safety ARMED</Pill>
-    <div className="bg-zinc-900 rounded border border-emerald-700/40 px-2 py-1">
-      <div className="text-[12px] text-zinc-500 uppercase">P&amp;L</div>
-      <div className="font-mono text-emerald-300 font-bold text-xs">+$4,300.78</div>
-      <div className="text-[12px] text-zinc-500">+$3,643.91 +$656.79</div>
-    </div>
-    <div className="bg-zinc-900 rounded border border-zinc-800 px-2 py-1">
-      <div className="text-[12px] text-zinc-500 uppercase">Equity</div>
-      <div className="font-mono text-zinc-100 font-bold text-xs">$237,654</div>
-    </div>
-    <div className="bg-zinc-900 rounded border border-zinc-800 px-2 py-1">
-      <div className="text-[12px] text-zinc-500 uppercase">Buying Pwr</div>
-      <div className="font-mono text-zinc-300 text-xs">$—</div>
-    </div>
-    <Pill color="orange">PHASE · AFTER-HOURS</Pill>
   </div>
 );
 
-// ─── ② PUSHER HEALTH STRIP ────────────────────────────────────
-const PusherStrip = () => (
-  <div className="bg-zinc-950/60 border-b border-zinc-800/50 px-3 py-1 flex items-center gap-3 flex-shrink-0 text-[14px]">
-    <span className="text-zinc-500 uppercase text-[13px]">Top Movers · Extended</span>
-    <span className="font-mono text-zinc-300">INWM <span className="text-zinc-500">$282.88</span> <span className="text-rose-400">-0.06%</span></span>
-    <span className="font-mono text-zinc-300">QQQ <span className="text-zinc-500">$683.86</span> <span className="text-emerald-400">+0.02%</span></span>
-    <span className="font-mono text-zinc-300">DIA <span className="text-zinc-500">$492.47</span> <span className="text-rose-400">-0.01%</span></span>
-    <span className="font-mono text-zinc-300">SPY <span className="text-zinc-500">$724.97</span> <span className="text-emerald-400">+0.00%</span></span>
-    <span className="font-mono text-zinc-300">VIX <span className="text-zinc-500">$17.38</span> <span className="text-emerald-400">+0.00%</span></span>
-    <span className="text-zinc-700">·</span>
-    <Pill color="emerald">PUSHER GREEN</Pill>
-    <span className="text-zinc-500">last push 6s ago</span>
-    <span className="text-zinc-700">·</span>
-    <span className="text-zinc-500">push rate <span className="text-zinc-300 font-mono">6/min</span></span>
-    <span className="text-zinc-700">·</span>
-    <span className="text-zinc-500">RPC <span className="text-emerald-300 font-mono">3ms</span></span>
-    <span className="text-zinc-500">last p95 <span className="font-mono">449ms</span> avg <span className="font-mono">119ms</span> (n=50)</span>
-    <span className="text-zinc-700">·</span>
-    <span className="text-zinc-500">total <span className="text-zinc-300 font-mono">736</span></span>
-    <span className="text-zinc-500">tracking <span className="text-cyan-300 font-mono">321</span> quotes · <span className="font-mono">21</span> pos</span>
+// ─── ② P&L STAT BLOCK (prominent, 2 rows) ────────────────────────
+const PnlStatBlock = () => (
+  <div className="bg-gradient-to-b from-zinc-900/80 to-zinc-950 border-b border-zinc-800 px-4 py-2 flex items-stretch gap-6 flex-shrink-0">
+    {/* Daily P&L — biggest, most prominent */}
+    <div className="flex flex-col">
+      <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Daily P&amp;L</div>
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[26px] font-bold text-emerald-300 leading-none">+$4,300.78</span>
+        <span className="font-mono text-[13px] text-emerald-400">+1.85%</span>
+      </div>
+      <div className="text-[11px] text-zinc-500 mt-0.5">
+        realized <span className="text-zinc-300 font-mono">+$3,643.91</span>
+        <span className="text-zinc-700 mx-1">·</span>
+        unreal <span className="text-emerald-400 font-mono">+$656.79</span>
+      </div>
+    </div>
+    <div className="w-px bg-zinc-800" />
+    <div className="flex flex-col">
+      <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Equity</div>
+      <span className="font-mono text-[22px] font-bold text-zinc-100 leading-none mt-0.5">$237,654</span>
+      <div className="text-[11px] text-zinc-500 mt-1">peak today <span className="text-zinc-300 font-mono">$238,012</span></div>
+    </div>
+    <div className="w-px bg-zinc-800" />
+    <div className="flex flex-col">
+      <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Buying Power</div>
+      <span className="font-mono text-[22px] font-bold text-cyan-300 leading-none mt-0.5">$142.8K</span>
+      <div className="text-[11px] text-zinc-500 mt-1">DLP <span className="text-zinc-300 font-mono">-0.4%</span> of <span className="font-mono">2.0%</span></div>
+    </div>
+    <div className="w-px bg-zinc-800" />
+    <div className="flex flex-col">
+      <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Open Risk</div>
+      <span className="font-mono text-[22px] font-bold text-amber-300 leading-none mt-0.5">$2,512</span>
+      <div className="text-[11px] text-zinc-500 mt-1">6 pos · max <span className="text-zinc-300 font-mono">$2.5K</span></div>
+    </div>
+    {/* Sparkline placeholder right side */}
+    <div className="flex-1 flex items-center justify-end">
+      <div className="text-[11px] text-zinc-600 italic">[ equity curve sparkline · today ]</div>
+    </div>
   </div>
 );
+
+// ─── ③ DENSITY STRIP (movers + pusher + strategy mix + S vs R) ──
+const DensityStrip = () => (
+  <div className="bg-zinc-950/60 border-b border-zinc-800/50 px-3 py-1 flex items-center gap-3 flex-shrink-0 text-[12px] overflow-hidden whitespace-nowrap">
+    <span className="text-zinc-500 uppercase">Top Movers</span>
+    <span className="font-mono text-zinc-300">QQQ <span className="text-emerald-400">+0.02%</span></span>
+    <span className="font-mono text-zinc-300">SPY <span className="text-emerald-400">+0.00%</span></span>
+    <span className="font-mono text-zinc-300">VIX <span className="text-zinc-500">17.38</span></span>
+    <span className="text-zinc-700">·</span>
+    <Pill color="emerald">PUSHER</Pill>
+    <span className="text-zinc-500 font-mono">6/min · RPC 3ms · 321 quotes</span>
+    <span className="text-zinc-700">·</span>
+    <span className="text-zinc-500">STRAT MIX</span>
+    <Pill color="violet">squeeze 38%</Pill>
+    <Pill color="cyan">gap_fade 22%</Pill>
+    <span className="text-zinc-600 font-mono">+5 more</span>
+    <span className="text-zinc-700">·</span>
+    <span className="flex items-center gap-1">
+      <span className="text-zinc-500">S vs R</span>
+      <span className="text-emerald-400 font-mono">↗ +32pp</span>
+      <span className="text-violet-300 font-mono">66%</span>
+      <span className="text-zinc-700">/</span>
+      <span className="text-emerald-300 font-mono">33%</span>
+      <span className="text-emerald-400 font-mono">+$73K</span>
+    </span>
+  </div>
+);
+
 
 // ─── SCANNER CARD (production-faithful + expandable) ────────────
 const SCANNER = [
@@ -309,92 +328,223 @@ const ScannerPane = ({ focused, onFocus }) => {
   );
 };
 
-// ─── ④ THINKING PANE ────────────────────────────────────────────
+// ─── ④ THINKING PANE — tabbed, SentCom Intelligence wired per-symbol ─
 const ThinkingPane = ({ focused }) => {
   const [mode, setMode] = useState('pinned');
+  const [tab, setTab] = useState('verdict');
+
+  const TABS = [
+    { id: 'verdict',  label: '🎯 Verdict' },
+    { id: 'gates',    label: '✓ Gates' },
+    { id: 'sentcom',  label: '🧠 SentCom' },
+    { id: 'audit',    label: '🔬 ML Audit' },
+    { id: 'log',      label: '📜 Log' },
+  ];
+
   return (
     <div className="bg-zinc-950 flex flex-col overflow-hidden h-full">
+      {/* Header with focus + pin/rotate */}
       <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-zinc-400 uppercase">🧠 Thinking</span>
           <Pill color="cyan">{focused}</Pill>
-          <span className="text-[13px] text-zinc-500">eval cycle #14 · 0.3s ago</span>
+          <span className="text-[12px] text-zinc-500">eval cycle #14 · 0.3s ago</span>
         </div>
         <div className="flex items-center gap-1 bg-zinc-900 rounded p-0.5">
-          <button onClick={() => setMode('pinned')} className={`text-[13px] px-2 py-0.5 rounded ${mode === 'pinned' ? 'bg-cyan-900/50 text-cyan-300' : 'text-zinc-500'}`}>📍 Pin</button>
-          <button onClick={() => setMode('rotate')} className={`text-[13px] px-2 py-0.5 rounded ${mode === 'rotate' ? 'bg-violet-900/50 text-violet-300' : 'text-zinc-500'}`}>🔄 Rotate</button>
+          <button onClick={() => setMode('pinned')} className={`text-[12px] px-2 py-0.5 rounded ${mode === 'pinned' ? 'bg-cyan-900/50 text-cyan-300' : 'text-zinc-500'}`}>📍 Pin</button>
+          <button onClick={() => setMode('rotate')} className={`text-[12px] px-2 py-0.5 rounded ${mode === 'rotate' ? 'bg-violet-900/50 text-violet-300' : 'text-zinc-500'}`}>🔄 Rotate</button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-2">
-        <div className="bg-zinc-900/60 border border-cyan-700/40 rounded p-2 text-[14px]">
-          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-            <span className="text-base font-bold">{focused}</span>
-            <Pill color="cyan">EVALUATING gap_fade LONG</Pill>
-            <Pill color="violet">TQS 80</Pill>
-            <Pill color="emerald">A+</Pill>
-            <Pill color="emerald">ML 78%</Pill>
-          </div>
-          <div className="grid grid-cols-4 gap-1 mb-2 text-[13px]">
-            <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">Entry</div><div className="font-mono">$368.04</div></div>
-            <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">SL</div><div className="text-rose-300 font-mono">$352.84</div></div>
-            <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">PT</div><div className="text-emerald-300 font-mono">$374.44</div></div>
-            <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">R:R</div><div className="font-mono">2.8 · 256sh</div></div>
-          </div>
-          <div className="mb-2"><div className="text-[12px] text-zinc-500 uppercase mb-0.5">Gates · 4 of 6 open</div>
-            <div className="grid grid-cols-2 gap-0.5 text-[13px]">
-              <div className="text-emerald-400">✓ Capital ($24k free)</div>
-              <div className="text-emerald-400">✓ R:R floor (2.8 ≥ 1.5)</div>
-              <div className="text-emerald-400">✓ Direction stable 38s</div>
-              <div className="text-emerald-400">✓ No cooldown</div>
-              <div className="text-amber-400">✗ Vol confirm (0.9× vs 1.5×)</div>
-              <div className="text-amber-400">✗ VWAP reclaim ($0.12 below)</div>
+
+      {/* Tab strip */}
+      <div className="px-2 py-1 border-b border-zinc-800/60 flex items-center gap-0.5 flex-shrink-0 overflow-x-auto">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`text-[12px] px-2 py-1 rounded whitespace-nowrap ${tab === t.id ? 'bg-cyan-900/40 text-cyan-300 border border-cyan-700/50' : 'text-zinc-400 border border-transparent hover:bg-zinc-900'}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 text-[13px]">
+        {/* ── VERDICT (compact summary — "if I had to decide right now") ─ */}
+        {tab === 'verdict' && (
+          <div className="bg-zinc-900/60 border border-cyan-700/40 rounded p-2 space-y-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-base font-bold">{focused}</span>
+              <Pill color="cyan">EVALUATING gap_fade LONG</Pill>
+              <Pill color="violet">TQS 80</Pill>
+              <Pill color="emerald">A+</Pill>
+              <Pill color="emerald">ML 78%</Pill>
             </div>
-          </div>
-          <div className="mb-2 bg-zinc-950/40 border border-violet-800/30 rounded p-1.5">
-            <div className="text-violet-300 font-medium text-[13px] mb-0.5">🎯 Watching for trigger</div>
-            <ul className="space-y-0.5 text-[13px] text-zinc-300">
-              <li>• 5m vol {'>'} 1.5× avg (need +67%)</li>
-              <li>• AND VWAP reclaim above $362.95</li>
-              <li>• Auto-fires both holding 8s</li>
-            </ul>
-          </div>
-          <div className="grid grid-cols-3 gap-1 mb-2 text-[13px]">
-            <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Bull · 65%</div><div className="text-emerald-300">+$226</div></div>
-            <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Base · 25%</div><div className="text-zinc-300">±$0–40</div></div>
-            <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Bear · 10%</div><div className="text-rose-300">−$109</div></div>
-          </div>
-          <div className="mb-2"><div className="text-[12px] text-zinc-500 uppercase mb-0.5">Context</div>
-            <div className="grid grid-cols-2 gap-0.5 text-[13px] text-zinc-400">
+            <div className="grid grid-cols-4 gap-1 text-[12px]">
+              <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">Entry</div><div className="font-mono">$368.04</div></div>
+              <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">SL</div><div className="text-rose-300 font-mono">$352.84</div></div>
+              <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">PT</div><div className="text-emerald-300 font-mono">$374.44</div></div>
+              <div className="bg-zinc-950/60 rounded px-1.5 py-1"><div className="text-zinc-500">R:R</div><div className="font-mono">2.8 · 256sh</div></div>
+            </div>
+            <div className="bg-zinc-950/40 border border-violet-800/30 rounded p-1.5">
+              <div className="text-violet-300 font-medium mb-0.5">🎯 Watching for trigger</div>
+              <ul className="space-y-0.5 text-zinc-300">
+                <li>• 5m vol &gt; 1.5× avg (need +67%)</li>
+                <li>• AND VWAP reclaim above $362.95</li>
+                <li>• Auto-fires when both held 8s</li>
+              </ul>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Bull · 65%</div><div className="text-emerald-300">+$226</div></div>
+              <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Base · 25%</div><div className="text-zinc-300">±$0–40</div></div>
+              <div className="bg-zinc-950/40 rounded p-1.5"><div className="text-[12px] text-zinc-500">Bear · 10%</div><div className="text-rose-300">−$109</div></div>
+            </div>
+            <div className="text-zinc-400 italic bg-zinc-950/40 p-1.5 rounded">
+              "Considered momentum_breakout but R:R 1.42 below floor. Will downgrade to Tier B if vol stays thin past 14:30."
+            </div>
+            <div className="grid grid-cols-2 gap-0.5 text-[12px] text-zinc-400">
               <div>📊 ATR(14) $1.82 · ±1.3%</div>
               <div>💧 8.4M avg vol · spread $0.01</div>
               <div>🌐 XLI +1.4% · RS +0.3</div>
-              <div>📰 No catalysts · earnings 12d</div>
+              <div>📰 No catalysts · earn 12d</div>
               <div>🔗 NVDA corr +0.74 ⚠</div>
               <div>🎲 18 PASS / 6 FAIL · 75% WR</div>
             </div>
           </div>
-          <div className="text-[13px] text-zinc-400 italic bg-zinc-950/40 p-1.5 rounded mb-2">
-            "Considered momentum_breakout but R:R 1.42 below floor. Will downgrade to Tier B if vol stays thin past 14:30."
-          </div>
-          <div className="border-t border-zinc-800 pt-1.5">
-            <div className="text-[12px] text-zinc-500 uppercase mb-0.5">Last 5 verdicts</div>
-            <div className="space-y-0 text-[12px]">
-              <div className="flex justify-between"><span className="text-rose-300">REJECT 14:22</span><span className="text-zinc-500">R:R 1.31</span></div>
-              <div className="flex justify-between"><span className="text-rose-300">REJECT 13:48</span><span className="text-zinc-500">vol fail</span></div>
-              <div className="flex justify-between"><span className="text-emerald-300">PASS 13:01 +$340</span><span className="text-zinc-500">target hit</span></div>
-              <div className="flex justify-between"><span className="text-rose-300">REJECT 12:18</span><span className="text-zinc-500">unstable</span></div>
-              <div className="flex justify-between"><span className="text-emerald-300">PASS 11:42 +$118</span><span className="text-zinc-500">scratch</span></div>
+        )}
+
+        {/* ── GATES tab ── */}
+        {tab === 'gates' && (
+          <div className="space-y-2">
+            <div className="text-[12px] text-zinc-500 uppercase">Gates · 4 of 6 open</div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between bg-zinc-950/40 rounded px-2 py-1">
+                <span className="text-emerald-400">✓ Capital floor</span>
+                <span className="text-[12px] text-zinc-500 font-mono">$24,142 free · need $20,000</span>
+              </div>
+              <div className="flex items-center justify-between bg-zinc-950/40 rounded px-2 py-1">
+                <span className="text-emerald-400">✓ R:R floor</span>
+                <span className="text-[12px] text-zinc-500 font-mono">2.8 ≥ 1.5</span>
+              </div>
+              <div className="flex items-center justify-between bg-zinc-950/40 rounded px-2 py-1">
+                <span className="text-emerald-400">✓ Direction stable</span>
+                <span className="text-[12px] text-zinc-500 font-mono">38s ≥ 30s</span>
+              </div>
+              <div className="flex items-center justify-between bg-zinc-950/40 rounded px-2 py-1">
+                <span className="text-emerald-400">✓ No cooldown active</span>
+                <span className="text-[12px] text-zinc-500 font-mono">v19.34.65 · last entry 312s ago</span>
+              </div>
+              <div className="flex items-center justify-between bg-rose-950/30 border border-rose-800/30 rounded px-2 py-1">
+                <span className="text-amber-400">✗ Vol confirm</span>
+                <span className="text-[12px] text-rose-300 font-mono">0.9× actual vs 1.5× required</span>
+              </div>
+              <div className="flex items-center justify-between bg-rose-950/30 border border-rose-800/30 rounded px-2 py-1">
+                <span className="text-amber-400">✗ VWAP reclaim</span>
+                <span className="text-[12px] text-rose-300 font-mono">$362.43 · need ≥ $362.55 (0.12 below)</span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-1 mt-2 pt-1.5 border-t border-zinc-800">
-            <button className="text-[12px] px-1.5 py-0.5 bg-cyan-900/40 text-cyan-300 rounded">📍 pin</button>
-            <button className="text-[12px] px-1.5 py-0.5 bg-zinc-800 text-zinc-300 rounded">📊 chart</button>
-            <button className="text-[12px] px-1.5 py-0.5 bg-zinc-800 text-zinc-300 rounded">📜 log</button>
-            <button className="text-[12px] px-1.5 py-0.5 bg-amber-900/30 text-amber-300 rounded ml-auto">🚫 mute</button>
+        )}
+
+        {/* ── SENTCOM INTELLIGENCE tab — per symbol ── */}
+        {tab === 'sentcom' && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-1">
+              <div className="flex items-center gap-1.5">
+                <Pill color="emerald">↗ NORMAL</Pill>
+                <span className="text-[12px] text-zinc-500">today: <span className="text-zinc-300 font-mono">5421</span> eval · <span className="text-emerald-400 font-mono">1838</span> GO · <span className="text-rose-400 font-mono">2999</span> SKIP · <span className="text-zinc-300 font-mono">34%</span> hit-rate</span>
+              </div>
+            </div>
+            {/* Verdict for THIS symbol */}
+            <div className="bg-zinc-900/60 border border-emerald-700/40 rounded p-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono font-bold">{focused}</span>
+                  <span className="text-zinc-400 text-[12px]">gap_fade · LONG</span>
+                  <Pill color="emerald">GO</Pill>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-emerald-400 font-mono text-[13px]">+43 pts</span>
+                  <span className="text-[12px] text-zinc-500">cycle #14</span>
+                </div>
+              </div>
+              <div className="space-y-0.5 text-[12px] text-zinc-400 mb-1.5">
+                <div>· Regime leans bullish (score 64.0) — moderate alignment <span className="text-emerald-300 font-mono">(+10)</span></div>
+                <div>· Model consensus STRONG (100% of 14 models, avg acc 57%) <span className="text-emerald-300 font-mono">(+15)</span></div>
+                <div>· Cross-model agreement on gap_fade direction <span className="text-emerald-300 font-mono">(+8)</span></div>
+                <div>· Live general sees NO EDGE (flat, 94% conf) <span className="text-rose-300 font-mono">(-2)</span></div>
+                <div>· Quality signal +12 from setup history <span className="text-emerald-300 font-mono">(+12)</span></div>
+              </div>
+              <div className="space-y-0.5">
+                {[['Regime', 75, 'emerald'], ['Consensus', 80, 'emerald'], ['Cross-Model', 70, 'emerald'], ['Live Model', 12, 'rose'], ['Quality', 78, 'emerald']].map(([l, v, c], i) => (
+                  <div key={i} className="flex items-center gap-1.5 text-[12px]">
+                    <span className="text-zinc-500 w-20">{l}</span>
+                    <Bar pct={v} color={c} />
+                    <span className="font-mono text-zinc-400 w-10 text-right">{v > 50 ? '+' : ''}{v - 50}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="text-[12px] text-zinc-500 italic">SentCom verdicts drive real bot trades — `confidence_gate_veto` rejects at trade_execution.py:1364.</div>
           </div>
-        </div>
-        {mode === 'rotate' && <div className="mt-2 text-[12px] text-zinc-500 text-center">⏱ rotates to UPS · MELI · NVDA every 8s</div>}
+        )}
+
+        {/* ── ML FEATURE AUDIT tab — replaces sidebar panel ── */}
+        {tab === 'audit' && (
+          <div className="space-y-2">
+            <div className="text-[12px] text-zinc-500 uppercase">ML feature audit · {focused}</div>
+            <div className="grid grid-cols-3 gap-1">
+              <div className="bg-emerald-500/10 border border-emerald-700 rounded px-1.5 py-1 text-[12px]">
+                <div className="text-zinc-500 uppercase tracking-wide text-[11px]">Setup</div>
+                <div className="text-emerald-300 font-mono">gap_and_go</div>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-700 rounded px-1.5 py-1 text-[12px]">
+                <div className="text-zinc-500 uppercase tracking-wide text-[11px]">Regime</div>
+                <div className="text-emerald-300 font-mono">risk_on_strong</div>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-700 rounded px-1.5 py-1 text-[12px]">
+                <div className="text-zinc-500 uppercase tracking-wide text-[11px]">Sector</div>
+                <div className="text-emerald-300 font-mono">leader</div>
+              </div>
+            </div>
+            <div>
+              <div className="text-[12px] text-zinc-500 uppercase mb-1">Active features (one-hot = 1.0)</div>
+              <div className="flex flex-wrap gap-1">
+                {['setup__gap_and_go', 'regime__risk_on_strong', 'sector__leader', 'tier__A', 'session__regular_hours', 'vol_bin__below_avg', 'spread__tight'].map(f => (
+                  <Pill key={f} color="cyan">{f}</Pill>
+                ))}
+              </div>
+            </div>
+            <div className="text-[12px] text-zinc-500 italic">Backed by GET /api/scanner/ml-feature-preview/{focused}. Click any $TICKER elsewhere to re-audit.</div>
+          </div>
+        )}
+
+        {/* ── LOG tab — last 5 verdicts for this symbol ── */}
+        {tab === 'log' && (
+          <div className="space-y-1">
+            {[
+              ['REJECT 14:22', 'rose', 'R:R 1.31 — below floor'],
+              ['REJECT 13:48', 'rose', 'vol fail (0.7×)'],
+              ['PASS  13:01 +$340', 'emerald', 'target hit · scaled out 1/3'],
+              ['REJECT 12:18', 'rose', 'unstable direction (12s)'],
+              ['PASS  11:42 +$118', 'emerald', 'scratch on R reclaim'],
+            ].map(([head, col, rest], i) => (
+              <div key={i} className="flex justify-between bg-zinc-950/40 rounded px-2 py-1">
+                <span className={`font-mono text-[12px] ${col === 'emerald' ? 'text-emerald-300' : 'text-rose-300'}`}>{head}</span>
+                <span className="text-[12px] text-zinc-500">{rest}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Footer actions */}
+      <div className="border-t border-zinc-800 px-2 py-1.5 flex items-center gap-1 flex-shrink-0">
+        <button className="text-[12px] px-1.5 py-0.5 bg-cyan-900/40 text-cyan-300 rounded">📍 pin</button>
+        <button className="text-[12px] px-1.5 py-0.5 bg-zinc-800 text-zinc-300 rounded">📊 chart</button>
+        <button className="text-[12px] px-1.5 py-0.5 bg-amber-900/30 text-amber-300 rounded ml-auto">🚫 mute symbol</button>
+      </div>
+      {mode === 'rotate' && <div className="px-2 pb-1 text-[12px] text-zinc-500 text-center flex-shrink-0">⏱ rotates to UPS · MELI · NVDA every 8s</div>}
     </div>
   );
 };
@@ -494,87 +644,58 @@ const TimelinePane = () => {
   );
 };
 
-// ─── RIGHT SIDEBAR (Briefings rotation + ML Audit + Open + SentCom Intel) ─
+// ─── RIGHT SIDEBAR — Open Positions leads, action buttons inline ────
 const Briefings = () => {
   const [tab, setTab] = useState('eod');
   return (
     <div className="border-b border-zinc-800 flex-shrink-0">
       <div className="px-2 py-1.5 flex items-center gap-1 flex-wrap">
-        {[['morning', '☀️ Morning Prep'], ['midday', '🌤 Mid-Day Recap'], ['power', '⚡ Power Hour'], ['eod', '🌙 EOD Recap']].map(([id, l]) => (
-          <button key={id} onClick={() => setTab(id)} className={`text-[13px] px-2 py-0.5 rounded border ${tab === id ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700' : 'text-zinc-400 border-zinc-800 hover:bg-zinc-900'}`}>{l}</button>
+        {[['morning', '☀️'], ['midday', '🌤'], ['power', '⚡'], ['eod', '🌙 EOD']].map(([id, l]) => (
+          <button key={id} onClick={() => setTab(id)} className={`text-[12px] px-1.5 py-0.5 rounded border ${tab === id ? 'bg-cyan-900/40 text-cyan-300 border-cyan-700' : 'text-zinc-400 border-zinc-800 hover:bg-zinc-900'}`}>{l}</button>
         ))}
-        <button className="ml-auto text-[13px] text-zinc-500 hover:text-zinc-300">🔄 RELIEF</button>
+        <button className="ml-auto text-[12px] text-zinc-500 hover:text-zinc-300">🔄</button>
       </div>
-      <div className="px-3 py-1.5 text-[13px] text-zinc-500 italic">Strategy mix · waiting for first alerts</div>
+      <div className="px-3 pb-1.5 text-[12px] text-zinc-500 italic">Strategy mix · waiting for first alerts</div>
     </div>
   );
 };
-
-const ShadowVsReal = () => (
-  <div className="px-3 py-2 border-b border-zinc-800 flex-shrink-0">
-    <div className="flex items-center justify-between mb-1.5">
-      <span className="text-[13px] text-zinc-500 uppercase">⚖ Shadow vs Real</span>
-      <span className="text-[13px] text-emerald-400 font-mono">↗ +32pp · shadow ahead</span>
-    </div>
-    <div className="grid grid-cols-2 gap-2">
-      <div className="bg-zinc-900 border border-violet-700/40 rounded p-2">
-        <div className="text-[12px] text-zinc-500">SHADOW</div>
-        <div className="text-violet-300 font-bold text-base">66%</div>
-        <div className="text-[12px] text-zinc-500">10.7k graded · 11.0k logged</div>
-        <div className="text-[12px] text-zinc-500">10.9k exec · 1? watch-only</div>
-      </div>
-      <div className="bg-zinc-900 border border-emerald-700/40 rounded p-2">
-        <div className="text-[12px] text-zinc-500">REAL</div>
-        <div className="text-emerald-300 font-bold text-base">33%</div>
-        <div className="text-[12px] text-zinc-500">105 closed</div>
-        <div className="text-[12px] text-emerald-400">+$73,903</div>
-      </div>
-    </div>
-  </div>
-);
-
-const MLFeatureAudit = () => (
-  <div className="px-3 py-2 border-b border-zinc-800 flex-shrink-0">
-    <div className="flex items-center justify-between mb-1.5">
-      <span className="text-[13px] text-zinc-500 uppercase flex items-center gap-1">📊 ML Feature Audit</span>
-      <button className="text-[13px] text-zinc-500 hover:text-cyan-300">⟳</button>
-    </div>
-    <div className="flex gap-1 mb-1.5">
-      <input placeholder="🔎 Symbol (e.g. NVDA)" className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-1.5 py-0.5 text-[13px]" />
-      <button className="bg-zinc-900 border border-zinc-800 hover:border-cyan-700 rounded px-2 py-0.5 text-[13px] text-zinc-300">AUDIT</button>
-    </div>
-    <div className="text-[12px] text-zinc-500">Type a symbol or click any $TICKER elsewhere to audit which ML label-features fire on it right now.</div>
-  </div>
-);
 
 const OpenPositions = () => {
   const positions = [
-    { sym: 'FDX', dir: 'DAY 2 long', mult: '2x', tag: 'PARTIAL', age: 'AMBER · 8s old', pnl: '+$648 · +0.0R', sl: '$350.32', pt: '$393.67', sh: '276', smb: 'B' },
-    { sym: 'UPS', dir: 'DAY 2 long', tag: 'PARTIAL', age: 'AMBER · 8s old', pnl: '-$124 · -0.0R', sl: '$94.98', pt: '$107.57', sh: '885', smb: 'B' },
-    { sym: 'SBUX', dir: 'SHORT', tag: 'ORPHAN ?', age: 'AMBER · 8s old', extra: 'RECONCILED', pnl: '+$258', sh: '273' },
-    { sym: 'ADBE', dir: 'SHORT', tag: 'ORPHAN ?', age: 'AMBER · 8s old', extra: 'RECONCILED', pnl: '-$2', sh: '15' },
-    { sym: 'LITE', dir: 'LONG', tag: 'ORPHAN ?', age: 'AMBER · 8s old', extra: 'RECONCILED', pnl: '-$121', sh: '8' },
-    { sym: 'LIN', dir: 'SHORT', tag: 'ORPHAN ?', age: 'AMBER · 8s old', extra: 'RECONCILED', pnl: '+$5', sh: '6' },
+    { sym: 'FDX', dir: 'DAY 2 long', mult: '2x', tag: 'PARTIAL', pnl: '+$648 · +0.0R', sl: '$350.32', pt: '$393.67', sh: '276', smb: 'B' },
+    { sym: 'UPS', dir: 'DAY 2 long', tag: 'PARTIAL', pnl: '-$124 · -0.0R', sl: '$94.98', pt: '$107.57', sh: '885', smb: 'B' },
+    { sym: 'SBUX', dir: 'SHORT', pnl: '+$258', sh: '273' },
+    { sym: 'ADBE', dir: 'SHORT', pnl: '-$2', sh: '15' },
+    { sym: 'LITE', dir: 'LONG', pnl: '-$121', sh: '8' },
+    { sym: 'LIN', dir: 'SHORT', pnl: '+$5', sh: '6' },
   ];
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
-        <span className="text-[13px] text-zinc-500 uppercase flex items-center gap-1">OPEN (6) <Pill color="emerald">● 6s</Pill> <button className="bg-cyan-900/40 text-cyan-300 px-1.5 py-0.5 rounded text-[12px]">RECONCILE 6</button></span>
-        <span className="text-[13px] text-emerald-400 font-mono">+$657</span>
+      {/* Header w/ inline action buttons */}
+      <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0 gap-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] text-zinc-300 uppercase font-semibold">Open</span>
+          <span className="font-mono text-zinc-100 font-bold">6</span>
+          <Pill color="emerald">● 6s</Pill>
+          <span className="text-[13px] font-mono text-emerald-400 ml-1">+$657</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button className="text-[11px] px-1.5 py-0.5 bg-cyan-900/40 hover:bg-cyan-900/60 text-cyan-300 rounded font-medium">RECONCILE 6</button>
+          <button className="text-[11px] px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-medium" title="Cancel all pending orders">✕ CANCEL</button>
+          <button className="text-[11px] px-2 py-0.5 bg-rose-900/40 hover:bg-rose-900/60 border border-rose-700/50 text-rose-300 rounded font-bold tracking-wide">⛔ FLATTEN</button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {positions.map((p, i) => (
-          <div key={i} className="px-3 py-2 border-b border-zinc-900/50 hover:bg-zinc-900/30">
-            <div className="flex items-center gap-1 mb-1 flex-wrap">
+          <div key={i} className="px-3 py-1.5 border-b border-zinc-900/50 hover:bg-zinc-900/30 cursor-pointer">
+            <div className="flex items-center gap-1 mb-0.5 flex-wrap">
               <span className="text-sm font-bold font-mono text-zinc-100">{p.sym}</span>
-              <Pill color={p.dir.includes('LONG') ? 'emerald' : p.dir.includes('SHORT') ? 'rose' : 'cyan'}>{p.dir}</Pill>
+              <Pill color={p.dir.includes('LONG') || p.dir.includes('long') ? 'emerald' : 'rose'}>{p.dir}</Pill>
               {p.mult && <Pill color="violet">{p.mult}</Pill>}
-              <Pill color="amber">{p.tag}</Pill>
-              <Pill color="amber">● {p.age}</Pill>
-              {p.extra && <Pill color="violet">{p.extra}</Pill>}
+              {p.tag && <Pill color="amber">{p.tag}</Pill>}
               <span className={`ml-auto text-[13px] font-mono ${p.pnl.includes('+') ? 'text-emerald-400' : 'text-rose-400'}`}>{p.pnl}</span>
             </div>
-            <div className="text-[12px] text-zinc-500 font-mono pl-1">{p.sh}sh{p.sl ? ` · ORIGINAL SL → ${p.sl} · PT ${p.pt}` : ''}{p.smb ? ` · SMB ${p.smb}` : ''}</div>
+            <div className="text-[11px] text-zinc-500 font-mono pl-1">{p.sh}sh{p.sl ? ` · SL ${p.sl} · PT ${p.pt}` : ''}{p.smb ? ` · SMB ${p.smb}` : ''}</div>
           </div>
         ))}
       </div>
@@ -582,60 +703,12 @@ const OpenPositions = () => {
   );
 };
 
-const SentComIntel = () => (
-  <div className="border-t border-zinc-800 flex-shrink-0">
-    <div className="px-3 py-1.5 flex items-center justify-between border-b border-zinc-800/50">
-      <span className="text-[13px] text-zinc-500 uppercase flex items-center gap-1">🧠 SentCom Intelligence</span>
-      <button className="text-[13px] text-zinc-500 hover:text-cyan-300">⟳</button>
-    </div>
-    <div className="px-3 py-1.5 flex items-center gap-2 border-b border-zinc-800/50 text-[13px]">
-      <Pill color="emerald">↗ NORMAL</Pill>
-      <span className="font-mono text-zinc-300">5421</span><span className="text-zinc-500">eval</span>
-      <span className="font-mono text-zinc-300">1838</span><span className="text-zinc-500">taken</span>
-      <span className="font-mono text-zinc-300">2999</span><span className="text-zinc-500">skip</span>
-      <span className="font-mono text-emerald-300 ml-auto">34%</span>
-    </div>
-    <div className="max-h-44 overflow-y-auto px-2 py-1.5 space-y-1.5">
-      {[
-        { sym: 'KMI', setup: 'squeeze', verdict: 'SKIP', verdictColor: 'rose', pts: '38 pts', t: '03:54 PM',
-          notes: ['Regime leans bullish (score 64.0) — moderate alignment (+10)', 'Model consensus STRONG (100% of 14 models, avg acc 57%) (+15)', 'Live general sees NO EDGE (flat, 98% conf) (-2)'],
-          bars: [['Regime', 75, 'emerald'], ['Consensus', 80, 'emerald'], ['Live Model', 12, 'rose'], ['Quality', 78, 'emerald'], ['VAE Regime', 25, 'amber']] },
-        { sym: 'XLU', setup: 'squeeze', verdict: 'GO', verdictColor: 'emerald', pts: '43 pts', t: '03:54 PM',
-          notes: ['Regime leans bullish (score 64.0) — moderate alignment (+10)', 'Model consensus STRONG (100% of 14 models, avg acc 57%) (+15)', 'Live general sees NO EDGE (flat, 94% conf) (-2)'],
-          bars: [['Regime', 75, 'emerald'], ['Consensus', 80, 'emerald'], ['Live Model', 0, 'rose']] }
-      ].map((c, i) => (
-        <div key={i} className="bg-zinc-900/40 border border-zinc-800 rounded p-2 text-[13px]">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold font-mono">{c.sym}</span>
-              <span className="text-zinc-400">{c.setup}</span>
-              <Pill color={c.verdictColor}>{c.verdict}</Pill>
-            </div>
-            <div className="flex items-center gap-2 text-[12px]"><span className="text-amber-400 font-mono">{c.pts}</span><span className="text-zinc-500">{c.t}</span></div>
-          </div>
-          {c.notes.map((n, j) => <div key={j} className="text-[13px] text-zinc-400 mb-0.5">{n}</div>)}
-          <div className="space-y-0.5 mt-1">
-            {c.bars.map(([l, v, color], j) => (
-              <div key={j} className="flex items-center gap-1.5">
-                <span className="text-[12px] text-zinc-500 w-16">{l}</span>
-                <Bar pct={v} color={color} />
-                <span className="text-[12px] font-mono text-zinc-400 w-6 text-right">{v > 50 ? '+' : ''}{v - 50}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
-
 const RightSidebar = () => (
   <div className="bg-zinc-950 flex flex-col overflow-hidden h-full border-l border-zinc-800">
-    <Briefings />
-    <ShadowVsReal />
-    <MLFeatureAudit />
+    {/* Open Positions leads — most important context, action buttons inline */}
     <OpenPositions />
-    <SentComIntel />
+    {/* Briefings rotation at bottom — secondary */}
+    <Briefings />
   </div>
 );
 
@@ -672,6 +745,23 @@ const StatusStrip = () => (
   </div>
 );
 
+// ─── ⌘K FLOATING SEARCH OVERLAY ───────────────────────────────────
+const SearchOverlay = ({ open, onClose }) => {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-start justify-center pt-32" onClick={onClose}>
+      <div className="bg-zinc-950 border border-cyan-700/50 rounded-lg shadow-2xl w-[640px] max-w-[90vw] overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="px-3 py-2 border-b border-zinc-800 flex items-center gap-2">
+          <span className="text-cyan-400">⌕</span>
+          <input autoFocus placeholder="Symbol · setup · keyword · 'WULF skip', 'gate', 'reconcile' …" className="flex-1 bg-transparent border-0 outline-0 text-[14px] text-zinc-100 placeholder:text-zinc-500" />
+          <span className="text-[11px] text-zinc-500">esc</span>
+        </div>
+        <div className="p-2 text-[12px] text-zinc-500 italic">type to search across symbols, decisions, trades, gates, and the Stream Deep Feed…</div>
+      </div>
+    </div>
+  );
+};
+
 // ─── ROOT ────────────────────────────────────────────────────────
 export const V6LayoutPreview = () => {
   const [focused, setFocused] = useState('FDX');
@@ -679,6 +769,7 @@ export const V6LayoutPreview = () => {
   const [rightPct, setRightPct] = useState(20);
   const [centerTopPct, setCenterTopPct] = useState(70);
   const [chartPct, setChartPct] = useState(58);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const outerRef = useRef(null);
   const centerRef = useRef(null);
@@ -686,20 +777,35 @@ export const V6LayoutPreview = () => {
   const onFocusSym = useCallback((s) => setFocused(s), []);
   const centerPct = 100 - leftPct - rightPct;
 
+  // ⌘K / Ctrl+K to open search
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(o => !o);
+      }
+      if (e.key === 'Escape') setSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <div className="min-h-screen bg-zinc-900 text-zinc-100 flex flex-col relative">
       <div className="bg-zinc-950 border-b border-zinc-800 px-3 py-1.5 flex items-center justify-between flex-shrink-0 text-[13px]">
         <div className="flex items-center gap-2">
-          <span className="text-cyan-300 font-bold text-xs">SentCom V6 — Layout Preview v3 (production-faithful)</span>
-          <Pill color="amber">drag any divider · ?preview=v6</Pill>
+          <span className="text-cyan-300 font-bold text-xs">SentCom V6.1 — Layout Preview (revised after operator review)</span>
+          <Pill color="amber">drag any divider · ⌘K to search</Pill>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => { setLeftPct(15); setRightPct(20); setCenterTopPct(70); setChartPct(58); }} className="px-2 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:bg-zinc-900">reset layout</button>
           <a href="?" className="text-violet-400 hover:underline">← back to V5</a>
         </div>
       </div>
-      <KpiRibbon />
-      <PusherStrip />
+
+      <TopStrip />
+      <PnlStatBlock />
+      <DensityStrip />
 
       <div ref={outerRef} className="flex-1 flex overflow-hidden relative">
         <EodAlarm />
@@ -718,6 +824,7 @@ export const V6LayoutPreview = () => {
         <div style={{ width: `${rightPct}%` }} className="flex-shrink-0 overflow-hidden"><RightSidebar /></div>
       </div>
       <StatusStrip />
+      <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 };
