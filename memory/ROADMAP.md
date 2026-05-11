@@ -3245,3 +3245,17 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - `server.py` breakup → `routers/` + `models/` + `tests/`
 
 
+
+---
+
+## Completed 2026-05-11 (v19.34.88)
+- ✅ Pusher-routed cancellation queue end-to-end (backend + pusher).
+- ✅ 31 orphan stops cleared across 7 symbols (ADBE, BMNR, CCL, EBAY, EFA, MDT, NCLH).
+- ✅ MDT short-bracket cleanup via `keep_oca_group` operator override.
+- ✅ Audit shows 0 symbols with stacking.
+
+## Newly-Surfaced (post-2026-05-11 cleanup)
+- 🟡 (P1) **Auto-orphan-sweep on position close**. After today's session we found ~31 orphan stops left dangling because some target legs weren't OCA'd to their stops. When a position transitions `>0 → 0` (target fill, manual close, EOD), the bot should auto-queue cancels for any remaining pending stops/targets on that symbol. Add as post-close hook in `position_reconciler.py` or as a watcher in `bot_persistence.py`.
+- 🟡 (P1) **Sizing-aware bracket pick** in `cancel-excess-bracket-legs`. Current logic picks the *newest* bracket pair regardless of qty. LIN example: a 21sh "newest" bracket would have been kept while a 47sh OCA bracket was cancelled, leaving 47 shares unprotected. Should prefer the bracket whose qty matches `|bot_position|` most closely (then OCA-grouped > non-OCA > newest as tiebreakers).
+- 🟢 (P2) **Mass-cancel endpoint** `/api/trading-bot/sweep-all-orphans` — single-shot version of today's python loop. Cancels every pending leg on every symbol where `|bot_position|==0`.
+- 🟢 (P2) Cancel-queue TTL + reaper for stale `pending` entries (>5min unclaimed → log + auto-mark `expired`).

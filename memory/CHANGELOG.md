@@ -18039,3 +18039,31 @@ Failed trades are marked `TradeStatus.REJECTED` with `close_reason="guardrail_ve
 
 
 
+
+---
+
+## v19.34.88 — Pusher-Routed Cancellation Queue (2026-05-11)
+
+### Problem
+`cancel-excess-bracket-legs` was structurally broken on native DGX deployments. It called `_ib_service.cancel_order(...)` directly, but on pusher-only setups the cloud backend has NO ib_insync connection — every cancel silently returned `cancel_returned_false`. Operators had to right-click in TWS, which made bulk cleanup impractical.
+
+### Fix
+- New in-memory **cancellation queue** in `routers/ib.py`: `_cancellation_queue: Dict[int, Dict]`.
+- 6 new endpoints under `/api/ib/cancellations/`: `queue`, `pending`, `claim/{ib_order_id}`, `result`, `status/{ib_order_id}`, `all`.
+- Helper `queue_cancellation(ib_order_id, reason, requested_by)` — idempotent on `ib_order_id`.
+- `cancel-excess-bracket-legs` now detects `_ib_service.is_connected()`; falls through to the cancel-queue path when disconnected. Response includes `queue_status` per leg.
+- Pusher (`ib_data_pusher.py`) gained `poll_and_execute_cancellations()` + `_execute_queued_cancellation()` + `_report_cancellation_result()`. Wired into both `run()` and `_trading_mode_tick()` alongside the order-poll cadence (~10s).
+
+### Smoke-test results (live, 2026-05-11)
+- Fake ib_order_id 99999999 → claimed within 7s → reported `not_found`. End-to-end pipeline confirmed.
+- **31 real orphan stops cancelled across 7 symbols** (ADBE, BMNR, CCL, EBAY, EFA, MDT, NCLH) in a single batch ~90s after EOD close left them dangling.
+- Final audit: 0 symbols with bracket stacking. Bot flat, IB clean.
+
+### Pytest coverage
+- `tests/test_v19_34_88_cancellation_queue.py` (8 tests): basic queue, idempotency, int coercion, bad-input rejection, pending filter excludes claimed + terminal, status lookup. 8/8 passing.
+
+### Files changed
+- `/app/backend/routers/ib.py` — queue state, models, helper, 6 endpoints.
+- `/app/backend/routers/trading_bot.py` — `cancel-excess-bracket-legs` queue-fallback branch.
+- `/app/documents/scripts/ib_data_pusher.py` — pusher polling methods + 2 call-site wires.
+- `/app/backend/tests/test_v19_34_88_cancellation_queue.py` — regression suite.
