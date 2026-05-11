@@ -172,6 +172,51 @@ async def test_singular_target_order_id_is_recognized_as_bracketed(patched_app):
 
 
 @pytest.mark.asyncio
+async def test_v19_34_83_stop_present_no_target_is_refused_not_stacked(patched_app):
+    """v19.34.83 regression: 2026-05-12 LIVE INCIDENT. After the
+    kill-switch carryover, 8 trades arrived with real non-SIM
+    stop_order_ids but EMPTY target_order_ids/target_order_id (boot
+    reload paths repopulate stop ids but not target ids). The pre-v83
+    logic treated them as "unprotected" and applied dry_run=false
+    fired `attach_oca_stop_target` per trade — POSTING NEW STOP+TARGET
+    OCA GROUPS ALONGSIDE the existing live stops at IB. That's the
+    bracket-stacking failure mode v19.34.79 was built to seal, but
+    re-introduced via attach-brackets-to-unprotected.
+
+    Post-v83: trades with a real stop but no target MUST land in
+    `skipped` with reason=stop_present_no_target_refusing_to_stack —
+    NOT in candidates."""
+    bot, executor, handler, Req = patched_app
+    trade = _mk_trade(
+        "t-pep", "PEP", 2266, 149.42,
+        direction="short",
+        stop_order_id="53dd8dbe",   # real, non-SIM, live at IB
+        target_order_ids=[],        # both plural...
+    )
+    # ...and singular missing (the live 2026-05-12 fingerprint).
+    # (Don't set target_order_id at all — getattr returns None.)
+    bot._open_trades = {"t-pep": trade}
+    with patch("routers.ib._pushed_ib_data", {"quotes": [
+        {"symbol": "PEP", "last": 149.42},
+    ]}):
+        resp = await handler(Req(dry_run=False))   # WORST case: not even dry-run
+    # MUST land in skipped, NOT candidates.
+    assert resp["candidates"] == [], (
+        f"v19.34.83 regression: PEP with real stop but no target MUST NOT "
+        f"be a candidate (would stack a duplicate stop at IB). Got "
+        f"candidates={resp['candidates']}"
+    )
+    assert len(resp["skipped"]) == 1
+    skip = resp["skipped"][0]
+    assert skip["symbol"] == "PEP"
+    assert skip["reason"] == "stop_present_no_target_refusing_to_stack"
+    assert skip["stop_order_id"] == "53dd8dbe"
+    assert "stack" in skip["hint"].lower()
+    # Critical: attach_oca_stop_target NEVER called.
+    executor.attach_oca_stop_target.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sim_prefixed_stop_is_treated_as_unprotected(patched_app):
     """SIM- ids are simulator/dry-run placeholders, not real broker
     protection — must be treated as unprotected so the retroactive

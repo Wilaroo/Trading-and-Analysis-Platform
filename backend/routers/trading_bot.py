@@ -5309,6 +5309,37 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
             })
             continue
 
+        # v19.34.83 — REFUSE TO STACK. If the trade has a REAL non-SIM
+        # stop but no target id in memory, firing `attach_oca_stop_target`
+        # would POST A NEW STOP ALONGSIDE THE OLD ONE — that's exactly
+        # the bracket-stacking failure mode v19.34.79 was built to seal.
+        # The 2026-05-12 live incident did exactly this on 8 symbols
+        # (ADBE/EFA/EBAY/BMNR/GM/MDT/NCLH/PEP) before this guard shipped.
+        #
+        # The right resolution depends on what's actually at IB:
+        #   - If IB has a target order already (bot just lost the
+        #     reference) → operator should backfill via bracket-stacking-audit.
+        #   - If IB truly has no target → operator should use a
+        #     dedicated "attach-missing-target-only" path (not yet
+        #     built), or cancel the old stop and re-fire the full OCA.
+        # Either way, blindly firing the full OCA here is wrong.
+        if has_real_stop and not has_real_tgt:
+            skipped.append({
+                "trade_id": trade_id, "symbol": sym,
+                "reason": "stop_present_no_target_refusing_to_stack",
+                "stop_order_id": existing_stop,
+                "target_order_ids": existing_tgt_ids,
+                "hint": (
+                    "Trade has a real stop_order_id but no target_order_id in memory. "
+                    "Re-firing attach_oca_stop_target would stack a duplicate stop at IB "
+                    "(v19.34.79 stacking fingerprint). Run "
+                    "GET /api/trading-bot/bracket-stacking-audit then "
+                    "POST /api/trading-bot/cancel-excess-bracket-legs to clean up first, "
+                    "or manually attach only the target leg."
+                ),
+            })
+            continue
+
         # Pick a reference price: per-symbol override > pusher last > entry.
         ov = overrides.get(sym) or {}
         last_px = pusher_last_prices.get(sym)
@@ -6040,9 +6071,18 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
         }
 
     def _shares(t):
-        return int(abs(getattr(t, "remaining_shares", None)
-                       if getattr(t, "remaining_shares", None) is not None
-                       else getattr(t, "shares", 0) or 0))
+        # v19.34.83 — Use max(shares, remaining_shares) as the live size.
+        # The 2026-05-12 post-kill-switch state had trades stuck with
+        # shares=2266, remaining_shares=0 (degenerate: bot still acted
+        # on `shares` for sizing new brackets, but `remaining_shares`
+        # said zero). The original v19.34.82 helper drove off
+        # remaining_shares first, so it computed tracked_total=0 and
+        # refused to shrink — leaving the divergence in place. Driving
+        # off the max catches both degenerate-state and healthy-state
+        # trades.
+        s = getattr(t, "shares", 0) or 0
+        r = getattr(t, "remaining_shares", 0) or 0
+        return int(abs(max(int(s), int(r))))
 
     before_trades = [
         {
@@ -6101,13 +6141,16 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
     # 4) Build FIFO shrink plan. Reduce the OLDEST trades first so the
     #    most-recent (likely best-protected) trade keeps its full size
     #    if possible. This is what the operator did manually on 5/12.
+    #
+    # v19.34.83 — Drive the shrink off `live = max(shares, remaining_shares)`
+    # and set BOTH fields to the same final value. This both resolves
+    # over-tracking AND cleans up the degenerate `shares=N, remaining=0`
+    # state that emerges from boot-time reload paths.
     plan: List[Dict[str, Any]] = []
     excess = tracked_total - target_qty
     for tid, t in zip(sym_trade_ids, sym_trades):
         cur_shares = int(getattr(t, "shares", 0) or 0)
         cur_remaining = int(getattr(t, "remaining_shares", 0) or 0)
-        # Drive the shrink off `remaining_shares` (live size) but cap so
-        # we never set `shares` below `remaining_shares`.
         live = max(cur_shares, cur_remaining)
         if excess <= 0 or live <= 0:
             plan.append({
@@ -6118,12 +6161,11 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
             })
             continue
         cut = min(excess, live)
-        new_remaining = max(0, cur_remaining - cut)
-        new_shares = max(0, cur_shares - cut)
+        final_live = max(0, live - cut)
         plan.append({
             "trade_id": tid,
-            "from_shares": cur_shares, "to_shares": new_shares,
-            "from_remaining": cur_remaining, "to_remaining": new_remaining,
+            "from_shares": cur_shares, "to_shares": final_live,
+            "from_remaining": cur_remaining, "to_remaining": final_live,
             "delta": -cut,
         })
         excess -= cut

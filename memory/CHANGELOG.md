@@ -2,6 +2,80 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.83) — URGENT: Patch attach-brackets stop-stacking + force-reconcile degenerate-state
+
+### What went wrong on the v19.34.82 rollout (2026-05-12, 17:34 UTC)
+
+The user ran the v19.34.82 runbook on live DGX. Two issues surfaced:
+
+1. **`attach-brackets-to-unprotected` STACKED 8 new OCA bracket pairs on top of existing live stops** at IB (ADBE, EFA, EBAY, BMNR, GM, MDT, NCLH, PEP). Every trade had `current_stop_order_id` populated (real, non-SIM) but `current_target_order_ids: []`. The v19.34.81 logic counted "real stop + missing target" as "unprotected" and fired `attach_oca_stop_target` per trade — exactly the bracket-stacking failure mode v19.34.79 was built to seal. Worse: the new OCAs were sized to the bot's over-tracked `shares` (PEP 2266 vs IB 971), so if any new stop fires, the position flips by the over-track delta.
+2. **`force-reconcile-down` reported `tracked_total=0` and refused to shrink.** Live trades arrived in a degenerate state — `shares=2266, remaining_shares=0` — because boot reload paths repopulate `shares` but not `remaining_shares`. v19.34.82's `_shares()` helper drove off `remaining_shares` first, so it saw zero and bailed.
+
+### v19.34.83 fixes
+
+**1. `attach-brackets-to-unprotected` — refuse to stack.**
+When a trade has a real non-SIM `stop_order_id` but no target id (singular or plural), DO NOT fire `attach_oca_stop_target`. New skip reason: `stop_present_no_target_refusing_to_stack`. The skip entry includes a `hint` directing the operator to `bracket-stacking-audit` + `cancel-excess-bracket-legs`, or to a (future) dedicated "attach-missing-target-only" path.
+
+**2. `force-reconcile-down` — drive off `max(shares, remaining_shares)`.**
+Both fields are now normalized to the same final value, cleaning up the degenerate state at the same time as the shrink. Live test target: `shares=2266, remaining_shares=0 → target_qty=971 → shares=971, remaining_shares=971`.
+
+### Tests (both regressions added)
+
+- `test_v19_34_83_stop_present_no_target_is_refused_not_stacked` — PEP at 2266 short with a real stop and empty target MUST land in `skipped`, NOT in `candidates`. Even with `dry_run=False`, `attach_oca_stop_target` must NEVER be called.
+- `test_v19_34_83_degenerate_state_shares_only` — `shares=2266, remaining_shares=0` must register `tracked_total=2266` (not 0). Shrink to target normalizes both fields to the target value.
+
+20/20 tests across `test_v19_34_76` + `test_v19_34_82` green. 43/43 across the v19.34.76/.78/.79/.80/.82 safety suite green.
+
+### Live cleanup runbook (operator must run this on DGX after deploy)
+
+```bash
+export DGX="http://localhost:8001"
+
+# 1) See the damage. bracket-stacking-audit will surface every symbol
+#    where pending stop qty > IB position qty. Expect to see the 8
+#    symbols from the 17:34 incident.
+curl -s "$DGX/api/trading-bot/bracket-stacking-audit" | python3 -m json.tool
+
+# 2) Per symbol, decide which OCA to KEEP. The NEW ADOPT-OCA-* groups
+#    are sized to over-tracked bot shares — DANGEROUS. The OLD
+#    standalone stop ids were (presumably) sized to IB truth.
+#    Recommendation: KEEP the OLD stop ids, CANCEL the new ADOPT-OCA
+#    groups. Run dry_run=true first per symbol.
+#
+#    Replace KEEP_STOP_ID below with each old stop_order_id from the
+#    incident report:
+#      ADBE: 73e15fc9    EFA:  b1b2a57d    EBAY: (was null — keep ADOPT-OCA-EBAY-* instead)
+#      BMNR: 1b79dd7a    GM:   7d27b923    MDT:  (was SIM- — keep ADOPT-OCA-MDT-* instead)
+#      NCLH: 96adaab9    PEP:  53dd8dbe
+
+curl -s -X POST "$DGX/api/trading-bot/cancel-excess-bracket-legs" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"ADBE","dry_run":true,"keep_order_ids":[73e15fc9]}' | python3 -m json.tool
+# (repeat per symbol; for EBAY and MDT, use keep_oca_group: "ADOPT-OCA-...")
+
+# 3) After confirming each cancel plan, flip dry_run to false PER symbol.
+
+# 4) NOW the bot's stop_order_id no longer matches IB (we cancelled the
+#    new ones the bot stored). Patch the bot's in-memory pointers
+#    manually OR restart so reconciler picks up the survivors.
+
+# 5) Force-reconcile-down (now works on degenerate state):
+curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"PEP","dry_run":true,"reason":"post-v82-cleanup"}' | python3 -m json.tool
+# Inspect plan, then flip dry_run to false. Repeat for every over-tracked symbol.
+
+# 6) NOW it is safe to re-run attach-brackets-to-unprotected. With v83
+#    in place, anything that still has a real stop but no target lands
+#    in `skipped` (with a hint) instead of stacking.
+curl -s -X POST "$DGX/api/trading-bot/attach-brackets-to-unprotected" \
+  -H "Content-Type: application/json" -d '{"dry_run": true}' | python3 -m json.tool
+```
+
+⚠️ **Order ids in step 2 are 8-hex strings in the user's run; IB internally uses integers.** Use whatever form `cancel-excess-bracket-legs` accepted before — check `bracket-stacking-audit` output for the canonical id form.
+
+
+
 ## 2026-05-12 (v19.34.82) — Force-reconcile-down endpoint (operator shrink-to-truth escape hatch)
 
 After the kill-switch bypass incident, the bot's `_open_trades` over-tracked vs IB (PEP: 2266 bot vs 971 IB; ADBE similar). Existing reconcilers only resolve "IB has more than bot" — the over-tracking case had no escape hatch, so the bot kept managing phantom shares (extra stop legs, scale-ins sized against a phantom base, partial fills mis-classified as full closes).

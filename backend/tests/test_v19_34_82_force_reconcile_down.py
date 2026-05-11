@@ -154,6 +154,38 @@ async def test_apply_mutates_trades_and_writes_audit(patched_app):
 
 
 @pytest.mark.asyncio
+async def test_v19_34_83_degenerate_state_shares_only(patched_app):
+    """v19.34.83 regression: live 2026-05-12 trades arrived in a
+    degenerate state — `shares=2266, remaining_shares=0` — because
+    boot reload paths only repopulate `shares`. The original v19.34.82
+    drove tracking off `remaining_shares` and saw 0, so it refused
+    to shrink. Driving off max(shares, remaining_shares) catches both
+    healthy and degenerate states AND normalizes both fields to the
+    same final value."""
+    bot, executor, handler, Req, save_mock, drift = patched_app
+    bot._open_trades = OrderedDict([
+        ("t-pep-1", _mk_trade(
+            "t-pep-1", "PEP", 2266, remaining_shares=0, direction="short"
+        )),
+    ])
+    resp = await handler(Req(symbol="PEP", target_qty=971, dry_run=False))
+    assert resp["success"] is True
+    assert resp["before"]["tracked_total"] == 2266, (
+        "v19.34.83: must drive tracking off max(shares, remaining_shares); "
+        "got tracked_total=%s from degenerate state shares=2266 remaining=0"
+        % resp["before"]["tracked_total"]
+    )
+    assert resp["plan"][0]["delta"] == -1295
+    assert resp["plan"][0]["to_shares"] == 971
+    assert resp["plan"][0]["to_remaining"] == 971
+    # And the in-memory trade now has BOTH fields normalized to 971 —
+    # cleaning up the degenerate state at the same time as the shrink.
+    assert bot._open_trades["t-pep-1"].shares == 971
+    assert bot._open_trades["t-pep-1"].remaining_shares == 971
+    assert resp["after"]["tracked_total"] == 971
+
+
+@pytest.mark.asyncio
 async def test_target_qty_omitted_falls_back_to_ib_pushed(patched_app):
     bot, executor, handler, Req, save_mock, drift = patched_app
     bot._open_trades = OrderedDict([
