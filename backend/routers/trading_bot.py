@@ -5277,7 +5277,22 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
             continue
 
         existing_stop = getattr(trade, "stop_order_id", None) or ""
-        existing_tgt_ids = getattr(trade, "target_order_ids", []) or []
+        # v19.34.81 — Trade objects vary: some store the target via the
+        # singular `target_order_id`, others via the plural
+        # `target_order_ids` list, some via both. Pre-fix the
+        # v19.34.76 logic only checked the plural field, which produced
+        # false-positive "unprotected" rows for every trade brackeded
+        # via `attach_oca_stop_target` (which writes the singular
+        # field). Applying the dry-run output would have stacked
+        # duplicate target legs on top of the existing ones —
+        # recreating the exact problem v19.34.79 was designed to
+        # prevent.
+        _tgt_singular = getattr(trade, "target_order_id", None)
+        _tgt_plural = getattr(trade, "target_order_ids", []) or []
+        existing_tgt_ids = (
+            ([_tgt_singular] if _tgt_singular else [])
+            + [t for t in _tgt_plural if t]
+        )
 
         # "Already bracketed" = real (non-SIM-) stop_order_id AND at least
         # one real (non-SIM-) target_order_id.
@@ -5334,6 +5349,8 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
             "shares": int(getattr(trade, "shares", 0) or 0),
             "direction": direction,
             "current_stop_order_id": existing_stop or None,
+            # v19.34.81 — include both singular + plural in the response
+            # so the operator can see the actual bracket state.
             "current_target_order_ids": existing_tgt_ids,
             "computed": {
                 "ref_price": ref_px, "stop": stop_px,

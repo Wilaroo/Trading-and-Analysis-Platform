@@ -141,6 +141,37 @@ async def test_already_bracketed_lands_in_skipped(patched_app):
 
 
 @pytest.mark.asyncio
+async def test_singular_target_order_id_is_recognized_as_bracketed(patched_app):
+    """v19.34.81 regression: trades brackeded via attach_oca_stop_target
+    store the target id in the SINGULAR `target_order_id` field, NOT
+    the plural list. v19.34.76 pre-fix only checked the plural and
+    produced false-positive "unprotected" rows for every such trade.
+    Applying the dry-run would have stacked duplicate target legs."""
+    bot, executor, handler, Req = patched_app
+    trade = _mk_trade(
+        "t-bmnr", "BMNR", 1320, 22.71,
+        stop_order_id="REAL-STP-b1b2",
+        target_order_ids=[],  # plural empty
+    )
+    # The v19.34.81 fingerprint: target lives in the singular field.
+    trade.target_order_id = "REAL-TGT-singular-7c91"
+    bot._open_trades = {"t-bmnr": trade}
+    with patch("routers.ib._pushed_ib_data", {"quotes": [
+        {"symbol": "BMNR", "last": 22.76},
+    ]}):
+        resp = await handler(Req(dry_run=True))
+    # MUST land in skipped, NOT candidates.
+    assert resp["candidates"] == [], (
+        f"v19.34.81 regression: BMNR with singular target_order_id "
+        f"should be recognized as bracketed; got candidates={resp['candidates']}"
+    )
+    assert len(resp["skipped"]) == 1
+    assert resp["skipped"][0]["symbol"] == "BMNR"
+    assert resp["skipped"][0]["reason"] == "already_bracketed"
+    assert "REAL-TGT-singular-7c91" in resp["skipped"][0]["target_order_ids"]
+
+
+@pytest.mark.asyncio
 async def test_sim_prefixed_stop_is_treated_as_unprotected(patched_app):
     """SIM- ids are simulator/dry-run placeholders, not real broker
     protection — must be treated as unprotected so the retroactive
