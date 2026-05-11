@@ -222,6 +222,16 @@ class OpportunityEvaluator:
             #    where it is not associated with a value`
             # on every scan cycle, vetoing the trade as `evaluator_veto`.
             # 2026-04-29 (afternoon-14).
+            #
+            # ⚠ v19.34.67 NOTE: This `=None` init silenced the
+            # UnboundLocalError but ALSO meant build_entry_context()
+            # received None and wrote an empty ai_modules dict — leaving
+            # ai_decision_audit.consulted_count=0 for every live trade
+            # since 2026-04-29. The current fix is a write-back inside
+            # the consult block (search for v19.34.67). The structural
+            # fix — moving the entire AI consult call BEFORE trade
+            # construction so build_entry_context gets the populated
+            # result on the first pass — is a separate follow-up.
             ai_consultation_result: Optional[Dict[str, Any]] = None
 
             if hasattr(bot, '_confidence_gate') and bot._confidence_gate is not None:
@@ -722,6 +732,19 @@ class OpportunityEvaluator:
                                 "shadow_decision_id": decision_id
                             }
 
+                        # v19.34.67 — Write the AI module decisions back
+                        # into trade.entry_context.ai_modules. The build_entry_context
+                        # call earlier in this function ran BEFORE the consult fired
+                        # (variable-ordering bug masked by a 2026-04-29 `=None`
+                        # defensive init), so ai_modules was always empty and the
+                        # ai_decision_audit endpoint reported consulted_count=0
+                        # for every single trade since then. This back-fill is
+                        # the surgical fix; the proper reordering of consult
+                        # BEFORE trade-build is deferred to a structural follow-up.
+                        ai_modules_ctx = self._build_ai_modules_ctx(ai_consultation_result)
+                        if ai_modules_ctx is not None and isinstance(trade.entry_context, dict):
+                            trade.entry_context["ai_modules"] = ai_modules_ctx
+
                 except Exception as e:
                     logger.warning(
                         "AI Consultation failed (proceeding anyway) (%s): %s",
@@ -1160,26 +1183,49 @@ class OpportunityEvaluator:
         # Surfaced HERE in entry_context so they're queryable from
         # `bot_trades` and feed analytics + the Q3 verification curl.
         # Was previously only landing under `explanation.ai_consultation`.
-        if ai_consultation_result and isinstance(ai_consultation_result, dict):
-            ai_ctx: Dict[str, Any] = {
-                "consulted":       True,
-                "proceed":         bool(ai_consultation_result.get("proceed", True)),
-                "size_adjustment": ai_consultation_result.get("size_adjustment"),
-                "summary":         ai_consultation_result.get("summary"),
-            }
-            # Fold in per-module results when present
-            for module_key, ec_key in (
-                ("debate",         "debate"),
-                ("risk_assessment","risk_manager"),
-                ("institutional",  "institutional_flow"),
-                ("time_series",    "time_series"),
-            ):
-                m = ai_consultation_result.get(module_key)
-                if m:
-                    ai_ctx[ec_key] = m
+        ai_ctx = self._build_ai_modules_ctx(ai_consultation_result)
+        if ai_ctx is not None:
             ctx["ai_modules"] = ai_ctx
 
         return ctx
+
+    @staticmethod
+    def _build_ai_modules_ctx(ai_consultation_result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Translate a raw AI consultation result into the shape that
+        lives under `entry_context.ai_modules` and is read by the
+        ai_decision_audit_service (consulted_count / aligned_count).
+
+        Returns None when there's nothing to record — caller must guard.
+
+        v19.34.67 — extracted so the consult write-back path (right
+        after the consultation completes in evaluate_opportunity) can
+        reuse the same mapping. Previously the consult result was only
+        consumed inside build_entry_context, but build_entry_context
+        runs BEFORE the consult fires (variable-ordering bug masked by
+        a 2026-04-29 `ai_consultation_result = None` defensive init),
+        so ai_modules was always empty across all live trades.
+        """
+        if not (ai_consultation_result and isinstance(ai_consultation_result, dict)):
+            return None
+        ai_ctx: Dict[str, Any] = {
+            "consulted":       True,
+            "proceed":         bool(ai_consultation_result.get("proceed", True)),
+            "size_adjustment": ai_consultation_result.get("size_adjustment"),
+            "summary":         ai_consultation_result.get("summary"),
+        }
+        # Fold in per-module results when present. Source keys come
+        # from the consult layer; ec_keys are the canonical fields the
+        # audit service reads from bot_trades.entry_context.ai_modules.
+        for module_key, ec_key in (
+            ("debate",         "debate"),
+            ("risk_assessment","risk_manager"),
+            ("institutional",  "institutional_flow"),
+            ("time_series",    "time_series"),
+        ):
+            m = ai_consultation_result.get(module_key)
+            if m:
+                ai_ctx[ec_key] = m
+        return ai_ctx
 
     @staticmethod
     def classify_time_window(now_et) -> str:
