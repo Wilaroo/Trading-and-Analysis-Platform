@@ -5175,3 +5175,408 @@ async def get_boot_reconcile_status(pill_visible_seconds: int = 600):
         "pill_visible_seconds": pill_visible_seconds,
     }
 
+
+
+# ── v19.34.76 — Retroactive bracket attach for unprotected positions ──────
+#
+# Why this exists:
+#   `attach_oca_stop_target` (v19.34.28) gives newly-adopted orphans a
+#   bracket the moment the reconciler claims them. v19.34.68 plumbed the
+#   call into every orphan-adoption code path. But carryover positions —
+#   anything already in `_open_trades` BEFORE either fix shipped — never
+#   went through that path on subsequent restarts. BMNR from the 2026-05-11
+#   P-1 kill-switch incident was carrying 658sh into the next session
+#   completely naked at IB: no stop, no target.
+#
+# This endpoint scans the live bot's `_open_trades`, flags any trade whose
+# `stop_order_id` is None / starts with "SIM-", and offers two modes:
+#   - dry_run=true  → return what WOULD be attached without firing orders.
+#   - dry_run=false → fire `attach_oca_stop_target` for each unprotected trade.
+#
+# Default stop is `-stop_pct` from current pusher last price, or from
+# entry_price if no last_price available. Default `stop_pct=2.0` (matches
+# the bot's default risk-per-trade sizing). Operator can override
+# per-symbol via the `overrides` map: `{"BMNR": {"stop": 20.50, "target": 26.00}}`.
+
+class AttachBracketsRequest(BaseModel):
+    dry_run: bool = True
+    stop_pct: float = 2.0          # default: -2% from current price
+    target_pct: float = 8.0        # default: +8% from current price
+    symbols: Optional[List[str]] = None  # if set, only these symbols
+    overrides: Optional[Dict[str, Dict[str, float]]] = None  # per-symbol stop/target
+
+
+@router.post("/attach-brackets-to-unprotected")
+async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
+    """v19.34.76 — Retroactive bracket attach for trades carrying without
+    protection. Use AFTER a restart that adopted carryover orphans, or
+    when forensic audit (e.g., TWS orders list) reveals a naked position.
+
+    Always run with `dry_run: true` first to see what would be attached.
+    Switch to `dry_run: false` to fire the OCA brackets.
+
+    Response shape:
+      {
+        "success": true,
+        "dry_run": <bool>,
+        "candidates": [
+          {
+            "trade_id": "...",
+            "symbol": "BMNR",
+            "shares": 658,
+            "current_stop_order_id": null,
+            "current_target_order_id": null,
+            "computed": {"stop": 22.12, "target": 24.38, "source": "pusher_last_price"},
+            "applied": <bool>,    # true if not dry_run and attach succeeded
+            "result": { ... attach_oca_stop_target return dict ... }
+          },
+          ...
+        ],
+        "skipped": [
+          {"symbol": "ADBE", "reason": "already_bracketed", "stop_order_id": "..."}
+        ]
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+    if _trade_executor is None:
+        raise HTTPException(503, "trade executor service not initialized")
+
+    open_trades = getattr(_trading_bot, "_open_trades", {}) or {}
+    if not open_trades:
+        return {
+            "success": True, "dry_run": payload.dry_run,
+            "candidates": [], "skipped": [],
+            "message": "No open trades in bot memory.",
+        }
+
+    symbol_filter = {s.upper() for s in (payload.symbols or [])}
+    overrides = {k.upper(): v for k, v in (payload.overrides or {}).items()}
+
+    candidates = []
+    skipped = []
+
+    # Best-effort fetch of current prices from the pusher's last_price map.
+    pusher_last_prices: Dict[str, float] = {}
+    try:
+        from routers.ib import _pushed_ib_data
+        for q in (_pushed_ib_data.get("quotes") or []):
+            sym = (q.get("symbol") or "").upper()
+            last = q.get("last") or q.get("close")
+            if sym and last is not None:
+                try:
+                    pusher_last_prices[sym] = float(last)
+                except (TypeError, ValueError):
+                    pass
+    except Exception as e:
+        logger.debug(f"[v19.34.76] pusher quote fetch failed: {e}")
+
+    for trade_id, trade in list(open_trades.items()):
+        sym = (getattr(trade, "symbol", "") or "").upper()
+        if symbol_filter and sym not in symbol_filter:
+            continue
+
+        existing_stop = getattr(trade, "stop_order_id", None) or ""
+        existing_tgt_ids = getattr(trade, "target_order_ids", []) or []
+
+        # "Already bracketed" = real (non-SIM-) stop_order_id AND at least
+        # one real (non-SIM-) target_order_id.
+        has_real_stop = bool(existing_stop) and not str(existing_stop).startswith("SIM-")
+        has_real_tgt = any(
+            tid and not str(tid).startswith("SIM-") for tid in existing_tgt_ids
+        )
+        if has_real_stop and has_real_tgt:
+            skipped.append({
+                "trade_id": trade_id, "symbol": sym,
+                "reason": "already_bracketed",
+                "stop_order_id": existing_stop,
+                "target_order_ids": existing_tgt_ids,
+            })
+            continue
+
+        # Pick a reference price: per-symbol override > pusher last > entry.
+        ov = overrides.get(sym) or {}
+        last_px = pusher_last_prices.get(sym)
+        entry_px = float(getattr(trade, "entry_price", 0) or 0)
+        ref_px = float(ov.get("ref_price") or last_px or entry_px or 0)
+        if ref_px <= 0:
+            skipped.append({
+                "trade_id": trade_id, "symbol": sym,
+                "reason": "no_reference_price_available",
+            })
+            continue
+
+        direction = (
+            trade.direction.value if hasattr(trade.direction, "value")
+            else str(getattr(trade, "direction", "long"))
+        ).lower()
+
+        # Compute stop + target. Long: stop below, target above. Short: inverted.
+        if direction == "long":
+            stop_px = float(ov.get("stop") or ref_px * (1 - payload.stop_pct / 100.0))
+            target_px = float(ov.get("target") or ref_px * (1 + payload.target_pct / 100.0))
+        else:  # short
+            stop_px = float(ov.get("stop") or ref_px * (1 + payload.stop_pct / 100.0))
+            target_px = float(ov.get("target") or ref_px * (1 - payload.target_pct / 100.0))
+
+        # Round to two decimals — IB will reject sub-penny ticks on most US equities.
+        stop_px = round(stop_px, 2)
+        target_px = round(target_px, 2)
+
+        source = (
+            "operator_override" if ov.get("stop") else
+            "pusher_last_price" if last_px else
+            "entry_price"
+        )
+
+        candidate = {
+            "trade_id": trade_id, "symbol": sym,
+            "shares": int(getattr(trade, "shares", 0) or 0),
+            "direction": direction,
+            "current_stop_order_id": existing_stop or None,
+            "current_target_order_ids": existing_tgt_ids,
+            "computed": {
+                "ref_price": ref_px, "stop": stop_px,
+                "target": target_px, "source": source,
+            },
+            "applied": False,
+            "result": None,
+        }
+
+        if not payload.dry_run:
+            # Mutate the trade's stop/target on the in-memory object so
+            # `attach_oca_stop_target` (which reads `trade.stop_price` and
+            # `trade.target_prices`) uses the freshly-computed values.
+            trade.stop_price = stop_px
+            if not hasattr(trade, "target_prices") or not trade.target_prices:
+                trade.target_prices = [target_px]
+            else:
+                trade.target_prices[0] = target_px
+            try:
+                result = await _trade_executor.attach_oca_stop_target(trade)
+                candidate["result"] = result
+                if result.get("success"):
+                    trade.stop_order_id = result.get("stop_order_id")
+                    tgt_id = result.get("target_order_id")
+                    if tgt_id:
+                        if not hasattr(trade, "target_order_ids") or not trade.target_order_ids:
+                            trade.target_order_ids = [tgt_id]
+                        else:
+                            trade.target_order_ids = [tgt_id]
+                    candidate["applied"] = True
+                    # Persist the trade so the new ids survive a restart.
+                    save_fn = getattr(_trading_bot, "_save_trade", None)
+                    if save_fn:
+                        try:
+                            r = save_fn(trade)
+                            import asyncio as _aio
+                            if _aio.iscoroutine(r):
+                                await r
+                        except Exception:
+                            pass
+                    logger.warning(
+                        "[v19.34.76 RETROACTIVE-BRACKET] %s: attached "
+                        "stop=%s target=%s (ref=%s, src=%s, oca=%s)",
+                        sym, stop_px, target_px, ref_px, source,
+                        result.get("oca_group"),
+                    )
+            except Exception as e:
+                candidate["result"] = {"success": False, "error": str(e)}
+                logger.error(
+                    "[v19.34.76 RETROACTIVE-BRACKET] %s attach failed: %s",
+                    sym, e, exc_info=True,
+                )
+
+        candidates.append(candidate)
+
+    return {
+        "success": True,
+        "dry_run": payload.dry_run,
+        "candidates": candidates,
+        "skipped": skipped,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── v19.34.77 — Bracket-stacking audit (READ-ONLY, no mutations) ────────
+#
+# 2026-05-12: TWS forensics showed multiple PreSubmitted stop+target legs
+# stacking on the SAME symbol every time the bot scaled into a position
+# (ADBE: 80sh long, 320sh of pending stops; EFA: 963sh long, 2,888sh of
+# pending stops; GM: 109sh long, 1,282sh of pending stops). If any leg
+# fires, the others stay live → the next price tick takes the bot net
+# short by the difference.
+#
+# This endpoint is READ-ONLY. It compares the bot's live `_open_trades`
+# qty per symbol against the sum of pending PreSubmitted stop+target
+# orders for that symbol at IB. Any imbalance is surfaced so the
+# operator can manually cancel the excess legs in TWS (or feed the
+# output to a follow-up `cancel-excess-bracket-legs` endpoint once the
+# behaviour is verified safe).
+#
+# Why not auto-cancel here?
+#   Cancelling legs in a live position is a one-way action. Need to be
+#   100% certain we're not cancelling the active protective leg.
+#   v19.34.77 SHIPS the diagnostic; auto-fix lives behind a separate
+#   patch (v19.34.78) once the operator confirms the diagnosis matches
+#   what they see in TWS.
+
+@router.get("/bracket-stacking-audit")
+async def bracket_stacking_audit():
+    """v19.34.77 — Read-only audit. Surfaces symbols where the sum of
+    pending stop/target legs at IB exceeds the bot's tracked position
+    size — the bracket-stacking fingerprint that risks flipping the
+    position to short on a single stop trigger.
+
+    Response shape:
+      {
+        "success": true,
+        "as_of": "...",
+        "symbols": [
+          {
+            "symbol": "ADBE",
+            "bot_position_qty": 80,
+            "ib_position_qty": 80,
+            "pending_stop_qty_total": 320,
+            "pending_target_qty_total": 240,
+            "stop_legs": [
+              {"order_id": "...", "qty": 40, "price": 237.05, "oca_group": "...", "status": "PreSubmitted"},
+              ...
+            ],
+            "target_legs": [...],
+            "excess_stop_qty": 240,
+            "excess_target_qty": 160,
+            "severity": "high",          # high if excess > position_qty
+            "recommendation": "Cancel oldest 240sh stop coverage in TWS, leave the most recent 80sh OCA pair in place."
+          },
+          ...
+        ],
+        "clean_symbols": ["EBAY", "PEP", "MDT"]  # bot qty matches pending leg qty
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    # ── 1. Build bot's view: symbol → qty (signed; long=+, short=-) ──
+    bot_qty_by_sym: Dict[str, float] = {}
+    open_trades = getattr(_trading_bot, "_open_trades", {}) or {}
+    for t in open_trades.values():
+        sym = (getattr(t, "symbol", "") or "").upper()
+        if not sym:
+            continue
+        direction = (
+            t.direction.value if hasattr(t.direction, "value")
+            else str(getattr(t, "direction", "long"))
+        ).lower()
+        shares = float(getattr(t, "remaining_shares", None) or getattr(t, "shares", 0) or 0)
+        signed = shares if direction == "long" else -shares
+        bot_qty_by_sym[sym] = bot_qty_by_sym.get(sym, 0) + signed
+
+    # ── 2. Pull IB's view (pusher positions) ───────────────────────
+    ib_qty_by_sym: Dict[str, float] = {}
+    try:
+        from routers.ib import _pushed_ib_data
+        for p in (_pushed_ib_data.get("positions") or []):
+            sym = (p.get("symbol") or "").upper()
+            if sym:
+                ib_qty_by_sym[sym] = float(p.get("position") or 0)
+    except Exception as e:
+        logger.debug(f"[v19.34.77] pusher positions fetch failed: {e}")
+
+    # ── 3. Pull open orders from the pusher; bucket stop/target per symbol ──
+    stop_legs_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    target_legs_by_sym: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        from routers.ib import _pushed_ib_data
+        all_orders = _pushed_ib_data.get("orders") or _pushed_ib_data.get("open_orders") or []
+        # Some pushers emit a dict with `orders` nested; handle both.
+        if isinstance(all_orders, dict):
+            all_orders = all_orders.get("orders", [])
+        for o in all_orders:
+            sym = (o.get("symbol") or "").upper()
+            if not sym:
+                continue
+            status = (o.get("status") or "").lower()
+            if status not in ("presubmitted", "submitted"):
+                continue
+            order_type = (o.get("order_type") or "").upper().replace(" ", "_")
+            qty = float(o.get("quantity") or o.get("remaining") or 0)
+            leg = {
+                "order_id": o.get("order_id") or o.get("orderId"),
+                "qty": int(qty),
+                "price": (o.get("aux_price") or o.get("stop_price")
+                          or o.get("limit_price")),
+                "oca_group": o.get("oca_group"),
+                "action": o.get("action"),
+                "order_type": order_type,
+                "status": o.get("status"),
+            }
+            if order_type in ("STP", "STP_LMT", "TRAIL", "TRAIL_LMT"):
+                stop_legs_by_sym.setdefault(sym, []).append(leg)
+            elif order_type == "LMT":
+                # Limit orders can be entries OR profit-targets. Filter:
+                # a profit-target SELL on a long position is opposite to
+                # the bot's tracked direction. We approximate by
+                # marking any LMT for a symbol where the bot ALSO has a
+                # position as a target leg.
+                if sym in bot_qty_by_sym:
+                    target_legs_by_sym.setdefault(sym, []).append(leg)
+    except Exception as e:
+        logger.warning(f"[v19.34.77] order fetch failed: {e}")
+
+    # ── 4. Compose per-symbol audit rows ───────────────────────────
+    all_syms = set(bot_qty_by_sym) | set(stop_legs_by_sym) | set(target_legs_by_sym)
+    symbols_out: List[Dict[str, Any]] = []
+    clean_symbols: List[str] = []
+    for sym in sorted(all_syms):
+        bot_q = bot_qty_by_sym.get(sym, 0)
+        ib_q = ib_qty_by_sym.get(sym, 0)
+        pos_qty = abs(bot_q)
+        stop_qty = sum(leg["qty"] for leg in stop_legs_by_sym.get(sym, []))
+        tgt_qty = sum(leg["qty"] for leg in target_legs_by_sym.get(sym, []))
+        excess_stop = max(0, stop_qty - int(pos_qty))
+        excess_tgt = max(0, tgt_qty - int(pos_qty))
+
+        if excess_stop == 0 and excess_tgt == 0 and pos_qty > 0:
+            clean_symbols.append(sym)
+            continue
+        if pos_qty == 0 and stop_qty == 0 and tgt_qty == 0:
+            continue  # symbol with no presence anywhere; skip
+
+        severity = "high" if (excess_stop >= pos_qty and pos_qty > 0) else \
+                   "medium" if (excess_stop > 0 or excess_tgt > 0) else "info"
+
+        recommendation = None
+        if excess_stop > 0:
+            recommendation = (
+                f"Cancel oldest {excess_stop}sh stop-side coverage in TWS, "
+                f"leave the most recent {int(pos_qty)}sh OCA pair in place. "
+                f"Verify the surviving stop+target share an oca_group string."
+            )
+
+        symbols_out.append({
+            "symbol": sym,
+            "bot_position_qty": int(bot_q),
+            "ib_position_qty": int(ib_q),
+            "pending_stop_qty_total": int(stop_qty),
+            "pending_target_qty_total": int(tgt_qty),
+            "stop_legs": stop_legs_by_sym.get(sym, []),
+            "target_legs": target_legs_by_sym.get(sym, []),
+            "excess_stop_qty": int(excess_stop),
+            "excess_target_qty": int(excess_tgt),
+            "severity": severity,
+            "recommendation": recommendation,
+        })
+
+    return {
+        "success": True,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "symbols": symbols_out,
+        "clean_symbols": clean_symbols,
+        "note": (
+            "Read-only diagnostic. To cancel excess legs, use the TWS UI "
+            "or wait for v19.34.78 auto-cancel endpoint (pending audit "
+            "verification)."
+        ),
+    }
+

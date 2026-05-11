@@ -4,6 +4,22 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-12 — v19.34.76 / .77 SHIPPED — Retroactive bracket attach + stacking audit
+
+Forensic audit of TWS this morning revealed BMNR (658sh, $15k) carrying naked at IB (no stop) AND systemic bracket-stacking on every scale-in (ADBE 80sh long had 320sh of pending stops; EFA 963sh long had 2,888sh; GM 109sh long had 1,282sh).
+
+**v19.34.76** — `POST /api/trading-bot/attach-brackets-to-unprotected` retroactively attaches OCA stop+target to any unbracketed open trade. Dry-run by default. 9 pytest cases.
+
+**v19.34.77** — `GET /api/trading-bot/bracket-stacking-audit` read-only diagnostic surfacing symbols with `pending_stop_qty > position_qty`. Auto-cancel of excess legs deferred to v19.34.78 pending operator-verified diagnosis.
+
+Full 142-test safety suite green. **User: Save to Github → `git pull` on DGX → restart backend; then run the runbook in CHANGELOG.md to safely re-arm BMNR.**
+
+### 🔴 P0 — v19.34.78 follow-up needed
+
+The bracket-stacking ROOT CAUSE is unidentified — the audit endpoint surfaces the symptom, but we don't yet know which code path is emitting redundant stops on each scale-in. Top suspects: (a) `bracket_reissue_service` not cancelling old legs before posting new; (b) `position_reconciler.attach_oca_stop_target` being re-fired for the same trade across scans; (c) scale-in code creating a fresh BotTrade per fill instead of resizing existing. Needs forensic deep-dive against the TWS order log before writing the auto-cancel endpoint.
+
+
+
 ## 🔥 OPEN BACKLOG — pinned 2026-05-11 (refreshed)
 
 All P0 + the 3 P1 items pinned earlier are now SHIPPED — see v19.34.71/.72/.73/.74/.75 below.

@@ -2,6 +2,54 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.76 / .77) — Retroactive bracket attach + bracket-stacking audit
+
+### Why
+
+Operator's 2026-05-12 TWS forensic audit revealed two new safety issues:
+
+1. **BMNR (658sh, ~$15k) was completely naked at IB** — no stop, no target. BMNR is the orphan adopted yesterday during the kill-switch bypass incident. v19.34.68 attaches brackets when the reconciler claims a NEW orphan, but BMNR was already in `_open_trades` BEFORE v19.34.68 shipped, so on today's restart the orphan-adoption path was skipped and the retroactive attach never ran.
+2. **Bracket-stacking** — every scale-in fill emitted a fresh stop+target pair WITHOUT cancelling the previous one. ADBE 80sh long carried 320sh of pending stops. EFA 963sh long carried 2,888sh. GM 109sh long carried 1,282sh. Any single stop firing would have flipped the position massively short on the next tick.
+
+### v19.34.76 — Retroactive bracket attach
+
+New endpoint `POST /api/trading-bot/attach-brackets-to-unprotected` (in `routers/trading_bot.py`). Scans `_open_trades` for trades with no real `stop_order_id` (or SIM-prefixed), computes a stop/target from pusher last-price (or entry-price fallback, or operator override), and fires `executor.attach_oca_stop_target` per candidate.
+
+Body:
+```json
+{
+  "dry_run": true,
+  "stop_pct": 2.0,
+  "target_pct": 8.0,
+  "symbols": ["BMNR"],                // optional filter
+  "overrides": {"BMNR": {"stop": 20.5, "target": 26.0}}  // optional
+}
+```
+
+Long vs short directions invert correctly. Persists new `stop_order_id` + `target_order_ids` on the trade via `bot._save_trade`.
+
+9 pytest cases in `tests/test_v19_34_76_retroactive_bracket_attach.py` covering dry-run, apply, symbol filter, overrides, short-direction inversion, SIM-prefixed detection, missing-reference-price skip.
+
+### v19.34.77 — Bracket-stacking audit (read-only)
+
+New endpoint `GET /api/trading-bot/bracket-stacking-audit` (in `routers/trading_bot.py`). Compares bot's `_open_trades` qty per symbol against the sum of pending PreSubmitted stop+target legs at IB; surfaces any imbalance with `severity` (`high`/`medium`/`info`) and a recommendation.
+
+**This is diagnostic-only.** Auto-cancel of excess legs is intentionally deferred to v19.34.78 once the operator confirms the diagnosis matches what they see in TWS — cancelling protective legs in a live position is one-way, can't be unsafe.
+
+### Roll-up
+
+9 new pytest cases. Full 142-test safety/cooldown/drift/bracket suite green. Lint clean (only pre-existing F841 on line 3551 unrelated to these patches). **User: Save to Github → `git pull` on DGX → restart backend.**
+
+### Operator runbook for BMNR right now
+
+1. Set a manual stop in TWS for BMNR immediately (the bot will respect the manual leg as a real `stop_order_id` once the reconciler picks it up).
+2. After restart: `curl -X POST $DGX/api/trading-bot/attach-brackets-to-unprotected -H "Content-Type: application/json" -d '{"dry_run": true}'` to see candidates.
+3. Verify computed stop/target look sane.
+4. Re-run with `"dry_run": false` to fire.
+5. `curl $DGX/api/trading-bot/bracket-stacking-audit | python3 -m json.tool` to inspect the stacking pattern across all symbols.
+
+
+
 ## 2026-05-11 (v19.34.71 / .72 / .73 / .74 / .75) — Drift gates, operator-flatten, and panel-truth fixes
 
 Five tightly-coupled patches shipped together. They close out the P0/P1 issues pinned 2026-05-11 morning.
