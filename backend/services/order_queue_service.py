@@ -98,6 +98,66 @@ class OrderQueueService:
             logger.error(f"Failed to initialize OrderQueueService: {e}")
             raise
     
+    def _maybe_refuse_for_kill_switch(self, order: Dict[str, Any]) -> Optional[str]:
+        """v19.34.69 — Bottom-layer kill-switch gate.
+
+        Delegates the decision to `services.kill_switch_gate.evaluate_kill_switch_gate`
+        (pure function, no side effects). If a refusal payload comes back,
+        persists it as a `rejected` row in the queue so callers blocking on
+        `get_order_result(order_id)` resolve immediately with status=rejected
+        instead of timing out.
+
+        Returns the refusal `order_id` if the order was refused, else None.
+
+        Why duplicate `routers/ib._kill_switch_gate` here?
+          - That wrapper guards orders submitted through `routers.ib.queue_order(...)`.
+          - It does NOT cover callers that import `services.order_queue_service`
+            directly (e.g., `agents/trade_executor_agent.py`). The BMNR P-1
+            bypass on 2026-05-11 14:14:34 UTC went through exactly that hole.
+          - This gate lives at the absolute lowest layer (the service
+            implementation), so EVERY producer is guarded — present and
+            future — without depending on disciplined import paths.
+        """
+        try:
+            from services.kill_switch_gate import evaluate_kill_switch_gate
+            refusal_payload = evaluate_kill_switch_gate(order)
+        except Exception as e:
+            # Failed-open: mirrors `routers/ib._kill_switch_gate` behavior.
+            # Closes are too important to block on guardrail outages.
+            logger.warning(
+                "v19.34.69 [SERVICE-GATE] kill-switch evaluation failed: %s "
+                "— allowing through (fail-open).", e,
+            )
+            return None
+
+        if refusal_payload is None:
+            return None
+
+        refused_id = f"ks-refused-{uuid.uuid4().hex[:8]}"
+        refusal_payload["order_id"] = refused_id
+
+        try:
+            self._collection.insert_one({**refusal_payload, "_id": refused_id})
+        except Exception as e:
+            # If the insert collides or Mongo is down, we still return the
+            # refused_id so the caller knows the order was NOT submitted.
+            # The downside is `get_order_result(refused_id)` may not find
+            # the row — but logs make the rejection unambiguous.
+            logger.error(
+                "v19.34.69 [SERVICE-GATE] failed to persist refusal row %s: %s",
+                refused_id, e,
+            )
+
+        logger.error(
+            "v19.34.69 [SERVICE-GATE] REFUSED entry at service layer: "
+            "symbol=%s action=%s qty=%s trade_id=%s — kill switch active (reason=%r)",
+            order.get("symbol"), order.get("action"),
+            order.get("quantity"), order.get("trade_id"),
+            refusal_payload.get("reason"),
+        )
+        return refused_id
+
+
     def queue_order(self, order: Dict[str, Any]) -> str:
         """Queue an order for execution by local pusher. Returns order_id.
 
@@ -108,6 +168,19 @@ class OrderQueueService:
         """
         if not self._initialized:
             self.initialize()
+
+        # v19.34.69 — Service-layer kill-switch gate. Pre-fix this gate
+        # only existed in `routers/ib.py::queue_order`, the wrapper. The
+        # BMNR P-1 bypass on 2026-05-11 14:14:34 UTC happened because
+        # `agents/trade_executor_agent.py` imports the service directly
+        # via `get_order_queue_service()` and calls `.queue_order(...)`,
+        # routing around the wrapper's gate entirely. Putting the gate
+        # HERE — at the absolute lowest layer before the pusher sees
+        # the row — closes that hole for every present and future
+        # caller, no matter which path they take to the queue.
+        refused_id = self._maybe_refuse_for_kill_switch(order)
+        if refused_id is not None:
+            return refused_id
 
         order_id = str(uuid.uuid4())[:8]
         is_bracket = order.get("type") == "bracket"

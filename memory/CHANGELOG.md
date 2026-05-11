@@ -2,6 +2,54 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-11 (v19.34.69) — BMNR P-1 kill-switch bypass — service-layer chokepoint
+
+### Why
+
+Operator manually tripped the kill switch at 2026-05-11 14:14:34 UTC. Despite that, the bot **still opened BMNR** — confirmed in TWS/IB as a real fill. Catastrophic P-1: the kill switch is supposed to be a hard halt for all new entries.
+
+### Forensic root cause
+
+The kill-switch gate (`routers/ib.py::_kill_switch_gate`, introduced v19.34.48 after the EBAY incident) is wired into `routers.ib.queue_order(...)`, the wrapper. Every order producer that imports it gets gated.
+
+`agents/trade_executor_agent.py::_execute_order` does NOT import the wrapper. It imports the service directly:
+
+```python
+from services.order_queue_service import get_order_queue_service
+order_queue = get_order_queue_service()
+order_id = order_queue.queue_order({...})   # ← bypasses the gate entirely
+```
+
+Result: any AI-assistant chat / coach / agent-initiated entry submits through this hole with zero kill-switch enforcement.
+
+### Fix
+
+Push the gate down one level to the absolute bottom — into `OrderQueueService.queue_order()` itself. New module `services/kill_switch_gate.py` holds the shared decision logic so both the routers wrapper (kept for redundancy / observability) and the service can enforce identical behaviour.
+
+After v19.34.69 the gate is reachable by every order producer — present and future — without depending on disciplined import paths.
+
+- New file: `/app/backend/services/kill_switch_gate.py` — `is_protective_intent()` + `evaluate_kill_switch_gate()` (pure, no side effects).
+- Modified: `/app/backend/services/order_queue_service.py` — new `_maybe_refuse_for_kill_switch()` runs at top of `queue_order()`; persists a `status=rejected` row and returns a `ks-refused-*` id so `get_order_result()` resolves immediately.
+- Fail mode: matches prior behaviour (fail-open on guardrails outage) so legitimate close-side orders aren't held hostage by guardrail health.
+
+### Regression test
+
+`/app/backend/tests/test_v19_34_69_service_layer_kill_switch_gate.py` — 6 cases:
+1. BMNR-shaped agent payload refused at service layer when kill switch active.
+2. OCA bracket leg (protective) still allowed.
+3. Bare `STP` order_type still allowed.
+4. No-op when kill switch inactive.
+5. Fail-open when guardrails import fails.
+6. Intent-detection parity with the routers-level gate.
+
+All 6 pass. Full kill-switch suite (107 tests across 8 files) green.
+
+### Operator action
+
+User must click **Save to Github** in the Emergent UI, then `git pull` on the DGX and reboot the backend via `spark_stop.sh` / `spark_start.sh`. No env/dependency changes — pure code patch.
+
+
+
 ## 2026-02-09 (v19.34.66) — Boot-time orphan-GTC reconciler (the missing audit pass)
 
 ### Why

@@ -4,6 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-11 — v19.34.69 SHIPPED — BMNR P-1 kill-switch bypass sealed
+
+Operator manually tripped kill switch at 2026-05-11 14:14:34 UTC; bot still opened BMNR. Forensic audit found `agents/trade_executor_agent.py::_execute_order` was importing `services.order_queue_service` directly and calling `.queue_order(...)` on the service, bypassing the only chokepoint (`routers/ib._kill_switch_gate`).
+
+Fix: pushed the gate decision into `services/kill_switch_gate.py` (shared module) and wired it into `OrderQueueService.queue_order()` itself. Every present and future order producer is now gated at the absolute lowest layer. Routers-level gate retained for redundancy + observability.
+
+6 new pytest regressions in `tests/test_v19_34_69_service_layer_kill_switch_gate.py` (incl. exact BMNR-shaped agent payload). All 107 kill-switch tests across 8 files pass. **User must Save to Github → pull on DGX → restart backend.**
+
+
+
 ## 🔒 2026-02-09 — V6.next++ UI SPEC LOCKED
 
 User approved final mockup at `?preview=v6mock`. Spec frozen at `/app/memory/V6_NEXT_LOCKED_SPEC.md`.
