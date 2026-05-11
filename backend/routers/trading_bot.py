@@ -5706,3 +5706,224 @@ async def clear_stale_pending_trades(payload: ClearStalePendingRequest):
         "still_pending": still_pending,
         "ran_at": now.isoformat(),
     }
+
+
+# ── v19.34.80 — Cancel excess bracket legs (operator-triggered) ─────────
+#
+# Companion to the read-only audit (v19.34.77). Now that v19.34.79 has
+# sealed the leak going forward (`_grow_existing_excess_slice` sibling
+# sweep), this endpoint lets the operator unwind HISTORICAL stacking —
+# the 320sh of stops against ADBE's 80sh position, the 2,888sh against
+# EFA's 963sh, the 1,282sh against GM's 109sh — with one curl per
+# affected symbol instead of clicking through TWS.
+#
+# Strategy: for each symbol, decide which bracket pair to KEEP and
+# cancel the rest. Preference order:
+#   1. Operator-supplied `keep_oca_group` (full control).
+#   2. Canonical slice's stop_order_id / target_order_ids (whatever the
+#      bot currently tracks as authoritative).
+#   3. The newest stop_leg + matching target_leg by `oca_group`.
+#
+# The "keep" bracket should already cover the cumulative position size
+# post-v19.34.79. Anything beyond it is by construction redundant.
+# Still defaults to dry-run because cancellation is one-way.
+
+class CancelExcessBracketLegsRequest(BaseModel):
+    symbol: str
+    dry_run: bool = True
+    keep_oca_group: Optional[str] = None  # operator override
+    keep_order_ids: Optional[List[int]] = None  # explicit "don't cancel these"
+
+
+@router.post("/cancel-excess-bracket-legs")
+async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
+    """v19.34.80 — Cancel excess stop/target legs for one symbol.
+
+    Reads the symbol's current pending stop+target legs from the
+    pusher's open-orders snapshot, picks ONE bracket pair to keep
+    (per the strategy above), and cancels the rest via
+    `_direct_ib_service.cancel_order(ib_order_id)`. Always run with
+    `dry_run: true` first.
+
+    Response:
+      {
+        "success": true,
+        "symbol": "ADBE",
+        "dry_run": <bool>,
+        "kept": {
+          "stop": {order_id, qty, price, oca_group},
+          "target": {order_id, qty, price, oca_group},
+          "decision_source": "canonical_slice"|"keep_oca_group"|"newest"|"keep_order_ids"
+        },
+        "cancelled": [{order_id, qty, price, oca_group, action, status}, ...],
+        "errors": [...]
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    sym = payload.symbol.upper()
+    keep_oca = payload.keep_oca_group
+    keep_ids = set(payload.keep_order_ids or [])
+
+    # ── 1. Pull symbol's pending orders from pusher ──
+    stop_legs: List[Dict[str, Any]] = []
+    target_legs: List[Dict[str, Any]] = []
+    try:
+        from routers.ib import _pushed_ib_data
+        all_orders = _pushed_ib_data.get("orders") or _pushed_ib_data.get("open_orders") or []
+        if isinstance(all_orders, dict):
+            all_orders = all_orders.get("orders", [])
+        for o in all_orders:
+            if (o.get("symbol") or "").upper() != sym:
+                continue
+            status = (o.get("status") or "").lower()
+            if status not in ("presubmitted", "submitted"):
+                continue
+            order_type = (o.get("order_type") or "").upper().replace(" ", "_")
+            oid_raw = o.get("order_id") or o.get("orderId")
+            try:
+                oid = int(oid_raw) if oid_raw is not None else None
+            except (TypeError, ValueError):
+                oid = None
+            if oid is None:
+                continue
+            leg = {
+                "order_id": oid,
+                "qty": int(float(o.get("quantity") or o.get("remaining") or 0)),
+                "price": (o.get("aux_price") or o.get("stop_price")
+                          or o.get("limit_price")),
+                "oca_group": o.get("oca_group"),
+                "action": o.get("action"),
+                "order_type": order_type,
+                "status": o.get("status"),
+                "submitted_at": o.get("submitted_at") or o.get("queued_at"),
+            }
+            if order_type in ("STP", "STP_LMT", "TRAIL", "TRAIL_LMT"):
+                stop_legs.append(leg)
+            elif order_type == "LMT":
+                target_legs.append(leg)
+    except Exception as e:
+        logger.warning(f"[v19.34.80] {sym} order fetch failed: {e}")
+
+    if not stop_legs and not target_legs:
+        return {
+            "success": True, "symbol": sym, "dry_run": payload.dry_run,
+            "kept": None, "cancelled": [], "errors": [],
+            "message": f"No pending stop/target legs found for {sym}.",
+        }
+
+    # ── 2. Pick the keep bracket ──
+    decision_source: str = "unknown"
+    keep_stop: Optional[Dict[str, Any]] = None
+    keep_target: Optional[Dict[str, Any]] = None
+
+    canonical_stop_id: Optional[int] = None
+    canonical_target_ids: set = set()
+    for trade in (getattr(_trading_bot, "_open_trades", {}) or {}).values():
+        if (getattr(trade, "symbol", "") or "").upper() != sym:
+            continue
+        try:
+            if trade.stop_order_id:
+                canonical_stop_id = int(trade.stop_order_id)
+        except (TypeError, ValueError):
+            pass
+        for tid in (getattr(trade, "target_order_ids", []) or []):
+            try:
+                canonical_target_ids.add(int(tid))
+            except (TypeError, ValueError):
+                pass
+
+    if keep_oca:
+        keep_stop = next((s for s in stop_legs if s["oca_group"] == keep_oca), None)
+        keep_target = next((t for t in target_legs if t["oca_group"] == keep_oca), None)
+        decision_source = "keep_oca_group"
+    elif keep_ids:
+        keep_stop = next((s for s in stop_legs if s["order_id"] in keep_ids), None)
+        keep_target = next((t for t in target_legs if t["order_id"] in keep_ids), None)
+        decision_source = "keep_order_ids"
+    elif canonical_stop_id or canonical_target_ids:
+        keep_stop = next((s for s in stop_legs if s["order_id"] == canonical_stop_id), None)
+        keep_target = next((t for t in target_legs if t["order_id"] in canonical_target_ids), None)
+        decision_source = "canonical_slice"
+
+    # Fallback: keep the newest. If submitted_at isn't reliable, fall
+    # back to highest order_id (IB issues monotonically).
+    if keep_stop is None and stop_legs:
+        keep_stop = max(stop_legs, key=lambda s: s["order_id"])
+        decision_source = decision_source if decision_source != "unknown" else "newest"
+    if keep_target is None and target_legs:
+        # Prefer the same OCA group as the kept stop, if any.
+        if keep_stop and keep_stop.get("oca_group"):
+            keep_target = next(
+                (t for t in target_legs if t["oca_group"] == keep_stop["oca_group"]),
+                None,
+            )
+        if keep_target is None:
+            keep_target = max(target_legs, key=lambda t: t["order_id"])
+        if decision_source == "unknown":
+            decision_source = "newest"
+
+    # ── 3. Cancel everything that isn't the keep bracket ──
+    keep_ids_final = set()
+    if keep_stop:
+        keep_ids_final.add(keep_stop["order_id"])
+    if keep_target:
+        keep_ids_final.add(keep_target["order_id"])
+
+    to_cancel = [
+        leg for leg in (stop_legs + target_legs)
+        if leg["order_id"] not in keep_ids_final
+    ]
+
+    cancelled: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    if not payload.dry_run:
+        try:
+            from routers.ib import _ib_service as _direct_ib_service
+        except Exception:
+            _direct_ib_service = None
+        if _direct_ib_service is None:
+            errors.append({
+                "error": "ib_service_unavailable",
+                "detail": "Pusher-only deployment or IB service not registered. "
+                          "Cancel from TWS directly.",
+            })
+        else:
+            for leg in to_cancel:
+                try:
+                    ok = await _direct_ib_service.cancel_order(int(leg["order_id"]))
+                    if ok:
+                        cancelled.append(leg)
+                        logger.warning(
+                            "[v19.34.80 EXCESS-CANCEL] %s order_id=%s "
+                            "(%s %s qty=%s) cancelled.",
+                            sym, leg["order_id"], leg["action"],
+                            leg["order_type"], leg["qty"],
+                        )
+                    else:
+                        errors.append({
+                            "order_id": leg["order_id"],
+                            "error": "cancel_returned_false",
+                            "detail": "Order may have already filled or been cancelled.",
+                        })
+                except Exception as e:
+                    errors.append({"order_id": leg["order_id"], "error": str(e)})
+    else:
+        cancelled = list(to_cancel)  # show what WOULD be cancelled
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "dry_run": payload.dry_run,
+        "kept": {
+            "stop": keep_stop,
+            "target": keep_target,
+            "decision_source": decision_source,
+        },
+        "cancelled": cancelled,
+        "errors": errors,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+

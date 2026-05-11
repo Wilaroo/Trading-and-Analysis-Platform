@@ -2,6 +2,67 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.80) — Cancel-excess-bracket-legs endpoint (historical stacking cleanup)
+
+Operator-triggered companion to v19.34.77 (read-only audit) and v19.34.79 (sealed the leak going forward). Lets the operator unwind historical bracket stacking — ADBE's 320sh of stops against 80sh, EFA's 2,888sh against 963sh, GM's 1,282sh against 109sh — with one curl per symbol instead of clicking through TWS.
+
+### Endpoint
+
+`POST /api/trading-bot/cancel-excess-bracket-legs`
+
+Body:
+```json
+{
+  "symbol": "ADBE",
+  "dry_run": true,
+  "keep_oca_group": "OCA-xxx",       // optional, highest priority
+  "keep_order_ids": [12345, 12346]   // optional, second priority
+}
+```
+
+Decision strategy (in priority order):
+1. `keep_oca_group` — full operator control.
+2. `keep_order_ids` — explicit "don't cancel these".
+3. Canonical slice — whatever `bot._open_trades[sym].stop_order_id` / `target_order_ids` track.
+4. Fallback: newest by IB `order_id` (monotonic at IB).
+
+Target leg pairing prefers the same OCA group as the kept stop; falls back to newest otherwise. Cancellation uses the same primitive as `_grow_existing_excess_slice` and `cancel-all-pending-orders` (`_direct_ib_service.cancel_order(int(order_id))`). Pusher-only deploys without a registered `_ib_service` return a helpful error instead of crashing.
+
+### Regression test
+
+`/app/backend/tests/test_v19_34_80_cancel_excess_bracket_legs.py` — 10 cases covering empty-pending noop, dry-run vs apply, all 4 decision strategies, target same-OCA pairing, pusher-only deploy graceful failure, cancel-returning-false recorded in errors, target-legs-only case.
+
+### Operator runbook (full unwind for 2026-05-12 stacking)
+
+```
+# 1. See the damage
+curl $DGX/api/trading-bot/bracket-stacking-audit | python3 -m json.tool
+
+# 2. Dry-run per affected symbol
+for SYM in ADBE EFA GM; do
+  echo "=== $SYM ==="
+  curl -X POST $DGX/api/trading-bot/cancel-excess-bracket-legs \
+    -H "Content-Type: application/json" \
+    -d "{\"symbol\":\"$SYM\",\"dry_run\":true}" | python3 -m json.tool
+done
+
+# 3. Apply
+for SYM in ADBE EFA GM; do
+  curl -X POST $DGX/api/trading-bot/cancel-excess-bracket-legs \
+    -H "Content-Type: application/json" \
+    -d "{\"symbol\":\"$SYM\",\"dry_run\":false}"
+done
+
+# 4. Confirm clean
+curl $DGX/api/trading-bot/bracket-stacking-audit | python3 -m json.tool
+```
+
+### Roll-up
+
+10 new pytest cases. Full 165-test safety/cooldown/drift/bracket suite green. Lint clean. **User: Save to Github → `git pull` on DGX → restart backend.**
+
+
+
 ## 2026-05-12 (v19.34.78 / .79) — Zombie pending cleanup + sibling-bracket cancel sweep
 
 ### v19.34.78 — Stale-PENDING zombie cleanup (P1 — operator-observed today)

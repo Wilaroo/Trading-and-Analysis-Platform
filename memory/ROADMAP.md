@@ -4,6 +4,12 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-12 — v19.34.80 SHIPPED — Cancel-excess-bracket-legs endpoint
+
+Operator-triggered companion to v19.34.77 audit (read-only) and v19.34.79 sibling-sweep (seals the leak going forward). `POST /api/trading-bot/cancel-excess-bracket-legs` picks ONE bracket pair to keep per symbol and cancels the rest via the same `cancel_order` primitive used by `_grow_existing_excess_slice` and `cancel-all-pending-orders`. Decision strategy: keep_oca_group > keep_order_ids > canonical_slice > newest fallback. Dry-run default. 10 pytest cases including pusher-only graceful failure. Full 165-test safety suite green. **User: Save to Github → `git pull` on DGX → restart backend.**
+
+
+
 ## ✅ 2026-05-12 — v19.34.78 / .79 SHIPPED — Zombie pending cleanup + bracket-stacking ROOT CAUSE fix
 
 **v19.34.78** — Stale-PENDING zombies (NBIS/MU/COIN-style "pending trade exists" 7+ min apart) traced to v19.34.6 pre-submit save → boot reload cycle. Boot-time filter in `bot_persistence.py` prunes PENDINGs older than `STALE_PENDING_TTL_S` (default 30 min); operator escape-hatch `POST /api/trading-bot/clear-stale-pending-trades` for live cleanup without restart. 7 pytest cases.
