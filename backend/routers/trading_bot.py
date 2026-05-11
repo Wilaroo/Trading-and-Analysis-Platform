@@ -467,6 +467,36 @@ async def get_bot_status():
         except Exception as e:
             logger.debug(f"starting_capital sync failed: {e}")
 
+    # v19.34.74 — `max_position_pct` truth-source reconciliation.
+    # `TradingRiskParams.max_position_pct` defaults to 50% and was the
+    # original UI source for the V5 Readiness/risk panels. But the
+    # canonical runtime value lives at `PositionSizerService.config.
+    # max_position_pct` (default 10%, mutable via
+    # `POST /api/risk/position-sizing/configure`). Operator caught the
+    # divergence 2026-05-11: readiness panel showed 50%, actual sizing
+    # used 10%, kill switch saw neither. Pre-fix the only fix was a
+    # manual call to both endpoints in lock-step every time the
+    # operator changed sizing config.
+    #
+    # Fix: surface BOTH values in the response so the UI can render
+    # the canonical (`sizer`) value AND warn when the legacy
+    # `risk_params` value disagrees by more than 0.5pp. Also overwrite
+    # `risk_params.max_position_pct` on the response (only — not the
+    # underlying object) so existing UI consumers reading from there
+    # see the canonical value without further code changes.
+    try:
+        from services.position_sizer import get_position_sizer_service
+        _sizer_cfg = get_position_sizer_service().get_config() or {}
+        _sizer_pct = _sizer_cfg.get("max_position_pct")
+        if _sizer_pct is not None:
+            _rp = dict(status.get("risk_params") or {})
+            _rp["max_position_pct_canonical_source"] = "position_sizer_service"
+            _rp["max_position_pct_legacy"] = _rp.get("max_position_pct")
+            _rp["max_position_pct"] = float(_sizer_pct)
+            status["risk_params"] = _rp
+    except Exception as e:
+        logger.debug(f"max_position_pct sizer reconciliation failed: {e}")
+
     return {"success": True, **status}
 
 

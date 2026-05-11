@@ -343,23 +343,37 @@ def get_strategy_mix(n: int = 100):
     domination at a glance.
     """
     n = max(10, min(500, int(n or 100)))
-    if not _scanner_service:
-        return {"success": True, "n": 0, "buckets": [], "total": 0}
-
-    db = getattr(_scanner_service, "db", None)
-    if db is None:
-        return {"success": True, "n": 0, "buckets": [], "total": 0}
-
     rows: list = []
-    try:
-        cursor = db["live_alerts"].find(
-            {},
-            {"_id": 0, "setup_type": 1, "direction": 1, "created_at": 1, "ai_edge_label": 1},
-        ).sort("created_at", -1).limit(n)
-        rows = list(cursor)
-    except Exception as e:
-        logger.warning(f"strategy-mix aggregate failed: {e}")
-        rows = []
+
+    # ── v19.34.75 — Always try DB + in-memory fallbacks, regardless of
+    # whether the legacy predictive `_scanner_service` is registered.
+    # Pre-fix this endpoint short-circuited to `total=0` when
+    # `_scanner_service is None`, even though the enhanced_scanner
+    # (which is what actually fires the alerts the operator sees in
+    # the V5 panel) was holding hundreds of `_live_alerts` in memory.
+    # The "Strategy mix · waiting for first alerts" UI bug came from
+    # exactly that short-circuit on DGX deploys where only the
+    # enhanced_scanner is initialized.
+    db = None
+    if _scanner_service is not None:
+        db = getattr(_scanner_service, "db", None)
+    if db is None:
+        try:
+            from database import get_database
+            db = get_database()
+        except Exception:
+            db = None
+
+    if db is not None:
+        try:
+            cursor = db["live_alerts"].find(
+                {},
+                {"_id": 0, "setup_type": 1, "direction": 1, "created_at": 1, "ai_edge_label": 1},
+            ).sort("created_at", -1).limit(n)
+            rows = list(cursor)
+        except Exception as e:
+            logger.warning(f"strategy-mix aggregate failed: {e}")
+            rows = []
 
     # Fallback to in-memory alerts when Mongo persistence is empty or
     # behind. Checks BOTH the predictive_scanner (which is `_scanner_service`)

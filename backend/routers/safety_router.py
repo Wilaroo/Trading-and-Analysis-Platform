@@ -970,3 +970,49 @@ async def cancel_orphan_gtc(req: CancelOrphanGtcRequest):
         "not_found": not_found,
         "audited_at": audit.get("checked_at"),
     }
+
+
+# ── v19.34.72 — Operator-flatten suppression endpoints ───────────────
+
+@router.get("/operator-flatten-suppression")
+async def list_operator_flatten_suppression():
+    """List symbols currently suppressed by the operator-flatten detector.
+
+    A symbol lands here when the position reconciler observes an
+    external close (IB=0 while bot was tracking, confirmed across two
+    consecutive scans per v19.34.71) — by construction the close was
+    not bot-initiated, so we assume the operator manually flattened
+    and block re-entries on the symbol until UTC midnight.
+    """
+    from services.operator_flatten_suppression import get_operator_flatten_suppression
+    supp = get_operator_flatten_suppression()
+    snapshot = supp.list_all()
+    return {
+        "success": True,
+        "count": len(snapshot),
+        "suppressed": snapshot,
+        "snapshot_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/clear-operator-flatten-suppression")
+async def clear_operator_flatten_suppression(payload: Optional[dict] = None):
+    """Clear one or all symbols from the operator-flatten suppression set.
+
+    Body (optional):
+      `{"symbol": "NBIS"}` — clear a specific symbol.
+      `{}` or omitted     — clear ALL suppressed symbols.
+
+    Returns count of symbols removed.
+    """
+    from services.operator_flatten_suppression import get_operator_flatten_suppression
+    supp = get_operator_flatten_suppression()
+    target = (payload or {}).get("symbol")
+    removed = supp.clear(symbol=target)
+    return {
+        "success": True,
+        "removed": removed,
+        "target": target or "ALL",
+        "cleared_at": datetime.now(timezone.utc).isoformat(),
+    }
+

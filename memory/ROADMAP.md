@@ -4,41 +4,48 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
-## 🔥 OPEN BACKLOG — pinned 2026-05-11
+## 🔥 OPEN BACKLOG — pinned 2026-05-11 (refreshed)
 
-### 🔴 P0 — `external_close_v19_34_15b` semantics
-
-**Symptom:** bot occasionally records phantom realized losses (~$326 on NBIS, 2026-05-11) when transient view mismatches between `bot._open_trades` and IB's position snapshot are misread as "the position closed externally."
-
-**Where:** `services/position_reconciler.py` — the `external_close_v19_34_15b` branch currently fires whenever bot view ≠ IB view at scan time. That includes momentary races (e.g., fill notification not yet propagated, snapshot stale by <1s).
-
-**Required fix:** restrict `external_close` to a **confirmed** IB position transition from non-zero → zero across two consecutive snapshots (or, ideally, an explicit `position_event` from the pusher showing the close fill). Anything else routes to drift-reconcile, not external-close. Add a two-tick confirmation window before recording the accounting event.
-
-**Acceptance:** new pytest pins:
-- single transient mismatch within one scan → no `external_close` recorded
-- two consecutive scans showing IB=0 → `external_close` recorded once (idempotent)
-- IB explicit close-fill event → `external_close` recorded immediately
-
-### 🟡 P1 — Operator-flatten detector
-
-**Symptom:** when the operator manually flattens at TWS, the bot's view still says "open." Next scan thinks there's drift, attempts to re-enter, or worse, marks the old fill as a phantom realized loss.
-
-**Required fix:** new watchdog in `services/position_reconciler.py` (or a dedicated module) that compares `bot._open_trades[symbol].shares` vs IB shares. When IB=0 AND bot has no record of issuing a close order for this trade (no `close_*` row in `bracket_lifecycle_events`, no `bot_trades.close_order_id`), tag the trade with `close_reason="operator_external_flatten"` and add the symbol to a per-session `_operator_flattened_symbols` set. The `_scan_for_opportunities` loop should skip any symbol in that set for the remainder of the session (cleared at midnight UTC or by `POST /api/trading-bot/clear-operator-flatten-suppression`).
-
-**Acceptance:**
-- pytest: IB=0 + no close-order trace → trade is closed with `close_reason="operator_external_flatten"`, symbol is in suppression set
-- pytest: re-entry attempt on suppressed symbol → silently dropped with `record_rejection(reason_code="operator_flatten_suppression")`
-- operator endpoint to inspect + clear the suppression set
-
-### 🟡 P1 — Earlier issues found but not fixed
-
-1. **`/api/health/quick-status` IB-gateway false-negative.** Reports "IB Gateway not connected" because it does a standard TCP probe, but this stack uses pusher-only deployment (DGX backend ↔ Windows pusher ↔ IB Gateway). Health check should pivot to "is pusher heartbeat fresh?" instead. File: probably in `routers/health.py` or wherever `quick-status` lives.
-2. **Readiness panel reads wrong `max_position_pct`.** UI shows 50% but live config is 10%. Align the panel's data source with `GET /api/risk/position-sizing/config`. File: V5 readiness panel component + backing endpoint.
-3. **"Strategy mix · waiting for first alerts" UI bug.** Component is not subscribing to the live alerts stream — stays stuck on the placeholder text even after alerts arrive.
+All P0 + the 3 P1 items pinned earlier are now SHIPPED — see v19.34.71/.72/.73/.74/.75 below.
 
 ### 🟢 P2 — Live cooldown HUD chip (operator-suggested 2026-05-11)
 
-Surface active rejection cooldowns as small chips in the V6 status strip — e.g., `🧊 NBIS cooldown 3:42`. Source: `GET /api/trading-bot/rejection-cooldowns`. Would have caught today's NBIS thrashing within 30s instead of the 70+ minutes it actually ran before someone noticed. Cheap to add once Plan A panel extraction begins.
+Surface active rejection cooldowns as small chips in the V6 status strip — e.g., `🧊 NBIS cooldown 3:42`. Source: `GET /api/trading-bot/rejection-cooldowns`. Would have caught today's NBIS thrashing within 30s instead of 70+ minutes. Pair with `🛑 NBIS operator-flatten` chips sourced from `GET /api/safety/operator-flatten-suppression` (v19.34.72) so the operator sees BOTH gate types at a glance. Cheap to add once V6 Plan A panel extraction begins.
+
+### 🟡 P1 — V6 UI migration (Plan A)
+
+V6 spec is locked at `/app/memory/V6_NEXT_LOCKED_SPEC.md`. Unblocked now that the P0/P1 backend fires are extinguished. Three phases:
+- Phase A — Extract V5 panels into pure reusable components (no behavior change)
+- Phase B — V6 shell + 5-column grid + new positions + thinking panes wired to live data
+- Phase C — Migrate remainder + chat drawer + retire V5 (1-week parallel run)
+
+### 🟢 P2/P3 — Original backlog (carried forward)
+- Tick-level Stop Run Probability ML module
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics service
+- Liquidity-aware trail in `stop_manager.py`
+- Chart bubble click → fire focus symbol
+- SEC EDGAR 8-K integration
+
+
+## ✅ 2026-05-11 — v19.34.71 / .72 / .73 / .74 / .75 SHIPPED — Drift gates, operator-flatten, panel truth-source
+
+Five tightly-coupled patches closing out the P0 + 3×P1 list pinned this morning:
+
+**v19.34.71** — Two-tick external-close confirmation. Single-tick races (NBIS phantom -$326) no longer trip the reconciler's `external_close` accounting event. Wired into both zero and partial drift cases. 7 pytest cases.
+
+**v19.34.72** — Operator-flatten detector + per-session re-entry suppression. New module `services/operator_flatten_suppression.py` + endpoints `GET/POST /api/safety/(clear-)operator-flatten-suppression`. Trades tagged `close_reason="operator_external_flatten"`; subsequent entries on the symbol skipped with `close_reason="operator_flatten_suppression"`. 9 pytest cases.
+
+**v19.34.73** — Health-monitor pusher-aware IB-gateway probe. `/api/risk/health/quick-status` no longer reports false "IB Gateway not connected" on DGX pusher-only deploys. 5 pytest cases.
+
+**v19.34.74** — `max_position_pct` truth-source reconciliation. `/api/trading-bot/status` now overlays the canonical value from `PositionSizerService.config` (default 10%) over the legacy `TradingRiskParams` default (50%). Original value preserved as `max_position_pct_legacy` for forensics.
+
+**v19.34.75** — Strategy-mix unconditional fallback. `GET /api/scanner/strategy-mix` now tries DB + enhanced_scanner in-memory alerts even when the legacy predictive `_scanner_service` is None. Fixes "waiting for first alerts" stuck-state.
+
+**21 new pytest cases**, full 133-test safety/cooldown/drift suite green. **User must Save to Github → `git pull` on DGX → restart backend.**
+
+
+- Break up `server.py` monolith (extract `bracket_router.py`)
 
 
 

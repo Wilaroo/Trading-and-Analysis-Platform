@@ -9,9 +9,10 @@ Handles IB position reconciliation:
 """
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from services.trading_bot_service import TradingBotService
@@ -119,6 +120,34 @@ class PositionReconciler:
         self._guard_first_skip_at: Optional[float] = None
         self._guard_last_skip_at: Optional[float] = None
 
+        # ── v19.34.71 (Feb 2026) — Two-tick external-close confirmation ──
+        # Even with v19.34.52's pusher+direct cross-check, a single scan
+        # can catch a fill-propagation race that briefly shows IB=0 on
+        # BOTH sources. Operator caught a -$326 NBIS phantom realized
+        # loss on 2026-05-11 from exactly this fingerprint.
+        #
+        # The fix requires TWO consecutive scans to agree on the
+        # zero-or-partial state before we record the accounting event.
+        # First sighting → stash here, do not close. Next scan: if the
+        # state still matches (same symbol, same bot trade-id set,
+        # still IB=0), confirm and close. If state has changed
+        # (position re-appeared, or new bot trades opened), drop the
+        # pending entry.
+        #
+        # Key: symbol (uppercased). Value: dict with first_seen_ts,
+        # bot_trade_ids (set), and drift_kind ("zero" or "partial").
+        # Pending entries auto-expire after 90 seconds so a missed
+        # scan cycle doesn't strand the symbol in pending forever.
+        self._pending_external_close: Dict[str, Dict[str, Any]] = {}
+        self._PENDING_EXTERNAL_CLOSE_TTL_S: float = 90.0
+        # Optional override for tests/operator tuning.
+        try:
+            self._PENDING_EXTERNAL_CLOSE_TTL_S = float(
+                os.environ.get("PENDING_EXTERNAL_CLOSE_TTL_S", 90.0)
+            )
+        except Exception:
+            pass
+
     def _stats_roll_day_if_needed(self):
         """Reset counters on UTC midnight."""
         from datetime import datetime, timezone
@@ -160,6 +189,80 @@ class PositionReconciler:
             "kind": drift_record.get("kind"),
             "shares": drift_record.get("drift_shares"),
         })
+
+    def _confirm_external_close_two_tick(
+        self,
+        symbol: str,
+        bot_trade_ids: set,
+        drift_kind: str,
+    ) -> tuple[bool, str]:
+        """v19.34.71 — Two-tick confirmation gate for `external_close_v19_34_15b`.
+
+        Returns `(confirmed, reason)`. When `confirmed=False`, the caller
+        MUST skip the close on this tick and stash the symbol for the
+        next scan. When `confirmed=True`, the caller proceeds with the
+        close exactly as before.
+
+        State machine:
+          - First sighting → record (symbol, bot_trade_ids, ts), return
+            `(False, "first_sighting_v19_34_71")`. No close.
+          - Second sighting with SAME bot_trade_ids → return
+            `(True, "confirmed_two_tick_v19_34_71")`. Caller closes.
+          - Second sighting with DIFFERENT bot_trade_ids → reset
+            pending state, return `(False, "trade_set_changed_v19_34_71")`.
+            (Bot opened/closed something between scans — restart the
+            confirmation window from this scan.)
+          - Pending entry older than TTL → treated as new first sighting.
+
+        Why: even with v19.34.52's pusher+direct cross-check, a single
+        scan can catch a fill-propagation race where both sources
+        briefly read zero (NBIS phantom -$326 realized 2026-05-11).
+        Requiring two consecutive scans to agree eliminates all known
+        single-tick races without slowing legitimate closes meaningfully
+        (the reconciler runs every ~30-60s, so a real flatten is
+        recorded within one cycle).
+        """
+        import time as _time
+        now = _time.time()
+        sym_u = (symbol or "").upper()
+        pending = self._pending_external_close.get(sym_u)
+
+        if pending is not None:
+            age = now - pending.get("first_seen_ts", 0)
+            if age > self._PENDING_EXTERNAL_CLOSE_TTL_S:
+                pending = None  # expired → treat as first sighting
+
+        if pending is None:
+            self._pending_external_close[sym_u] = {
+                "first_seen_ts": now,
+                "bot_trade_ids": set(bot_trade_ids),
+                "drift_kind": drift_kind,
+            }
+            return False, "first_sighting_v19_34_71"
+
+        # We have a pending entry within TTL. Did the trade set change?
+        if pending.get("bot_trade_ids") != set(bot_trade_ids):
+            # Bot's open trades for this symbol changed between scans
+            # (a real fill or close happened). Don't trust this tick —
+            # reset confirmation window starting now.
+            self._pending_external_close[sym_u] = {
+                "first_seen_ts": now,
+                "bot_trade_ids": set(bot_trade_ids),
+                "drift_kind": drift_kind,
+            }
+            return False, "trade_set_changed_v19_34_71"
+
+        # Confirmed across two ticks with identical trade set.
+        # Pop pending so re-occurrence in future requires a fresh
+        # two-tick cycle.
+        self._pending_external_close.pop(sym_u, None)
+        return True, "confirmed_two_tick_v19_34_71"
+
+    def _clear_pending_external_close(self, symbol: str) -> None:
+        """Drop a pending two-tick confirmation. Called when the symbol's
+        state moves AWAY from zero/partial (i.e., position re-appeared or
+        the bot trade was closed by some other path)."""
+        self._pending_external_close.pop((symbol or "").upper(), None)
 
     def get_guard_stats(self) -> dict:
         """v19.34.55 — Snapshot for the UI status pill."""
@@ -1423,6 +1526,14 @@ class PositionReconciler:
 
                 # In sync (within threshold)? → skip.
                 if abs(drift) <= drift_threshold:
+                    # v19.34.71 — Symbol back in sync ⇒ drop any pending
+                    # two-tick external-close confirmation. Without this,
+                    # a transient (zero → recovered → zero-again) within
+                    # the 90s TTL would short-circuit the gate and close
+                    # on the third sighting as if it were a clean
+                    # confirmation. Clearing here forces a fresh
+                    # two-tick window for each new external-close event.
+                    self._clear_pending_external_close(sym)
                     continue
 
                 # ── v19.34.19 (2026-05-06) — Zombie-trade blind spot fix ──
@@ -1706,6 +1817,40 @@ class PositionReconciler:
                             continue
                         drift_record["kind"] = "zero_external_close"
                         drift_record["confirmed_by"] = auth_conf
+                        # ── v19.34.71 — Two-tick confirmation gate ─────
+                        # v19.34.52's pusher+direct cross-check still
+                        # catches fill-propagation races where BOTH
+                        # sources momentarily read zero. NBIS phantom
+                        # -$326 realized on 2026-05-11 came from exactly
+                        # that pattern. Require this same (symbol,
+                        # trade-id set) to be observed TWO consecutive
+                        # scans before recording the accounting event.
+                        _bot_trade_ids = {
+                            getattr(t, "id", None) for t in bot_trades_by_sym[sym]
+                        }
+                        _confirmed, _conf_reason = (
+                            self._confirm_external_close_two_tick(
+                                symbol=sym,
+                                bot_trade_ids=_bot_trade_ids,
+                                drift_kind="zero",
+                            )
+                        )
+                        if not _confirmed:
+                            drift_record["kind"] = (
+                                "pending_external_close_v19_34_71"
+                            )
+                            drift_record["pending_reason"] = _conf_reason
+                            drift_record["bot_trade_ids"] = list(_bot_trade_ids)
+                            report["skipped"].append(drift_record)
+                            self._record_guard_skip(drift_record)
+                            logger.warning(
+                                f"[v19.34.71 TWO-TICK] {sym} zero-close "
+                                f"PENDING ({_conf_reason}) — waiting for "
+                                f"next scan to confirm before recording "
+                                f"external_close."
+                            )
+                            continue
+                        drift_record["two_tick_confirmation"] = _conf_reason
                         report["drifts_detected"].append(drift_record)
                         if not auto_resolve:
                             continue
@@ -1745,6 +1890,38 @@ class PositionReconciler:
                             continue
                         drift_record["kind"] = "partial_external_close"
                         drift_record["confirmed_by"] = auth_conf
+                        # ── v19.34.71 — Two-tick confirmation gate ─────
+                        # Same race fingerprint applies to partial shrinks:
+                        # pusher and direct can briefly agree on a smaller
+                        # qty if a fill notification is in flight. Require
+                        # two consecutive scans before shrinking the
+                        # tracked size and locking in any partial-close
+                        # realized P&L.
+                        _bot_trade_ids = {
+                            getattr(t, "id", None) for t in bot_trades_by_sym[sym]
+                        }
+                        _confirmed, _conf_reason = (
+                            self._confirm_external_close_two_tick(
+                                symbol=sym,
+                                bot_trade_ids=_bot_trade_ids,
+                                drift_kind="partial",
+                            )
+                        )
+                        if not _confirmed:
+                            drift_record["kind"] = (
+                                "pending_partial_close_v19_34_71"
+                            )
+                            drift_record["pending_reason"] = _conf_reason
+                            drift_record["bot_trade_ids"] = list(_bot_trade_ids)
+                            report["skipped"].append(drift_record)
+                            self._record_guard_skip(drift_record)
+                            logger.warning(
+                                f"[v19.34.71 TWO-TICK] {sym} partial-shrink "
+                                f"PENDING ({_conf_reason}) — waiting for "
+                                f"next scan to confirm before shrinking."
+                            )
+                            continue
+                        drift_record["two_tick_confirmation"] = _conf_reason
                         report["drifts_detected"].append(drift_record)
                         if not auto_resolve:
                             continue
@@ -1926,17 +2103,40 @@ class PositionReconciler:
         confirmed `(qty=0, confidence='high')`. The bare check on
         pusher's `ib_q < 0.01` was the source of the 2026-05-08
         phantom-close incident.
+
+        v19.34.71 NOTE: only invoked AFTER `_confirm_external_close_two_tick`
+        has confirmed the same (symbol, trade-set) across two consecutive
+        scans. Single-tick races no longer reach this method.
+
+        v19.34.72 NOTE: by the time we reach this branch the close is
+        EXTERNAL by construction — if the bot had initiated it, the
+        trade would already be out of `_open_trades`. We tag each trade
+        with `close_reason="operator_external_flatten"` and add the
+        symbol to the session-scoped suppression set so the bot does
+        NOT re-enter on the same name moments after the operator's
+        risk-off action. Operator can clear via the safety API if a
+        bracket-leg fill was misclassified.
         """
         from services.trading_bot_service import TradeStatus
+        from services.operator_flatten_suppression import (
+            get_operator_flatten_suppression,
+        )
         now_iso = datetime.now(timezone.utc).isoformat()
+        trade_ids: List[str] = []
         for t in trades:
             try:
                 t.status = TradeStatus.CLOSED
                 t.closed_at = now_iso
-                t.close_reason = "external_close_v19_34_15b"
+                t.close_reason = "operator_external_flatten"
                 if hasattr(t, "remaining_shares"):
                     t.remaining_shares = 0
-                t.notes = (t.notes or "") + " [v19.34.15b: IB qty was 0; auto-closed]"
+                t.notes = (t.notes or "") + (
+                    " [v19.34.72: IB qty=0 confirmed across two ticks; "
+                    "bot did not initiate close → tagged as operator/external "
+                    "flatten. Symbol added to re-entry suppression set for "
+                    "remainder of UTC day.]"
+                )
+                trade_ids.append(getattr(t, "id", "") or "")
                 # Persist via bot._save_trade if available (mirror existing pattern).
                 save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
                 if save_fn:
@@ -1950,23 +2150,46 @@ class PositionReconciler:
                 if hasattr(bot, "_open_trades") and t.id in bot._open_trades:
                     del bot._open_trades[t.id]
             except Exception as ex:
-                logger.warning(f"[v19.34.15b] close-drift {sym} failed: {ex}")
+                logger.warning(f"[v19.34.72] close-drift {sym} failed: {ex}")
+
+        # Add to operator-flatten suppression set.
+        try:
+            get_operator_flatten_suppression().add(
+                symbol=sym,
+                reason="operator_external_flatten",
+                trade_ids=trade_ids,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[v19.34.72] failed to add {sym} to operator-flatten "
+                f"suppression set: {e}"
+            )
+
         # Stream emit so operator sees it.
         try:
             from services.sentcom_service import emit_stream_event
             await emit_stream_event({
                 "kind": "warning",
-                "event": "external_close_v19_34_15b",
+                "event": "operator_external_flatten_v19_34_72",
                 "symbol": sym,
-                "text": (f"⚠ {sym} flat at IB but bot was tracking "
-                         f"{len(trades)} trade(s). Auto-closed."),
-                "metadata": {"closed_count": len(trades)},
+                "text": (
+                    f"⚠ {sym} flat at IB but bot was tracking "
+                    f"{len(trades)} trade(s). Confirmed across two ticks → "
+                    f"tagged as operator/external flatten. Re-entries on "
+                    f"{sym} suppressed until UTC midnight or operator clears."
+                ),
+                "metadata": {
+                    "closed_count": len(trades),
+                    "trade_ids": trade_ids,
+                    "suppression_active": True,
+                },
             })
         except Exception:
             pass
         logger.warning(
-            f"[v19.34.15b DRIFT] {sym} ZERO at IB — closed "
-            f"{len(trades)} bot_trade(s) as external_close_v19_34_15b"
+            f"[v19.34.72 DRIFT] {sym} ZERO at IB (confirmed 2-tick) — "
+            f"closed {len(trades)} bot_trade(s) as operator_external_flatten, "
+            f"added to suppression set."
         )
 
     async def _shrink_drift_trades(

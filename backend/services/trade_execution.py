@@ -355,6 +355,75 @@ class TradeExecution:
                     type(e).__name__, e,
                 )
 
+            # === v19.34.72 OPERATOR-FLATTEN SUPPRESSION GATE ===
+            # When the position reconciler observes IB drop to zero on a
+            # symbol the bot was tracking — confirmed across two scans
+            # (v19.34.71) — it tags the close as `operator_external_flatten`
+            # and adds the symbol to the suppression set. Rationale: if
+            # the operator manually flattened because they saw something
+            # the bot couldn't (news, hostile tape, discretionary risk-off),
+            # the bot continuing to evaluate the SAME setup moments later
+            # actively fights the operator. Skip the trade and surface
+            # a clear breadcrumb. Suppression auto-clears at UTC midnight
+            # or via `POST /api/safety/clear-operator-flatten-suppression`.
+            try:
+                from services.operator_flatten_suppression import (
+                    get_operator_flatten_suppression,
+                )
+                _supp = get_operator_flatten_suppression()
+                if _supp.is_suppressed(trade.symbol):
+                    entry = _supp.get_entry(trade.symbol) or {}
+                    logger.warning(
+                        "🚫 [v19.34.72 OPERATOR-FLATTEN] Skipping %s — "
+                        "symbol in operator-flatten suppression set "
+                        "(reason=%s, added_at=%s). Operator manually "
+                        "flattened or external close was observed; "
+                        "bot will not re-enter this name until UTC "
+                        "midnight or operator clears.",
+                        trade.symbol,
+                        entry.get("reason"),
+                        entry.get("added_at"),
+                    )
+                    trade.status = TradeStatus.VETOED
+                    trade.notes = (
+                        (trade.notes or "")
+                        + f" [OPERATOR-FLATTEN-SUPPRESSION: "
+                        f"added_at={entry.get('added_at')}]"
+                    )
+                    trade.close_reason = "operator_flatten_suppression"
+                    if trade.id in bot._pending_trades:
+                        del bot._pending_trades[trade.id]
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="operator_flatten_suppression",
+                            symbol=trade.symbol,
+                            setup_type=trade.setup_type,
+                            direction=(
+                                trade.direction.value if hasattr(trade.direction, "value")
+                                else str(trade.direction)
+                            ),
+                            reason="operator_external_flatten",
+                            context={
+                                "trade_id": trade.id,
+                                "suppression_added_at": entry.get("added_at"),
+                                "suppression_reason": entry.get("reason"),
+                                "suppressed_trade_ids": entry.get("trade_ids", []),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    await bot._save_trade(trade)
+                    return
+            except Exception as e:
+                # Fail-OPEN if the suppression module is unavailable —
+                # we don't want a module import bug to block all trading.
+                logger.warning(
+                    "Operator-flatten suppression check failed (allowing trade) (%s): %s",
+                    type(e).__name__, e,
+                )
+
             # === PRE-EXECUTION GUARD RAILS (2026-04-21) ===
             # Block pathologically tight stops and oversized positions BEFORE
             # any order hits the broker. See services/execution_guardrails.py

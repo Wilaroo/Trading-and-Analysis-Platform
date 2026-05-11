@@ -2,6 +2,50 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-11 (v19.34.71 / .72 / .73 / .74 / .75) — Drift gates, operator-flatten, and panel-truth fixes
+
+Five tightly-coupled patches shipped together. They close out the P0/P1 issues pinned 2026-05-11 morning.
+
+### v19.34.71 — Two-tick external-close confirmation (P0)
+
+NBIS phantom -$326 realized 2026-05-11 came from a single-tick race: pusher and direct IB BOTH momentarily read zero shares while a fill notification was in flight. v19.34.52's multi-source cross-check passed → reconciler closed the trade locally → permanent accounting error.
+
+Fix: require TWO consecutive scans agreeing on (symbol, bot_trade_id_set, drift_kind) before recording `external_close`. Pending state is keyed by uppercased symbol with 90s TTL (env-tunable via `PENDING_EXTERNAL_CLOSE_TTL_S`). State auto-clears when the symbol's drift resolves to in-sync. Wired into BOTH Case 3 (zero) and Case 2 (partial) drift paths.
+
+New method `PositionReconciler._confirm_external_close_two_tick(symbol, bot_trade_ids, drift_kind) -> (confirmed, reason)`. 7 regression cases in `tests/test_v19_34_71_two_tick_external_close.py` covering first-sighting, second-sighting confirm, trade-set-changed reset, TTL expiry, case-insensitive lookup, per-symbol isolation.
+
+### v19.34.72 — Operator-flatten detector + re-entry suppression (P1)
+
+When the two-tick gate confirms a real external close, the close is non-bot-initiated by construction (if the bot had issued it, the trade would already be out of `_open_trades`). The bot continuing to evaluate the SAME setup moments later actively fights the operator's risk-off signal.
+
+New module `services/operator_flatten_suppression.py` — process-singleton suppression set keyed by uppercased symbol. Auto-rolls at UTC midnight. `_close_drift_trades_zero` now tags trades with `close_reason="operator_external_flatten"` (was `external_close_v19_34_15b`) and adds the symbol to the suppression set. The trade-execution pre-flight check vetoes new entries on suppressed symbols with `close_reason="operator_flatten_suppression"`, mirroring the rejection-cooldown gate pattern.
+
+New endpoints: `GET /api/safety/operator-flatten-suppression` (inspect) + `POST /api/safety/clear-operator-flatten-suppression` (clear one symbol or all). 9 regression cases in `tests/test_v19_34_72_operator_flatten_suppression.py`.
+
+### v19.34.73 — Health-monitor pusher-aware IB-gateway probe (P1)
+
+DGX deploys never open a direct IB socket; `_ib_service._connected` is permanently False. Pre-fix `/api/risk/health/quick-status` reported "IB Gateway not connected" forever.
+
+Fix: `HealthMonitorService._check_ib_gateway` now consults `routers.ib.is_pusher_connected()` first. Fresh pusher heartbeat (≤ 90s) → HEALTHY with `transport=pusher`. Direct-socket check remains as fallback for legacy deploys. Specific error messages distinguish "pusher stale" from "no transport". 5 regression cases in `tests/test_v19_34_73_health_monitor_pusher_aware.py`.
+
+### v19.34.74 — `max_position_pct` truth-source reconciliation (P1)
+
+V5 Readiness panel showed 50% (from `TradingRiskParams.max_position_pct` default) while live sizing actually used 10% (from `PositionSizerService.config.max_position_pct`). Two divergent sources of truth for the same value.
+
+Fix: `/api/trading-bot/status` now overlays the response's `risk_params.max_position_pct` with the canonical value from `position_sizer_service.get_config()`. Original value preserved as `risk_params.max_position_pct_legacy` + new flag `risk_params.max_position_pct_canonical_source = "position_sizer_service"` for forensic visibility.
+
+### v19.34.75 — Strategy-mix unconditional fallback (P1)
+
+`StrategyMixCard` stuck on "waiting for first alerts" forever. `GET /api/scanner/strategy-mix` short-circuited to `total=0` when `_scanner_service is None`, even though `enhanced_scanner._live_alerts` had hundreds of rows in memory.
+
+Fix: endpoint now always attempts (a) DB query via `database.get_database()` and (b) in-memory fallback through `enhanced_scanner._live_alerts`, regardless of whether the legacy predictive `_scanner_service` is initialized.
+
+### Roll-up
+
+**21 new pytest cases** across the five patches. Full 133-test safety/cooldown/drift suite green. All lint clean. **User: Save to Github → `git pull` on DGX → restart backend.**
+
+
+
 ## 2026-05-11 (v19.34.70) — NBIS symbol-exposure-saturated cooldown
 
 ### Why

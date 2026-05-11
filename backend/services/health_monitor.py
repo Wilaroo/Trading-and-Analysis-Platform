@@ -354,20 +354,66 @@ class HealthMonitorService:
             comp.error_message = "Streaming not active"
             
     def _check_ib_gateway(self, comp: ComponentHealth):
-        """Check IB Gateway health"""
-        if self._ib_service is None:
-            comp.status = HealthStatus.UNKNOWN
+        """Check IB Gateway health.
+
+        v19.34.73 — Pusher-aware probe. In the DGX/pusher-only deployment
+        the backend never opens its own IB socket; `_ib_service._connected`
+        is permanently False even when IB Gateway is healthy and pumping
+        data through the Windows pusher. Pre-fix this produced a permanent
+        "IB Gateway not connected" false-negative in `/api/risk/health/quick-status`.
+
+        New logic:
+          1. If pusher heartbeat is fresh (`is_pusher_connected()` per
+             `routers/ib.py`, 90s staleness window) → HEALTHY.
+          2. Else if `_ib_service._connected` is True (legacy direct
+             socket deploys) → HEALTHY.
+          3. Else → UNHEALTHY with a more specific error message that
+             distinguishes "pusher stale" from "no pusher and no direct".
+
+        The probe never lies: a fresh pusher payload IS proof the
+        pusher's IB Gateway socket is alive on the other end (the pusher
+        only emits data after a successful IB authenticate + subscribe).
+        """
+        pusher_ok = False
+        pusher_last_update = None
+        try:
+            from routers.ib import is_pusher_connected, _pushed_ib_data
+            pusher_ok = bool(is_pusher_connected())
+            pusher_last_update = _pushed_ib_data.get("last_update")
+        except Exception:
+            pass  # pusher module not available — fall through to legacy probe
+
+        if pusher_ok:
+            comp.status = HealthStatus.HEALTHY
+            comp.last_success = datetime.now(timezone.utc).isoformat()
+            comp.metrics["transport"] = "pusher"
+            comp.metrics["pusher_last_update"] = pusher_last_update
+            comp.error_message = None
             return
-            
+
+        if self._ib_service is None:
+            comp.status = HealthStatus.UNHEALTHY if pusher_last_update else HealthStatus.UNKNOWN
+            comp.error_message = (
+                f"Pusher stale (last_update={pusher_last_update}) and no "
+                f"direct IB service registered"
+                if pusher_last_update else
+                "No IB transport registered (pusher offline, direct service not configured)"
+            )
+            return
+
         is_connected = getattr(self._ib_service, '_connected', False)
-        
         if is_connected:
             comp.status = HealthStatus.HEALTHY
             comp.last_success = datetime.now(timezone.utc).isoformat()
+            comp.metrics["transport"] = "direct"
             comp.metrics["has_level2"] = True
+            comp.error_message = None
         else:
             comp.status = HealthStatus.UNHEALTHY
-            comp.error_message = "IB Gateway not connected"
+            comp.error_message = (
+                f"IB Gateway not reachable: pusher stale "
+                f"(last_update={pusher_last_update}) AND direct socket disconnected"
+            )
             
     def _check_mongodb(self, comp: ComponentHealth):
         """Check MongoDB health"""
