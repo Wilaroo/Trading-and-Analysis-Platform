@@ -4,6 +4,59 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-12 — v19.34.81 / .82 SHIPPED — Singular-target detection + force-reconcile-down
+
+**v19.34.81** — `attach-brackets-to-unprotected` was producing false-positive "unprotected" rows for every trade brackeded via `attach_oca_stop_target` (which writes the **singular** `target_order_id`), because the v19.34.76 logic only checked the plural `target_order_ids` list. Patched to recognize both. Without this fix, applying the dry-run output would have stacked duplicate target legs — recreating the exact problem v19.34.79 sealed. Regression test: `test_singular_target_order_id_is_recognized_as_bracketed`.
+
+**v19.34.82** — `POST /api/trading-bot/force-reconcile-down` — operator escape hatch for the OPPOSITE side of state divergence: bot over-tracks vs IB (PEP 2266 bot vs 971 IB after kill-switch carryover). Existing reconcilers only resolved "IB > bot"; this is the missing "bot > IB" half. Walks `_open_trades` FIFO and shrinks `shares`/`remaining_shares` until total = `target_qty`. Optional `target_qty` falls back to `|IB pushed qty|`. NEVER sends a broker order. Persists touched trades. Emits one `share_drift_events` audit row per call (`event=force_reconcile_down_v19_34_82`). 8 pytest cases incl. broker-never-called assertion.
+
+Endpoint smoke-tested live against `/openapi.json`. **User: Save to Github → `git pull` on DGX → restart backend.** Then run the runbook below to clean up PEP / ADBE / any other over-tracked symbol.
+
+### Runbook (paste into terminal after deploying)
+
+```bash
+# 1) Set DGX target (skip if already set).
+export DGX="http://localhost:8001"
+
+# 2) DRY-RUN: see what attach-brackets-to-unprotected would do now that
+#    the singular-target false positives are gone.
+curl -s -X POST "$DGX/api/trading-bot/attach-brackets-to-unprotected" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}' | python3 -m json.tool
+
+# 3) DRY-RUN force-reconcile-down for each over-tracked symbol. Omit
+#    target_qty to let the endpoint query IB pushed positions live.
+curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "PEP", "dry_run": true, "reason": "post-kill-switch carryover"}' \
+  | python3 -m json.tool
+
+curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "ADBE", "dry_run": true, "reason": "post-kill-switch carryover"}' \
+  | python3 -m json.tool
+
+# 4) APPLY (flip dry_run to false) once the plans look correct.
+curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "PEP", "dry_run": false, "reason": "post-kill-switch carryover"}' \
+  | python3 -m json.tool
+
+curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "ADBE", "dry_run": false, "reason": "post-kill-switch carryover"}' \
+  | python3 -m json.tool
+
+# 5) APPLY attach-brackets-to-unprotected (now safe — singular-target
+#    false positives are gone).
+curl -s -X POST "$DGX/api/trading-bot/attach-brackets-to-unprotected" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": false}' | python3 -m json.tool
+```
+
+
+
+
 ## ✅ 2026-05-12 — v19.34.80 SHIPPED — Cancel-excess-bracket-legs endpoint
 
 Operator-triggered companion to v19.34.77 audit (read-only) and v19.34.79 sibling-sweep (seals the leak going forward). `POST /api/trading-bot/cancel-excess-bracket-legs` picks ONE bracket pair to keep per symbol and cancels the rest via the same `cancel_order` primitive used by `_grow_existing_excess_slice` and `cancel-all-pending-orders`. Decision strategy: keep_oca_group > keep_order_ids > canonical_slice > newest fallback. Dry-run default. 10 pytest cases including pusher-only graceful failure. Full 165-test safety suite green. **User: Save to Github → `git pull` on DGX → restart backend.**

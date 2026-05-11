@@ -5944,3 +5944,287 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
         "ran_at": datetime.now(timezone.utc).isoformat(),
     }
 
+
+
+# ── v19.34.82 — Force reconcile down (shrink bot tracking to IB truth) ─────
+#
+# 2026-05-12: After the kill-switch bypass incident the bot's internal
+# `_open_trades` ended up holding more shares than the broker actually
+# carried (PEP: 2266 tracked vs 971 at IB; ADBE similar). The existing
+# reconcilers only resolved this when IB held MORE than the bot — when
+# the bot over-tracks, there was no escape hatch. The bot would then
+# happily manage non-existent shares: sending more stop legs, sizing
+# scale-ins against a phantom base, treating partial fills as full
+# closes, etc.
+#
+# This endpoint is the operator's "shrink to truth" escape hatch.
+#   - Input: symbol, optional target_qty (absolute shares), dry_run.
+#   - If `target_qty` is omitted, the endpoint queries pusher's
+#     `get_pushed_positions()` and uses |IB position| as the target.
+#   - It then walks the bot's `_open_trades` for that symbol (FIFO by
+#     creation order — oldest first), shrinking each trade's `shares`
+#     and `remaining_shares` until the sum equals `target_qty`.
+#   - dry_run=True returns the plan without mutating anything.
+#   - dry_run=False mutates in-memory state, persists each modified
+#     trade via `_save_trade`, and emits a `share_drift_events` audit
+#     entry per symbol.
+#
+# This endpoint NEVER sends an order to the broker. It only adjusts
+# the bot's internal accounting so it stops managing phantom shares.
+# Existing IB brackets are left intact (they already reflect IB truth).
+
+class ForceReconcileDownRequest(BaseModel):
+    symbol: str
+    target_qty: Optional[int] = None  # if None → query IB live
+    dry_run: bool = True
+    reason: Optional[str] = None       # operator note for audit trail
+
+
+@router.post("/force-reconcile-down")
+async def force_reconcile_down(payload: ForceReconcileDownRequest):
+    """v19.34.82 — Operator escape hatch. Shrinks the bot's tracked
+    `shares`/`remaining_shares` for a symbol to match IB truth, without
+    sending any broker orders.
+
+    Body:
+      {
+        "symbol": "PEP",
+        "target_qty": 971,            // optional; falls back to IB pushed qty
+        "dry_run": true,              // default true; flip to false to apply
+        "reason": "post-kill-switch carryover divergence"
+      }
+
+    Response shape:
+      {
+        "success": true,
+        "symbol": "PEP",
+        "dry_run": true,
+        "target_qty": 971,
+        "target_qty_source": "operator" | "ib_pushed" | "ib_direct",
+        "before": {"tracked_total": 2266, "trades": [...]},
+        "plan": [
+          {"trade_id": "...", "from_shares": 1500, "to_shares": 971,
+           "from_remaining": 1500, "to_remaining": 971, "delta": -529},
+          {"trade_id": "...", "from_shares": 766, "to_shares": 0,
+           "from_remaining": 766, "to_remaining": 0, "delta": -766}
+        ],
+        "after": {"tracked_total": 971, "trades": [...]} | null,
+        "ran_at": "..."
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    sym = (payload.symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(400, "symbol is required")
+
+    bot = _trading_bot
+    open_trades = getattr(bot, "_open_trades", {}) or {}
+
+    # 1) Locate all trades for this symbol (preserve insertion order = FIFO).
+    sym_trades: List[Any] = []
+    sym_trade_ids: List[str] = []
+    for tid, t in open_trades.items():
+        if (getattr(t, "symbol", "") or "").upper() == sym:
+            sym_trades.append(t)
+            sym_trade_ids.append(tid)
+
+    if not sym_trades:
+        return {
+            "success": True, "symbol": sym, "dry_run": payload.dry_run,
+            "message": f"No open trades for {sym} in bot memory — nothing to shrink.",
+            "before": {"tracked_total": 0, "trades": []},
+            "plan": [], "after": None,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _shares(t):
+        return int(abs(getattr(t, "remaining_shares", None)
+                       if getattr(t, "remaining_shares", None) is not None
+                       else getattr(t, "shares", 0) or 0))
+
+    before_trades = [
+        {
+            "trade_id": tid,
+            "shares": int(getattr(t, "shares", 0) or 0),
+            "remaining_shares": int(getattr(t, "remaining_shares", 0) or 0),
+            "direction": (getattr(t.direction, "value", None)
+                          if hasattr(t, "direction") and hasattr(t.direction, "value")
+                          else str(getattr(t, "direction", ""))).lower(),
+        }
+        for tid, t in zip(sym_trade_ids, sym_trades)
+    ]
+    tracked_total = sum(_shares(t) for t in sym_trades)
+
+    # 2) Determine the target qty.
+    target_qty: Optional[int] = payload.target_qty
+    target_source = "operator"
+    if target_qty is None:
+        # Query the pusher's last positions snapshot for IB truth.
+        try:
+            from routers.ib import get_pushed_positions
+            ib_positions = get_pushed_positions() or []
+            ib_signed = 0.0
+            for p in ib_positions:
+                if (p.get("symbol") or "").upper() == sym:
+                    ib_signed = float(p.get("position") or 0)
+                    break
+            target_qty = int(abs(ib_signed))
+            target_source = "ib_pushed"
+        except Exception as e:
+            logger.error("[v19.34.82 force-reconcile-down] IB pushed lookup failed: %s", e)
+            raise HTTPException(
+                502,
+                f"target_qty not provided and IB pushed positions lookup failed: {e}",
+            )
+
+    if target_qty < 0:
+        raise HTTPException(400, "target_qty must be >= 0")
+
+    # 3) Safety: this endpoint ONLY shrinks. If target >= tracked, refuse.
+    if target_qty >= tracked_total:
+        return {
+            "success": True, "symbol": sym, "dry_run": payload.dry_run,
+            "target_qty": target_qty, "target_qty_source": target_source,
+            "before": {"tracked_total": tracked_total, "trades": before_trades},
+            "plan": [],
+            "after": None,
+            "message": (
+                f"target_qty={target_qty} is >= tracked_total={tracked_total} — "
+                f"this endpoint only SHRINKS bot tracking. Refusing to grow or noop. "
+                f"If the bot is UNDER-tracking, use the orphan reconciler instead."
+            ),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # 4) Build FIFO shrink plan. Reduce the OLDEST trades first so the
+    #    most-recent (likely best-protected) trade keeps its full size
+    #    if possible. This is what the operator did manually on 5/12.
+    plan: List[Dict[str, Any]] = []
+    excess = tracked_total - target_qty
+    for tid, t in zip(sym_trade_ids, sym_trades):
+        cur_shares = int(getattr(t, "shares", 0) or 0)
+        cur_remaining = int(getattr(t, "remaining_shares", 0) or 0)
+        # Drive the shrink off `remaining_shares` (live size) but cap so
+        # we never set `shares` below `remaining_shares`.
+        live = max(cur_shares, cur_remaining)
+        if excess <= 0 or live <= 0:
+            plan.append({
+                "trade_id": tid,
+                "from_shares": cur_shares, "to_shares": cur_shares,
+                "from_remaining": cur_remaining, "to_remaining": cur_remaining,
+                "delta": 0,
+            })
+            continue
+        cut = min(excess, live)
+        new_remaining = max(0, cur_remaining - cut)
+        new_shares = max(0, cur_shares - cut)
+        plan.append({
+            "trade_id": tid,
+            "from_shares": cur_shares, "to_shares": new_shares,
+            "from_remaining": cur_remaining, "to_remaining": new_remaining,
+            "delta": -cut,
+        })
+        excess -= cut
+
+    # 5) Apply (or stop here for dry-run).
+    if payload.dry_run:
+        return {
+            "success": True, "symbol": sym, "dry_run": True,
+            "target_qty": target_qty, "target_qty_source": target_source,
+            "before": {"tracked_total": tracked_total, "trades": before_trades},
+            "plan": plan,
+            "after": None,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    after_trades: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    for step, t in zip(plan, sym_trades):
+        if step["delta"] == 0:
+            after_trades.append({
+                "trade_id": step["trade_id"],
+                "shares": step["to_shares"],
+                "remaining_shares": step["to_remaining"],
+            })
+            continue
+        try:
+            t.shares = step["to_shares"]
+            t.remaining_shares = step["to_remaining"]
+            # Audit note on the trade itself so it surfaces in any UI panel.
+            existing_notes = (getattr(t, "notes", "") or "")
+            t.notes = (
+                existing_notes + (
+                    f" [v19.34.82 force-reconcile-down {datetime.now(timezone.utc).isoformat()}: "
+                    f"shares {step['from_shares']}→{step['to_shares']}, "
+                    f"remaining {step['from_remaining']}→{step['to_remaining']} "
+                    f"(target={target_qty}, src={target_source}, "
+                    f"reason={payload.reason or 'unspecified'})]"
+                )
+            )
+            # Persist via the bot's save hook so the shrink survives restart.
+            save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+            if save_fn:
+                try:
+                    r = save_fn(t)
+                    if asyncio.iscoroutine(r):
+                        await r
+                except Exception as e:
+                    errors.append({"trade_id": step["trade_id"], "stage": "save", "err": str(e)[:200]})
+            after_trades.append({
+                "trade_id": step["trade_id"],
+                "shares": step["to_shares"],
+                "remaining_shares": step["to_remaining"],
+            })
+            logger.warning(
+                "[v19.34.82 FORCE-RECONCILE-DOWN] %s tid=%s shares %s→%s "
+                "remaining %s→%s (target=%s src=%s reason=%s)",
+                sym, step["trade_id"], step["from_shares"], step["to_shares"],
+                step["from_remaining"], step["to_remaining"],
+                target_qty, target_source, payload.reason or "unspecified",
+            )
+        except Exception as e:
+            errors.append({"trade_id": step["trade_id"], "stage": "apply", "err": str(e)[:200]})
+
+    # 6) Emit a single per-symbol share_drift_events audit row.
+    try:
+        db = getattr(bot, "_db", None)
+        if db is not None:
+            await asyncio.to_thread(
+                db["share_drift_events"].insert_one,
+                {
+                    "created_at": datetime.now(timezone.utc),
+                    "event": "force_reconcile_down_v19_34_82",
+                    "symbol": sym,
+                    "tracked_before": tracked_total,
+                    "tracked_after": target_qty,
+                    "delta_shares": -(tracked_total - target_qty),
+                    "target_qty_source": target_source,
+                    "operator_reason": payload.reason or "unspecified",
+                    "trades_touched": [
+                        {
+                            "trade_id": s["trade_id"],
+                            "from_shares": s["from_shares"],
+                            "to_shares": s["to_shares"],
+                            "from_remaining": s["from_remaining"],
+                            "to_remaining": s["to_remaining"],
+                        }
+                        for s in plan if s["delta"] != 0
+                    ],
+                },
+            )
+    except Exception as e:
+        errors.append({"stage": "audit_log", "err": str(e)[:200]})
+
+    tracked_after_total = sum(int(r["remaining_shares"]) for r in after_trades)
+
+    return {
+        "success": True, "symbol": sym, "dry_run": False,
+        "target_qty": target_qty, "target_qty_source": target_source,
+        "before": {"tracked_total": tracked_total, "trades": before_trades},
+        "plan": plan,
+        "after": {"tracked_total": tracked_after_total, "trades": after_trades},
+        "errors": errors,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }

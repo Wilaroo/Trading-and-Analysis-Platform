@@ -2,6 +2,44 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.82) — Force-reconcile-down endpoint (operator shrink-to-truth escape hatch)
+
+After the kill-switch bypass incident, the bot's `_open_trades` over-tracked vs IB (PEP: 2266 bot vs 971 IB; ADBE similar). Existing reconcilers only resolve "IB has more than bot" — the over-tracking case had no escape hatch, so the bot kept managing phantom shares (extra stop legs, scale-ins sized against a phantom base, partial fills mis-classified as full closes).
+
+### Endpoint
+
+`POST /api/trading-bot/force-reconcile-down`
+
+Body:
+```json
+{
+  "symbol": "PEP",
+  "target_qty": 971,         // optional; if omitted, falls back to |IB pushed qty|
+  "dry_run": true,           // default true; flip to false to apply
+  "reason": "post-kill-switch carryover divergence"
+}
+```
+
+Behavior:
+- Walks `_open_trades` FIFO (oldest first) and shrinks `shares` / `remaining_shares` until the sum equals `target_qty`.
+- Safety: refuses to grow or no-op — only shrinks. Returns an explanation pointing at the orphan reconciler if `target_qty >= tracked_total`.
+- **NEVER** sends a broker order. Existing IB brackets reflect IB truth and are left intact.
+- Persists each touched trade via `bot._save_trade` so the shrink survives restart.
+- Emits one `share_drift_events` row per call with `event="force_reconcile_down_v19_34_82"`, before/after totals, the FIFO touch list, and the operator's `reason` note.
+
+### v19.34.81 — also bundled
+
+`attach-brackets-to-unprotected` now recognizes the **singular** `target_order_id` field in addition to the plural `target_order_ids` list. Pre-fix it only checked the plural, which flagged every `attach_oca_stop_target`-bracketed trade (which writes the singular) as "unprotected" — applying the dry-run would have stacked duplicate target legs, recreating the exact problem v19.34.79 was designed to prevent. 10/10 tests passing including a regression case (`test_singular_target_order_id_is_recognized_as_bracketed`).
+
+### Tests
+
+- `/app/backend/tests/test_v19_34_82_force_reconcile_down.py` — 8 cases:
+  dry-run plan, apply-mutates-and-audits, IB-pushed fallback, target-above-tracked refused, no-trades-for-symbol, broker-never-called, FIFO across multiple trades, invalid inputs.
+- `/app/backend/tests/test_v19_34_76_retroactive_bracket_attach.py` — 10 cases (incl. v19.34.81 singular-target regression).
+- Smoke test against live `/openapi.json` confirms `POST /api/trading-bot/force-reconcile-down` is registered and reachable.
+
+
+
 ## 2026-05-12 (v19.34.80) — Cancel-excess-bracket-legs endpoint (historical stacking cleanup)
 
 Operator-triggered companion to v19.34.77 (read-only audit) and v19.34.79 (sealed the leak going forward). Lets the operator unwind historical bracket stacking — ADBE's 320sh of stops against 80sh, EFA's 2,888sh against 963sh, GM's 1,282sh against 109sh — with one curl per symbol instead of clicking through TWS.
