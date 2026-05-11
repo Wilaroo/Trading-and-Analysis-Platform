@@ -4,6 +4,44 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🔥 OPEN BACKLOG — pinned 2026-05-11
+
+### 🔴 P0 — `external_close_v19_34_15b` semantics
+
+**Symptom:** bot occasionally records phantom realized losses (~$326 on NBIS, 2026-05-11) when transient view mismatches between `bot._open_trades` and IB's position snapshot are misread as "the position closed externally."
+
+**Where:** `services/position_reconciler.py` — the `external_close_v19_34_15b` branch currently fires whenever bot view ≠ IB view at scan time. That includes momentary races (e.g., fill notification not yet propagated, snapshot stale by <1s).
+
+**Required fix:** restrict `external_close` to a **confirmed** IB position transition from non-zero → zero across two consecutive snapshots (or, ideally, an explicit `position_event` from the pusher showing the close fill). Anything else routes to drift-reconcile, not external-close. Add a two-tick confirmation window before recording the accounting event.
+
+**Acceptance:** new pytest pins:
+- single transient mismatch within one scan → no `external_close` recorded
+- two consecutive scans showing IB=0 → `external_close` recorded once (idempotent)
+- IB explicit close-fill event → `external_close` recorded immediately
+
+### 🟡 P1 — Operator-flatten detector
+
+**Symptom:** when the operator manually flattens at TWS, the bot's view still says "open." Next scan thinks there's drift, attempts to re-enter, or worse, marks the old fill as a phantom realized loss.
+
+**Required fix:** new watchdog in `services/position_reconciler.py` (or a dedicated module) that compares `bot._open_trades[symbol].shares` vs IB shares. When IB=0 AND bot has no record of issuing a close order for this trade (no `close_*` row in `bracket_lifecycle_events`, no `bot_trades.close_order_id`), tag the trade with `close_reason="operator_external_flatten"` and add the symbol to a per-session `_operator_flattened_symbols` set. The `_scan_for_opportunities` loop should skip any symbol in that set for the remainder of the session (cleared at midnight UTC or by `POST /api/trading-bot/clear-operator-flatten-suppression`).
+
+**Acceptance:**
+- pytest: IB=0 + no close-order trace → trade is closed with `close_reason="operator_external_flatten"`, symbol is in suppression set
+- pytest: re-entry attempt on suppressed symbol → silently dropped with `record_rejection(reason_code="operator_flatten_suppression")`
+- operator endpoint to inspect + clear the suppression set
+
+### 🟡 P1 — Earlier issues found but not fixed
+
+1. **`/api/health/quick-status` IB-gateway false-negative.** Reports "IB Gateway not connected" because it does a standard TCP probe, but this stack uses pusher-only deployment (DGX backend ↔ Windows pusher ↔ IB Gateway). Health check should pivot to "is pusher heartbeat fresh?" instead. File: probably in `routers/health.py` or wherever `quick-status` lives.
+2. **Readiness panel reads wrong `max_position_pct`.** UI shows 50% but live config is 10%. Align the panel's data source with `GET /api/risk/position-sizing/config`. File: V5 readiness panel component + backing endpoint.
+3. **"Strategy mix · waiting for first alerts" UI bug.** Component is not subscribing to the live alerts stream — stays stuck on the placeholder text even after alerts arrive.
+
+### 🟢 P2 — Live cooldown HUD chip (operator-suggested 2026-05-11)
+
+Surface active rejection cooldowns as small chips in the V6 status strip — e.g., `🧊 NBIS cooldown 3:42`. Source: `GET /api/trading-bot/rejection-cooldowns`. Would have caught today's NBIS thrashing within 30s instead of the 70+ minutes it actually ran before someone noticed. Cheap to add once Plan A panel extraction begins.
+
+
+
 ## ✅ 2026-05-11 — v19.34.70 SHIPPED — NBIS symbol-exposure-saturated cooldown
 
 Operator-observed 2026-05-11: bot fragmented NBIS into many small fills, hitting per-symbol exposure cap, retrying with smaller sizes, looping every ~30-60s. Sizer's cap-saturated branch was producing `shares=0` with reason `position_size_zero` — which is NOT structural, so rejection cooldown never engaged.
