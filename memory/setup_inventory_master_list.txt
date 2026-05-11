@@ -1,0 +1,102 @@
+SENTCOM SETUP MASTER LIST
+=========================
+
+LEGEND:
+  [H] = HAVE NOW
+  [+] = SUGGESTING TO ADD
+  [?] = DON'T HAVE (considered, not in suggestion yet)
+
+
+SCALP
+-----
+1   [H] 9_ema_scalp
+2   [H] abc_scalp
+3   [H] backside
+4   [H] bella_fade
+5   [H] fashionably_late
+6   [H] first_move_down
+7   [H] first_move_up
+8   [H] gap_fade
+9   [H] gap_give_go
+10  [H] gap_pick_roll
+11  [H] hitchhiker
+12  [H] mean_reversion
+13  [H] off_sides
+14  [H] puppy_dog
+15  [H] rubber_band
+16  [H] rubber_band_long
+17  [H] rubber_band_short
+18  [H] second_chance
+19  [H] spencer_scalp
+20  [H] tidal_wave
+21  [H] time_of_day_fade
+22  [H] volume_capitulation
+23  [H] vwap_fade
+24  [+] failed_breakout              short  trap fade of failed HOD break
+25  [+] failed_breakdown             long   trap squeeze off failed LOD break
+26  [+] liquidity_sweep_reversal     both   stop-hunt wick then reclaim
+27  [+] opening_imbalance_play       both   IB MOO imbalance ride
+28  [?] closing_auction_imbalance    MOC imbalance fade
+29  [?] dark_pool_print_follow       large prints above ask (no IB feed)
+
+
+INTRADAY
+--------
+30  [H] back_through_open
+31  [H] big_dog
+32  [H] breakdown
+33  [H] breaking_news
+34  [H] breakout
+35  [H] chart_pattern
+36  [H] first_vwap_pullback
+37  [H] hod_breakout
+38  [H] lod_breakdown
+39  [H] opening_drive
+40  [H] orb
+41  [H] range_break
+42  [H] relative_strength
+43  [H] relative_weakness
+44  [H] squeeze
+45  [H] up_through_open
+46  [H] vwap_bounce
+47  [+] earnings_drift_continuation  both   PEAD T+1 to T+5
+48  [+] parabolic_short              short  overextension exhaustion fade
+49  [?] nr7_breakout                 narrow-range-7 squeeze break
+50  [?] inside_day_break             inside-day range break
+51  [?] sector_leader_sympathy       laggard catches sector leader
+52  [?] pair_divergence              correlated pair separation
+53  [?] short_squeeze_alert          SI>20% + gap + vol
+54  [?] pre_earnings_drift           T-3 to T-1 drift into earnings
+55  [?] head_and_shoulders           dedicated H&S pattern
+
+
+SWING
+-----
+56  [H] base_breakout
+57  [H] breakdown_confirmed
+58  [H] daily_breakout
+59  [H] daily_squeeze
+60  [H] day_2_continuation
+61  [H] gap_fill_open
+62  [H] trend_continuation
+63  [+] high_tight_flag              long   Minervini 80%+ rise then tight flag
+64  [+] cup_and_handle               long   O'Neil classic pattern
+
+
+INVESTMENT
+----------
+65  [+] weekly_breakout              long   26-week base break (fills empty bucket)
+
+
+POSITION
+--------
+66  [H] accumulation_entry
+67  [+] stage_2_breakout             long   Weinstein stage 2 above rising 30-week SMA
+
+
+TOTALS
+======
+HAVE NOW           : 48 setups
+SUGGESTING TO ADD  : 10 setups  (#24 #25 #26 #27 #47 #48 #63 #64 #65 #67)
+DON'T HAVE         :  9 setups  (#28 #29 #49 #50 #51 #52 #53 #54 #55)
+GRAND TOTAL ITEMS  : 67
