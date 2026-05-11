@@ -4,6 +4,25 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🔒 2026-02-09 — V6.next++ UI SPEC LOCKED
+
+User approved final mockup at `?preview=v6mock`. Spec frozen at `/app/memory/V6_NEXT_LOCKED_SPEC.md`.
+
+**Locked concepts:** ①②③④⑤⑦⑧ (heartbeat, risk rail, sparklines, glass+halo, vibe tints, time scrubber, provenance ring). **Skipped:** ⑥ pipeline particles.
+
+**Locked enhancements A–J:** trigger progress, SL→PT proximity, mini-arc, action bar, narrative strip, AI chat drawer, aggregate P&L sparkline, change-detector, conditional sparklines, colorblind icons.
+
+**Migration plan: 3 phases (Plan A)**
+- Phase A — Extract V5 panels into pure reusable components (no behavior change)
+- Phase B — V6 shell + 5-column grid + new positions + thinking panes wired to live data
+- Phase C — Migrate remainder + chat drawer + retire V5 (1-week parallel run)
+
+**New backend endpoints required** for state machine, proximity, aggregate P&L, trigger progress, narrative — listed in spec §7.
+
+Next action: kick off Phase A (panel extraction) once user gives green light.
+
+
+
 ## ✅ 2026-02-09 — v19.34.66 SHIPPED — Boot-time orphan-GTC reconciler (3 layers)
 
 The long-missing audit pass. Triggered by tonight's discovery that the operator had 10 GTC sell-side bracket legs from 5/4 sitting at IB after multiple bot restarts — bot had completely lost track. Every prior reconciler started from the bot's view of the world; none ever asked "what does IB still have that the bot has forgotten about?".
