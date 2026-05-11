@@ -4,6 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-11 — v19.34.70 SHIPPED — NBIS symbol-exposure-saturated cooldown
+
+Operator-observed 2026-05-11: bot fragmented NBIS into many small fills, hitting per-symbol exposure cap, retrying with smaller sizes, looping every ~30-60s. Sizer's cap-saturated branch was producing `shares=0` with reason `position_size_zero` — which is NOT structural, so rejection cooldown never engaged.
+
+Fix: new distinct reason code `symbol_exposure_saturated`. Sizer tags the branch via `multipliers_out`; caller emits the new reason code and directly calls `rejection_cooldown.mark_rejection(...)`. Reason added to `STRUCTURAL_REJECTION_REASONS` (default cooldown 5 min, extends on repeat). New narrative branch emits "🧊 Cooling off on NBIS breakout — exposure $14,800 hit $15,000 cap" so Bot's Brain panel isn't silent.
+
+5 new pytest cases in `tests/test_v19_34_70_symbol_exposure_saturated_cooldown.py`. Full 112-test safety/cooldown suite green. **User must Save to Github → pull on DGX → restart backend.**
+
+
+
 ## ✅ 2026-05-11 — v19.34.69 SHIPPED — BMNR P-1 kill-switch bypass sealed
 
 Operator manually tripped kill switch at 2026-05-11 14:14:34 UTC; bot still opened BMNR. Forensic audit found `agents/trade_executor_agent.py::_execute_order` was importing `services.order_queue_service` directly and calling `.queue_order(...)` on the service, bypassing the only chokepoint (`routers/ib._kill_switch_gate`).

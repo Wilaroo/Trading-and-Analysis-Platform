@@ -138,6 +138,7 @@ STRUCTURAL_REJECTION_REASONS: Tuple[str, ...] = (
     "max_position_pct",     # single-position size cap
     "max_total_exposure",   # gross book size cap
     "max_symbol_exposure",  # per-symbol concentration cap
+    "symbol_exposure_saturated",  # v19.34.70 — sizer-side: cap fully used
     "kill_switch",          # operator-tripped or auto-tripped
     "buying_power",         # IB rejected for insufficient bp
     "insufficient_bp",

@@ -504,6 +504,58 @@ class OpportunityEvaluator:
                 logger.debug(f"[HRPAllocator] skipped: {_hrp_err}")
 
             if shares <= 0:
+                # v19.34.70 — Distinguish "cap-saturated" zero from generic
+                # sizing-zero. When the sizer hits the per-symbol exposure
+                # cap, follow-up cycles on (symbol, setup_type) will keep
+                # producing 0 shares for the same reason → death by a
+                # thousand cuts (operator-observed NBIS thrashing
+                # 2026-05-11). Route to `symbol_exposure_saturated` which
+                # is registered as STRUCTURAL in the cooldown service so
+                # subsequent re-evaluations get throttled by the
+                # per-(symbol, setup_type) cooldown.
+                cap_saturated = (
+                    isinstance(position_multipliers, dict)
+                    and position_multipliers.get("block_reason") == "symbol_exposure_saturated"
+                )
+                if cap_saturated:
+                    _existing = float(position_multipliers.get("existing_sym_exposure", 0))
+                    _cap = float(position_multipliers.get("safety_cap_usd", 0))
+                    print(
+                        f"   ❌ {symbol} symbol_exposure_saturated "
+                        f"(existing ${_existing:,.0f} ≥ cap ${_cap:,.0f}) → "
+                        f"triggering rejection cooldown."
+                    )
+                    bot.record_rejection(
+                        symbol=symbol, setup_type=setup_type, direction=direction_str,
+                        reason_code="symbol_exposure_saturated",
+                        context={
+                            "entry_price": float(entry_price),
+                            "existing_sym_exposure_usd": _existing,
+                            "safety_cap_usd": _cap,
+                            "why": (
+                                "Per-symbol exposure cap reached. Further "
+                                "entries on this symbol+setup will be "
+                                "skipped until cooldown expires or exposure "
+                                "drops below cap."
+                            ),
+                        },
+                    )
+                    # Feed the per-(symbol, setup_type) cooldown so the
+                    # next ~5 min of evaluations are silently dropped
+                    # instead of regenerating fresh trade_ids every cycle.
+                    try:
+                        from services.rejection_cooldown_service import get_rejection_cooldown
+                        get_rejection_cooldown().mark_rejection(
+                            symbol=symbol,
+                            setup_type=setup_type or "unknown",
+                            reason="symbol_exposure_saturated",
+                        )
+                    except Exception as _cd_err:
+                        logger.debug(
+                            f"v19.34.70 mark_rejection(cap_saturated) failed: {_cd_err}"
+                        )
+                    return None
+
                 print(f"   ❌ Position size = 0 (entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f})")
                 bot.record_rejection(
                     symbol=symbol, setup_type=setup_type, direction=direction_str,
@@ -948,9 +1000,27 @@ class OpportunityEvaluator:
                     shares = max(min(shares, _max_shares_by_safety), 1)
                 else:
                     # Symbol already at/over cap — return 0 shares so the
-                    # upstream flow rejects cleanly as position_size_zero
-                    # instead of a wasted evaluate → safety-block cycle.
+                    # upstream flow rejects cleanly instead of wasting an
+                    # evaluate → safety-block cycle.
+                    #
+                    # v19.34.70 — Tag this branch DISTINCTLY (operator
+                    # discovered 2026-05-11 NBIS thrashing: bot kept
+                    # re-evaluating NBIS every 30-60s, sizer kept
+                    # producing 0 shares for cap reasons, rejection
+                    # reason `position_size_zero` did NOT trigger the
+                    # rejection cooldown — so the bot looped death-by-
+                    # a-thousand-cuts style for 70+ minutes producing
+                    # fragmented fills until something else broke it.
+                    # The distinct reason code feeds the cooldown via
+                    # `STRUCTURAL_REJECTION_REASONS` so subsequent
+                    # cycles on (NBIS, setup) are skipped silently
+                    # until either the cap clears or the cooldown
+                    # expires.
                     shares = 0
+                    if multipliers_out is not None:
+                        multipliers_out["block_reason"] = "symbol_exposure_saturated"
+                        multipliers_out["existing_sym_exposure"] = _existing_sym_exposure
+                        multipliers_out["safety_cap_usd"] = _safety_cap
         except Exception as _cap_err:
             # Never let the safety-cap lookup break sizing; fall through to
             # legacy behaviour if the guardrail is misconfigured.

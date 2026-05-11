@@ -2,6 +2,40 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-11 (v19.34.70) — NBIS symbol-exposure-saturated cooldown
+
+### Why
+
+Live-session observation 2026-05-11: bot opened multiple fragmented NBIS positions in rapid succession, hit the per-symbol exposure cap, retried with smaller sizes, and looped — "death by a thousand cuts" fragmentation. The exact failure mode the v19.34.8 rejection-cooldown was meant to prevent, except this path wasn't wired into it.
+
+### Root cause
+
+`opportunity_evaluator.calculate_position_size` clamps `shares` down to fit under `max_symbol_exposure_usd` (v19.20). When existing exposure already ≥ cap, the clamp emits `shares=0` and the caller logs `position_size_zero`. That reason is NOT in `STRUCTURAL_REJECTION_REASONS`, so the rejection-cooldown service never engages. Bot kept re-evaluating every ~30-60s, regenerating fresh `trade_id`s, and occasionally squeezing through a tiny order when transient exposure dipped.
+
+### Fix
+
+- Sizer tags the cap-saturated branch via `multipliers_out["block_reason"] = "symbol_exposure_saturated"` (plus `existing_sym_exposure` and `safety_cap_usd` for narrative context).
+- Caller routes that branch to `record_rejection(reason_code="symbol_exposure_saturated")` AND directly calls `rejection_cooldown.mark_rejection(...)` to engage the per-(symbol, setup_type) cooldown immediately. Default 5-min window, extends on repeat rejections within window.
+- `STRUCTURAL_REJECTION_REASONS` now includes `"symbol_exposure_saturated"` so any future producer firing this reason feeds the cooldown by default.
+- `_compose_rejection_narrative` has a new branch emitting `"🧊 Cooling off on NBIS breakout — per-symbol exposure $14,800 hit the $15,000 cap. Skipping further entries..."` so the Bot's Brain panel surfaces a human-readable reason instead of looking silent.
+
+### Regression test
+
+`/app/backend/tests/test_v19_34_70_symbol_exposure_saturated_cooldown.py` — 5 cases:
+1. Reason is classified as structural.
+2. `mark_rejection` engages a live cooldown observable by `is_in_cooldown`.
+3. Cooldown is keyed by (symbol, setup_type) — does NOT bleed across symbols or setups.
+4. Narrative composer emits cooling-off message with $ amounts and "cooldown" keyword.
+5. Repeat rejection extends the cooldown (relentless re-evaluation can't accidentally clear its own gate).
+
+All 5 pass. Full 112-test safety+cooldown suite green.
+
+### Operator action
+
+Same as v19.34.69 — Save to Github → `git pull` on DGX → restart backend.
+
+
+
 ## 2026-05-11 (v19.34.69) — BMNR P-1 kill-switch bypass — service-layer chokepoint
 
 ### Why

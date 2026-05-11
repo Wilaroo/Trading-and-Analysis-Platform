@@ -1438,6 +1438,19 @@ class TradingBotService:
                 f"risk=${risk:.2f}). Equity may be unavailable, or risk caps "
                 f"are tighter than the entry/stop distance allows."
             )
+        if reason_code == "symbol_exposure_saturated":
+            # v19.34.70 — Operator-visible cooldown breadcrumb so the
+            # Bot's Brain panel shows WHY the bot stopped re-evaluating
+            # the symbol (instead of looking silent and broken).
+            existing = ctx.get("existing_sym_exposure_usd", 0) or 0
+            cap = ctx.get("safety_cap_usd", 0) or 0
+            return (
+                f"🧊 Cooling off on {symbol} {setup_display} — per-symbol "
+                f"exposure ${existing:,.0f} hit the ${cap:,.0f} cap. "
+                f"Skipping further entries on this setup until exposure "
+                f"clears or the 5-min cooldown expires (prevents "
+                f"death-by-a-thousand-cuts fragmentation)."
+            )
         if reason_code == "rr_below_min":
             rr = ctx.get("rr_ratio")
             min_rr = ctx.get("min_required")
