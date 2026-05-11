@@ -3281,3 +3281,29 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - 🟡 (P1) **v19.34.93 — `resize-bracket-to-ib-truth`** atomic cancel+re-attach endpoint. Single operator call to fix any size drift.
 - 🟢 (P2) **Cancel-queue TTL/reaper** for stale `pending` entries (>5min unclaimed → log + auto-mark `expired`).
 - 🟢 (P2) **Mass-cancel endpoint** `/sweep-all-orphans` (single-shot version of today's python loop) — though v89 auto-sweep makes this lower priority.
+
+## Completed 2026-05-11 late evening (v19.34.93 + v19.34.94 + data audit)
+- ✅ `resize-bracket-to-ib-truth` atomic cancel+re-attach endpoint.
+- ✅ Cancel-queue TTL/reaper (auto-expire >10min pending, revert >5min claimed).
+- ✅ 49/49 pytest passing across full order-pipeline + reaper suite.
+- ✅ Confirmed Collect Data button is the correct training-data refresh entry point.
+- ✅ Confirmed TrainingPipelinePanel "Start Training" button is the correct trophy-run entry point.
+
+## Order-Pipeline Hardening — COMPLETE
+All P1 hardening shipped (v88, v89, v90, v91, v92, v93, v94). Pipeline is self-healing end-to-end.
+
+## Active TODO for User (low-effort)
+- 🟢 Click NIA → DataCollectionPanel "Collect Data" to top up 6-day backfill gap.
+- 🟢 After collection drains, click NIA → TrainingPipelinePanel "Start Training" to refresh the 15-day-stale trophy run.
+
+## Next Feature Work — Pick Whichever
+- 🟡 V6 UI refactor (Variant C, 4-pane layout).
+- 🟢 Position Health Console (`/app/memory/V6_POSITION_HEALTH_CONSOLE_SPEC.md`).
+- 🟢 Safety Activity Stream (`/app/memory/V6_SAFETY_ACTIVITY_STREAM_SPEC.md`).
+- 🟢 (P2) Tick-level Stop Run Probability ML Module.
+- 🟢 (P2) Setup-landscape EOD self-grading tracker.
+- 🟢 (P2) Mean-reversion metrics service.
+- 🟢 (P2) Liquidity-aware trail in `stop_manager.py`.
+- 🟢 (P3) Chart bubble click → fire focus symbol.
+- 🟢 (P3) SEC EDGAR 8-K integration.
+- 🟢 (P3) Break up `server.py` and `trading_bot.py` monoliths.

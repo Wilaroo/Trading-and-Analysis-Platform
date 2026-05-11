@@ -18214,3 +18214,73 @@ Today's incident class is now structurally impossible:
 - **v90**: EOD close fires immediate sweep (≤10s).
 - **v91**: cancel-excess is sizing-aware → won't under-protect.
 - **v92**: orphans can't form to begin with — OCA enforced at placement.
+
+---
+
+## v19.34.93 — `resize-bracket-to-ib-truth` (Atomic Cancel + Re-Attach) (2026-05-11)
+
+### Problem
+Pre-v93 size-drift recovery was a 3-step manual dance: `cancel-excess-bracket-legs target_qty=0` → wait → `attach-brackets-to-unprotected`. Lots of room for operator mistakes (wrong wait, forgot step 3, mis-typed prices).
+
+### Fix
+`POST /api/trading-bot/resize-bracket-to-ib-truth` collapses all 3 steps:
+
+1. Reads symbol's pending stop+target legs from pusher snapshot.
+2. Resolves `target_qty` (operator override → bot trade's `remaining_shares`).
+3. Queues cancels for ALL existing legs via the v88 cancel queue.
+4. Polls `_cancellation_queue` up to `cancel_wait_s` (default 15s) for confirmation.
+5. Calls `_trade_executor.attach_oca_stop_target(trade)` with resolved prices and target_qty, restoring the trade's original fields afterward (no permanent side-effects).
+
+### Request
+```json
+{
+  "symbol": "ABC", "dry_run": true,
+  "target_qty": <int|null>, "new_stop_price": <float|null>,
+  "new_target_price": <float|null>, "cancel_wait_s": 15.0,
+  "allow_zero_qty": false
+}
+```
+
+### Safety gates
+- `target_qty=0` without `allow_zero_qty=true` → 400 (almost certainly a mistake).
+- `target_qty>0` + no bot trade + no override prices → 400.
+- Trade fields restored in `finally` block so failed re-attach doesn't mutate the bot.
+
+### Pytest coverage
+- `tests/test_v19_34_93_resize_bracket_to_ib_truth.py` (6 tests): dry-run plan, zero-qty guard, zero-qty with allow flag cancels only, no-trade error, full flow, price-override doesn't mutate trade. **All passing.**
+
+---
+
+## v19.34.94 — Cancel-Queue TTL / Reaper (2026-05-11)
+
+### Problem
+The v88 cancel queue is in-memory and has no lifecycle: a `pending` cancel where the pusher died sits forever; a `claimed` cancel where the pusher crashed mid-cancel never gets retried.
+
+### Fix
+`GET /api/ib/cancellations/pending` now sweeps stale entries on every call (zero-cost; runs only when the pusher polls):
+
+- **`pending` for > 10 min** → mark `expired` with explanatory error.
+- **`claimed` for > 5 min with no result** → revert to `pending` so the next poll cycle retries.
+- **Terminal states** (`cancelled`, `failed`, `not_found`, `expired`) → never touched.
+
+Response now includes `reaped: {expired, reverted_to_pending}` counts for visibility.
+
+### Pytest coverage
+- `tests/test_v19_34_94_cancel_queue_reaper.py` (6 tests): fresh not reaped, old pending expired, stuck claimed reverted, terminal never touched, recent claim not reverted, malformed timestamps don't crash. **All passing.**
+
+### Total test suite: 49/49 across v80, v88, v89, v91, v92, v93, v94.
+
+---
+
+## 2026-05-11 evening — Data Lake Health Check
+
+Verified DGX state ahead of resuming trophy training:
+- **215M bars** / 9,412 symbols / 7 timeframes — data lake rich and healthy.
+- **ADV cache** fresh (9,412 cached, 4,553 ≥ $50k).
+- **Last smart-backfill**: 2026-05-05 (6 days ago, 14,241 queued).
+- **Last trophy run**: 2026-04-26 → 6h 37m, 173 models, 0 failures (15 days stale).
+
+### "Collect Data" → "Start Training" workflow (confirmed correct, NOT wired together intentionally):
+1. **NIA → DataCollectionPanel "Collect Data" button** fires `POST /api/ib-collector/smart-backfill`. Tier-aware, gap-aware, dedupes against pending. ✅ working.
+2. **NIA → TrainingPipelinePanel "Start Training" button** fires `POST /api/ai-training/start`. Has a pre-train safety interlock (`/data-readiness` check). Shift+click overrides the gate. ✅ working.
+3. Buttons are intentionally decoupled — trophy training is a 6+ hour subprocess that should never auto-fire after every backfill.
