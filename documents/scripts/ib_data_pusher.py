@@ -1454,6 +1454,7 @@ class IBDataPusher:
                     # Poll for pending orders from cloud trading bot (less frequently)
                     if current_time - last_order_poll >= order_poll_interval:
                         self.poll_and_execute_orders()
+                        self.poll_and_execute_cancellations()  # v19.34.88
                         last_order_poll = current_time
                         
                 except Exception as e:
@@ -1658,6 +1659,7 @@ class IBDataPusher:
             self._last_order_poll = 0
         if current_time - self._last_order_poll >= 10:
             self.poll_and_execute_orders()
+            self.poll_and_execute_cancellations()  # v19.34.88
             self._last_order_poll = current_time
         
         # Poll L2 data
@@ -2463,6 +2465,127 @@ class IBDataPusher:
                 return False
 
     # ==================== ORDER EXECUTION ====================
+    def poll_and_execute_cancellations(self):
+        """v19.34.88 — Poll cloud for pending IB order cancellations and
+        execute them via `self.ib.cancelOrder(...)`. Mirrors
+        `poll_and_execute_orders` but for cancels.
+
+        Pre-v88 the cloud `cancel-excess-bracket-legs` endpoint called
+        `_ib_service.cancel_order(...)` on a backend that was never
+        actually connected to IB Gateway on pusher-only deployments,
+        so every cancel silently returned `cancel_returned_false`.
+        This loop closes that gap: backend enqueues, pusher fires.
+        """
+        try:
+            result = self.api.get_safe("/api/ib/cancellations/pending", timeout=10)
+            if not result:
+                return
+            cancellations = result.get("cancellations", [])
+            if not cancellations:
+                return
+            logger.info(f"[CancelQueue] Found {len(cancellations)} pending cancellations")
+            for c in cancellations:
+                self._execute_queued_cancellation(c)
+        except Exception as e:
+            logger.error(f"[CancelQueue] Poll error: {e}")
+
+    def _execute_queued_cancellation(self, c: dict):
+        """Cancel a single queued cancellation request via IB."""
+        ib_order_id = c.get("ib_order_id")
+        try:
+            ib_order_id = int(ib_order_id)
+        except (TypeError, ValueError):
+            return
+
+        logger.info(f"[CancelQueue] Cancelling IB order {ib_order_id} "
+                    f"(reason={c.get('reason')})")
+
+        # Claim first to prevent another poll cycle from racing us.
+        try:
+            claim = self.api.post_safe(
+                f"/api/ib/cancellations/claim/{ib_order_id}", timeout=10,
+            )
+            if not claim:
+                logger.debug(f"[CancelQueue] Could not claim {ib_order_id} (already claimed?)")
+                return
+        except Exception as e:
+            logger.warning(f"[CancelQueue] Claim error {ib_order_id}: {e}")
+            return
+
+        # Look up the actual Trade in ib_insync's openTrades().
+        target_trade = None
+        try:
+            for t in self.ib.openTrades():
+                try:
+                    if int(t.order.orderId) == ib_order_id:
+                        target_trade = t
+                        break
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"[CancelQueue] openTrades lookup failed: {e}")
+
+        if target_trade is None:
+            logger.warning(f"[CancelQueue] {ib_order_id} not found at IB (already filled/cancelled?)")
+            self._report_cancellation_result(
+                ib_order_id, "not_found",
+                error="Order not present in ib.openTrades() — likely already terminal."
+            )
+            return
+
+        try:
+            self.ib.cancelOrder(target_trade.order)
+        except Exception as e:
+            logger.error(f"[CancelQueue] cancelOrder error {ib_order_id}: {e}")
+            self._report_cancellation_result(ib_order_id, "failed", error=str(e))
+            return
+
+        # Wait briefly for IB to confirm.
+        confirmed = False
+        for _ in range(10):
+            self.ib.sleep(0.5)
+            try:
+                status = (target_trade.orderStatus.status or "").lower()
+            except Exception:
+                status = ""
+            if status in ("cancelled", "apicancelled", "inactive"):
+                self._report_cancellation_result(ib_order_id, "cancelled")
+                logger.warning(f"[CancelQueue] {ib_order_id} cancelled at IB.")
+                confirmed = True
+                break
+            if status == "filled":
+                self._report_cancellation_result(
+                    ib_order_id, "failed",
+                    error="Order filled before cancel could land."
+                )
+                logger.warning(f"[CancelQueue] {ib_order_id} filled before cancel landed.")
+                confirmed = True
+                break
+
+        if not confirmed:
+            # cancelOrder() was sent but IB hasn't echoed terminal status yet.
+            # Report `pending` so the backend knows we tried but doesn't
+            # treat it as failed. Next audit poll will reveal the truth.
+            self._report_cancellation_result(
+                ib_order_id, "pending",
+                error="cancelOrder sent; IB not yet confirmed terminal."
+            )
+
+    def _report_cancellation_result(self, ib_order_id: int, status: str,
+                                    error: str = None):
+        """POST cancellation outcome back to cloud."""
+        try:
+            payload = {
+                "ib_order_id": int(ib_order_id),
+                "status": status,
+                "error": error,
+                "executed_at": datetime.now().isoformat(),
+            }
+            self.api.post_safe("/api/ib/cancellations/result", payload, timeout=10)
+        except Exception as e:
+            logger.warning(f"[CancelQueue] Report failed: {e}")
+
+
     
     def poll_and_execute_orders(self):
         """

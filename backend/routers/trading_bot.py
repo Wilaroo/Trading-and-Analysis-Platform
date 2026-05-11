@@ -5932,13 +5932,20 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
             from routers.ib import _ib_service as _direct_ib_service
         except Exception:
             _direct_ib_service = None
-        if _direct_ib_service is None:
-            errors.append({
-                "error": "ib_service_unavailable",
-                "detail": "Pusher-only deployment or IB service not registered. "
-                          "Cancel from TWS directly.",
-            })
-        else:
+
+        # v19.34.88 — Detect whether the backend has a live IB connection.
+        # On native DGX deployments (pusher-only), `_ib_service` exists but
+        # `is_connected()` returns False, so `cancel_order` silently no-ops
+        # ("cancel_returned_false"). Fall through to the cancel-queue path
+        # so the Windows pusher actually fires the cancel.
+        direct_ok = False
+        if _direct_ib_service is not None:
+            try:
+                direct_ok = bool(_direct_ib_service.is_connected())
+            except Exception:
+                direct_ok = False
+
+        if direct_ok:
             for leg in to_cancel:
                 try:
                     ok = await _direct_ib_service.cancel_order(int(leg["order_id"]))
@@ -5958,6 +5965,42 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
                         })
                 except Exception as e:
                     errors.append({"order_id": leg["order_id"], "error": str(e)})
+        else:
+            # v19.34.88 — Pusher-only deployment: enqueue cancels for the
+            # Windows pusher to execute. Each entry returns immediately
+            # with status="queued"; operator polls /cancellations/all to
+            # see when the pusher confirms `cancelled`.
+            try:
+                from routers.ib import queue_cancellation as _queue_cancellation
+            except Exception as e:
+                logger.error(f"[v19.34.88] cancel-queue import failed: {e}")
+                _queue_cancellation = None
+            if _queue_cancellation is None:
+                errors.append({
+                    "error": "cancel_queue_unavailable",
+                    "detail": "queue_cancellation() not importable. "
+                              "Cancel from TWS directly.",
+                })
+            else:
+                for leg in to_cancel:
+                    try:
+                        entry = _queue_cancellation(
+                            ib_order_id=int(leg["order_id"]),
+                            reason=f"cancel-excess-bracket-legs {sym}",
+                            requested_by="cancel-excess-bracket-legs",
+                        )
+                        queued_leg = dict(leg)
+                        queued_leg["queue_status"] = entry.get("status", "pending")
+                        queued_leg["queued_at"] = entry.get("requested_at")
+                        cancelled.append(queued_leg)
+                        logger.warning(
+                            "[v19.34.88 EXCESS-CANCEL QUEUED] %s order_id=%s "
+                            "(%s %s qty=%s) → pusher cancel queue.",
+                            sym, leg["order_id"], leg["action"],
+                            leg["order_type"], leg["qty"],
+                        )
+                    except Exception as e:
+                        errors.append({"order_id": leg["order_id"], "error": str(e)})
     else:
         cancelled = list(to_cancel)  # show what WOULD be cancelled
 

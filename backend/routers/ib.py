@@ -186,6 +186,78 @@ _order_queue_legacy = {
 }
 
 
+# ===================== v19.34.88 — Cancellation Queue =======================
+# Pre-v88, `cancel-excess-bracket-legs` (and any operator endpoint that
+# wanted to cancel an IB-side order by `ib_order_id`) called
+# `_ib_service.cancel_order(...)` directly. On native DGX deployments
+# the cloud backend has NO direct ib_insync connection — that lives on
+# the Windows pusher. Result: every cancel returned `False` and the
+# operator was stuck doing TWS right-clicks.
+#
+# This queue mirrors the order-queue plumbing above but for cancels:
+#   1. Backend enqueues a cancel by IB order_id via `queue_cancellation()`.
+#   2. Pusher polls `GET /api/ib/cancellations/pending` every ~5s.
+#   3. Pusher claims via `POST /api/ib/cancellations/claim/{ib_order_id}`.
+#   4. Pusher calls `self.ib.cancelOrder(...)` and reports back via
+#      `POST /api/ib/cancellations/result`.
+#
+# In-memory is fine — cancels are ephemeral (max ~30s lifetime), and
+# `cancel-excess-bracket-legs` is operator-triggered so we don't need
+# Mongo persistence here. If the backend restarts mid-flight the
+# operator simply re-runs the endpoint.
+_cancellation_queue: Dict[int, Dict[str, Any]] = {}
+
+
+class CancellationQueueRequest(BaseModel):
+    """v19.34.88 — Enqueue a cancellation for a live IB order."""
+    ib_order_id: int
+    reason: Optional[str] = None
+    requested_by: Optional[str] = "operator"
+
+
+class CancellationResult(BaseModel):
+    """v19.34.88 — Pusher reports back the outcome of a cancel."""
+    ib_order_id: int
+    status: str  # cancelled | failed | not_found | pending
+    error: Optional[str] = None
+    executed_at: Optional[str] = None
+
+
+def queue_cancellation(ib_order_id: int, reason: Optional[str] = None,
+                       requested_by: str = "operator") -> Dict[str, Any]:
+    """v19.34.88 — Enqueue a cancellation; idempotent on ib_order_id."""
+    try:
+        oid = int(ib_order_id)
+    except (TypeError, ValueError):
+        raise ValueError(f"ib_order_id must be int, got {ib_order_id!r}")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    existing = _cancellation_queue.get(oid)
+    if existing and existing.get("status") in ("pending", "claimed"):
+        # Already in flight — don't reset the clock, just stamp the reason.
+        if reason and not existing.get("reason"):
+            existing["reason"] = reason
+        return existing
+    _cancellation_queue[oid] = {
+        "ib_order_id": oid,
+        "reason": reason,
+        "requested_by": requested_by,
+        "requested_at": now_iso,
+        "status": "pending",
+        "claimed_at": None,
+        "completed_at": None,
+        "error": None,
+    }
+    return _cancellation_queue[oid]
+
+
+def get_cancellation_status(ib_order_id: int) -> Optional[Dict[str, Any]]:
+    """Read-only lookup for operators / audit endpoints."""
+    try:
+        return _cancellation_queue.get(int(ib_order_id))
+    except (TypeError, ValueError):
+        return None
+
+
 class QueuedOrderRequest(BaseModel):
     """Request to queue an order for remote execution.
 
@@ -1807,6 +1879,101 @@ def get_order_result_endpoint(order_id: str, wait: bool = False, timeout: float 
         return {"success": True, "order": _order_queue_legacy["pending"][order_id], "status": "pending"}
     
     raise HTTPException(status_code=404, detail=f"Order {order_id} not found")
+
+
+# ===================== v19.34.88 — Cancellation Queue Endpoints ============
+
+@router.post("/cancellations/queue")
+def queue_cancellation_endpoint(req: CancellationQueueRequest):
+    """v19.34.88 — Enqueue a cancellation. Used by `cancel-excess-bracket-legs`
+    and any future operator endpoint that needs to cancel a live IB order
+    on a pusher-only deployment. Idempotent on ib_order_id."""
+    try:
+        entry = queue_cancellation(
+            ib_order_id=req.ib_order_id,
+            reason=req.reason,
+            requested_by=req.requested_by or "operator",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, "cancellation": entry}
+
+
+@router.get("/cancellations/pending")
+def get_pending_cancellations():
+    """v19.34.88 — Pusher polls this every ~5s and cancels each order via
+    `self.ib.cancelOrder(...)`. Only returns `pending` entries — claimed
+    ones are excluded to prevent duplicate cancels on overlapping polls."""
+    pending = [
+        dict(entry) for entry in _cancellation_queue.values()
+        if entry.get("status") == "pending"
+    ]
+    return {"success": True, "cancellations": pending, "count": len(pending)}
+
+
+@router.post("/cancellations/claim/{ib_order_id}")
+def claim_cancellation(ib_order_id: int):
+    """v19.34.88 — Pusher claims a cancellation before sending it to IB.
+    Returns 404 if not found or already terminal, 409 if already claimed."""
+    entry = _cancellation_queue.get(int(ib_order_id))
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Cancellation {ib_order_id} not queued")
+    status = entry.get("status")
+    if status == "claimed":
+        raise HTTPException(status_code=409, detail=f"Cancellation {ib_order_id} already claimed")
+    if status in ("cancelled", "failed", "not_found"):
+        raise HTTPException(status_code=400, detail=f"Cancellation {ib_order_id} already terminal ({status})")
+    entry["status"] = "claimed"
+    entry["claimed_at"] = datetime.now(timezone.utc).isoformat()
+    return {"success": True, "cancellation": entry}
+
+
+@router.post("/cancellations/result")
+def report_cancellation_result(result: CancellationResult):
+    """v19.34.88 — Pusher reports the outcome of a cancel.
+    Accepted statuses: cancelled, failed, not_found, pending."""
+    entry = _cancellation_queue.get(int(result.ib_order_id))
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Cancellation {result.ib_order_id} not queued")
+    status = (result.status or "").lower().strip()
+    if status not in ("cancelled", "failed", "not_found", "pending"):
+        raise HTTPException(status_code=400, detail=f"Invalid status: {result.status}")
+    entry["status"] = status
+    entry["error"] = result.error
+    entry["completed_at"] = result.executed_at or datetime.now(timezone.utc).isoformat()
+    if status == "cancelled":
+        logger.warning(
+            "[v19.34.88 CANCEL-QUEUE] ib_order_id=%s cancelled (reason=%s)",
+            result.ib_order_id, entry.get("reason"),
+        )
+    elif status == "failed":
+        logger.error(
+            "[v19.34.88 CANCEL-QUEUE] ib_order_id=%s FAILED: %s",
+            result.ib_order_id, result.error,
+        )
+    return {"success": True, "cancellation": entry}
+
+
+@router.get("/cancellations/status/{ib_order_id}")
+def get_cancellation_status_endpoint(ib_order_id: int):
+    """v19.34.88 — Operator/audit endpoint for checking a single cancel."""
+    entry = get_cancellation_status(ib_order_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Cancellation {ib_order_id} not queued")
+    return {"success": True, "cancellation": entry}
+
+
+@router.get("/cancellations/all")
+def list_all_cancellations():
+    """v19.34.88 — Dump entire cancellation queue for debugging."""
+    return {
+        "success": True,
+        "count": len(_cancellation_queue),
+        "cancellations": list(_cancellation_queue.values()),
+    }
+
+
+
 
 
 @router.post("/orders/reconcile")
