@@ -1903,12 +1903,69 @@ def queue_cancellation_endpoint(req: CancellationQueueRequest):
 def get_pending_cancellations():
     """v19.34.88 — Pusher polls this every ~5s and cancels each order via
     `self.ib.cancelOrder(...)`. Only returns `pending` entries — claimed
-    ones are excluded to prevent duplicate cancels on overlapping polls."""
+    ones are excluded to prevent duplicate cancels on overlapping polls.
+
+    v19.34.94 — Also reaps stale entries:
+      - `pending` for > 10 min with no claim   → mark `expired` (pusher dead).
+      - `claimed` for > 5 min with no result   → revert to `pending` so a
+        live pusher can retry. Without this, a pusher crash mid-cancel
+        would leave the entry stuck in `claimed` forever.
+    """
+    # Reap stale entries in-place before serving the response.
+    now = datetime.now(timezone.utc)
+    reap_pending_expired_ts = now - timedelta(minutes=10)
+    reap_claimed_revert_ts = now - timedelta(minutes=5)
+    expired_count = 0
+    reverted_count = 0
+    for entry in list(_cancellation_queue.values()):
+        status = entry.get("status")
+        if status == "pending":
+            ts_raw = entry.get("requested_at")
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if ts < reap_pending_expired_ts:
+                entry["status"] = "expired"
+                entry["completed_at"] = now.isoformat()
+                entry["error"] = (
+                    "Auto-expired after 10 min in `pending` — pusher likely "
+                    "unreachable. Re-queue manually if still needed."
+                )
+                expired_count += 1
+                logger.warning(
+                    "[v19.34.94 CANCEL-REAPER] ib_order_id=%s expired after "
+                    "10 min unclaimed (reason=%s)",
+                    entry.get("ib_order_id"), entry.get("reason"),
+                )
+        elif status == "claimed":
+            ts_raw = entry.get("claimed_at")
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else None
+            except Exception:
+                ts = None
+            if ts and ts < reap_claimed_revert_ts:
+                # Pusher claimed but never reported back → revert.
+                entry["status"] = "pending"
+                entry["claimed_at"] = None
+                reverted_count += 1
+                logger.warning(
+                    "[v19.34.94 CANCEL-REAPER] ib_order_id=%s reverted from "
+                    "claimed → pending after 5 min no-result. Pusher may "
+                    "have died mid-cancel; another poll will retry.",
+                    entry.get("ib_order_id"),
+                )
+
     pending = [
         dict(entry) for entry in _cancellation_queue.values()
         if entry.get("status") == "pending"
     ]
-    return {"success": True, "cancellations": pending, "count": len(pending)}
+    return {
+        "success": True,
+        "cancellations": pending,
+        "count": len(pending),
+        "reaped": {"expired": expired_count, "reverted_to_pending": reverted_count},
+    }
 
 
 @router.post("/cancellations/claim/{ib_order_id}")

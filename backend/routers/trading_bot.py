@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import asyncio
+import time
 import json
 import logging
 import os
@@ -6947,5 +6948,282 @@ async def attach_target_only(payload: AttachTargetOnlyRequest):
             **preview,
             "target_order_id": target_id,
         },
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# v19.34.93 — resize-bracket-to-ib-truth (atomic cancel + re-attach)
+# ────────────────────────────────────────────────────────────────────────────
+#
+# Operator workflow before v93:
+#   1. cancel-excess-bracket-legs target_qty=0 → nuke ALL legs for symbol
+#   2. wait for pusher to actually cancel them at IB
+#   3. attach-brackets-to-unprotected (or attach-target-only) → re-arm
+#
+# 3 commands + a wait. Operator errors abound. v93 collapses all 3 into
+# one atomic call with dry_run for safety.
+
+class ResizeBracketRequest(BaseModel):
+    symbol: str
+    dry_run: bool = True
+    target_qty: Optional[int] = None
+    new_stop_price: Optional[float] = None
+    new_target_price: Optional[float] = None
+    cancel_wait_s: float = 15.0
+    allow_zero_qty: bool = False
+
+
+@router.post("/resize-bracket-to-ib-truth")
+async def resize_bracket_to_ib_truth(payload: ResizeBracketRequest):
+    """v19.34.93 — Atomic cancel + re-attach for one symbol.
+
+    Always run with `dry_run: true` first. Composes:
+      1. Read symbol's pending stop+target legs from pusher snapshot.
+      2. Determine target_qty (override → |bot_position|).
+      3. Queue cancels for ALL existing legs via v88 cancel queue.
+      4. Poll _cancellation_queue up to `cancel_wait_s` for confirmation.
+      5. Call _trade_executor.attach_oca_stop_target(trade) with
+         resolved stop/target prices and target_qty.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    sym = payload.symbol.upper()
+
+    # 1. Find bot trade tracking this symbol
+    target_trade = None
+    bot_position_qty = 0
+    for t in (getattr(_trading_bot, "_open_trades", {}) or {}).values():
+        if (getattr(t, "symbol", "") or "").upper() != sym:
+            continue
+        try:
+            rem = int(abs(float(getattr(t, "remaining_shares", 0) or 0)))
+        except (TypeError, ValueError):
+            rem = 0
+        bot_position_qty += rem
+        if target_trade is None and rem > 0:
+            target_trade = t
+
+    # 2. Resolve target_qty
+    if payload.target_qty is not None:
+        target_qty = max(0, int(payload.target_qty))
+    else:
+        target_qty = bot_position_qty
+
+    if target_qty == 0 and not payload.allow_zero_qty:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "target_qty resolves to 0. If you truly want to cancel every "
+                "protective leg without re-attaching, set `allow_zero_qty: true`. "
+                "Otherwise pass `target_qty` explicitly."
+            ),
+        )
+
+    # 3. Read current pending stop+target legs
+    stop_legs: List[Dict[str, Any]] = []
+    target_legs: List[Dict[str, Any]] = []
+    try:
+        from routers.ib import _pushed_ib_data
+        raw_orders = _pushed_ib_data.get("orders") or []
+        if isinstance(raw_orders, dict):
+            raw_orders = raw_orders.get("orders", [])
+        for o in raw_orders:
+            try:
+                if (o.get("symbol") or "").upper() != sym:
+                    continue
+                if (o.get("status") or "") not in ("PreSubmitted", "Submitted"):
+                    continue
+                ot = (o.get("order_type") or "").upper()
+                leg = {
+                    "order_id": int(o.get("order_id") or 0),
+                    "qty": int(abs(float(o.get("quantity") or o.get("remaining") or 0))),
+                    "price": (
+                        float(o.get("limit_price") or 0)
+                        if "LMT" in ot
+                        else float(o.get("stop_price") or o.get("aux_price") or 0)
+                    ),
+                    "oca_group": o.get("oca_group") or None,
+                    "action": (o.get("action") or "").upper(),
+                    "order_type": ot,
+                    "status": o.get("status") or "",
+                }
+                if "STP" in ot:
+                    stop_legs.append(leg)
+                elif "LMT" in ot:
+                    target_legs.append(leg)
+            except Exception:
+                continue
+    except Exception as e:
+        return {
+            "success": False,
+            "symbol": sym,
+            "error": f"failed to read pusher orders snapshot: {e}",
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    existing_legs = {"stop_legs": stop_legs, "target_legs": target_legs}
+
+    # 4. Resolve stop/target prices
+    stop_price: Optional[float] = None
+    target_price: Optional[float] = None
+    if target_qty > 0:
+        if target_trade is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"target_qty={target_qty} but no bot trade tracking {sym}. "
+                    f"Pass `new_stop_price` and `new_target_price` explicitly."
+                ),
+            )
+        stop_price = payload.new_stop_price
+        if stop_price is None:
+            stop_price = float(getattr(target_trade, "stop_price", 0) or 0)
+        target_price = payload.new_target_price
+        if target_price is None:
+            tprices = getattr(target_trade, "target_prices", None) or []
+            if tprices:
+                target_price = float(tprices[0])
+        if not stop_price or not target_price:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"missing stop_price/target_price for {sym}. Pass "
+                    f"`new_stop_price` and `new_target_price` in the request."
+                ),
+            )
+
+    preview = {
+        "qty": target_qty,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "action": (
+            "SELL" if (getattr(target_trade, "direction", "long") if target_trade else "long") == "long"
+            else "BUY"
+        ),
+    }
+
+    # 5. Dry-run short-circuit
+    if payload.dry_run:
+        return {
+            "success": True,
+            "symbol": sym,
+            "dry_run": True,
+            "bot_position_qty": bot_position_qty,
+            "target_qty": target_qty,
+            "existing_legs": existing_legs,
+            "would_cancel_ids": [leg["order_id"] for leg in stop_legs + target_legs],
+            "would_attach": preview if target_qty > 0 else None,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # 6. Queue cancels
+    cancelled: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    try:
+        from routers.ib import queue_cancellation
+    except Exception as e:
+        raise HTTPException(500, f"cancel queue unavailable: {e}")
+
+    for leg in stop_legs + target_legs:
+        try:
+            entry = queue_cancellation(
+                ib_order_id=int(leg["order_id"]),
+                reason=f"resize-bracket-to-ib-truth {sym} → qty={target_qty}",
+                requested_by="resize_bracket_to_ib_truth",
+            )
+            cancelled.append({**leg, "queue_status": entry.get("status")})
+        except Exception as e:
+            errors.append({"order_id": leg["order_id"], "error": str(e)})
+
+    # 7. Wait for pusher to ack cancels
+    cancel_ids = [int(c["order_id"]) for c in cancelled]
+    cancel_summary: Dict[str, int] = {
+        "pending": 0, "claimed": 0, "cancelled": 0,
+        "failed": 0, "not_found": 0,
+    }
+    if cancel_ids:
+        try:
+            from routers.ib import _cancellation_queue
+            deadline = time.monotonic() + max(1.0, float(payload.cancel_wait_s))
+            while time.monotonic() < deadline:
+                cancel_summary = {
+                    "pending": 0, "claimed": 0, "cancelled": 0,
+                    "failed": 0, "not_found": 0,
+                }
+                all_done = True
+                for oid in cancel_ids:
+                    entry = _cancellation_queue.get(oid) or {}
+                    status = entry.get("status", "pending")
+                    cancel_summary[status] = cancel_summary.get(status, 0) + 1
+                    if status in ("pending", "claimed"):
+                        all_done = False
+                if all_done:
+                    break
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            errors.append({"stage": "wait_for_cancels", "error": str(e)})
+
+    # 8. Re-attach OCA bracket
+    attached: Optional[Dict[str, Any]] = None
+    if target_qty > 0:
+        try:
+            orig_stop = getattr(target_trade, "stop_price", None)
+            orig_targets = list(getattr(target_trade, "target_prices", []) or [])
+            orig_remaining = getattr(target_trade, "remaining_shares", None)
+            if payload.new_stop_price is not None:
+                target_trade.stop_price = float(payload.new_stop_price)
+            if payload.new_target_price is not None:
+                target_trade.target_prices = [float(payload.new_target_price)]
+            target_trade.remaining_shares = int(target_qty)
+            try:
+                result = await _trading_bot._trade_executor.attach_oca_stop_target(target_trade)
+            finally:
+                if payload.new_stop_price is not None and orig_stop is not None:
+                    target_trade.stop_price = orig_stop
+                if payload.new_target_price is not None:
+                    target_trade.target_prices = orig_targets
+                if orig_remaining is not None:
+                    target_trade.remaining_shares = orig_remaining
+            if result.get("success"):
+                attached = {
+                    "stop_order_id": result.get("stop_order_id"),
+                    "target_order_id": result.get("target_order_id"),
+                    "oca_group": result.get("oca_group"),
+                    "stop_price": stop_price,
+                    "target_price": target_price,
+                    "qty": target_qty,
+                    "partial": result.get("partial", False),
+                }
+            else:
+                errors.append({
+                    "stage": "attach_oca_stop_target",
+                    "error": result.get("error") or result.get("errors") or "unknown",
+                })
+        except Exception as e:
+            errors.append({"stage": "attach_oca_stop_target", "error": str(e)})
+
+    logger.warning(
+        "[v19.34.93 RESIZE-BRACKET] %s qty=%s stop=%s target=%s cancelled=%d "
+        "attached=%s errors=%d",
+        sym, target_qty, stop_price, target_price,
+        len(cancelled),
+        attached.get("oca_group") if attached else None,
+        len(errors),
+    )
+
+    return {
+        "success": len(errors) == 0,
+        "symbol": sym,
+        "dry_run": False,
+        "bot_position_qty": bot_position_qty,
+        "target_qty": target_qty,
+        "existing_legs": existing_legs,
+        "cancelled": cancelled,
+        "cancel_summary": cancel_summary,
+        "attached": attached,
+        "errors": errors,
         "ran_at": datetime.now(timezone.utc).isoformat(),
     }
