@@ -98,10 +98,47 @@ cd /app/backend && python -m pytest \
   -v --tb=short 2>&1 | tail -30
 
 curl -s "$DGX/api/system/health" | python3 -m json.tool
-tail -n 500 /var/log/supervisor/backend.err.log | grep -iE "error|exception|traceback" | tail -20
 ```
 
 **PASS:** ~44 tests green, system/health ok, no fresh tracebacks.
+
+---
+
+## GATE 6 (T-15 → T-10): Scanner universe + pusher profile — ADDED 2026-05-11
+
+Learned the hard way: on 2026-05-11 the scanner was idle for the first 13 min of trading because the ADV cache had decayed and the universe builder had no qualifying symbols. ALWAYS run these BEFORE open:
+
+```bash
+# 6a. ADV cache freshness — looking for "stale on intraday" warnings
+curl -s "$DGX/api/ib-collector/universe-freshness-health" | python3 -m json.tool
+
+# 6b. Scanner universe size — should be > 100 after rebuild
+curl -s "$DGX/api/sentcom/status" | python3 -m json.tool | grep universe
+
+# 6c. Pusher profile — should transition to "rth_open" by 09:31 ET
+curl -s "$DGX/api/diagnostic/pusher-rotation-status" | python3 -m json.tool | grep active_profile
+```
+
+**FAIL — actions:**
+
+```bash
+# 6a/6b fail: rebuild ADV cache AND canonical universe (both!)
+curl -s -X POST "$DGX/api/ib-collector/rebuild-adv-from-ib" | python3 -m json.tool
+# wait ~30s for it to complete
+
+# verify tier_summary shows intraday > 500
+# then verify universe propagates:
+curl -s "$DGX/api/sentcom/status" | python3 -m json.tool | grep universe
+# should be > 100 within ~60s
+
+# 6c fail: force pusher rotation
+curl -s -X POST "$DGX/api/diagnostic/pusher-rotation-rotate-now" | python3 -m json.tool
+```
+
+**PASS criteria:**
+- `universe-freshness-health`: no `Stale on intraday` warnings for SPY/QQQ/DIA/IWM/AAPL/MSFT
+- `scanner_universe_size`: > 100
+- `active_profile`: `rth_open` by 09:31 ET (or `rth_steady` later in session)
 
 ---
 
