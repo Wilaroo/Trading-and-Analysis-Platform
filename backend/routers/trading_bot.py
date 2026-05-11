@@ -5781,30 +5781,50 @@ class CancelExcessBracketLegsRequest(BaseModel):
     dry_run: bool = True
     keep_oca_group: Optional[str] = None  # operator override
     keep_order_ids: Optional[List[int]] = None  # explicit "don't cancel these"
+    target_qty: Optional[int] = None  # v19.34.91 — override `|bot_position|`
 
 
 @router.post("/cancel-excess-bracket-legs")
 async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
     """v19.34.80 — Cancel excess stop/target legs for one symbol.
 
-    Reads the symbol's current pending stop+target legs from the
-    pusher's open-orders snapshot, picks ONE bracket pair to keep
-    (per the strategy above), and cancels the rest via
-    `_direct_ib_service.cancel_order(ib_order_id)`. Always run with
-    `dry_run: true` first.
+    v19.34.91 (2026-05-11) — Now SIZING-AWARE. Picks the keep-set greedily
+    so total kept coverage equals `|bot_position|` (or `payload.target_qty`
+    override). Old behavior — picking exactly ONE bracket pair regardless
+    of qty — could leave positions under-protected when scale-ins created
+    legitimately fragmented brackets (e.g., LIN 68 = 21+47 in two OCAs).
 
-    Response:
+    Algorithm:
+      1. Determine `target_qty`:
+         - Operator override via `payload.target_qty`, else
+         - Sum of `_open_trades[sym].remaining_shares` for this symbol.
+         - If both are zero AND legacy "keep-one" tests are running with
+           empty `_open_trades`, fall back to keep-newest-bracket so
+           pre-v91 callers / tests keep working.
+      2. Bucket legs into bracket groups by `oca_group`. Non-OCA legs are
+         their own singleton brackets.
+      3. Sort brackets by preference (best keep candidate first):
+            canonical_match > keep_oca_group > keep_order_ids > OCA-linked
+            > newer > older. Brackets containing both stop + target rank
+            above singletons.
+      4. Greedy fill: walk sorted brackets, add to `kept` until kept stop
+         qty == target_qty. Anything over goes to `cancel`.
+      5. If total ≤ target_qty: keep everything (nothing to cancel; the
+         caller likely wants `attach-brackets-to-unprotected` instead).
+
+    Response (v91 fields are additive — legacy `kept` is still emitted
+    for the first kept bracket):
       {
-        "success": true,
-        "symbol": "ADBE",
-        "dry_run": <bool>,
-        "kept": {
-          "stop": {order_id, qty, price, oca_group},
-          "target": {order_id, qty, price, oca_group},
-          "decision_source": "canonical_slice"|"keep_oca_group"|"newest"|"keep_order_ids"
-        },
-        "cancelled": [{order_id, qty, price, oca_group, action, status}, ...],
-        "errors": [...]
+        success, symbol, dry_run,
+        target_qty: <int>,
+        bot_position_qty: <int>,
+        kept_total_qty: <int>,
+        kept_brackets: [
+          { stop, target, oca_group, qty, decision_source }, ...
+        ],
+        kept: { stop, target, decision_source },   # backward compat
+        cancelled: [...],
+        errors: [...]
       }
     """
     if _trading_bot is None:
@@ -5861,13 +5881,10 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
             "message": f"No pending stop/target legs found for {sym}.",
         }
 
-    # ── 2. Pick the keep bracket ──
-    decision_source: str = "unknown"
-    keep_stop: Optional[Dict[str, Any]] = None
-    keep_target: Optional[Dict[str, Any]] = None
-
+    # ── 2. Determine target_qty + bot canonical IDs (v19.34.91) ──
     canonical_stop_id: Optional[int] = None
     canonical_target_ids: set = set()
+    bot_position_qty = 0
     for trade in (getattr(_trading_bot, "_open_trades", {}) or {}).values():
         if (getattr(trade, "symbol", "") or "").upper() != sym:
             continue
@@ -5881,48 +5898,178 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
                 canonical_target_ids.add(int(tid))
             except (TypeError, ValueError):
                 pass
+        # Sum remaining shares across all bot trades for this symbol.
+        try:
+            bot_position_qty += int(abs(float(getattr(trade, "remaining_shares", 0) or 0)))
+        except (TypeError, ValueError):
+            pass
 
-    if keep_oca:
-        keep_stop = next((s for s in stop_legs if s["oca_group"] == keep_oca), None)
-        keep_target = next((t for t in target_legs if t["oca_group"] == keep_oca), None)
-        decision_source = "keep_oca_group"
-    elif keep_ids:
-        keep_stop = next((s for s in stop_legs if s["order_id"] in keep_ids), None)
-        keep_target = next((t for t in target_legs if t["order_id"] in keep_ids), None)
-        decision_source = "keep_order_ids"
-    elif canonical_stop_id or canonical_target_ids:
-        keep_stop = next((s for s in stop_legs if s["order_id"] == canonical_stop_id), None)
-        keep_target = next((t for t in target_legs if t["order_id"] in canonical_target_ids), None)
-        decision_source = "canonical_slice"
+    # Operator override > bot truth. If both are absent (e.g., legacy
+    # tests with empty _open_trades), target_qty=None triggers the
+    # backward-compat "keep newest bracket" fallback further down.
+    if payload.target_qty is not None:
+        target_qty: Optional[int] = max(0, int(payload.target_qty))
+    elif bot_position_qty > 0:
+        target_qty = bot_position_qty
+    else:
+        target_qty = None  # legacy fallback path
 
-    # Fallback: keep the newest. If submitted_at isn't reliable, fall
-    # back to highest order_id (IB issues monotonically).
-    if keep_stop is None and stop_legs:
-        keep_stop = max(stop_legs, key=lambda s: s["order_id"])
-        decision_source = decision_source if decision_source != "unknown" else "newest"
-    if keep_target is None and target_legs:
-        # Prefer the same OCA group as the kept stop, if any.
-        if keep_stop and keep_stop.get("oca_group"):
-            keep_target = next(
-                (t for t in target_legs if t["oca_group"] == keep_stop["oca_group"]),
-                None,
-            )
-        if keep_target is None:
-            keep_target = max(target_legs, key=lambda t: t["order_id"])
+    # ── 3. Bucket into brackets ──
+    # A "bracket" = one OCA group's worth of legs, OR a singleton non-OCA
+    # leg. Keys: `oca_group` or `None|<order_id>` for non-OCA singletons.
+    brackets: Dict[Any, Dict[str, Any]] = {}
+
+    def _add_to_bracket(leg: Dict[str, Any], side: str):
+        oca = leg.get("oca_group")
+        # Use oca string if present, else a synthetic per-leg key so each
+        # non-OCA leg is its own bracket.
+        key = ("oca", oca) if oca else ("singleton", side, leg["order_id"])
+        bucket = brackets.setdefault(key, {
+            "oca_group": oca,
+            "stops": [],
+            "targets": [],
+            "order_ids": set(),
+        })
+        bucket[f"{side}s"].append(leg)
+        bucket["order_ids"].add(leg["order_id"])
+
+    for leg in stop_legs:
+        _add_to_bracket(leg, "stop")
+    for leg in target_legs:
+        _add_to_bracket(leg, "target")
+
+    # Annotate each bracket with the bracket-coverage qty + match flags.
+    def _bracket_max_order_id(b: Dict[str, Any]) -> int:
+        all_legs = b["stops"] + b["targets"]
+        if not all_legs:
+            return 0
+        return max(int(leg["order_id"]) for leg in all_legs)
+
+    def _bracket_qty(b: Dict[str, Any]) -> int:
+        # Use stop qty as primary coverage measure (stops are what
+        # protect us). Falls back to target qty for target-only legs.
+        stop_qty = sum(int(s.get("qty") or 0) for s in b["stops"])
+        if stop_qty > 0:
+            return stop_qty
+        return sum(int(t.get("qty") or 0) for t in b["targets"])
+
+    bracket_list: List[Dict[str, Any]] = []
+    for b in brackets.values():
+        b["qty"] = _bracket_qty(b)
+        b["max_order_id"] = _bracket_max_order_id(b)
+        b["has_stop"] = bool(b["stops"])
+        b["has_target"] = bool(b["targets"])
+        b["has_canonical"] = (
+            (canonical_stop_id is not None and canonical_stop_id in b["order_ids"])
+            or bool(canonical_target_ids & b["order_ids"])
+        )
+        b["matches_keep_oca"] = bool(keep_oca) and b["oca_group"] == keep_oca
+        b["matches_keep_ids"] = bool(keep_ids & b["order_ids"])
+        bracket_list.append(b)
+
+    # ── 4. Sort by keep-preference (best first) ──
+    # Tuple sort: smaller tuple = higher priority. We use NEGATIVE for
+    # boolean preferences so True (= keep) sorts ahead of False.
+    def _sort_key(b: Dict[str, Any]):
+        return (
+            not b["matches_keep_ids"],     # explicit keep_order_ids wins all
+            not b["matches_keep_oca"],     # then keep_oca_group
+            not b["has_canonical"],        # then canonical slice
+            not (b["has_stop"] and b["has_target"]),  # full pair > singleton
+            not bool(b["oca_group"]),      # OCA-linked > non-OCA
+            -int(b["max_order_id"] or 0),  # newer first
+        )
+
+    bracket_list.sort(key=_sort_key)
+
+    # ── 5. Greedy fill ──
+    decision_source: str = "unknown"
+    kept_brackets: List[Dict[str, Any]] = []
+    kept_stop_qty = 0
+    used_legacy_fallback = False
+
+    if target_qty is None:
+        # Legacy fallback: keep the single best-preference bracket.
+        # Preserves v19.34.80 contract for callers/tests with no
+        # position context.
+        used_legacy_fallback = True
+        if bracket_list:
+            best = bracket_list[0]
+            kept_brackets.append(best)
+            kept_stop_qty = best["qty"]
+            if best["matches_keep_oca"]:
+                decision_source = "keep_oca_group"
+            elif best["matches_keep_ids"]:
+                decision_source = "keep_order_ids"
+            elif best["has_canonical"]:
+                decision_source = "canonical_slice"
+            else:
+                decision_source = "newest"
+    else:
+        # Two-pass greedy fill:
+        #   Pass 1: pick brackets whose qty fits in remaining headroom.
+        #   Pass 2: if still under-target, pick the smallest overshoot
+        #           bracket (better to over-protect than under-).
+        for b in bracket_list:
+            if kept_stop_qty >= target_qty:
+                break
+            if b["qty"] == 0:
+                continue
+            # Always honour operator overrides — they trump fit logic.
+            if (b["matches_keep_oca"] or b["matches_keep_ids"]
+                    or b["has_canonical"]):
+                kept_brackets.append(b)
+                kept_stop_qty += b["qty"]
+                if b["matches_keep_oca"] and decision_source == "unknown":
+                    decision_source = "keep_oca_group"
+                elif b["matches_keep_ids"] and decision_source == "unknown":
+                    decision_source = "keep_order_ids"
+                elif b["has_canonical"] and decision_source == "unknown":
+                    decision_source = "canonical_slice"
+                continue
+            # Pass 1: must fit in remaining headroom.
+            if kept_stop_qty + b["qty"] <= target_qty:
+                kept_brackets.append(b)
+                kept_stop_qty += b["qty"]
+        # Pass 2: still short? Add smallest leftover that gets us
+        # closest to (or past) target_qty.
+        if kept_stop_qty < target_qty:
+            remaining_qty = target_qty - kept_stop_qty
+            kept_ids_so_far = set()
+            for b in kept_brackets:
+                kept_ids_so_far |= b["order_ids"]
+            leftovers = [
+                b for b in bracket_list
+                if not (b["order_ids"] & kept_ids_so_far) and b["qty"] > 0
+            ]
+            # Prefer the smallest bracket that's >= remaining_qty.
+            # Otherwise pick the largest available.
+            fits = [b for b in leftovers if b["qty"] >= remaining_qty]
+            if fits:
+                pick = min(fits, key=lambda b: (b["qty"], -int(b["max_order_id"] or 0)))
+                kept_brackets.append(pick)
+                kept_stop_qty += pick["qty"]
+            elif leftovers:
+                pick = max(leftovers, key=lambda b: (b["qty"], int(b["max_order_id"] or 0)))
+                kept_brackets.append(pick)
+                kept_stop_qty += pick["qty"]
         if decision_source == "unknown":
-            decision_source = "newest"
+            decision_source = "sizing_aware_greedy_v91" if kept_brackets else "noop"
 
-    # ── 3. Cancel everything that isn't the keep bracket ──
+    # ── 6. Compute cancel set ──
     keep_ids_final = set()
-    if keep_stop:
-        keep_ids_final.add(keep_stop["order_id"])
-    if keep_target:
-        keep_ids_final.add(keep_target["order_id"])
+    for b in kept_brackets:
+        keep_ids_final |= b["order_ids"]
 
     to_cancel = [
         leg for leg in (stop_legs + target_legs)
         if leg["order_id"] not in keep_ids_final
     ]
+
+    # ── 7. Backward-compat singleton "kept" view ──
+    first_kept = kept_brackets[0] if kept_brackets else None
+    legacy_keep_stop = first_kept["stops"][0] if first_kept and first_kept["stops"] else None
+    legacy_keep_target = first_kept["targets"][0] if first_kept and first_kept["targets"] else None
 
     cancelled: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
@@ -6008,11 +6155,29 @@ async def cancel_excess_bracket_legs(payload: CancelExcessBracketLegsRequest):
         "success": True,
         "symbol": sym,
         "dry_run": payload.dry_run,
-        "kept": {
-            "stop": keep_stop,
-            "target": keep_target,
-            "decision_source": decision_source,
-        },
+        # v19.34.91 — sizing-aware metadata
+        "bot_position_qty": bot_position_qty,
+        "target_qty": target_qty,
+        "kept_total_qty": kept_stop_qty,
+        "used_legacy_fallback": used_legacy_fallback,
+        "kept_brackets": [
+            {
+                "oca_group": b["oca_group"],
+                "qty": b["qty"],
+                "stops": b["stops"],
+                "targets": b["targets"],
+                "has_canonical": b["has_canonical"],
+            }
+            for b in kept_brackets
+        ],
+        # Backward-compat singleton view (first kept bracket only)
+        "kept": (
+            {
+                "stop": legacy_keep_stop,
+                "target": legacy_keep_target,
+                "decision_source": decision_source,
+            } if kept_brackets else None
+        ),
         "cancelled": cancelled,
         "errors": errors,
         "ran_at": datetime.now(timezone.utc).isoformat(),

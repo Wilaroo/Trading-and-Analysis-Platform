@@ -18117,3 +18117,100 @@ The v89 periodic sweep closes the gap to ~30s — but the EOD close fires 25+ po
 - **30s** — max delay between a target fill and the orphan stop auto-cancelling (periodic sweep).
 - **~10s** — max delay between an EOD close and orphan sweep (v90 immediate sweep).
 - **0** — operator clicks required.
+
+---
+
+## v19.34.91 — Sizing-Aware cancel-excess-bracket-legs (2026-05-11)
+
+### Problem
+The old `cancel-excess-bracket-legs` endpoint kept *exactly one* bracket pair regardless of qty. For symbols with legitimately fragmented brackets (e.g., LIN scale-in: 68 shares = 21+47 across two OCAs), the default behavior would keep only the 21sh bracket and cancel the 47sh, leaving 47 shares unprotected. Today's session exposed this as a footgun.
+
+### Fix
+`POST /api/trading-bot/cancel-excess-bracket-legs` is now sizing-aware:
+
+1. **Determine `target_qty`**: operator override → `payload.target_qty`, else sum of `_open_trades[sym].remaining_shares` across bot's tracked trades for this symbol.
+2. **Bucket legs into brackets** by `oca_group` (OCA legs grouped, non-OCA = singleton).
+3. **Sort by keep-preference**: `keep_order_ids` > `keep_oca_group` > canonical slice > full-pair > OCA-linked > newer.
+4. **Two-pass greedy fill**:
+   - Pass 1: pick brackets that fit in remaining `target_qty` headroom.
+   - Pass 2: if still under target, pick the smallest overshoot bracket (better to over-protect than under-).
+5. **Pre-flight no-op**: if total coverage already equals `target_qty`, nothing is cancelled.
+
+### Request additions
+- `target_qty: Optional[int]` — operator override (e.g., just sold half manually).
+
+### Response additions (backward-compat)
+- `bot_position_qty`, `target_qty`, `kept_total_qty`, `kept_brackets[]`, `used_legacy_fallback`.
+- Legacy `kept: {stop, target, decision_source}` still emitted for first kept bracket (or `null` when nothing kept).
+- New `decision_source` value: `sizing_aware_greedy_v91`.
+
+### Behavior matrix
+| Scenario | Old behavior | v91 behavior |
+|---|---|---|
+| pos=68, legs=21+47 (LIN) | Keep 21, cancel 47 → **47 unprotected** | Keep both, cancel none |
+| pos=80, legs=40+40+80+80 (ADBE) | Keep 80, cancel rest | Keep 80, cancel rest |
+| pos=−412, legs=412+412 (MDT) | Keep newest 412 | Keep newest 412 (prefer OCA) |
+| pos=963, legs=500 (under) | Keep 500, leave gap | Keep 500, leave gap (signals attach-brackets-to-unprotected) |
+| pos=0, no `target_qty` | Keep newest one | **Legacy fallback** (keep newest) — operator must pass `target_qty=0` to cancel all |
+| pos=0, `target_qty=0` | n/a | Cancel everything |
+
+### Pytest coverage
+- `tests/test_v19_34_91_sizing_aware_cancel_excess.py` (8 tests): perfect-match no-op, oversized cancels-down, zero-position legacy fallback + explicit target_qty=0, target_qty override, OCA preference over singletons, backward-compat singleton emission, keep_oca_group override, under-protected leaves gap.
+- **All passing.** Plus updated v80 tests for v88 `is_connected()` gating (`test_apply_fires_cancel_for_each_excess`, `test_pusher_only_deploy_routes_through_cancel_queue` renamed from `_returns_helpful_error`, `test_cancel_returning_false_is_recorded`).
+
+### Total test suite status
+- 33/33 passing across v80 + v88 + v89 + v91.
+
+### Files changed
+- `/app/backend/routers/trading_bot.py` — `CancelExcessBracketLegsRequest` + endpoint logic.
+- `/app/backend/tests/test_v19_34_80_cancel_excess_bracket_legs.py` — 3 v88-compatibility fixes.
+- `/app/backend/tests/test_v19_34_91_sizing_aware_cancel_excess.py` — 8 new regression tests.
+
+---
+
+## v19.34.92 — OCA Enforcement at Placement (Root-Cause Fix) (2026-05-11)
+
+### Problem
+v89/v90 made the system self-healing for orphan stops AFTER they form. v92 makes it so they never form in the first place.
+
+Today's orphan-stop incident root-caused to a **2-layer bug** in the order pipeline:
+
+1. **Cloud-side** (`order_queue_service.queue_order`): `oca_group` was ONLY persisted on `is_bracket=True` rows. For FLAT orders (`attach_oca_stop_target` queues two separate STP+LMT rows sharing an OCA group), the field was silently dropped before the Mongo insert.
+2. **Pusher-side** (`ib_data_pusher._execute_queued_order`): Even when the cloud had `oca_group` in the payload, the pusher constructed `LimitOrder(action, qty, price)` / `StopOrder(action, qty, stop_price)` **without** ever setting `ib_order.ocaGroup`. The field was stripped a second time before reaching IB.
+
+Result: every "flat OCA pair" produced two **independent** orders at IB with no OCA linkage. When the target filled, the stop didn't auto-cancel — it became an orphan. Today's 31-orphan-stop mess.
+
+### Fix
+**Cloud — `/app/backend/services/order_queue_service.py`:**
+- Persist `oca_group`, `oca_type`, and `outside_rth` on ALL queued orders (both flat and bracket). Pre-v92 these were only saved for bracket rows.
+
+**Pusher — `/app/documents/scripts/ib_data_pusher.py` (in `_execute_queued_order`):**
+- After constructing the `ib_order` (MarketOrder/LimitOrder/StopOrder/StopLimitOrder), propagate from the queued order:
+  - `ib_order.ocaGroup = order["oca_group"]` (if present)
+  - `ib_order.ocaType = order["oca_type"] or 1` (default 1 = cancel-on-fill-with-block)
+  - `ib_order.tif = order["time_in_force"]` (if present)
+  - `ib_order.outsideRth = order["outside_rth"]` (if present)
+- Each propagation is in its own try/except so a malformed field doesn't abort the placement.
+
+### Behavioral impact
+- Every flat protective leg now arrives at IB with proper OCA grouping.
+- Target fill → IB auto-cancels paired stop at the broker.
+- Stop fill → IB auto-cancels paired target.
+- Orphans cannot structurally form anymore on the cloud→pusher→IB path.
+
+### Pytest coverage
+- `tests/test_v19_34_92_oca_propagation.py` (4 tests): oca_group survives round-trip, naked orders don't crash, paired legs share same OCA value, oca_type defaults correctly. **All passing.**
+- **37/37 total** across the full order-pipeline test suite (v80 + v88 + v89 + v91 + v92).
+
+### Files changed
+- `/app/backend/services/order_queue_service.py` — persist OCA fields on flat orders.
+- `/app/documents/scripts/ib_data_pusher.py` — `_execute_queued_order` propagates ocaGroup/ocaType/tif/outsideRth to IB.
+- `/app/backend/tests/test_v19_34_92_oca_propagation.py` — 4 regression tests.
+
+### Defense-in-depth summary (v88 → v92)
+Today's incident class is now structurally impossible:
+- **v88**: backend can actually cancel orders on pusher-only deploys.
+- **v89**: orphans are auto-swept within 30s if they ever form.
+- **v90**: EOD close fires immediate sweep (≤10s).
+- **v91**: cancel-excess is sizing-aware → won't under-protect.
+- **v92**: orphans can't form to begin with — OCA enforced at placement.

@@ -198,6 +198,18 @@ class OrderQueueService:
             "limit_price": order.get("limit_price"),
             "stop_price": order.get("stop_price"),
             "time_in_force": order.get("time_in_force", "DAY"),
+            # v19.34.92 — persist OCA grouping + outside-RTH on FLAT orders too.
+            # Pre-v92 these fields were only saved for `is_bracket` rows,
+            # so when `attach_oca_stop_target` (or any code path that
+            # queues two separate flat legs sharing an OCA group) ran,
+            # the oca_group was silently dropped before the pusher
+            # could read it. Result: stops + targets placed without
+            # ocaGroup at IB → target fill couldn't auto-cancel the
+            # paired stop → orphan stops accumulated. Root cause of the
+            # 2026-05-11 31-orphan-stop incident.
+            "oca_group": order.get("oca_group"),
+            "oca_type": order.get("oca_type"),
+            "outside_rth": order.get("outside_rth"),
             "trade_id": order.get("trade_id"),
             "status": OrderStatus.PENDING.value,
             "queued_at": datetime.now(timezone.utc).isoformat(),
@@ -218,6 +230,8 @@ class OrderQueueService:
             order_doc["parent"] = order.get("parent")
             order_doc["stop"] = order.get("stop")
             order_doc["target"] = order.get("target")
+            # `oca_group` is already populated above (v19.34.92) — keep
+            # the legacy assignment for clarity but it's now a no-op.
             if order.get("oca_group"):
                 order_doc["oca_group"] = order.get("oca_group")
 

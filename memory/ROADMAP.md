@@ -3271,3 +3271,13 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - 🟡 (P1) **v19.34.91 — Sizing-aware bracket pick** in `cancel-excess-bracket-legs`. Prefer the bracket whose qty matches `|bot_position|` most closely. Eliminates the LIN under-protection trap.
 - 🟡 (P1) **v19.34.92 — OCA-enforcement audit + fix**. Find code paths placing stops/targets without OCA grouping (likely scale-in handler). Force every bracket placement to use an OCA group so target-fill auto-kills the paired stop at IB-level — prevents orphans from forming to begin with.
 - 🟡 (P1) **v19.34.93 — Resize-bracket-to-ib-truth** one-shot endpoint (atomic cancel+re-attach).
+
+## Completed 2026-05-11 evening pt 2 (v19.34.91 + v19.34.92)
+- ✅ Sizing-aware `cancel-excess-bracket-legs` (greedy fill to match `|bot_position|`).
+- ✅ OCA enforcement at placement time (cloud queue + pusher both propagate `oca_group`).
+- ✅ 37/37 pytest passing across full order-pipeline suite.
+
+## Order-Pipeline Hardening — Remaining
+- 🟡 (P1) **v19.34.93 — `resize-bracket-to-ib-truth`** atomic cancel+re-attach endpoint. Single operator call to fix any size drift.
+- 🟢 (P2) **Cancel-queue TTL/reaper** for stale `pending` entries (>5min unclaimed → log + auto-mark `expired`).
+- 🟢 (P2) **Mass-cancel endpoint** `/sweep-all-orphans` (single-shot version of today's python loop) — though v89 auto-sweep makes this lower priority.

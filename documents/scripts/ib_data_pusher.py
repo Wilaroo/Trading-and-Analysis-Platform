@@ -2808,7 +2808,33 @@ class IBDataPusher:
                 logger.error(f"[OrderQueue] Unknown order type: {order_type}")
                 self._report_order_result(order_id, "rejected", error=f"Unknown order type: {order_type}")
                 return
-            
+
+            # v19.34.92 — Propagate OCA grouping + TIF + outside-RTH from
+            # the queued order to IB. Pre-v92 the cloud backend specified
+            # `oca_group` on every protective leg, but the pusher silently
+            # dropped the field, so target fills couldn't auto-cancel
+            # their paired stops at IB-level. The 31-orphan-stop mess
+            # cleaned up on 2026-05-11 root-caused to this gap.
+            queued_oca = order.get("oca_group")
+            if queued_oca:
+                try:
+                    ib_order.ocaGroup = str(queued_oca)
+                    queued_oca_type = order.get("oca_type")
+                    ib_order.ocaType = int(queued_oca_type) if queued_oca_type else 1
+                except Exception as e:
+                    logger.warning(f"[v19.34.92] OCA propagation failed for {order_id}: {e}")
+            queued_tif = order.get("time_in_force") or order.get("tif")
+            if queued_tif:
+                try:
+                    ib_order.tif = str(queued_tif).upper()
+                except Exception:
+                    pass
+            queued_outside_rth = order.get("outside_rth")
+            if queued_outside_rth is not None:
+                try:
+                    ib_order.outsideRth = bool(queued_outside_rth)
+                except Exception:
+                    pass
             # Place the order
             trade = self.ib.placeOrder(contract, ib_order)
             # Stamp idempotency cache IMMEDIATELY after placeOrder returns — even if

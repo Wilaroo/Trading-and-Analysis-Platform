@@ -105,7 +105,12 @@ async def test_apply_fires_cancel_for_each_excess(patched_app):
         _leg(103, 80, 237.05, "OCA-B", "STP"),
         _leg(104, 80, 270.75, "OCA-B", "LMT"),
     ]
-    mock_ib = SimpleNamespace(cancel_order=AsyncMock(return_value=True))
+    # v19.34.88 — endpoint now gates on is_connected(); must return True
+    # to take the direct-IB path instead of falling through to the queue.
+    mock_ib = SimpleNamespace(
+        cancel_order=AsyncMock(return_value=True),
+        is_connected=lambda: True,
+    )
     with patch("routers.ib._pushed_ib_data", {"orders": orders}), \
          patch("routers.ib._ib_service", mock_ib):
         resp = await handler(Req(symbol="ADBE", dry_run=False))
@@ -201,8 +206,15 @@ async def test_newest_fallback_when_canonical_missing(patched_app):
 
 
 @pytest.mark.asyncio
-async def test_pusher_only_deploy_returns_helpful_error(patched_app):
+async def test_pusher_only_deploy_routes_through_cancel_queue(patched_app):
+    """v19.34.88 — When `_ib_service` is None (pusher-only DGX deploy),
+    cancels are enqueued via `queue_cancellation` instead of returning
+    an error. Pre-v88 this returned ib_service_unavailable; v88 made it
+    self-healing."""
     bot, handler, Req = patched_app
+    # Clean the queue so we can assert exactly what got added.
+    import routers.ib as ib_mod
+    ib_mod._cancellation_queue.clear()
     orders = [
         _leg(101, 40, 237.05, "OCA-A", "STP"),
         _leg(103, 80, 237.05, "OCA-B", "STP"),
@@ -210,9 +222,12 @@ async def test_pusher_only_deploy_returns_helpful_error(patched_app):
     with patch("routers.ib._pushed_ib_data", {"orders": orders}), \
          patch("routers.ib._ib_service", None):
         resp = await handler(Req(symbol="ADBE", dry_run=False))
-    assert any(e.get("error") == "ib_service_unavailable" for e in resp["errors"])
-    # Doesn't crash.
     assert resp["success"] is True
+    # Excess legs queued; no errors.
+    assert resp["errors"] == []
+    queue_statuses = [c.get("queue_status") for c in resp["cancelled"]]
+    assert queue_statuses and all(s == "pending" for s in queue_statuses)
+    ib_mod._cancellation_queue.clear()
 
 
 @pytest.mark.asyncio
@@ -222,7 +237,12 @@ async def test_cancel_returning_false_is_recorded(patched_app):
         _leg(101, 40, 237.05, "OCA-A", "STP"),
         _leg(103, 80, 237.05, "OCA-B", "STP"),
     ]
-    mock_ib = SimpleNamespace(cancel_order=AsyncMock(return_value=False))
+    # v19.34.88 — is_connected must be True to use the direct-IB path
+    # (where the False return is surfaced as cancel_returned_false).
+    mock_ib = SimpleNamespace(
+        cancel_order=AsyncMock(return_value=False),
+        is_connected=lambda: True,
+    )
     with patch("routers.ib._pushed_ib_data", {"orders": orders}), \
          patch("routers.ib._ib_service", mock_ib):
         resp = await handler(Req(symbol="ADBE", dry_run=False))
