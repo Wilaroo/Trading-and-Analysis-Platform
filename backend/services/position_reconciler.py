@@ -1157,17 +1157,78 @@ class PositionReconciler:
                     bot._open_trades[trade.id] = trade
                     await asyncio.to_thread(bot._persist_trade, trade)
 
+                    # v19.34.68 — Submit the actual OCA stop+target legs to IB.
+                    # Pre-v19.34.68 we recorded the bracket only in bot_trades
+                    # (stop_price/target_prices fields) but never submitted the
+                    # protective orders to IB. The 2026-05-11 CEG/FIG incident
+                    # surfaced this: adopted positions appeared as "AMBER" in
+                    # the UI (bot view) but were NAKED at IB — $100K of
+                    # exposure on a $237K account with zero auto-stop.
+                    #
+                    # `attach_oca_stop_target` was added in v19.34.28 for
+                    # `_spawn_excess_slice` (share-drift Case 1) but was never
+                    # wired into this `reconcile_orphan_positions` path. This
+                    # block closes that gap: same OCA-bracket attach pattern,
+                    # same fail-safe rules (STP first, abort target if STP
+                    # fails, never leave one-sided exposure).
+                    bracket_attach_result: Dict[str, Any] = {"success": False, "skipped": "no_executor"}
+                    executor = getattr(bot, "_trade_executor", None)
+                    if executor and hasattr(executor, "attach_oca_stop_target"):
+                        try:
+                            oca_result = await executor.attach_oca_stop_target(trade)
+                            if oca_result and oca_result.get("success"):
+                                trade.stop_order_id = oca_result.get("stop_order_id")
+                                tgt_id = oca_result.get("target_order_id")
+                                if tgt_id:
+                                    # BotTrade tracks targets as a list
+                                    # (`target_order_ids`) since brackets
+                                    # can scale out across multiple PTs.
+                                    if not hasattr(trade, "target_order_ids") or trade.target_order_ids is None:
+                                        trade.target_order_ids = []
+                                    trade.target_order_ids.append(tgt_id)
+                                trade.oca_group = oca_result.get("oca_group")
+                                # Re-persist so the order IDs land in bot_trades.
+                                await asyncio.to_thread(bot._persist_trade, trade)
+                                bracket_attach_result = oca_result
+                                logger.info(
+                                    f"[RECONCILE BRACKET] {sym} OCA attached: "
+                                    f"stop={trade.stop_order_id} "
+                                    f"tgt={getattr(trade, 'target_order_ids', [])} "
+                                    f"oca={getattr(trade, 'oca_group', None)}"
+                                )
+                            else:
+                                err = (oca_result or {}).get("error", "unknown")
+                                bracket_attach_result = {"success": False, "error": err}
+                                logger.error(
+                                    f"[RECONCILE NAKED] {sym} {trade.id} adopted "
+                                    f"{abs_qty}sh but OCA attach failed: {err}. "
+                                    f"Position is UNPROTECTED at IB — operator must "
+                                    f"add stop manually or wait for retry."
+                                )
+                        except Exception as e:
+                            bracket_attach_result = {"success": False, "error": str(e)}
+                            logger.error(
+                                f"[RECONCILE NAKED] {sym} OCA attach raised: {e}. "
+                                f"Position UNPROTECTED."
+                            )
+                    else:
+                        logger.warning(
+                            f"[RECONCILE] {sym} adopted but no executor with "
+                            f"attach_oca_stop_target — position UNPROTECTED at IB"
+                        )
+
                     # Best-effort: emit stream event so the V5 Unified
                     # Stream shows "Reconciled SBUX @ $100.12 · 150sh".
                     try:
                         from services.sentcom_service import emit_stream_event
                         await emit_stream_event({
-                            "kind": "info",
+                            "kind": "info" if bracket_attach_result.get("success") else "warning",
                             "text": (
                                 f"Reconciled {sym} {direction.value.upper()} "
                                 f"{abs_qty}sh @ ${avg_cost:.2f} · "
                                 f"SL ${stop_price:.2f} · PT ${target_1:.2f} · "
                                 f"R:R {default_rr:.1f}"
+                                + ("" if bracket_attach_result.get("success") else " · ⚠ BRACKET ATTACH FAILED — NAKED AT IB")
                             ),
                             "symbol": sym,
                             "event": "trade_reconciled",
@@ -1180,6 +1241,8 @@ class PositionReconciler:
                                 "target_price": target_1,
                                 "risk_reward_ratio": default_rr,
                                 "source": "reconcile_orphan_positions",
+                                "bracket_attached": bool(bracket_attach_result.get("success")),
+                                "bracket_attach_error": bracket_attach_result.get("error"),
                             },
                         })
                     except Exception as emit_err:
@@ -1202,6 +1265,15 @@ class PositionReconciler:
                         "target_price": round(target_1, 4),
                         "risk_reward_ratio": default_rr,
                         "stop_pct": default_stop_pct,
+                        # v19.34.68 — surface bracket-attach outcome so
+                        # operators / UI can tell at a glance whether the
+                        # adopted position is actually protected at IB.
+                        "bracket_attached": bool(bracket_attach_result.get("success")),
+                        "bracket_attach_error": bracket_attach_result.get("error"),
+                        "stop_order_id": getattr(trade, "stop_order_id", None),
+                        "target_order_id": (getattr(trade, "target_order_ids", []) or [None])[0],
+                        "target_order_ids": list(getattr(trade, "target_order_ids", []) or []),
+                        "oca_group": getattr(trade, "oca_group", None),
                     })
 
                 except Exception as inner_err:
