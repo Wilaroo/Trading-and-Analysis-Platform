@@ -50,6 +50,16 @@ Full spec: **`/app/memory/V6_SAFETY_ACTIVITY_STREAM_SPEC.md`** (queued behind V6
 
 Three independent safety ledgers now exist: rejection cooldowns, operator-flatten suppression, drift-guard skips — plus kill-switch-gate refusals and safety_guardrail vetoes. Operator currently has to fuse three streams to answer "why didn't the bot trade NBIS just now?" Unified panel = one feed, chronological, with metadata + one-click clear actions. Backend aggregator (~50 LOC) + V6 right-sidebar component (~200 LOC). Three-phase rollout. Subsumes the simpler "cooldown HUD chip" item above — pick one or the other.
 
+### 🟢 P2 — Position Health Console panel (operator-suggested 2026-05-12)
+
+Full spec: **`/app/memory/V6_POSITION_HEALTH_CONSOLE_SPEC.md`** (queued alongside Safety Activity Stream).
+
+Single V6 right-sidebar panel that polls `bracket-stacking-audit` every 30s, shows one row per tracked symbol with traffic-light state (CLEAN, UNPROTECTED, STACKED, STACKED-HIGH, ZOMBIE PENDING, drift variants), and exposes inline buttons for each remediation. Reuses 100% of today's shipped endpoints (`audit`, `cancel-excess-bracket-legs`, `attach-brackets-to-unprotected`, `clear-stale-pending-trades`) — **zero new backend code**, ~250 LOC frontend.
+
+Operator value: answers "Am I safe right now?" in one glance. Today's full unwind sequence (audit → cancel-excess on 3 symbols → attach-brackets on BMNR) collapses to four clicks. Would catch this whole class of issues live instead of as a post-mortem.
+
+**Build order recommendation in the spec**: ship Position Health Console first (Phase 1+2 = 1.5 days), then Safety Activity Stream (3 days). Position Health is more frequently consulted and reuses more existing code.
+
 ### 🟡 P1 — V6 UI migration (Plan A)
 
 V6 spec is locked at `/app/memory/V6_NEXT_LOCKED_SPEC.md`. Unblocked now that the P0/P1 backend fires are extinguished. Three phases:
