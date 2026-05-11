@@ -6122,8 +6122,16 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
     if target_qty < 0:
         raise HTTPException(400, "target_qty must be >= 0")
 
-    # 3) Safety: this endpoint ONLY shrinks. If target >= tracked, refuse.
-    if target_qty >= tracked_total:
+    # 3) Safety: this endpoint ONLY shrinks (or normalizes degenerate
+    #    state). If target > tracked, refuse.
+    #
+    # v19.34.84 — When `target_qty == tracked_total` AND at least one
+    # trade has `remaining_shares < shares` (the degenerate post-boot
+    # state), we still need to normalize — set `remaining_shares =
+    # shares` so downstream code that drives off `remaining_shares`
+    # (positions/reconcile, audit, etc.) stops reporting bot_qty=0
+    # for a position that the bot is actually managing.
+    if target_qty > tracked_total:
         return {
             "success": True, "symbol": sym, "dry_run": payload.dry_run,
             "target_qty": target_qty, "target_qty_source": target_source,
@@ -6131,9 +6139,31 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
             "plan": [],
             "after": None,
             "message": (
-                f"target_qty={target_qty} is >= tracked_total={tracked_total} — "
-                f"this endpoint only SHRINKS bot tracking. Refusing to grow or noop. "
-                f"If the bot is UNDER-tracking, use the orphan reconciler instead."
+                f"target_qty={target_qty} is > tracked_total={tracked_total} — "
+                f"this endpoint only SHRINKS or NORMALIZES bot tracking. "
+                f"Refusing to grow. If the bot is UNDER-tracking, use the "
+                f"orphan reconciler instead."
+            ),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Degenerate-state detector: at least one trade has
+    # remaining_shares < shares. Normalize-only mode applies when
+    # tracked == target AND we're in degenerate state.
+    has_degenerate = any(
+        int(getattr(t, "remaining_shares", 0) or 0) < int(getattr(t, "shares", 0) or 0)
+        for t in sym_trades
+    )
+    if target_qty == tracked_total and not has_degenerate:
+        return {
+            "success": True, "symbol": sym, "dry_run": payload.dry_run,
+            "target_qty": target_qty, "target_qty_source": target_source,
+            "before": {"tracked_total": tracked_total, "trades": before_trades},
+            "plan": [],
+            "after": None,
+            "message": (
+                f"target_qty={target_qty} == tracked_total={tracked_total} "
+                f"and no degenerate state detected — nothing to do."
             ),
             "ran_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -6152,13 +6182,33 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
         cur_shares = int(getattr(t, "shares", 0) or 0)
         cur_remaining = int(getattr(t, "remaining_shares", 0) or 0)
         live = max(cur_shares, cur_remaining)
-        if excess <= 0 or live <= 0:
+        if excess <= 0 and live <= 0:
             plan.append({
                 "trade_id": tid,
                 "from_shares": cur_shares, "to_shares": cur_shares,
                 "from_remaining": cur_remaining, "to_remaining": cur_remaining,
                 "delta": 0,
             })
+            continue
+        if excess <= 0:
+            # v19.34.84 — normalize-only: no shrink needed, but if
+            # remaining_shares != shares, sync them so downstream
+            # state-reading endpoints stop reporting bot_qty=0.
+            if cur_remaining != cur_shares:
+                plan.append({
+                    "trade_id": tid,
+                    "from_shares": cur_shares, "to_shares": cur_shares,
+                    "from_remaining": cur_remaining, "to_remaining": cur_shares,
+                    "delta": 0,
+                    "normalized": True,
+                })
+            else:
+                plan.append({
+                    "trade_id": tid,
+                    "from_shares": cur_shares, "to_shares": cur_shares,
+                    "from_remaining": cur_remaining, "to_remaining": cur_remaining,
+                    "delta": 0,
+                })
             continue
         cut = min(excess, live)
         final_live = max(0, live - cut)
@@ -6184,7 +6234,10 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
     after_trades: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     for step, t in zip(plan, sym_trades):
-        if step["delta"] == 0:
+        # v19.34.84 — apply when there's a real change to push, which
+        # includes the normalize-only case (delta=0 but normalized=True).
+        is_normalize = bool(step.get("normalized"))
+        if step["delta"] == 0 and not is_normalize:
             after_trades.append({
                 "trade_id": step["trade_id"],
                 "shares": step["to_shares"],
@@ -6196,9 +6249,10 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
             t.remaining_shares = step["to_remaining"]
             # Audit note on the trade itself so it surfaces in any UI panel.
             existing_notes = (getattr(t, "notes", "") or "")
+            tag = "force-reconcile-down" if step["delta"] != 0 else "normalize-remaining"
             t.notes = (
                 existing_notes + (
-                    f" [v19.34.82 force-reconcile-down {datetime.now(timezone.utc).isoformat()}: "
+                    f" [v19.34.82 {tag} {datetime.now(timezone.utc).isoformat()}: "
                     f"shares {step['from_shares']}→{step['to_shares']}, "
                     f"remaining {step['from_remaining']}→{step['to_remaining']} "
                     f"(target={target_qty}, src={target_source}, "
@@ -6220,9 +6274,10 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
                 "remaining_shares": step["to_remaining"],
             })
             logger.warning(
-                "[v19.34.82 FORCE-RECONCILE-DOWN] %s tid=%s shares %s→%s "
+                "[v19.34.82 %s] %s tid=%s shares %s→%s "
                 "remaining %s→%s (target=%s src=%s reason=%s)",
-                sym, step["trade_id"], step["from_shares"], step["to_shares"],
+                tag.upper(), sym, step["trade_id"],
+                step["from_shares"], step["to_shares"],
                 step["from_remaining"], step["to_remaining"],
                 target_qty, target_source, payload.reason or "unspecified",
             )
@@ -6251,8 +6306,10 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
                             "to_shares": s["to_shares"],
                             "from_remaining": s["from_remaining"],
                             "to_remaining": s["to_remaining"],
+                            "normalized_only": bool(s.get("normalized")),
                         }
-                        for s in plan if s["delta"] != 0
+                        # v19.34.84 — include normalize-only touches in the audit too.
+                        for s in plan if s["delta"] != 0 or s.get("normalized")
                     ],
                 },
             )

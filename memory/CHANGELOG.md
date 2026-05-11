@@ -2,6 +2,62 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.84) — force-reconcile-down normalize-degenerate-state mode
+
+### What the v83 rollout exposed
+
+After PEP shrunk cleanly (2266→971), `positions/reconcile` STILL reported `bot_qty: 0` for the other 7 symbols (ADBE, BMNR, EBAY, EFA, GM, MDT, NCLH). Root cause: those trades are in degenerate state (`shares=X, remaining_shares=0`), and the bot has multiple downstream readers (`positions/reconcile`, `bracket-stacking-audit`) that drive off `remaining_shares` directly, returning 0 when remaining is 0 — even though `shares` correctly says X. The bot is effectively schizophrenic about its own positions.
+
+v83 was scoped to "shrink only" so it refused (`target_qty >= tracked_total`) when bot's `shares` already matched IB qty — leaving the degenerate state in place.
+
+### v19.34.84 fix
+
+`POST /api/trading-bot/force-reconcile-down` now handles three cases:
+1. `target_qty > tracked_total`: refuse (still). Operator should use the orphan reconciler.
+2. `target_qty < tracked_total`: shrink FIFO + normalize both fields to final value (v83 behavior).
+3. `target_qty == tracked_total`:
+   - **No degenerate state** → clean no-op with `"nothing to do"` message.
+   - **Degenerate state** (`remaining_shares < shares` on any trade) → **normalize only**: set `remaining_shares = shares` per trade. No `delta`, but each touched trade is persisted via `_save_trade`, audit row emitted with `normalized_only: true`, log line tagged `[v19.34.82 NORMALIZE-REMAINING]`.
+
+### Tests
+
+- `test_v19_34_84_target_equal_tracked_no_degenerate_is_noop` — clean no-op path.
+- `test_v19_34_84_target_equal_tracked_degenerate_normalizes` — full normalize: shares=1320, remaining=0 → both become 1320; save called; audit row has `normalized_only=true`; notes tagged `normalize-remaining`.
+- 22/22 across v76 + v82 suites green.
+
+### Additional findings (operator action required, not a code fix)
+
+- **Pusher's open-orders stream is empty on DGX**: `bracket-stacking-audit` shows `clean_symbols` for every position because it can't see the live IB orders. Misleading "clean" really means "blind". Need to fix the Windows pusher's order-replication or get direct IB connected.
+- **Direct IB Gateway not connected from DGX**: `cancel-all-pending-orders` returns `ib_gateway_unavailable: Not connected to IB`. Operator must cancel oversized OCAs in TWS manually until this is restored.
+- **Untracked position**: VRT short 414sh sitting at IB with no bot trade row. Run orphan reconciler after the order pipeline is restored.
+
+### Live runbook (post-v84)
+
+```bash
+export DGX="http://localhost:8001"
+
+# A) Normalize the 7 symbols still in degenerate state. Each call is
+#    a tiny ~10ms in-memory + DB update. Order doesn't matter.
+for SYM_QTY in ADBE,120 BMNR,1320 EBAY,540 EFA,963 GM,1923 MDT,412 NCLH,6030; do
+  SYM=${SYM_QTY%,*}; QTY=${SYM_QTY#*,}
+  curl -s -X POST "$DGX/api/trading-bot/force-reconcile-down" \
+    -H "Content-Type: application/json" \
+    -d "{\"symbol\":\"$SYM\",\"target_qty\":$QTY,\"dry_run\":false,\"reason\":\"normalize-degenerate-post-v82\"}" \
+    | python3 -c "import sys,json; r=json.load(sys.stdin); p=r.get('plan',[]); print(f\"{r['symbol']}: tracked_before={r['before']['tracked_total']}, after={r.get('after',{}).get('tracked_total') if r.get('after') else 'n/a'}, plan_size={len(p)}\")"
+done
+
+# B) Re-check positions/reconcile — bot_qty should now match for these 7 symbols.
+curl -s "$DGX/api/trading-bot/positions/reconcile" | python3 -m json.tool | grep -E "symbol|qty" | head -60
+
+# C) For PEP (where IB-side OCAs are still oversized at 2266sh), cancel
+#    in TWS manually until the order pipeline is restored, then:
+curl -s -X POST "$DGX/api/trading-bot/attach-brackets-to-unprotected" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true,"symbols":["PEP"]}' | python3 -m json.tool
+```
+
+
+
 ## 2026-05-12 (v19.34.83) — URGENT: Patch attach-brackets stop-stacking + force-reconcile degenerate-state
 
 ### What went wrong on the v19.34.82 rollout (2026-05-12, 17:34 UTC)

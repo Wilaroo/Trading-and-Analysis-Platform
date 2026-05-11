@@ -220,6 +220,60 @@ async def test_target_above_tracked_is_refused(patched_app):
 
 
 @pytest.mark.asyncio
+async def test_v19_34_84_target_equal_tracked_no_degenerate_is_noop(patched_app):
+    """When target == tracked AND no degenerate state, return a clean
+    no-op (don't pretend to normalize)."""
+    bot, executor, handler, Req, save_mock, drift = patched_app
+    bot._open_trades = OrderedDict([
+        ("t-bmnr", _mk_trade("t-bmnr", "BMNR", 1320, remaining_shares=1320, direction="long")),
+    ])
+    resp = await handler(Req(symbol="BMNR", target_qty=1320, dry_run=False))
+    assert resp["success"] is True
+    assert resp["plan"] == []
+    assert "nothing to do" in resp["message"]
+    save_mock.assert_not_called()
+    drift.insert_one.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_v19_34_84_target_equal_tracked_degenerate_normalizes(patched_app):
+    """When target == tracked BUT trades are in degenerate state
+    (shares=1320, remaining=0), normalize remaining_shares = shares
+    so downstream endpoints stop reporting bot_qty=0. This is the
+    2026-05-12 live state for BMNR/EFA/EBAY/GM/MDT/NCLH — bot's
+    `shares` equals IB qty, but `remaining_shares=0` makes
+    positions/reconcile and bracket-stacking-audit blind to them."""
+    bot, executor, handler, Req, save_mock, drift = patched_app
+    bot._open_trades = OrderedDict([
+        ("t-bmnr", _mk_trade("t-bmnr", "BMNR", 1320, remaining_shares=0, direction="long")),
+    ])
+    resp = await handler(Req(
+        symbol="BMNR", target_qty=1320, dry_run=False,
+        reason="normalize-degenerate-post-v82",
+    ))
+    assert resp["success"] is True
+    assert resp["dry_run"] is False
+    assert len(resp["plan"]) == 1
+    step = resp["plan"][0]
+    assert step["delta"] == 0
+    assert step.get("normalized") is True
+    assert step["to_shares"] == 1320
+    assert step["to_remaining"] == 1320
+    # Mutation applied:
+    assert bot._open_trades["t-bmnr"].shares == 1320
+    assert bot._open_trades["t-bmnr"].remaining_shares == 1320
+    # Save fired (the degenerate state needed persisting).
+    save_mock.assert_called_once()
+    # Audit row emitted with normalized_only=True.
+    drift.insert_one.assert_called_once()
+    audit = drift.insert_one.call_args[0][0]
+    assert audit["delta_shares"] == 0
+    assert audit["trades_touched"][0]["normalized_only"] is True
+    # Notes tagged differently from a real shrink.
+    assert "normalize-remaining" in bot._open_trades["t-bmnr"].notes
+
+
+@pytest.mark.asyncio
 async def test_no_open_trades_for_symbol(patched_app):
     bot, executor, handler, Req, save_mock, drift = patched_app
     bot._open_trades = OrderedDict([
