@@ -12,6 +12,12 @@ All P0 + the 3 P1 items pinned earlier are now SHIPPED — see v19.34.71/.72/.73
 
 Surface active rejection cooldowns as small chips in the V6 status strip — e.g., `🧊 NBIS cooldown 3:42`. Source: `GET /api/trading-bot/rejection-cooldowns`. Would have caught today's NBIS thrashing within 30s instead of 70+ minutes. Pair with `🛑 NBIS operator-flatten` chips sourced from `GET /api/safety/operator-flatten-suppression` (v19.34.72) so the operator sees BOTH gate types at a glance. Cheap to add once V6 Plan A panel extraction begins.
 
+### 🟢 P2 — Unified Safety Activity Stream panel (operator-suggested 2026-05-11)
+
+Full spec: **`/app/memory/V6_SAFETY_ACTIVITY_STREAM_SPEC.md`** (queued behind V6 Plan A panel extraction).
+
+Three independent safety ledgers now exist: rejection cooldowns, operator-flatten suppression, drift-guard skips — plus kill-switch-gate refusals and safety_guardrail vetoes. Operator currently has to fuse three streams to answer "why didn't the bot trade NBIS just now?" Unified panel = one feed, chronological, with metadata + one-click clear actions. Backend aggregator (~50 LOC) + V6 right-sidebar component (~200 LOC). Three-phase rollout. Subsumes the simpler "cooldown HUD chip" item above — pick one or the other.
+
 ### 🟡 P1 — V6 UI migration (Plan A)
 
 V6 spec is locked at `/app/memory/V6_NEXT_LOCKED_SPEC.md`. Unblocked now that the P0/P1 backend fires are extinguished. Three phases:
