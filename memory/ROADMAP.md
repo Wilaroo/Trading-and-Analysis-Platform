@@ -4,6 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-05-12 — v19.34.78 / .79 SHIPPED — Zombie pending cleanup + bracket-stacking ROOT CAUSE fix
+
+**v19.34.78** — Stale-PENDING zombies (NBIS/MU/COIN-style "pending trade exists" 7+ min apart) traced to v19.34.6 pre-submit save → boot reload cycle. Boot-time filter in `bot_persistence.py` prunes PENDINGs older than `STALE_PENDING_TTL_S` (default 30 min); operator escape-hatch `POST /api/trading-bot/clear-stale-pending-trades` for live cleanup without restart. 7 pytest cases.
+
+**v19.34.79** — Bracket-stacking ROOT CAUSE identified and fixed in `_grow_existing_excess_slice`: was only cancelling canonical slice's bracket, leaving sibling BotTrades' brackets alive at IB (ADBE 4x stacking, GM 12x stacking on 2026-05-12). Now sweeps siblings for the same (symbol, direction) and cancels their brackets too. 6 pytest cases incl. opposing-direction safety, different-symbol isolation, exception-resilience.
+
+Full 155-test safety suite green. **User: Save to Github → `git pull` on DGX → restart backend.** After restart: run audit, then clear-stale-pending, then attach-brackets-to-unprotected.
+
+
+
 ## ✅ 2026-05-12 — v19.34.76 / .77 SHIPPED — Retroactive bracket attach + stacking audit
 
 Forensic audit of TWS this morning revealed BMNR (658sh, $15k) carrying naked at IB (no stop) AND systemic bracket-stacking on every scale-in (ADBE 80sh long had 320sh of pending stops; EFA 963sh long had 2,888sh; GM 109sh long had 1,282sh).

@@ -5580,3 +5580,129 @@ async def bracket_stacking_audit():
         ),
     }
 
+
+
+
+# ── v19.34.78 — Clear stale pending trades (operator escape hatch) ──────
+#
+# Companion to the boot-time `bot_persistence.py` filter. Allows operator
+# to drop pending zombies WITHOUT a restart when they observe the
+# `rejection: pending trade exists` pattern on names they want the bot
+# to re-evaluate. Default age threshold matches the boot filter
+# (`STALE_PENDING_TTL_S`, 30 min) but is overridable per call.
+
+class ClearStalePendingRequest(BaseModel):
+    older_than_s: float = 1800.0   # 30 minutes
+    symbols: Optional[List[str]] = None   # if set, only these symbols
+    dry_run: bool = True
+
+
+@router.post("/clear-stale-pending-trades")
+async def clear_stale_pending_trades(payload: ClearStalePendingRequest):
+    """v19.34.78 — Drop pending zombies blocking re-evaluation.
+
+    Pre-fix (today): v19.34.6 pre-submit save writes status=PENDING to
+    Mongo BEFORE the broker call. Veto/refusal code paths that skip the
+    follow-up save leave the row PENDING in Mongo. On restart, bot_
+    persistence.py loads those rows into `_pending_trades` →
+    `pending_trade_exists` rejects every fresh eval on the same symbol.
+
+    Boot-time filter (v19.34.78 in bot_persistence.py) auto-prunes
+    PENDINGs older than `STALE_PENDING_TTL_S` (default 30 min). THIS
+    endpoint is the operator escape hatch for clearing them WITHOUT
+    a restart.
+
+    Body:
+      {
+        "older_than_s": 600,            // drop if pre_submit_at < now-600s
+        "symbols": ["NBIS", "MU"],      // optional filter
+        "dry_run": true
+      }
+
+    Response:
+      {
+        "success": true, "dry_run": <bool>, "removed_count": <int>,
+        "removed": [{trade_id, symbol, age_s, pre_submit_at}, ...],
+        "still_pending": [{trade_id, symbol, age_s}, ...]
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    pending = getattr(_trading_bot, "_pending_trades", {}) or {}
+    symbol_filter = {s.upper() for s in (payload.symbols or [])}
+    now = datetime.now(timezone.utc)
+
+    removed: List[Dict[str, Any]] = []
+    still_pending: List[Dict[str, Any]] = []
+
+    for tid, trade in list(pending.items()):
+        sym = (getattr(trade, "symbol", "") or "").upper()
+        if symbol_filter and sym not in symbol_filter:
+            continue
+        ts_iso = (
+            getattr(trade, "pre_submit_at", None)
+            or getattr(trade, "created_at", None)
+        )
+        age_s: Optional[float] = None
+        if ts_iso:
+            try:
+                norm = ts_iso.replace("Z", "+00:00") if ts_iso.endswith("Z") else ts_iso
+                ts_dt = datetime.fromisoformat(norm)
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+                age_s = (now - ts_dt).total_seconds()
+            except Exception:
+                age_s = None
+
+        # Stale if no timestamp OR older than threshold.
+        is_stale = (age_s is None) or (age_s > payload.older_than_s)
+        if not is_stale:
+            still_pending.append({
+                "trade_id": tid, "symbol": sym, "age_s": age_s,
+            })
+            continue
+
+        record = {
+            "trade_id": tid, "symbol": sym,
+            "age_s": age_s, "pre_submit_at": ts_iso,
+        }
+        removed.append(record)
+
+        if not payload.dry_run:
+            # Mutate in-memory + Mongo to REJECTED.
+            try:
+                from services.trading_bot_service import TradeStatus
+                trade.status = TradeStatus.REJECTED
+                trade.close_reason = "stale_pending_cleared_v19_34_78"
+                trade.notes = (
+                    (getattr(trade, "notes", "") or "")
+                    + " [STALE-PENDING-CLEARED-v19.34.78]"
+                )
+                trade.closed_at = now.isoformat()
+                save_fn = getattr(_trading_bot, "_save_trade", None)
+                if save_fn:
+                    r = save_fn(trade)
+                    import asyncio as _aio
+                    if _aio.iscoroutine(r):
+                        await r
+            except Exception as e:
+                logger.warning(
+                    "[v19.34.78] failed to persist REJECTED status for "
+                    "%s: %s", tid, e,
+                )
+            pending.pop(tid, None)
+            logger.warning(
+                "[v19.34.78 STALE-PENDING-CLEAR] %s (id=%s, age=%ss) "
+                "removed from _pending_trades.",
+                sym, tid, int(age_s or -1),
+            )
+
+    return {
+        "success": True,
+        "dry_run": payload.dry_run,
+        "removed_count": len(removed),
+        "removed": removed,
+        "still_pending": still_pending,
+        "ran_at": now.isoformat(),
+    }

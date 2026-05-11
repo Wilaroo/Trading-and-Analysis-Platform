@@ -10,6 +10,7 @@ Handles all state persistence and restoration:
 """
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional, TYPE_CHECKING
@@ -219,6 +220,103 @@ class BotPersistence:
             open_trades = await asyncio.to_thread(
                 lambda: list(bot._db.bot_trades.find({"status": {"$in": ["open", "pending", "filled"]}}))
             )
+
+            # ── v19.34.78 — Stale PENDING filter ──────────────────────
+            # Operator observed 2026-05-12: NBIS/MU/COIN/CRCL/COHR/etc.
+            # repeatedly hitting `rejection: pending trade exists` 7+
+            # minutes apart. Forensic trace: v19.34.6's pre-submit save
+            # writes status=PENDING BEFORE the broker call. If the trade
+            # is later vetoed/refused on a code path that doesn't update
+            # the Mongo row (or the bot crashes between pre-submit and
+            # broker confirm), the row stays PENDING in Mongo. Next boot
+            # this restorer loads those zombies into `_pending_trades`,
+            # where the scan loop's `pending_trade_exists` check at
+            # `trading_bot_service.py:3192` keeps rejecting fresh evals
+            # on the SAME symbol forever.
+            #
+            # Fix: only restore PENDING rows whose `pre_submit_at` /
+            # `created_at` is within the last STALE_PENDING_TTL_S seconds
+            # (default 1800 = 30 min — plenty for a legitimate
+            # confirmation-mode pending trade, prunes session-scale
+            # zombies). Stale PENDINGs are auto-rewritten in Mongo as
+            # status=REJECTED with `close_reason="stale_pending_v19_34_78"`
+            # so analytics/audit still see them.
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            try:
+                _ttl_s = float(os.environ.get("STALE_PENDING_TTL_S", 1800.0))
+            except Exception:
+                _ttl_s = 1800.0
+            _now = _dt.now(_tz.utc)
+            _cutoff = _now - _td(seconds=_ttl_s)
+            stale_pending_pruned = 0
+
+            for trade_doc in open_trades:
+                try:
+                    raw_status = trade_doc.get("status")
+                    if raw_status not in ("pending", "PENDING"):
+                        continue
+                    ts_iso = (
+                        trade_doc.get("pre_submit_at")
+                        or trade_doc.get("created_at")
+                        or trade_doc.get("submitted_at")
+                    )
+                    if not ts_iso:
+                        # No timestamp at all → can't judge age. Treat
+                        # as stale (safer to drop a zombie than to keep
+                        # one blocking re-evaluation forever).
+                        is_stale = True
+                    else:
+                        try:
+                            norm = ts_iso.replace("Z", "+00:00") if ts_iso.endswith("Z") else ts_iso
+                            ts_dt = _dt.fromisoformat(norm)
+                            if ts_dt.tzinfo is None:
+                                ts_dt = ts_dt.replace(tzinfo=_tz.utc)
+                            is_stale = ts_dt < _cutoff
+                        except Exception:
+                            is_stale = True
+                    if is_stale:
+                        try:
+                            await asyncio.to_thread(
+                                lambda doc=trade_doc: bot._db.bot_trades.update_one(
+                                    {"id": doc.get("id")},
+                                    {"$set": {
+                                        "status": "rejected",
+                                        "close_reason": "stale_pending_v19_34_78",
+                                        "notes": (
+                                            (doc.get("notes") or "")
+                                            + " [STALE-PENDING-PRUNED-v19.34.78]"
+                                        ),
+                                        "closed_at": _now.isoformat(),
+                                    }},
+                                )
+                            )
+                            stale_pending_pruned += 1
+                            logger.info(
+                                "[v19.34.78 STALE-PENDING-PRUNE] %s "
+                                "(id=%s, pre_submit_at=%s) — older than "
+                                "%ds, rewritten as REJECTED.",
+                                trade_doc.get("symbol"),
+                                trade_doc.get("id"),
+                                ts_iso, int(_ttl_s),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "[v19.34.78] failed to mark stale "
+                                "pending %s as REJECTED: %s",
+                                trade_doc.get("id"), e,
+                            )
+                        # Skip restoring this trade — it's gone.
+                        trade_doc["_v19_34_78_pruned"] = True
+                except Exception:
+                    pass
+
+            open_trades = [t for t in open_trades if not t.get("_v19_34_78_pruned")]
+            if stale_pending_pruned:
+                logger.warning(
+                    "[v19.34.78] Pruned %d stale PENDING zombie(s) on "
+                    "boot. They would have blocked re-evaluation on "
+                    "their symbols.", stale_pending_pruned,
+                )
 
             restored_count = 0
             for trade_doc in open_trades:

@@ -2399,6 +2399,78 @@ class PositionReconciler:
                 await executor._cancel_ib_bracket_orders(trade)
             except Exception as e:
                 logger.warning(f"[v19.34.42 grow] {sym} cancel old bracket failed: {e}")
+
+        # ── v19.34.79 — Sibling-bracket cancel sweep ──────────────────
+        # Pre-fix the grow path only cancelled the canonical slice's
+        # bracket. Any OTHER BotTrade objects for the same symbol (which
+        # arise when the bot scales into a position across multiple
+        # evals, or when the reconciler spawns additional excess slices)
+        # kept their OWN brackets alive at IB. TWS forensic 2026-05-12:
+        # ADBE 80sh long carried 320sh of pending stops, EFA 963sh long
+        # carried 2,888sh, GM 109sh long carried 1,282sh — exact
+        # fingerprint of overlapping brackets from sibling BotTrades.
+        # On a single stop trigger, the surviving siblings would have
+        # flipped the position massively short on the next tick.
+        #
+        # Now: after the canonical slice's bracket is replaced, sweep
+        # sibling BotTrades for the same (symbol, direction) and cancel
+        # their brackets too. The canonical slice's NEW bracket already
+        # covers the cumulative position size, so the siblings'
+        # brackets are redundant by construction.
+        try:
+            for sibling in list(getattr(bot, "_open_trades", {}).values()):
+                if sibling is trade:
+                    continue
+                if (getattr(sibling, "symbol", "") or "").upper() != sym.upper():
+                    continue
+                sib_dir = (
+                    sibling.direction.value if hasattr(sibling.direction, "value")
+                    else str(getattr(sibling, "direction", ""))
+                ).lower()
+                trade_dir = (
+                    trade.direction.value if hasattr(trade.direction, "value")
+                    else str(getattr(trade, "direction", ""))
+                ).lower()
+                if sib_dir != trade_dir:
+                    continue  # opposing-side sibling — different exposure, leave it
+                if executor and hasattr(executor, "_cancel_ib_bracket_orders"):
+                    try:
+                        await executor._cancel_ib_bracket_orders(sibling)
+                        logger.warning(
+                            "[v19.34.79 SIBLING-CANCEL] %s sibling trade "
+                            "%s brackets cancelled (canonical slice %s "
+                            "now covers cumulative %d sh).",
+                            sym, sibling.id, trade.id, new_shares,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "[v19.34.79] %s sibling %s cancel failed: %s",
+                            sym, sibling.id, e,
+                        )
+                # Clear the sibling's stop/target ids so they don't
+                # accidentally get re-used or appear "bracketed" in the
+                # v19.34.77 audit while the cancels propagate.
+                sibling.stop_order_id = None
+                try:
+                    sibling.target_order_id = None
+                except Exception:
+                    pass
+                try:
+                    sibling.target_order_ids = []
+                except Exception:
+                    pass
+                # Mark the sibling as merged so the manage-loop doesn't
+                # try to manage stops/targets it no longer owns.
+                sibling.notes = (getattr(sibling, "notes", "") or "") + (
+                    f" [v19.34.79: brackets merged into canonical slice "
+                    f"{trade.id} (cumulative {new_shares}sh).]"
+                )
+        except Exception as e:
+            logger.warning(
+                "[v19.34.79] %s sibling-bracket sweep raised: %s",
+                sym, e,
+            )
+
         trade.stop_order_id = None
         trade.target_order_id = None
         try:

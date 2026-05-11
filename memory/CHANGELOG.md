@@ -2,6 +2,49 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.78 / .79) — Zombie pending cleanup + sibling-bracket cancel sweep
+
+### v19.34.78 — Stale-PENDING zombie cleanup (P1 — operator-observed today)
+
+Deep feed showed NBIS, MU, COIN, CRCL, COHR, IONQ, NOK, CCL, TEAM, CPNG, QCOM, LITE, NVD repeatedly hitting `rejection: pending trade exists` 7+ minutes apart. Forensic trace:
+
+`trade_execution.py` L676 (v19.34.6) writes `status=PENDING` to Mongo BEFORE the broker call. Refusal / veto / crash paths between pre-submit and broker confirm that DON'T issue a follow-up status update leave the row PENDING in Mongo. Next boot `bot_persistence.py` L298 loads those rows into `_pending_trades`, where the scan loop's `pending_trade_exists` gate (`trading_bot_service.py:3192`) rejects every fresh evaluation on the same symbol forever.
+
+Two-part fix:
+1. **Boot filter** in `services/bot_persistence.py` — only restore PENDINGs younger than `STALE_PENDING_TTL_S` (default 1800 = 30 min, env-tunable). Stale rows auto-rewritten in Mongo as `status=REJECTED` with `close_reason="stale_pending_v19_34_78"`.
+2. **Operator escape hatch** — `POST /api/trading-bot/clear-stale-pending-trades` with body `{older_than_s, symbols?, dry_run}`. Drops pending zombies WITHOUT a restart, persists REJECTED status. 7 pytest cases.
+
+### v19.34.79 — Sibling-bracket cancel sweep (P0 — bracket-stacking ROOT CAUSE)
+
+TWS forensic 2026-05-12: ADBE 80sh long carried 320sh of pending stops (4x), EFA 963sh long carried 2,888sh (3x), GM 109sh long carried 1,282sh (12x). Single stop trigger would have flipped position massively short on next tick. v19.34.77 audit endpoint surfaces the symptom; this patches the cause.
+
+**Root cause traced**: v19.34.42's `_grow_existing_excess_slice` correctly cancels the CANONICAL slice's old bracket before placing the new one sized to cumulative position. But when the bot tracks multiple BotTrade objects for the same symbol (scale-in via successive evals, OR reconciler spawning excess slices), each sibling has its OWN bracket at IB. The grow path only cleaned up the canonical slice — every sibling kept its bracket alive.
+
+**Fix**: after canonical bracket is replaced, sweep sibling BotTrades for the same `(symbol, direction)` and cancel their brackets too. Canonical's new bracket already covers cumulative position — siblings' are redundant by construction. Opposing-direction siblings (e.g., long+short same symbol) left intact. Stop/target ids cleared on swept siblings so they don't appear "bracketed" in v19.34.77 audit. 6 pytest cases including exception-resilience.
+
+### Operator runbook
+
+After restart:
+```
+# 1. Inspect bracket-stacking damage from previous session
+curl $DGX/api/trading-bot/bracket-stacking-audit | python3 -m json.tool
+
+# 2. Drop pending zombies (dry-run first)
+curl -X POST $DGX/api/trading-bot/clear-stale-pending-trades \
+  -H "Content-Type: application/json" -d '{"older_than_s": 600, "dry_run": true}'
+# Then dry_run: false to apply
+
+# 3. Confirm BMNR + others bracketed
+curl -X POST $DGX/api/trading-bot/attach-brackets-to-unprotected \
+  -H "Content-Type: application/json" -d '{"dry_run": true}'
+```
+
+### Roll-up
+
+13 new pytest cases. Full 155-test safety/cooldown/drift/bracket suite green. Lint clean. **User: Save to Github → `git pull` on DGX → restart backend.**
+
+
+
 ## 2026-05-12 (v19.34.76 / .77) — Retroactive bracket attach + bracket-stacking audit
 
 ### Why
