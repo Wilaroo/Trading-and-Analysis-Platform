@@ -2109,22 +2109,48 @@ class TradingBotService:
             asyncio.create_task(_startup_orphan_gtc_audit())
 
             # ── v19.34.66 — Periodic background reconciler ──
-            # Re-runs every 120s while the bot is alive so new orphans
-            # accumulating during long sessions surface within ~2 min.
-            # Cheap: 1 IB query + 1 position snapshot read + 1 Mongo
-            # find capped at 2000 docs.
+            # v19.34.89 (2026-05-11) — now actually AUTO-CANCELS the
+            # safe verdicts (NAKED_NO_POSITION, ORPHAN_NO_TRADE) instead
+            # of merely logging. Gate via `AUTO_SWEEP_ORPHAN_GTC` env
+            # var (default: enabled). Cancels are routed through the
+            # v19.34.88 cancel queue → Windows pusher → IB.
+            #
+            # Interval dropped from 120s → 30s so the gap between
+            # "target fills, stop becomes naked" and "stop cancelled at
+            # IB" shrinks to ≤30s. Cheap: 1 IB orders read + 1 position
+            # snapshot read + 1 Mongo find.
             async def _periodic_orphan_gtc_audit():
                 # Initial offset so this doesn't dogpile with the boot
                 # tripwire above.
-                await asyncio.sleep(150)
+                await asyncio.sleep(60)
+                # Read once at startup; treat live changes to env as
+                # operator-driven restart events.
+                import os as _os
+                auto_sweep = _os.environ.get(
+                    "AUTO_SWEEP_ORPHAN_GTC", "true",
+                ).strip().lower() in ("1", "true", "yes", "on")
+                if auto_sweep:
+                    logger.warning(
+                        "[v19.34.89 AUTO-SWEEP] periodic orphan-GTC "
+                        "auto-cancel ENABLED (interval=30s)"
+                    )
+                else:
+                    logger.info(
+                        "[v19.34.89 AUTO-SWEEP] periodic orphan-GTC "
+                        "auto-cancel DISABLED via env "
+                        "(AUTO_SWEEP_ORPHAN_GTC). Falling back to "
+                        "surfacing-only behaviour."
+                    )
                 while self._running:
                     try:
                         from services.orphan_gtc_reconciler import (
                             VERDICT_NAKED_NO_POSITION,
                             VERDICT_ORPHAN_NO_TRADE,
+                            SAFE_TO_AUTO_CANCEL,
                             audit_orphan_gtc_orders,
+                            cancel_orphan_gtc_orders,
                         )
-                        audit = await audit_orphan_gtc_orders(bot=self)
+                        audit = await audit_orphan_gtc_orders(bot=self, only_gtc=False)
                         if audit.get("success"):
                             s = audit.get("summary", {})
                             danger = (
@@ -2138,12 +2164,80 @@ class TradingBotService:
                                     "Surface = GET /api/safety/orphan-gtc-orders",
                                     danger,
                                 )
+                                if auto_sweep:
+                                    # Collect verdict objects for the safe set only.
+                                    raw_verdicts = audit.get("verdicts") or []
+                                    safe_to_cancel = []
+                                    for raw in raw_verdicts:
+                                        if isinstance(raw, dict):
+                                            if raw.get("verdict") not in SAFE_TO_AUTO_CANCEL:
+                                                continue
+                                            # Rehydrate into OrderVerdict-like obj.
+                                            from services.orphan_gtc_reconciler import OrderVerdict
+                                            try:
+                                                safe_to_cancel.append(OrderVerdict(
+                                                    ib_order_id=int(raw.get("ib_order_id") or 0),
+                                                    perm_id=raw.get("perm_id"),
+                                                    symbol=raw.get("symbol") or "",
+                                                    action=raw.get("action") or "",
+                                                    quantity=int(raw.get("quantity") or 0),
+                                                    order_type=raw.get("order_type") or "",
+                                                    limit_price=raw.get("limit_price"),
+                                                    stop_price=raw.get("stop_price"),
+                                                    time_in_force=raw.get("time_in_force") or "",
+                                                    status=raw.get("status") or "",
+                                                    verdict=raw.get("verdict") or "",
+                                                    reasons=list(raw.get("reasons") or []),
+                                                    bot_trade_id=raw.get("bot_trade_id"),
+                                                    ib_position_size=raw.get("ib_position_size"),
+                                                    submitted_at=raw.get("submitted_at"),
+                                                ))
+                                            except Exception as _re:
+                                                logger.debug(
+                                                    "[v19.34.89] verdict rehydrate skipped: %s", _re,
+                                                )
+                                        else:
+                                            if getattr(raw, "verdict", None) in SAFE_TO_AUTO_CANCEL:
+                                                safe_to_cancel.append(raw)
+                                    if safe_to_cancel:
+                                        logger.warning(
+                                            "[v19.34.89 AUTO-SWEEP] firing cancels for %d "
+                                            "safe orphan(s): %s",
+                                            len(safe_to_cancel),
+                                            [(v.symbol, v.ib_order_id, v.verdict)
+                                             for v in safe_to_cancel[:10]],
+                                        )
+                                        sweep = await cancel_orphan_gtc_orders(
+                                            verdicts_to_cancel=safe_to_cancel,
+                                        )
+                                        n_ok = len(sweep.get("cancelled") or [])
+                                        n_err = len(sweep.get("errors") or [])
+                                        logger.warning(
+                                            "[v19.34.89 AUTO-SWEEP] sweep complete: "
+                                            "queued=%d errors=%d",
+                                            n_ok, n_err,
+                                        )
+                                        if n_err:
+                                            for err in (sweep.get("errors") or [])[:5]:
+                                                logger.error(
+                                                    "[v19.34.89 AUTO-SWEEP] err: %s", err,
+                                                )
+                                        try:
+                                            await self._broadcast_event({
+                                                "type": "orphan_auto_sweep",
+                                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                                "queued": n_ok,
+                                                "errors": n_err,
+                                                "details": sweep.get("cancelled") or [],
+                                            })
+                                        except Exception:
+                                            pass
                     except Exception as e:
                         logger.debug(
                             "[v19.34.66 ORPHAN-GTC PERIODIC] tick error "
                             "(non-fatal): %s", e,
                         )
-                    await asyncio.sleep(120)
+                    await asyncio.sleep(30)
             asyncio.create_task(_periodic_orphan_gtc_audit())
 
             # 2026-05-04 v19.31.1 — Auto-reconcile-at-boot.

@@ -3259,3 +3259,15 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - 🟡 (P1) **Sizing-aware bracket pick** in `cancel-excess-bracket-legs`. Current logic picks the *newest* bracket pair regardless of qty. LIN example: a 21sh "newest" bracket would have been kept while a 47sh OCA bracket was cancelled, leaving 47 shares unprotected. Should prefer the bracket whose qty matches `|bot_position|` most closely (then OCA-grouped > non-OCA > newest as tiebreakers).
 - 🟢 (P2) **Mass-cancel endpoint** `/api/trading-bot/sweep-all-orphans` — single-shot version of today's python loop. Cancels every pending leg on every symbol where `|bot_position|==0`.
 - 🟢 (P2) Cancel-queue TTL + reaper for stale `pending` entries (>5min unclaimed → log + auto-mark `expired`).
+
+## Completed 2026-05-11 evening (v19.34.89 + v19.34.90)
+- ✅ Auto-orphan-sweep periodic loop (30s cadence, only_gtc=False, env-gated).
+- ✅ Tier 3 fallback in `_fetch_ib_open_orders` (pusher-only deploys).
+- ✅ Queue fallback in `cancel_orphan_gtc_orders` when ib_direct down.
+- ✅ Immediate post-EOD sweep wired into `check_eod_close`.
+- ✅ 15/15 pytest passing across v88 + v89 suites.
+
+## Order-Pipeline Hardening — Remaining (was P1, still applies)
+- 🟡 (P1) **v19.34.91 — Sizing-aware bracket pick** in `cancel-excess-bracket-legs`. Prefer the bracket whose qty matches `|bot_position|` most closely. Eliminates the LIN under-protection trap.
+- 🟡 (P1) **v19.34.92 — OCA-enforcement audit + fix**. Find code paths placing stops/targets without OCA grouping (likely scale-in handler). Force every bracket placement to use an OCA group so target-fill auto-kills the paired stop at IB-level — prevents orphans from forming to begin with.
+- 🟡 (P1) **v19.34.93 — Resize-bracket-to-ib-truth** one-shot endpoint (atomic cancel+re-attach).

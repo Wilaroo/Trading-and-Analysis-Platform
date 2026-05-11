@@ -18067,3 +18067,53 @@ Failed trades are marked `TradeStatus.REJECTED` with `close_reason="guardrail_ve
 - `/app/backend/routers/trading_bot.py` — `cancel-excess-bracket-legs` queue-fallback branch.
 - `/app/documents/scripts/ib_data_pusher.py` — pusher polling methods + 2 call-site wires.
 - `/app/backend/tests/test_v19_34_88_cancellation_queue.py` — regression suite.
+
+---
+
+## v19.34.89 — Periodic Auto-Orphan-Sweep (2026-05-11)
+
+### Problem
+After v19.34.88 we had the cancel-queue infrastructure, but it was still operator-triggered. Today's session left 31 orphan stops post-EOD that required a manual python one-liner to clear. The system needs to self-heal — when a position transitions to 0, any remaining protective legs must auto-cancel without human intervention.
+
+### Fix
+**`orphan_gtc_reconciler.py`:**
+- **Tier 3 fallback in `_fetch_ib_open_orders`** — when `ib_direct` (Tier 1) and `_ib_service` relay (Tier 2) are both unreachable (pusher-only DGX deploy), read directly from `_pushed_ib_data["orders"]` (populated by v85). This was the missing fallback that made the auditor structurally blind on native DGX.
+- **`cancel_orphan_gtc_orders` queue fallback** — when `ib_direct` is disconnected, route safe verdicts through the v19.34.88 cancel queue. Mirrors the `cancel-excess-bracket-legs` pattern. Per-leg responses include `"via": "cancel_queue" | "ib_direct"`.
+
+**`trading_bot_service.py` — `_periodic_orphan_gtc_audit`:**
+- **Auto-cancel SAFE verdicts** (`NAKED_NO_POSITION` + `ORPHAN_NO_TRADE`). Previously this was log-only.
+- **Interval dropped 120s → 30s** so target-fill → orphan-cancel gap closes within ~30s instead of ~2min.
+- **`only_gtc=False`** so DAY orders are also swept (today's intraday orphans).
+- Gated via `AUTO_SWEEP_ORPHAN_GTC` env (default `true`). On disable, falls back to surfacing-only.
+- Each sweep emits an `orphan_auto_sweep` event on the WS bus for V5 HUD visibility.
+
+### Live confirmation
+Backend log after restart: `[v19.34.89 AUTO-SWEEP] periodic orphan-GTC auto-cancel ENABLED (interval=30s)`
+
+### Pytest coverage
+- `tests/test_v19_34_89_auto_orphan_sweep.py` (7 tests): Tier-3 pusher fallback, terminal-status skipping, queue fallback on ib_direct unavail, refuse mismatched_size/tracked verdicts, mixed safe+unsafe handling, SAFE_TO_AUTO_CANCEL invariant, idempotent re-queue. **7/7 passing** + 8/8 v88 regressions = 15/15.
+
+---
+
+## v19.34.90 — EOD Close Fires Immediate Sweep (2026-05-11)
+
+### Problem
+The v89 periodic sweep closes the gap to ~30s — but the EOD close fires 25+ position closes in parallel, so we can leave ~25 orphan brackets sitting at IB for up to 30s before they get swept. That's a measurable window where a stop could fire on a zero position.
+
+### Fix
+**`position_manager.check_eod_close`:**
+- After EOD closes complete (`closed_count > 0`), wait 8s for the pusher to publish a fresh position+orders snapshot, then run an immediate `audit_orphan_gtc_orders(only_gtc=False)` + `cancel_orphan_gtc_orders(SAFE_TO_AUTO_CANCEL)` sweep in-line.
+- Same env gate (`AUTO_SWEEP_ORPHAN_GTC`).
+- Emits `eod_orphan_sweep` event with queue stats.
+- Failures are non-fatal — the v89 periodic sweep is the safety net.
+
+### Files changed
+- `/app/backend/services/orphan_gtc_reconciler.py` — Tier 3 fallback + queue-fallback branch in cancel.
+- `/app/backend/services/trading_bot_service.py` — periodic auto-sweep + 30s interval.
+- `/app/backend/services/position_manager.py` — immediate post-EOD sweep.
+- `/app/backend/tests/test_v19_34_89_auto_orphan_sweep.py` — 7 regression tests.
+
+### Pipeline self-healing surface after v89 + v90
+- **30s** — max delay between a target fill and the orphan stop auto-cancelling (periodic sweep).
+- **~10s** — max delay between an EOD close and orphan sweep (v90 immediate sweep).
+- **0** — operator clicks required.

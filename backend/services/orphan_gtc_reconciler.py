@@ -419,6 +419,47 @@ async def _fetch_ib_open_orders() -> Tuple[Optional[List[Dict[str, Any]]], Dict[
         src["tier_attempted"] = "ib_service_relay"
         src["error"] = f"{type(e).__name__}: {e}"
 
+    # Tier 3 (v19.34.89): direct read of `_pushed_ib_data["orders"]`.
+    # On native DGX deployments tiers 1 and 2 both rely on a live cloud
+    # ↔ IB connection that doesn't exist (pusher-only). The pusher
+    # (v19.34.85+) publishes its `openTrades()` snapshot here on every
+    # push — that's the authoritative source for this deployment shape.
+    try:
+        from routers.ib import _pushed_ib_data
+        raw_orders = _pushed_ib_data.get("orders") or []
+        if isinstance(raw_orders, dict):
+            raw_orders = raw_orders.get("orders", [])
+        normalized: List[Dict[str, Any]] = []
+        for o in raw_orders:
+            try:
+                status = (o.get("status") or "")
+                if _normalise_status(status) not in WORKING_ORDER_STATUSES:
+                    continue
+                oid_raw = o.get("order_id") or o.get("orderId")
+                if oid_raw is None:
+                    continue
+                normalized.append({
+                    "ib_order_id": int(oid_raw),
+                    "perm_id": int(o.get("perm_id") or 0) or None,
+                    "symbol": (o.get("symbol") or "").upper(),
+                    "action": (o.get("action") or "").upper(),
+                    "quantity": int(abs(float(o.get("quantity") or o.get("remaining") or 0))),
+                    "order_type": (o.get("order_type") or "").upper(),
+                    "limit_price": _safe_float(o.get("limit_price")),
+                    "stop_price": _safe_float(o.get("stop_price") or o.get("aux_price")),
+                    "time_in_force": (o.get("tif") or "").upper(),
+                    "status": status,
+                })
+            except Exception:
+                continue
+        src["tier"] = "pusher_orders_snapshot"
+        src["ok"] = True
+        src["count"] = len(normalized)
+        return normalized, src
+    except Exception as e:
+        src["tier_attempted"] = "pusher_orders_snapshot"
+        src["error"] = f"{type(e).__name__}: {e}"
+
     return None, src
 
 
@@ -520,27 +561,55 @@ async def cancel_orphan_gtc_orders(
 
     # Use ib_direct's cancel_order primitive — it's the only path that
     # acks back synchronously. Pusher-relayed cancels would be racy.
+    # v19.34.89: When ib_direct is unavailable (pusher-only DGX deploy),
+    # fall through to the cancel queue. Per-leg outcomes return
+    # "queued" rather than "cancelled" — caller can poll
+    # `/api/ib/cancellations/status/{ib_order_id}` to confirm.
+    use_queue = False
     try:
         from services.ib_direct_service import get_ib_direct_service
         ib_direct = get_ib_direct_service()
-    except Exception as e:
-        summary["errors"].append({"stage": "import_ib_direct", "err": str(e)[:200]})
-        summary["completed_at"] = datetime.now(timezone.utc).isoformat()
-        return summary
-
+    except Exception:
+        ib_direct = None
     if ib_direct is None:
-        summary["errors"].append({
-            "stage": "ib_direct_unavailable",
-            "err": "ib_direct_service singleton is None",
-        })
-        summary["completed_at"] = datetime.now(timezone.utc).isoformat()
-        return summary
+        use_queue = True
+    else:
+        try:
+            if not await ib_direct.ensure_connected():
+                use_queue = True
+        except Exception:
+            use_queue = True
 
-    if not await ib_direct.ensure_connected():
-        summary["errors"].append({
-            "stage": "ib_direct_not_connected",
-            "err": "cannot reach IB Gateway via clientId=11",
-        })
+    if use_queue:
+        try:
+            from routers.ib import queue_cancellation
+        except Exception as e:
+            summary["errors"].append({
+                "stage": "queue_import_failed",
+                "err": f"{type(e).__name__}: {e}",
+            })
+            summary["completed_at"] = datetime.now(timezone.utc).isoformat()
+            return summary
+        for v in safe:
+            try:
+                entry = queue_cancellation(
+                    ib_order_id=int(v.ib_order_id),
+                    reason=f"orphan-gtc auto-sweep ({v.verdict})",
+                    requested_by="orphan_gtc_reconciler",
+                )
+                summary["cancelled"].append({
+                    "ib_order_id": v.ib_order_id,
+                    "symbol": v.symbol,
+                    "verdict": v.verdict,
+                    "via": "cancel_queue",
+                    "queue_status": entry.get("status"),
+                })
+            except Exception as e:
+                summary["errors"].append({
+                    "ib_order_id": v.ib_order_id,
+                    "symbol": v.symbol,
+                    "err": f"{type(e).__name__}: {e}",
+                })
         summary["completed_at"] = datetime.now(timezone.utc).isoformat()
         return summary
 
@@ -552,6 +621,7 @@ async def cancel_orphan_gtc_orders(
                     "ib_order_id": v.ib_order_id,
                     "symbol": v.symbol,
                     "verdict": v.verdict,
+                    "via": "ib_direct",
                 })
             else:
                 summary["errors"].append({
