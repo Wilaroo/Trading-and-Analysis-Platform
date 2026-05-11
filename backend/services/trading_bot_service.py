@@ -786,6 +786,30 @@ class BotTrade:
         d['synthetic_source'] = self.synthetic_source
         # v19.34.6 — Pre-submit Mongo sanity timestamp.
         d['pre_submit_at'] = self.pre_submit_at
+        # v19.34.87 — Runtime-attached bracket fields. `target_order_id`
+        # (singular) and `oca_group` are NOT dataclass fields — they
+        # get attached at runtime by attach_oca_stop_target and
+        # bracket_reissue_service. asdict() doesn't see them, so
+        # pre-v87 every persist wiped both fields, meaning every
+        # restart left `target_order_id=None` on trades that had a
+        # live target at IB. That made the v83 stop_present_no_target
+        # skip fire on legitimately-bracketed trades, which on
+        # 2026-05-12 caused 8 new OCA pairs to get stacked on top
+        # of existing live brackets at IB. Explicitly serialize them
+        # now so the restore path can hydrate them back.
+        if hasattr(self, "target_order_id"):
+            d['target_order_id'] = getattr(self, "target_order_id", None)
+        if hasattr(self, "oca_group"):
+            d['oca_group'] = getattr(self, "oca_group", None)
+        # Also surface adoption / external-close timestamps used by
+        # the reconciler's filtering logic (set by reconciler /
+        # consolidator paths at runtime).
+        for _runtime_field in (
+            "adopted_from_orphan_at", "external_close_first_seen_at",
+            "external_close_confirmed_at", "remaining_shares_after_external_close",
+        ):
+            if hasattr(self, _runtime_field):
+                d[_runtime_field] = getattr(self, _runtime_field, None)
         return d
 
 

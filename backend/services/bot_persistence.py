@@ -374,6 +374,64 @@ class BotPersistence:
                     trade.market_regime = trade_doc.get("market_regime", "UNKNOWN")
                     trade.regime_score = trade_doc.get("regime_score", 50.0)
 
+                    # v19.34.87 — Restore the scale-out / lifecycle fields
+                    # the BotTrade dataclass defaults to zero. Pre-v87
+                    # these were silently dropped at restore: every
+                    # boot reload produced `shares=N, remaining_shares=0`
+                    # (degenerate state — bot's `shares` reads the
+                    # right size while `remaining_shares` says zero,
+                    # causing positions/reconcile + bracket-stacking-audit
+                    # to report `bot_qty=0`). The 2026-05-12 incident
+                    # surfaced this on 8 symbols at once and required
+                    # v83/v84 force-reconcile-down + normalize patches
+                    # to clean up after the fact. Restoring properly
+                    # at the source prevents the state from existing.
+                    #
+                    # Field policy:
+                    #   - remaining_shares: prefer saved; else fall back
+                    #     to `shares` (best-effort "trade is open with
+                    #     full size" assumption).
+                    #   - original_shares: prefer saved; else `shares`.
+                    #   - target_order_id / target_order_ids / oca_group:
+                    #     restore as-is so the v83 `attach-brackets-to-
+                    #     unprotected` skip logic correctly identifies
+                    #     already-bracketed trades.
+                    saved_remaining = trade_doc.get("remaining_shares")
+                    if saved_remaining is None or saved_remaining < 0:
+                        trade.remaining_shares = int(shares or 0)
+                    else:
+                        trade.remaining_shares = int(saved_remaining)
+                    saved_original = trade_doc.get("original_shares")
+                    if saved_original is None or saved_original <= 0:
+                        trade.original_shares = int(shares or 0)
+                    else:
+                        trade.original_shares = int(saved_original)
+                    # Target ids: singular + plural list + oca group.
+                    if trade_doc.get("target_order_id") is not None:
+                        trade.target_order_id = trade_doc.get("target_order_id")
+                    saved_target_ids = trade_doc.get("target_order_ids")
+                    if isinstance(saved_target_ids, list):
+                        try:
+                            trade.target_order_ids = [x for x in saved_target_ids if x]
+                        except Exception:
+                            pass
+                    if trade_doc.get("oca_group") is not None:
+                        try:
+                            trade.oca_group = trade_doc.get("oca_group")
+                        except Exception:
+                            pass
+                    # Provenance / adoption tracking — useful for
+                    # reconciler filters (orphan-reconciler skips
+                    # trades with `entered_by=reconciled_excess_*`).
+                    for _field in ("entered_by", "adopted_from_orphan_at",
+                                    "external_close_first_seen_at",
+                                    "external_close_confirmed_at"):
+                        if trade_doc.get(_field) is not None:
+                            try:
+                                setattr(trade, _field, trade_doc.get(_field))
+                            except Exception:
+                                pass
+
                     # Restore trailing stop config
                     if trade_doc.get("trailing_stop_config"):
                         trade.trailing_stop_config = trade_doc["trailing_stop_config"]

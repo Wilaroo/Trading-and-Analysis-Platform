@@ -2,6 +2,110 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.87) — Boot reload no longer creates degenerate state
+
+### The upstream bug we'd been papering over
+
+v19.34.83/.84 patched the SYMPTOM of `shares=N, remaining_shares=0` trades (force-reconcile-down learned to normalize them). v19.34.87 fixes the CAUSE: two persistence/restore bugs that together made every boot reload produce the degenerate state.
+
+**Bug 1**: `bot_persistence.restore_open_trades()` built `BotTrade(..., shares=X)` but never passed `remaining_shares`, `original_shares`, `target_order_id`, `target_order_ids`, or `oca_group`. The `BotTrade` dataclass defaults them all to 0/None/[], so every restart wiped the correctly-persisted values.
+
+**Bug 2**: `BotTrade.to_dict()` uses `asdict(self)` which only sees dataclass fields. `target_order_id` (singular) and `oca_group` are runtime attributes attached by `attach_oca_stop_target` — they were NEVER persisted. Every save → restart round-trip silently wiped both. That's why on 2026-05-12, 8 trades that had been bracketed yesterday came back from boot with `target_order_id=None` → v83 flagged them all as "stop_present_no_target" → 8 OCA pairs got stacked.
+
+### Fix
+
+- `bot_persistence.restore_open_trades()` now explicitly restores `remaining_shares` (fallback to `shares` if 0/missing), `original_shares` (fallback to `shares`), `target_order_id`, `target_order_ids`, `oca_group`, and reconciler provenance fields (`entered_by`, `adopted_from_orphan_at`, `external_close_*_at`).
+- `BotTrade.to_dict()` explicitly serializes `target_order_id`, `oca_group`, and adoption/close timestamps when set at runtime.
+- Backward-compat: legacy bot_trades rows pre-v87 (no `remaining_shares` persisted) fall back to `shares` at restore → no longer load as zombies.
+- Backward-compat: degenerate rows already in the DB (`shares=971, remaining=0` — the 2026-05-12 fingerprint) are HEALED at restore: `remaining_shares` becomes `shares`.
+
+### Tests
+
+`/app/backend/tests/test_v19_34_87_boot_reload_preserves_fields.py` — 5 cases:
+- `to_dict` includes runtime-attached `target_order_id` and `oca_group`.
+- `to_dict` doesn't crash when runtime fields absent.
+- Restore round-trip preserves remaining_shares + bracket ids exactly.
+- Legacy doc without `remaining_shares` → fallback to `shares` (no degenerate state).
+- Pre-v87 degenerate row (`shares=971, remaining=0`) → healed to healthy on restore.
+
+76/76 tests across the full v34 safety suite (76/77/78/79/80/82/85/86/87 + dict_to_trade + restore_open_trades_format) green.
+
+### Combined effect of v83 → v87
+
+| | Pre-v83 | v83/.84 | v85 | v86 | v87 |
+|---|---|---|---|---|---|
+| Bot tracking > IB qty | required restart | shrinks programmatically | — | — | — |
+| Degenerate `shares=N, remaining=0` | silently broke audit/reconcile | normalize-only patches symptom | — | — | **prevents at boot** |
+| Pusher open-orders | invisible to audit | — | piped into `_pushed_ib_data["orders"]` | — | — |
+| Manual TWS cancel cleanup | DB edit | — | — | `clear-stale-bracket-ids` + `attach-target-only` | — |
+| Stop+target both wiped after restart | every reboot | — | — | — | **persisted via to_dict + restored** |
+
+
+## 2026-05-12 (v19.34.86) — clear-stale-bracket-ids + attach-target-only
+
+Two operator endpoints needed once the bot's pointer-to-IB-order gets stale (post-TWS-cancel cleanup) and to close the v83 `stop_present_no_target` skip without re-stacking.
+
+### Endpoints
+
+`POST /api/trading-bot/clear-stale-bracket-ids`
+```json
+{
+  "symbol": "PEP",
+  "clear_stop": true,      // default true
+  "clear_target": true,    // default true
+  "dry_run": true,
+  "reason": "post-TWS-cancel of oversized 2266sh OCA"
+}
+```
+Nulls stop_order_id / target_order_id / target_order_ids / oca_group (if both legs cleared) on the bot's open trades for a symbol. Persists. Audit-logged. **NEVER touches IB**. Use after you've cancelled the actual orders in TWS so the bot's pointers don't outlive the orders they reference. After running this, `attach-brackets-to-unprotected` can correctly re-arm a clean OCA.
+
+`POST /api/trading-bot/attach-target-only`
+```json
+{
+  "symbol": "PEP",                 // or "trade_id": "9848a5a0",
+  "target_price": 137.47,           // OR "target_pct": 8.0
+  "ref_price": 149.42,              // optional pct override
+  "oca_group": null,                // optional override (defaults to trade.oca_group)
+  "dry_run": true,
+  "reason": "post-cleanup re-arm missing target"
+}
+```
+Submits ONE LMT target leg via `queue_order`, sharing the trade's existing OCA group (so the live stop auto-cancels when it fills). Resolves the v83 `stop_present_no_target_refusing_to_stack` skip without the cancel-stop-then-re-attach naked window. Pusher-offline returns success=False without queueing.
+
+### Tests
+
+12 pytest cases at `/app/backend/tests/test_v19_34_86_clear_stale_and_attach_target.py` covering: dry-run vs apply, partial clear keeps target+OCA intact, both-flags-false → 400, no-stop-no-target candidate refusal, target_pct math, trade_id overrides symbol resolution, pusher-offline refusal.
+
+
+## 2026-05-12 (v19.34.85) — Pusher open-orders plumbing
+
+### What was missing
+
+`bracket-stacking-audit` had been reading `_pushed_ib_data["orders"]` since v19.34.77 — but that key was NEVER populated. `IBPushDataRequest` had no `orders` field, and the Windows pusher's payload (`ib_data_pusher.py` line 977-987) only sent `quotes/account/positions/level2/fundamentals/news/news_providers`. Result: on 2026-05-12 the audit reported `clean_symbols=[ADBE, BMNR, EBAY, EFA, GM, MDT, NCLH, PEP]` for every position even though the bot had just stacked 8 new OCA bracket pairs at IB. The endpoint was structurally blind.
+
+### Fix (both halves)
+
+**Backend** (`/app/backend/routers/ib.py`):
+- Added `orders: list = Field(default=[])` to `IBPushDataRequest`.
+- Initialized `_pushed_ib_data["orders"] = []`.
+- Push handler now writes `_pushed_ib_data["orders"] = request.orders or []` on every push (replace, not merge — empty list means "IB has no pending orders", not stale data).
+- Push response includes `received.orders` count for log/audit traceability.
+
+**Pusher** (`/app/documents/scripts/ib_data_pusher.py`):
+- New `_collect_open_orders_snapshot()` method calls `self.ib.reqAllOpenOrders()` + reads `self.ib.openTrades()` and serializes each into a dict (`order_id, perm_id, symbol, action, order_type, quantity, remaining, filled, limit_price, stop_price, aux_price, oca_group, parent_id, tif, status, why_held, account, …`). Skips terminal-state orders (Filled/Cancelled/Inactive).
+- `push_data_to_cloud()` now calls this on every push and includes the snapshot in the payload alongside positions/quotes/etc.
+- Push log line now reports `… X open orders` so the operator can verify the feed is alive.
+
+### Tests + smoke
+
+`/app/backend/tests/test_v19_34_85_pusher_open_orders_plumbing.py` — 5 cases incl. end-to-end via `bracket_stacking_audit()` reading the pushed orders and correctly surfacing 200sh stacking. Smoke-tested live on the pod via curl: pushed 2 fake ADBE stop legs → audit correctly reported `excess_stop_qty=200`.
+
+### Operator deploy
+
+The backend change ships with `Save to Github → git pull → restart backend`. The **pusher change requires copying `/app/documents/scripts/ib_data_pusher.py` to the Windows machine and restarting the pusher process**. Until that's done, the cloud side still works (orders=[]), it's just blind to IB-side orders.
+
+
+
 ## 2026-05-12 (v19.34.84) — force-reconcile-down normalize-degenerate-state mode
 
 ### What the v83 rollout exposed

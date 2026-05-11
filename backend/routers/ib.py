@@ -115,6 +115,18 @@ class IBPushDataRequest(BaseModel):
     fundamentals: dict = Field(default={}, description="Fundamental data by symbol")
     news: dict = Field(default={}, description="News data by symbol")
     news_providers: list = Field(default=[], description="Available news providers")
+    # v19.34.85 — Open orders snapshot from IB Gateway. Pusher should
+    # include this on every push so `bracket-stacking-audit`,
+    # `cancel-excess-bracket-legs`, and any other endpoint that reads
+    # `_pushed_ib_data["orders"]` can see live IB state. Pre-v85 this
+    # field was absent and every consumer was structurally blind —
+    # the bracket-stacking-audit on 2026-05-12 reported "clean" for
+    # every symbol because it was reading an empty list. Each entry
+    # should carry at minimum:
+    #   order_id, symbol, action, quantity, remaining, order_type,
+    #   status, limit_price, stop_price, aux_price, oca_group,
+    #   submitted_at.
+    orders: list = Field(default=[], description="Open orders snapshot from IB Gateway")
 
 
 # In-memory storage for pushed IB data
@@ -127,6 +139,7 @@ _pushed_ib_data = {
     "fundamentals": {},  # Fundamental data (P/E, short interest, float, etc.)
     "news": {},  # News data by symbol
     "news_providers": [],  # Available news providers
+    "orders": [],  # v19.34.85 — open orders snapshot from pusher
     "connected": False
 }
 
@@ -752,11 +765,22 @@ async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response)
         if request.news_providers:
             _pushed_ib_data["news_providers"] = request.news_providers
 
+        # v19.34.85 — Open orders snapshot. Pre-v85 this field was
+        # never plumbed; `_pushed_ib_data["orders"]` stayed empty
+        # forever, so `bracket-stacking-audit`,
+        # `cancel-excess-bracket-legs`, and any reader was blind.
+        # Now: replace the snapshot wholesale on every push. Always
+        # set the key (even to []) so an empty IB-side order book
+        # is correctly represented (vs being "stale, last push had
+        # orders we no longer trust").
+        _pushed_ib_data["orders"] = request.orders or []
+
         quote_count = len(request.quotes) if request.quotes else 0
         pos_count = len(request.positions) if request.positions else 0
         l2_count = len(request.level2) if request.level2 else 0
         fund_count = len(request.fundamentals) if request.fundamentals else 0
         news_count = sum(len(items) for items in request.news.values()) if request.news else 0
+        orders_count = len(request.orders) if request.orders else 0  # v19.34.85
 
         # Persist snapshot to MongoDB so chat_server (port 8002) can read it
         # without HTTP calls to the main backend (avoids thread pool exhaustion).
@@ -811,7 +835,8 @@ async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response)
                 "level2": l2_count,
                 "fundamentals": fund_count,
                 "news_items": news_count,
-                "news_providers": len(request.news_providers) if request.news_providers else 0
+                "news_providers": len(request.news_providers) if request.news_providers else 0,
+                "orders": orders_count,  # v19.34.85
             },
             "timestamp": datetime.now(timezone.utc).isoformat()
         }

@@ -947,6 +947,117 @@ class IBDataPusher:
         else:
             return obj
     
+    def _collect_open_orders_snapshot(self):
+        """v19.34.85 — Build a serializable snapshot of every live open
+        order at IB Gateway. Pre-v85 the pusher only tracked orders
+        it placed itself (via `_execute_queued_order`'s Trade
+        objects); orders placed via TWS, by other API sessions, or
+        carried over from prior days were invisible to the cloud.
+        That made `bracket-stacking-audit` structurally blind — it
+        reported "clean" for every symbol on 2026-05-12 because
+        `_pushed_ib_data["orders"]` was always empty.
+
+        Uses `ib_insync`'s `self.ib.openTrades()` which returns every
+        Trade still in flight (PreSubmitted, Submitted, etc.) +
+        `self.ib.orders()` as a fallback. Skips trades that have
+        already finalized (Filled/Cancelled/Inactive).
+
+        Returns a list of dicts the backend can consume directly.
+        Schema matches what `bracket-stacking-audit` and
+        `cancel-excess-bracket-legs` read from `_pushed_ib_data["orders"]`.
+        """
+        out = []
+        try:
+            # Refresh from IB before reading.
+            try:
+                self.ib.reqAllOpenOrders()
+            except Exception:
+                pass
+
+            open_trades = []
+            try:
+                open_trades = list(self.ib.openTrades())
+            except Exception as e:
+                logger.debug(f"[v19.34.85] ib.openTrades() failed: {e}")
+                # Fallback: build from orders() + contracts.
+                try:
+                    open_trades = []
+                    for o in self.ib.orders():
+                        open_trades.append(o)
+                except Exception:
+                    open_trades = []
+
+            for trade in open_trades:
+                try:
+                    contract = getattr(trade, "contract", None)
+                    order = getattr(trade, "order", None)
+                    status_obj = getattr(trade, "orderStatus", None)
+                    if not contract or not order:
+                        continue
+                    status = (getattr(status_obj, "status", "") or "").strip()
+                    # Skip terminal states — those are not "open".
+                    if status in ("Filled", "Cancelled", "ApiCancelled", "Inactive"):
+                        continue
+                    sym = (getattr(contract, "symbol", "") or "").upper()
+                    if not sym:
+                        continue
+                    order_id = getattr(order, "orderId", None) or getattr(order, "permId", None)
+                    if order_id is None:
+                        continue
+                    out.append({
+                        "order_id": int(order_id),
+                        "perm_id": int(getattr(order, "permId", 0) or 0),
+                        "symbol": sym,
+                        "sec_type": getattr(contract, "secType", "STK"),
+                        "exchange": getattr(contract, "exchange", "SMART"),
+                        "currency": getattr(contract, "currency", "USD"),
+                        "action": getattr(order, "action", None),
+                        "order_type": getattr(order, "orderType", None),
+                        "quantity": float(getattr(order, "totalQuantity", 0) or 0),
+                        "remaining": float(getattr(status_obj, "remaining", 0) or 0),
+                        "filled": float(getattr(status_obj, "filled", 0) or 0),
+                        "limit_price": (
+                            float(order.lmtPrice)
+                            if getattr(order, "lmtPrice", None) not in (None, 0, 0.0)
+                            else None
+                        ),
+                        "stop_price": (
+                            float(order.auxPrice)
+                            if getattr(order, "auxPrice", None) not in (None, 0, 0.0)
+                            else None
+                        ),
+                        "aux_price": (
+                            float(order.auxPrice)
+                            if getattr(order, "auxPrice", None) not in (None, 0, 0.0)
+                            else None
+                        ),
+                        "trail_stop_price": (
+                            float(order.trailStopPrice)
+                            if getattr(order, "trailStopPrice", None) not in (None, 0, 0.0)
+                            else None
+                        ),
+                        "trailing_percent": (
+                            float(order.trailingPercent)
+                            if getattr(order, "trailingPercent", None) not in (None, 0, 0.0)
+                            else None
+                        ),
+                        "oca_group": getattr(order, "ocaGroup", None) or None,
+                        "oca_type": getattr(order, "ocaType", None) or None,
+                        "parent_id": getattr(order, "parentId", None) or None,
+                        "tif": getattr(order, "tif", None),
+                        "status": status,
+                        "avg_fill_price": float(getattr(status_obj, "avgFillPrice", 0) or 0),
+                        "why_held": getattr(status_obj, "whyHeld", "") or "",
+                        "client_id": getattr(order, "clientId", None),
+                        "account": getattr(order, "account", None),
+                    })
+                except Exception as inner:
+                    logger.debug(f"[v19.34.85] open-order serialize skipped: {inner}")
+                    continue
+        except Exception as e:
+            logger.warning(f"[v19.34.85] _collect_open_orders_snapshot crashed: {e}")
+        return out
+
     def push_data_to_cloud(self):
         """Push buffered data to cloud backend using CloudAPIClient with retry logic"""
         has_data = (self.quotes_buffer or self.account_data or 
@@ -967,10 +1078,25 @@ class IBDataPusher:
                 )
             return
         
+        # v19.34.85 — Collect open orders snapshot on every push. This
+        # is cheap (in-process ib_insync state read) and gives the
+        # cloud audit endpoints live visibility into IB-side legs.
+        try:
+            orders_snapshot = self._collect_open_orders_snapshot()
+        except Exception as _oe:
+            logger.warning(f"[v19.34.85] open-orders collection failed: {_oe}")
+            orders_snapshot = []
+
         # Log what we're pushing
         news_count = sum(len(items) for items in self.news_buffer.values())
-        logger.info(f"Pushing: {len(self.quotes_buffer)} quotes, {len(self.positions_data)} positions, {len(self.account_data)} account fields, {news_count} news items")
-        
+        logger.info(
+            f"Pushing: {len(self.quotes_buffer)} quotes, "
+            f"{len(self.positions_data)} positions, "
+            f"{len(self.account_data)} account fields, "
+            f"{news_count} news items, "
+            f"{len(orders_snapshot)} open orders"  # v19.34.85
+        )
+
         # Clean all data to remove NaN/Inf values before JSON serialization
         # Use UTC timestamp for proper timezone handling
         from datetime import timezone as tz
@@ -983,7 +1109,8 @@ class IBDataPusher:
             "level2": self.level2_buffer.copy(),
             "fundamentals": self.fundamentals_buffer.copy(),
             "news": self.news_buffer.copy(),
-            "news_providers": self.news_providers.copy() if self.news_providers else []
+            "news_providers": self.news_providers.copy() if self.news_providers else [],
+            "orders": orders_snapshot,  # v19.34.85
         })
         
         try:

@@ -6327,3 +6327,417 @@ async def force_reconcile_down(payload: ForceReconcileDownRequest):
         "errors": errors,
         "ran_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+
+# ── v19.34.86 — Clear stale bracket ids (post-manual-TWS-cancel cleanup) ────
+#
+# Background: when the operator cancels an oversized OCA in TWS to
+# resize it (the 2026-05-12 PEP scenario), the bot's
+# `_open_trades[symbol].stop_order_id` and `target_order_id` still
+# point at the cancelled ids. Any reader (attach-brackets-to-unprotected,
+# bracket-stacking-audit, V5 UI freshness pill) will treat the trade
+# as "already bracketed" even though IB has no live bracket. Worse:
+# `attach-brackets-to-unprotected` v83 now refuses to re-arm because
+# it sees a non-null stop_order_id (the cancelled one) — leaving the
+# position naked indefinitely.
+#
+# This endpoint nulls out the stop / target / oca ids in bot memory
+# AND persists the change. No IB orders are touched. After running
+# this, `attach-brackets-to-unprotected` will correctly identify the
+# trade as unbracketed and re-arm cleanly.
+
+class ClearStaleBracketIdsRequest(BaseModel):
+    symbol: str
+    clear_stop: bool = True
+    clear_target: bool = True
+    dry_run: bool = True
+    reason: Optional[str] = None
+
+
+@router.post("/clear-stale-bracket-ids")
+async def clear_stale_bracket_ids(payload: ClearStaleBracketIdsRequest):
+    """v19.34.86 — Null out stale bracket ids on bot's open trades for
+    a symbol. Run AFTER cancelling the corresponding IB-side orders
+    manually in TWS (or via `cancel-excess-bracket-legs`) so the
+    bot's pointers don't outlive the orders they reference.
+
+    Body:
+      {
+        "symbol": "PEP",
+        "clear_stop": true,
+        "clear_target": true,
+        "dry_run": true,                        // flip to false to apply
+        "reason": "post-TWS-cancel of oversized 2266sh OCA"
+      }
+
+    NEVER sends a broker order. Operator-driven mutation of in-memory
+    state + persistence only.
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    sym = (payload.symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(400, "symbol is required")
+    if not (payload.clear_stop or payload.clear_target):
+        raise HTTPException(400, "clear_stop and clear_target both False — nothing to do")
+
+    bot = _trading_bot
+    open_trades = getattr(bot, "_open_trades", {}) or {}
+
+    # Find trades for this symbol.
+    sym_trades = [
+        (tid, t) for tid, t in open_trades.items()
+        if (getattr(t, "symbol", "") or "").upper() == sym
+    ]
+    if not sym_trades:
+        return {
+            "success": True, "symbol": sym, "dry_run": payload.dry_run,
+            "message": f"No open trades for {sym} in bot memory.",
+            "cleared": [], "skipped": [],
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    plan: List[Dict[str, Any]] = []
+    for tid, t in sym_trades:
+        before = {
+            "trade_id": tid,
+            "stop_order_id": getattr(t, "stop_order_id", None),
+            "target_order_id": getattr(t, "target_order_id", None),
+            "target_order_ids": list(getattr(t, "target_order_ids", []) or []),
+            "oca_group": getattr(t, "oca_group", None),
+        }
+        # Skip trades where nothing would change.
+        no_stop = before["stop_order_id"] in (None, "")
+        no_tgt = (
+            before["target_order_id"] in (None, "")
+            and not before["target_order_ids"]
+        )
+        if (no_stop or not payload.clear_stop) and (no_tgt or not payload.clear_target):
+            plan.append({**before, "action": "skipped_no_change"})
+            continue
+        plan.append({**before, "action": "will_clear"})
+
+    if payload.dry_run:
+        return {
+            "success": True, "symbol": sym, "dry_run": True,
+            "plan": plan,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    cleared: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    for step, (tid, t) in zip(plan, sym_trades):
+        if step["action"] != "will_clear":
+            skipped.append(step)
+            continue
+        try:
+            if payload.clear_stop:
+                t.stop_order_id = None
+            if payload.clear_target:
+                t.target_order_id = None
+                try:
+                    t.target_order_ids = []
+                except Exception:
+                    pass
+            # Null the OCA group only if BOTH legs are being cleared —
+            # otherwise we'd orphan the surviving leg from its OCA.
+            if payload.clear_stop and payload.clear_target:
+                try:
+                    t.oca_group = None
+                except Exception:
+                    pass
+            existing_notes = getattr(t, "notes", "") or ""
+            t.notes = existing_notes + (
+                f" [v19.34.86 clear-stale-bracket-ids "
+                f"{datetime.now(timezone.utc).isoformat()}: "
+                f"cleared_stop={payload.clear_stop} cleared_target={payload.clear_target} "
+                f"(reason={payload.reason or 'unspecified'})]"
+            )
+            save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+            if save_fn:
+                try:
+                    r = save_fn(t)
+                    if asyncio.iscoroutine(r):
+                        await r
+                except Exception as e:
+                    errors.append({"trade_id": tid, "stage": "save", "err": str(e)[:200]})
+            cleared.append({
+                "trade_id": tid,
+                "stop_order_id_before": step["stop_order_id"],
+                "target_order_id_before": step["target_order_id"],
+                "target_order_ids_before": step["target_order_ids"],
+                "oca_group_before": step["oca_group"],
+            })
+            logger.warning(
+                "[v19.34.86 CLEAR-STALE-BRACKET-IDS] %s tid=%s cleared_stop=%s "
+                "cleared_target=%s reason=%s",
+                sym, tid, payload.clear_stop, payload.clear_target,
+                payload.reason or "unspecified",
+            )
+        except Exception as e:
+            errors.append({"trade_id": tid, "stage": "apply", "err": str(e)[:200]})
+
+    # Audit row.
+    try:
+        db = getattr(bot, "_db", None)
+        if db is not None:
+            await asyncio.to_thread(
+                db["share_drift_events"].insert_one,
+                {
+                    "created_at": datetime.now(timezone.utc),
+                    "event": "clear_stale_bracket_ids_v19_34_86",
+                    "symbol": sym,
+                    "cleared_stop": payload.clear_stop,
+                    "cleared_target": payload.clear_target,
+                    "operator_reason": payload.reason or "unspecified",
+                    "cleared": cleared,
+                },
+            )
+    except Exception as e:
+        errors.append({"stage": "audit_log", "err": str(e)[:200]})
+
+    return {
+        "success": True, "symbol": sym, "dry_run": False,
+        "cleared": cleared, "skipped": skipped, "errors": errors,
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── v19.34.86 — Attach target-only (close the v83 stop-no-target gap) ──────
+#
+# Background: the v19.34.83 `attach-brackets-to-unprotected` refusal
+# kicks in when a trade has a real stop_order_id but no
+# target_order_id. The correct resolution is to attach JUST the
+# target leg into the existing OCA group, so it shares cancellation
+# with the live stop. Pre-v86 there was no endpoint for this — the
+# operator had to either (a) cancel the stop + re-attach a full OCA
+# (brief naked window) or (b) place the target manually in TWS.
+#
+# This endpoint takes a trade_id (preferred — unambiguous) or a
+# symbol (FIFO oldest trade with stop_present_no_target). It computes
+# a target price from operator override, the trade's target_prices[0],
+# or `target_pct` * entry_price, and submits ONE LMT leg via
+# `queue_order` carrying the trade's existing `oca_group` (or one
+# derived from the stop's OCA on the IB side when bot's `oca_group`
+# is None).
+
+class AttachTargetOnlyRequest(BaseModel):
+    symbol: Optional[str] = None
+    trade_id: Optional[str] = None
+    target_price: Optional[float] = None  # explicit override
+    target_pct: Optional[float] = None    # +X% from ref_price if no explicit target
+    ref_price: Optional[float] = None     # operator override for entry/current
+    oca_group: Optional[str] = None       # operator override (defaults to trade.oca_group)
+    dry_run: bool = True
+    reason: Optional[str] = None
+
+
+@router.post("/attach-target-only")
+async def attach_target_only(payload: AttachTargetOnlyRequest):
+    """v19.34.86 — Submit a LMT target leg for a trade that has a
+    live stop but no target. Closes the v83
+    `stop_present_no_target_refusing_to_stack` gap.
+
+    Body (one of `symbol` or `trade_id` required):
+      {
+        "symbol": "PEP",                  // or "trade_id": "9848a5a0",
+        "target_price": 137.47,            // or "target_pct": 8.0
+        "ref_price": 149.42,               // optional override for pct calc
+        "oca_group": null,                 // optional: defaults to trade.oca_group
+        "dry_run": true,
+        "reason": "post-cleanup: re-arm missing target"
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+    if _trade_executor is None:
+        raise HTTPException(503, "trade executor service not initialized")
+    if not payload.symbol and not payload.trade_id:
+        raise HTTPException(400, "Provide symbol or trade_id")
+
+    bot = _trading_bot
+    open_trades = getattr(bot, "_open_trades", {}) or {}
+
+    # Locate target trade.
+    trade = None
+    trade_id_resolved = None
+    if payload.trade_id:
+        trade = open_trades.get(payload.trade_id)
+        trade_id_resolved = payload.trade_id
+        if trade is None:
+            raise HTTPException(404, f"trade_id {payload.trade_id} not in bot._open_trades")
+    else:
+        sym = (payload.symbol or "").upper().strip()
+        candidates = [
+            (tid, t) for tid, t in open_trades.items()
+            if (getattr(t, "symbol", "") or "").upper() == sym
+        ]
+        # Pick the first one with stop_present_no_target signature.
+        for tid, t in candidates:
+            stop_id = getattr(t, "stop_order_id", None) or ""
+            tgt_singular = getattr(t, "target_order_id", None) or ""
+            tgt_plural = getattr(t, "target_order_ids", []) or []
+            has_real_stop = bool(stop_id) and not str(stop_id).startswith("SIM-")
+            has_real_tgt = (
+                (bool(tgt_singular) and not str(tgt_singular).startswith("SIM-"))
+                or any(x and not str(x).startswith("SIM-") for x in tgt_plural)
+            )
+            if has_real_stop and not has_real_tgt:
+                trade = t
+                trade_id_resolved = tid
+                break
+        if trade is None:
+            return {
+                "success": False,
+                "error": (
+                    f"No open trade for {sym} matched stop_present_no_target. "
+                    f"Either both stop and target already set, or no stop yet — "
+                    f"use attach-brackets-to-unprotected for the latter."
+                ),
+                "ran_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+    sym = (getattr(trade, "symbol", "") or "").upper()
+    direction = (
+        trade.direction.value if hasattr(trade.direction, "value")
+        else str(getattr(trade, "direction", "long"))
+    ).lower()
+    qty = int(getattr(trade, "shares", 0) or getattr(trade, "remaining_shares", 0) or 0)
+    if qty <= 0:
+        raise HTTPException(400, f"trade {trade_id_resolved} has shares=0 — nothing to bracket")
+
+    # Compute target price.
+    target_price = payload.target_price
+    if target_price is None:
+        # Fall back to trade.target_prices[0] if present.
+        tp = getattr(trade, "target_prices", None)
+        if tp:
+            try:
+                target_price = float(tp[0])
+            except (TypeError, ValueError):
+                target_price = None
+    if target_price is None:
+        # Fall back to ref_price + target_pct.
+        ref_px = payload.ref_price
+        if ref_px is None:
+            ref_px = float(getattr(trade, "entry_price", 0) or 0)
+        if ref_px <= 0 or payload.target_pct is None:
+            raise HTTPException(
+                400,
+                "Cannot determine target_price: provide `target_price` directly, "
+                "or `target_pct` + valid ref_price/entry_price.",
+            )
+        pct = float(payload.target_pct)
+        target_price = (
+            ref_px * (1 + pct / 100.0) if direction == "long"
+            else ref_px * (1 - pct / 100.0)
+        )
+    target_price = round(float(target_price), 2)
+
+    # Resolve OCA group: override > trade.oca_group > None.
+    oca_group = payload.oca_group or getattr(trade, "oca_group", None) or None
+
+    # Determine action (opposite of position direction).
+    action = "SELL" if direction == "long" else "BUY"
+
+    preview = {
+        "trade_id": trade_id_resolved,
+        "symbol": sym,
+        "direction": direction,
+        "qty": qty,
+        "action": action,
+        "target_price": target_price,
+        "oca_group": oca_group,
+        "stop_order_id_existing": getattr(trade, "stop_order_id", None),
+    }
+
+    if payload.dry_run:
+        return {
+            "success": True, "dry_run": True,
+            "preview": preview,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Apply: queue a LMT leg.
+    try:
+        from routers.ib import queue_order, is_pusher_connected
+    except Exception as e:
+        raise HTTPException(500, f"Unable to import order primitives: {e}")
+
+    if not is_pusher_connected():
+        return {
+            "success": False,
+            "error": "pusher_offline_target_not_submitted",
+            "preview": preview,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    try:
+        target_id = queue_order({
+            "symbol": sym,
+            "action": action,
+            "quantity": qty,
+            "order_type": "LMT",
+            "limit_price": target_price,
+            "stop_price": None,
+            "time_in_force": "GTC",
+            "outside_rth": False,
+            "oca_group": oca_group,
+            "trade_id": f"ATTACH-TGT-{trade_id_resolved}",
+        })
+    except Exception as e:
+        logger.error(f"[v19.34.86 attach-target-only] queue_order failed: {e}")
+        raise HTTPException(502, f"queue_order failed: {e}")
+
+    # Update bot's in-memory trade record.
+    try:
+        trade.target_order_id = target_id
+        try:
+            existing = list(getattr(trade, "target_order_ids", []) or [])
+            if target_id not in existing:
+                existing.append(target_id)
+            trade.target_order_ids = existing
+        except Exception:
+            pass
+        # Best-effort: set target_prices[0] if not already populated.
+        try:
+            if not getattr(trade, "target_prices", None):
+                trade.target_prices = [target_price]
+        except Exception:
+            pass
+        existing_notes = getattr(trade, "notes", "") or ""
+        trade.notes = existing_notes + (
+            f" [v19.34.86 attach-target-only {datetime.now(timezone.utc).isoformat()}: "
+            f"target_order_id={target_id} target_price={target_price} oca={oca_group} "
+            f"reason={payload.reason or 'unspecified'}]"
+        )
+        save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
+        if save_fn:
+            try:
+                r = save_fn(trade)
+                if asyncio.iscoroutine(r):
+                    await r
+            except Exception as e:
+                logger.warning(f"[v19.34.86 attach-target-only] save failed: {e}")
+    except Exception as e:
+        logger.warning(f"[v19.34.86 attach-target-only] in-memory update partial: {e}")
+
+    logger.warning(
+        "[v19.34.86 ATTACH-TARGET-ONLY] %s tid=%s qty=%s target=%s oca=%s "
+        "target_order_id=%s reason=%s",
+        sym, trade_id_resolved, qty, target_price, oca_group, target_id,
+        payload.reason or "unspecified",
+    )
+
+    return {
+        "success": True,
+        "dry_run": False,
+        "submitted": {
+            **preview,
+            "target_order_id": target_id,
+        },
+        "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
