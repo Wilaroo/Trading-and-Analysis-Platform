@@ -148,6 +148,61 @@ class PositionReconciler:
         except Exception:
             pass
 
+        # ── v19.34.111 (Feb 2026) — Bracket-attach cooldown ──────────────
+        # Even with queue-level trade_id idempotency catching duplicates
+        # at the lowest layer, the reconciler should NOT be racing
+        # attach attempts every 30s for the same logical trade. If the
+        # last attach call hasn't reached a terminal state — fill,
+        # cancel, or a clean failure that surfaced an actionable error
+        # — the right move is "wait and let it land," not "queue
+        # another pair." This belt-and-suspenders guard caps the
+        # attach frequency to once per `BRACKET_ATTACH_COOLDOWN_S`
+        # per (trade.id) so even a misconfigured caller can't melt
+        # the queue.
+        #
+        # Key: trade.id (string). Value: monotonic timestamp of the
+        # last attach attempt (success OR failure — we cooldown both
+        # paths because a failure usually means the position is still
+        # being worked at IB, not that the pusher silently dropped it).
+        self._last_bracket_attach_at: Dict[str, float] = {}
+        try:
+            self._BRACKET_ATTACH_COOLDOWN_S: float = float(
+                os.environ.get("BRACKET_ATTACH_COOLDOWN_S", 60.0)
+            )
+        except Exception:
+            self._BRACKET_ATTACH_COOLDOWN_S = 60.0
+        # Cooldown skip counter (operator-visible diagnostic).
+        self._bracket_attach_cooldown_skips: int = 0
+
+    def _bracket_attach_in_cooldown(self, trade_id: str) -> Optional[float]:
+        """Return seconds remaining in cooldown for `trade_id`, or None
+        if not in cooldown.
+
+        Empty / falsy trade_id always passes (legacy paths without an
+        id stay backward-compatible).
+        """
+        if not trade_id:
+            return None
+        import time as _time
+        last = self._last_bracket_attach_at.get(trade_id)
+        if last is None:
+            return None
+        elapsed = _time.monotonic() - last
+        remaining = self._BRACKET_ATTACH_COOLDOWN_S - elapsed
+        return remaining if remaining > 0 else None
+
+    def _stamp_bracket_attach(self, trade_id: str) -> None:
+        """Record that we just attempted a bracket attach for `trade_id`.
+
+        Called whether the attach succeeded, failed, or raised — the
+        cooldown is on *attempts*, not outcomes. A subsequent caller
+        gets blocked for `BRACKET_ATTACH_COOLDOWN_S` regardless.
+        """
+        if not trade_id:
+            return
+        import time as _time
+        self._last_bracket_attach_at[trade_id] = _time.monotonic()
+
     def _stats_roll_day_if_needed(self):
         """Reset counters on UTC midnight."""
         from datetime import datetime, timezone
@@ -1277,43 +1332,60 @@ class PositionReconciler:
                     bracket_attach_result: Dict[str, Any] = {"success": False, "skipped": "no_executor"}
                     executor = getattr(bot, "_trade_executor", None)
                     if executor and hasattr(executor, "attach_oca_stop_target"):
-                        try:
-                            oca_result = await executor.attach_oca_stop_target(trade)
-                            if oca_result and oca_result.get("success"):
-                                trade.stop_order_id = oca_result.get("stop_order_id")
-                                tgt_id = oca_result.get("target_order_id")
-                                if tgt_id:
-                                    # BotTrade tracks targets as a list
-                                    # (`target_order_ids`) since brackets
-                                    # can scale out across multiple PTs.
-                                    if not hasattr(trade, "target_order_ids") or trade.target_order_ids is None:
-                                        trade.target_order_ids = []
-                                    trade.target_order_ids.append(tgt_id)
-                                trade.oca_group = oca_result.get("oca_group")
-                                # Re-persist so the order IDs land in bot_trades.
-                                await asyncio.to_thread(bot._persist_trade, trade)
-                                bracket_attach_result = oca_result
-                                logger.info(
-                                    f"[RECONCILE BRACKET] {sym} OCA attached: "
-                                    f"stop={trade.stop_order_id} "
-                                    f"tgt={getattr(trade, 'target_order_ids', [])} "
-                                    f"oca={getattr(trade, 'oca_group', None)}"
-                                )
-                            else:
-                                err = (oca_result or {}).get("error", "unknown")
-                                bracket_attach_result = {"success": False, "error": err}
-                                logger.error(
-                                    f"[RECONCILE NAKED] {sym} {trade.id} adopted "
-                                    f"{abs_qty}sh but OCA attach failed: {err}. "
-                                    f"Position is UNPROTECTED at IB — operator must "
-                                    f"add stop manually or wait for retry."
-                                )
-                        except Exception as e:
-                            bracket_attach_result = {"success": False, "error": str(e)}
-                            logger.error(
-                                f"[RECONCILE NAKED] {sym} OCA attach raised: {e}. "
-                                f"Position UNPROTECTED."
+                        # v19.34.111 — cooldown guard. Skip if we tried
+                        # attach for this trade.id <60s ago. Belt + suspenders
+                        # on top of the queue-level trade_id idempotency.
+                        _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
+                        if _cooldown_left is not None:
+                            self._bracket_attach_cooldown_skips += 1
+                            bracket_attach_result = {
+                                "success": False,
+                                "skipped": "bracket_attach_cooldown",
+                                "cooldown_remaining_s": round(_cooldown_left, 1),
+                            }
+                            logger.info(
+                                f"[v19.34.111 COOLDOWN] {sym} {trade.id} skip "
+                                f"attach — {_cooldown_left:.1f}s left in cooldown."
                             )
+                        else:
+                            self._stamp_bracket_attach(trade.id)
+                            try:
+                                oca_result = await executor.attach_oca_stop_target(trade)
+                                if oca_result and oca_result.get("success"):
+                                    trade.stop_order_id = oca_result.get("stop_order_id")
+                                    tgt_id = oca_result.get("target_order_id")
+                                    if tgt_id:
+                                        # BotTrade tracks targets as a list
+                                        # (`target_order_ids`) since brackets
+                                        # can scale out across multiple PTs.
+                                        if not hasattr(trade, "target_order_ids") or trade.target_order_ids is None:
+                                            trade.target_order_ids = []
+                                        trade.target_order_ids.append(tgt_id)
+                                    trade.oca_group = oca_result.get("oca_group")
+                                    # Re-persist so the order IDs land in bot_trades.
+                                    await asyncio.to_thread(bot._persist_trade, trade)
+                                    bracket_attach_result = oca_result
+                                    logger.info(
+                                        f"[RECONCILE BRACKET] {sym} OCA attached: "
+                                        f"stop={trade.stop_order_id} "
+                                        f"tgt={getattr(trade, 'target_order_ids', [])} "
+                                        f"oca={getattr(trade, 'oca_group', None)}"
+                                    )
+                                else:
+                                    err = (oca_result or {}).get("error", "unknown")
+                                    bracket_attach_result = {"success": False, "error": err}
+                                    logger.error(
+                                        f"[RECONCILE NAKED] {sym} {trade.id} adopted "
+                                        f"{abs_qty}sh but OCA attach failed: {err}. "
+                                        f"Position is UNPROTECTED at IB — operator must "
+                                        f"add stop manually or wait for retry."
+                                    )
+                            except Exception as e:
+                                bracket_attach_result = {"success": False, "error": str(e)}
+                                logger.error(
+                                    f"[RECONCILE NAKED] {sym} OCA attach raised: {e}. "
+                                    f"Position UNPROTECTED."
+                                )
                     else:
                         logger.warning(
                             f"[RECONCILE] {sym} adopted but no executor with "
@@ -2480,21 +2552,31 @@ class PositionReconciler:
         trade.oca_group = None
 
         if executor and hasattr(executor, "attach_oca_stop_target"):
-            try:
-                oca_result = await executor.attach_oca_stop_target(trade)
-                if oca_result and oca_result.get("success"):
-                    trade.stop_order_id = oca_result.get("stop_order_id")
-                    tgt_id = oca_result.get("target_order_id")
-                    if tgt_id:
-                        trade.target_order_id = tgt_id
-                    trade.oca_group = oca_result.get("oca_group")
-                else:
-                    logger.error(
-                        f"[v19.34.42 grow NAKED] {sym} {trade.id} grew to {new_shares} "
-                        f"sh but OCA reissue failed: {(oca_result or {}).get('error', 'unknown')}"
-                    )
-            except Exception as e:
-                logger.error(f"[v19.34.42 grow NAKED] {sym} OCA reissue raised: {e}")
+            # v19.34.111 — cooldown guard (see PositionReconciler init).
+            _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
+            if _cooldown_left is not None:
+                self._bracket_attach_cooldown_skips += 1
+                logger.info(
+                    f"[v19.34.111 COOLDOWN] {sym} {trade.id} skip grow-attach "
+                    f"— {_cooldown_left:.1f}s left in cooldown."
+                )
+            else:
+                self._stamp_bracket_attach(trade.id)
+                try:
+                    oca_result = await executor.attach_oca_stop_target(trade)
+                    if oca_result and oca_result.get("success"):
+                        trade.stop_order_id = oca_result.get("stop_order_id")
+                        tgt_id = oca_result.get("target_order_id")
+                        if tgt_id:
+                            trade.target_order_id = tgt_id
+                        trade.oca_group = oca_result.get("oca_group")
+                    else:
+                        logger.error(
+                            f"[v19.34.42 grow NAKED] {sym} {trade.id} grew to {new_shares} "
+                            f"sh but OCA reissue failed: {(oca_result or {}).get('error', 'unknown')}"
+                        )
+                except Exception as e:
+                    logger.error(f"[v19.34.42 grow NAKED] {sym} OCA reissue raised: {e}")
         # Persist.
         save_fn = getattr(bot, "_save_trade", None) or getattr(bot, "_persist_trade", None)
         if save_fn:
@@ -2678,7 +2760,18 @@ class PositionReconciler:
         try:
             executor = getattr(bot, "_trade_executor", None)
             if executor and hasattr(executor, "attach_oca_stop_target"):
-                oca_result = await executor.attach_oca_stop_target(trade)
+                # v19.34.111 — cooldown guard (see PositionReconciler init).
+                _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
+                if _cooldown_left is not None:
+                    self._bracket_attach_cooldown_skips += 1
+                    logger.info(
+                        f"[v19.34.111 COOLDOWN] {sym} {trade.id} skip "
+                        f"spawn-attach — {_cooldown_left:.1f}s left in cooldown."
+                    )
+                    oca_result = None
+                else:
+                    self._stamp_bracket_attach(trade.id)
+                    oca_result = await executor.attach_oca_stop_target(trade)
                 if oca_result and oca_result.get("success"):
                     trade.stop_order_id = oca_result.get("stop_order_id")
                     # Target ID lives alongside stop. Stamped on trade

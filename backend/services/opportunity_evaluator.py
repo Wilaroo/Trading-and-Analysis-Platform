@@ -399,10 +399,48 @@ class OpportunityEvaluator:
             # Calculate targets if not provided
             if not target_prices:
                 risk = abs(entry_price - stop_price)
-                if direction == TradeDirection.LONG:
-                    target_prices = [entry_price + risk * 1.5, entry_price + risk * 2.5, entry_price + risk * 4]
+                # ── v19.34.112 (Feb 2026) — Trade-style-aware target ladder ──
+                # Pre-v112 every trade — scalp, swing, position — got
+                # the same `[1.5R, 2.5R, 4R]` ladder regardless of
+                # holding period. A scalp targeting 1R in <5 minutes
+                # rarely sees 1.5R inside the window; 2.5R and 4R are
+                # noise rungs that never trigger. Worse, the OCA
+                # bracket attached to the trade uses `target_prices[0]`
+                # (the 1.5R rung) as the SINGLE LMT — so scalps exit
+                # at 1.5R or they don't exit at all.
+                #
+                # New ladder is keyed off `trade_style` (preferred) with
+                # `setup_type` fallback for setups that pre-date the
+                # trade_style stamp. Each rung is tuned to the typical
+                # holding-period MFE distribution:
+                #   • Scalp     → [1.0R, 1.5R]      — fast, two-rung scale
+                #   • Intraday  → [1.5R, 2.5R]      — single-session bracket
+                #   • Swing     → [1.5R, 2.5R, 4R]  — legacy default (kept)
+                #   • Position  → [2R,   4R,   8R]  — runner-friendly
+                trade_style_lower = (
+                    (alert.get('trade_style') if isinstance(alert, dict) else None)
+                    or ''
+                ).strip().lower()
+                setup_lower = (setup_type or '').strip().lower()
+                _is_scalp = (
+                    trade_style_lower == 'scalp'
+                    or setup_lower in {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
+                )
+                _is_position = trade_style_lower in {'position', 'investment'}
+                _is_intraday = trade_style_lower == 'intraday'
+                if _is_scalp:
+                    rungs = [1.0, 1.5]
+                elif _is_position:
+                    rungs = [2.0, 4.0, 8.0]
+                elif _is_intraday:
+                    rungs = [1.5, 2.5]
                 else:
-                    target_prices = [entry_price - risk * 1.5, entry_price - risk * 2.5, entry_price - risk * 4]
+                    # swing / multi_day / unknown → legacy ladder.
+                    rungs = [1.5, 2.5, 4.0]
+                if direction == TradeDirection.LONG:
+                    target_prices = [entry_price + risk * r for r in rungs]
+                else:
+                    target_prices = [entry_price - risk * r for r in rungs]
 
             # ── Target snap (2026-04-28e) ──
             # For each computed target, snap to just before the nearest
@@ -415,7 +453,30 @@ class OpportunityEvaluator:
                 if isinstance(alert, dict):
                     tgt_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
                 db_for_targets = getattr(bot, "_db", None) or getattr(bot, "db", None)
-                if sym_for_targets and db_for_targets is not None and target_prices:
+                # ── v19.34.112 — Skip target-snap for scalps ────────────
+                # target-snap is designed to *widen* targets to just
+                # before the nearest S/R cluster on the move side. For
+                # swing/position trades targeting 2-4R, that's a few
+                # cents of slippage to capture a thicker resting bid.
+                # For a scalp targeting 1R in <5 minutes, a snap can
+                # easily push the target 30-50 bp further out — far
+                # enough that the move never reaches it inside the
+                # holding window. Treat scalps as "tight target, take
+                # what's there"; do not widen.
+                _ts = (
+                    (alert.get('trade_style') if isinstance(alert, dict) else None) or ''
+                ).strip().lower()
+                _su = (setup_type or '').strip().lower()
+                _is_scalp_for_snap = (
+                    _ts == 'scalp'
+                    or _su in {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
+                )
+                if _is_scalp_for_snap:
+                    logger.debug(
+                        f"target-snap skipped for {sym_for_targets} — "
+                        f"scalp trade-style does not widen targets."
+                    )
+                elif sym_for_targets and db_for_targets is not None and target_prices:
                     from services.smart_levels_service import compute_target_snap
                     dir_str = "long" if direction == TradeDirection.LONG else "short"
                     snap = compute_target_snap(
@@ -1046,9 +1107,39 @@ class OpportunityEvaluator:
         setup_multipliers = {
             'rubber_band': 1.0, 'squeeze': 1.5, 'breakout': 1.5, 'vwap_bounce': 1.0,
             'gap_fade': 1.25, 'relative_strength': 1.5, 'mean_reversion': 1.0, 'orb': 1.25,
+            # ── v19.34.112 (Feb 2026) — Scalp ATR multipliers ──────────
+            # Pre-v112 every scalp setup fell through to
+            # `bot.risk_params.base_atr_multiplier` (typically 1.5-2.0×),
+            # which is the same stop distance we use for a 4-hour
+            # intraday hold. For a position designed to be in-and-out
+            # in <5 minutes that's catastrophic: the stop sits 1-2 ATRs
+            # away (often $1.50+) on micro-moves where the operator
+            # expected a 30-50 bp risk budget. The setup's documented
+            # 60-70% win rate is built on RECOVERING when the entry
+            # ticks against us by 0.3-0.5×ATR — wide stops force scalps
+            # to ride out moves they should already have cut on.
+            #
+            # Tight multipliers below align with the "scalper's bracket"
+            # convention: 0.4-0.5×ATR stop, 1R first target (see
+            # target ladder fix below). The trade-style chip on the V5
+            # HUD will surface the actual R:R per setup so the operator
+            # can verify these are right for their account size.
+            'scalp':          0.5,
+            'nine_ema_scalp': 0.4,   # tightest — momentum scalps revert fast
+            'spencer_scalp':  0.5,
+            'abc_scalp':      0.5,
         }
         multiplier = setup_multipliers.get(setup_type, bot.risk_params.base_atr_multiplier)
-        multiplier = max(bot.risk_params.min_atr_multiplier, min(multiplier, bot.risk_params.max_atr_multiplier))
+        # v19.34.112 — Scalp multipliers (0.4-0.5×) intentionally sit
+        # BELOW the global `min_atr_multiplier` floor (typically 1.0×).
+        # The floor exists to protect non-scalp setups from a noisy
+        # config; scalps need to legitimately go tighter. Skip the
+        # clamp ONLY for known scalp setups.
+        is_scalp_setup = setup_type in {
+            'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp',
+        }
+        if not is_scalp_setup:
+            multiplier = max(bot.risk_params.min_atr_multiplier, min(multiplier, bot.risk_params.max_atr_multiplier))
         stop_distance = atr * multiplier
         if direction == TradeDirection.LONG:
             return entry_price - stop_distance

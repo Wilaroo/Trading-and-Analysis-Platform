@@ -269,3 +269,25 @@ event-driven dispatch we never time-out a transient.
 
 Pusher redeploy required for P3-B; backend hot-reloads for P3-A
 after frontend `yarn build`.
+
+## v19.34.111 — Queue idempotency + reconciler attach cooldown (2026-02-12)
+
+Root-cause fix for the bounce loop v109 patched at the symptom layer.
+`order_queue_service.queue_order()` now returns the existing `order_id`
+when the caller's `trade_id` is already in-flight (PENDING / CLAIMED /
+IB_PENDING / EXECUTING). Reconciler's `attach_oca_stop_target` call
+sites are throttled by a per-`trade.id` 60s cooldown
+(`BRACKET_ATTACH_COOLDOWN_S` env-overridable). Two layered guards
+ensure duplicate intents can't reach IB regardless of caller path.
+
+## v19.34.112 — Scalp SL/TP calculation fix (2026-02-12)
+
+Scalp setups (`scalp`, `nine_ema_scalp`, `spencer_scalp`, `abc_scalp`)
+were silently using the generic 1.5-2.0× base ATR multiplier and the
+fixed `[1.5R, 2.5R, 4R]` target ladder — wrong for <5min holding
+periods. v112 ships:
+- Tight ATR multipliers (0.4-0.5×) with min-clamp bypass for scalps only
+- Trade-style-aware target ladder: scalp `[1R, 1.5R]`, intraday `[1.5R, 2.5R]`, swing `[1.5R, 2.5R, 4R]` (legacy), position `[2R, 4R, 8R]`
+- `target_snap` skipped for scalps (avoids widening tight targets to S/R clusters)
+
+Existing positions are NOT migrated — only new alerts get the v112 treatment.

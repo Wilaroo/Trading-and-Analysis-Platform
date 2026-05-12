@@ -2,6 +2,167 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.112) — Scalp SL/TP calculation fix
+
+The P3 investigation under v110 surfaced a P0-grade SL/TP gap nobody
+had been looking at: pre-v112 every scalp setup fell through to
+`bot.risk_params.base_atr_multiplier` (typically 1.5-2.0×) in
+`OpportunityEvaluator.calculate_atr_based_stop` because the
+`setup_multipliers` table had no scalp entries. The legacy target
+ladder `[1.5R, 2.5R, 4R]` was hardcoded regardless of trade_style.
+The result: scalps designed for a <5min hold rode 1-2 ATR stops and
+chased unreachable 1.5R+ targets — a 60-70% WR strategy degraded to
+a coin flip.
+
+### Three coordinated fixes
+
+**1. Scalp ATR stop multipliers (services/opportunity_evaluator.py)**
+
+```python
+setup_multipliers = {
+    'rubber_band': 1.0, 'squeeze': 1.5, 'breakout': 1.5,
+    'vwap_bounce': 1.0, 'gap_fade': 1.25,
+    'relative_strength': 1.5, 'mean_reversion': 1.0, 'orb': 1.25,
+    # v112 — Scalp variants
+    'scalp':          0.5,
+    'nine_ema_scalp': 0.4,   # tightest — momentum scalps revert fast
+    'spencer_scalp':  0.5,
+    'abc_scalp':      0.5,
+}
+```
+
+The 0.4-0.5× multipliers intentionally sit BELOW the global
+`min_atr_multiplier` floor (typically 1.0×). The clamp exists to
+protect non-scalp setups from misconfigured floors; scalps
+legitimately need to go tighter. v112 bypasses the clamp ONLY for
+the four scalp setup_types. Every other setup still respects the
+floor (regression-locked in `TestNonScalpRegression`).
+
+**2. Trade-style-aware target ladder**
+
+The ladder is now keyed off `trade_style` (preferred) with
+`setup_type` fallback for alerts that pre-date the trade_style stamp:
+
+| trade_style | rungs (R) | reasoning |
+|---|---|---|
+| `scalp` | `[1.0, 1.5]` | fast two-rung scale, hit at MFE peak |
+| `intraday` | `[1.5, 2.5]` | single-session bracket |
+| `swing` / `multi_day` / unknown | `[1.5, 2.5, 4.0]` | legacy default preserved |
+| `position` / `investment` | `[2.0, 4.0, 8.0]` | runner-friendly, multi-day MFE |
+
+`attach_oca_stop_target` uses `target_prices[0]` as its single LMT —
+which means scalps now exit at 1R via the OCA bracket (not 1.5R) and
+position trades run for 2R minimum (not 1.5R).
+
+**3. Target-snap skip for scalps**
+
+`smart_levels_service.compute_target_snap` widens targets to the
+next S/R cluster on the move side. For swing/position that's a few
+cents of slippage to capture a thicker resting bid. For a scalp
+targeting 1R in <5min, a snap can push the target 30-50 bp further
+out — easily unreachable inside the holding window. v112 skips the
+snap entirely for `_is_scalp_for_snap` trades. Non-scalp behaviour
+preserved bit-for-bit.
+
+### Regression — 20 / 20 new + 159 / 159 cumulative PASS
+
+`tests/test_v19_34_112_scalp_sl_tp_fix.py`:
+- `TestScalpAtrStopMultipliers` (7) — each variant + clamp bypass +
+  short stop + non-scalp clamp preserved + unknown-setup fallback
+- `TestTradeStyleTargetLadder` (5) — scalp / position / intraday /
+  swing rungs + setup_type fallback when trade_style missing
+- `TestScalpTargetSnapSkip` (3) — skip branch present, dual-signal
+  classification, non-scalp path still imports compute_target_snap
+- `TestSetupMultipliersTableIntegrity` (1) — every scalp variant
+  produces a tighter stop than base-multiplier
+- `TestNonScalpRegression` (4) — breakout / squeeze / rubber_band /
+  orb multipliers unchanged
+
+### Operator notes
+- **No DGX restart required** — backend hot-reloads.
+- Existing scalp positions opened pre-v112 are NOT migrated — their
+  stop/target prices are baked in. Only NEW alerts get the v112
+  treatment. Operator can manually retune existing scalp brackets
+  via the V5 surface if needed.
+- The 0.4-0.5× multipliers are *opinions*, not laws. If your scalp
+  win rate drops in week 1, widen to 0.6-0.7× in
+  `opportunity_evaluator.py` line 1046 — single-file change, no test
+  contract needs updating.
+
+
+## 2026-02-12 (v19.34.111) — Queue-level trade_id idempotency + reconciler attach cooldown
+
+The P1 investigation traced the v109 "Duplicate submission blocked"
+bounce-loop back to its actual root cause: Spark was generating
+duplicate orders. Pre-v111 `order_queue_service.queue_order()`
+allocated a fresh `uuid4()` `order_id` on every call with no
+idempotency check on `trade_id`. The 30s share-drift loop happily
+queued a second / third STP+LMT pair under the same
+`trade_id="ADOPT-STOP-<trade.id>"` while the pusher was still
+working the first one. Each got a different `order_id` so the queue
+never noticed the duplicate intent. v109 patched the *symptom* (the
+pusher's bounce loop on already-submitted IB orders); v111 closes
+the upstream gap.
+
+### Two layered guards
+
+**1. Queue-level `trade_id` idempotency (services/order_queue_service.py)**
+
+If a row with the caller's `trade_id` is in any in-flight state —
+`PENDING`, `CLAIMED`, `IB_PENDING`, `EXECUTING` — `queue_order()`
+returns the existing `order_id` instead of inserting a new row.
+Terminal states (filled/rejected/cancelled/expired/partial/timeout)
+do NOT block — yesterday's filled stop must be re-quotable today.
+Falsy `trade_id` (None / "" / whitespace) bypasses the guard for
+legacy anonymous orders. Guard failure (Mongo blip on the probe)
+swallows + falls through to the legacy insert path so the queue
+never crashes silently.
+
+**2. Reconciler bracket-attach cooldown (services/position_reconciler.py)**
+
+Per-`trade.id` monotonic timestamp of the last
+`attach_oca_stop_target` attempt (success OR failure — the cooldown
+is on *attempts*, not outcomes). If a subsequent call lands inside
+`BRACKET_ATTACH_COOLDOWN_S` (default 60s, `BRACKET_ATTACH_COOLDOWN_S`
+env-overridable), the reconciler skips and stamps a cooldown skip
+diagnostic. Wraps all three production attach call sites:
+
+- `reconcile_orphan_positions` (boot retry + manual RECONCILE +
+  share-drift fallback)
+- `_grow_existing_excess_slice` (drift-recheck reissue)
+- `_spawn_excess_slice` (new-slice adoption)
+
+The two guards are deliberately layered: the queue-level dedup
+catches duplicates at the lowest layer regardless of caller; the
+reconciler cooldown stops duplicate intents from even reaching the
+queue so Mongo writes don't spike under a misbehaving caller.
+
+### Regression — 23 / 23 new + 137 / 137 cumulative PASS
+
+`tests/test_v19_34_111_queue_idempotency_and_attach_cooldown.py`:
+- `TestQueueLevelTradeIdIdempotency` (9) — in-flight dedup for
+  pending/claimed/ib_pending/executing, terminal states pass through,
+  empty trade_id bypass, Mongo blip fallback, filter integrity check
+- `TestBracketAttachCooldown` (9) — first-attempt no cooldown,
+  active immediately after stamp, clears after window, falsy id
+  bypass, stamp no-op for falsy, independent cooldowns per trade,
+  env override, invalid env default, skip counter
+- `TestCooldownCallsiteWiring` (4) — all three production attach
+  sites wrap their executor call in the cooldown guard
+- `TestEndToEndIdempotencyContract` (1) — two callers, same
+  trade_id, share order_id, one insert
+
+### Operator notes
+- **No DGX restart required** — backend hot-reloads. Effect visible
+  immediately on next share-drift tick.
+- Pusher unchanged. The pusher's v109/v110 architecture stays in
+  place as a backup defense against any future Spark misconfig.
+- The 60s cooldown is conservative. If you observe legitimate retry
+  patterns getting throttled (rare — would require an OCA attach to
+  legitimately fail and recover within 60s), tune via
+  `BRACKET_ATTACH_COOLDOWN_S=30` env var.
+
+
 ## 2026-02-12 (v19.34.110) — Pipeline tile split + event-driven pusher ACK
 
 Two P3 items shipped under one version tag.

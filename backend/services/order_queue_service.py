@@ -194,6 +194,76 @@ class OrderQueueService:
         if refused_id is not None:
             return refused_id
 
+        # v19.34.111 (Feb 2026) — Queue-level `trade_id` idempotency.
+        #
+        # Pre-v111 every call to queue_order() inserted a brand new row
+        # with a fresh `order_id = uuid4()` even when the caller had
+        # already queued an order under the same `trade_id` and IB
+        # hadn't reached a terminal state yet. The reconciler's
+        # share-drift loop fires every 30s; if the pusher's first
+        # ADOPT-STP submission hadn't settled (PENDING / CLAIMED /
+        # IB_PENDING / EXECUTING), the next reconciler tick happily
+        # queued a SECOND STP+LMT pair under
+        # `trade_id="ADOPT-STOP-<trade.id>"`. v109's IB_PENDING split
+        # tamed the symptom (the "Duplicate submission blocked"
+        # bounce-loop on the pusher side) but the upstream root cause
+        # remained: Spark was generating duplicate orders.
+        #
+        # This guard closes the loop. If a caller passes a `trade_id`
+        # AND an in-flight row with that `trade_id` already exists
+        # (status in {pending, claimed, ib_pending, executing}), we
+        # return the existing `order_id` instead of inserting. The
+        # caller sees the same order they would have submitted; the
+        # pusher continues working the original.
+        #
+        # Notes:
+        #   - Falsy `trade_id` (None, "") bypasses the guard. Some
+        #     legacy paths intentionally queue anonymous orders.
+        #   - Terminal states (filled/rejected/cancelled/expired/
+        #     partial/timeout) DO NOT block — a stop that filled
+        #     yesterday must be re-quotable today under a fresh
+        #     adoption cycle. We key strictly on `in-flight`.
+        #   - The guard is scoped to (trade_id) — not (trade_id +
+        #     payload hash). Different intents under the same trade_id
+        #     would collide; this is intentional because Spark always
+        #     re-creates a payload with the same trade_id when retrying
+        #     the same logical order (ADOPT-STP-{trade.id} is the same
+        #     STP every cycle).
+        trade_id_for_dedup = (order.get("trade_id") or "").strip() or None
+        if trade_id_for_dedup:
+            try:
+                in_flight_statuses = [
+                    OrderStatus.PENDING.value,
+                    OrderStatus.CLAIMED.value,
+                    OrderStatus.IB_PENDING.value,
+                    OrderStatus.EXECUTING.value,
+                ]
+                existing = self._collection.find_one(
+                    {
+                        "trade_id": trade_id_for_dedup,
+                        "status": {"$in": in_flight_statuses},
+                    },
+                    {"_id": 0, "order_id": 1, "status": 1, "queued_at": 1},
+                    sort=[("queued_at", DESCENDING)],
+                )
+                if existing and existing.get("order_id"):
+                    logger.warning(
+                        "[v19.34.111 QUEUE-IDEMPOTENCY] trade_id=%s already "
+                        "in-flight as order_id=%s status=%s — returning "
+                        "existing id, refusing duplicate insert.",
+                        trade_id_for_dedup, existing["order_id"], existing.get("status"),
+                    )
+                    return existing["order_id"]
+            except Exception as e:
+                # Idempotency guard MUST NOT crash the queue. Log and
+                # fall through to the legacy path (worst case = the
+                # pre-v111 duplicate-row behaviour).
+                logger.warning(
+                    "[v19.34.111 QUEUE-IDEMPOTENCY] guard error for "
+                    "trade_id=%s: %s — falling through to legacy insert.",
+                    trade_id_for_dedup, e,
+                )
+
         order_id = str(uuid.uuid4())[:8]
         is_bracket = order.get("type") == "bracket"
 
