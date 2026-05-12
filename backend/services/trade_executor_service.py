@@ -21,6 +21,12 @@ from typing import Dict, Optional, Any
 from enum import Enum
 
 from services.bracket_tif import bracket_tif
+# v19.34.102 (Feb 2026) — pull TIF + outside_rth + tp_ladder from the
+# per-style order-policy registry. The registry is the single source of
+# truth introduced in v19.34.100 and replaces ad-hoc lookups in this
+# module. `bracket_tif` import is preserved for the legacy non-bracket
+# paths and the v19.34.28 attach-OCA path that still consult it.
+from services.order_policy_registry import get_policy_for_trade
 
 logger = logging.getLogger(__name__)
 
@@ -996,15 +1002,99 @@ class TradeExecutorService:
                 return {"success": False,
                         "error": "bracket_missing_stop_or_target", "fallback": "legacy"}
 
-            # v19.34.5 — classification-aware TIF for stop/target legs.
-            # Intraday/scalp trades get DAY TIF (legs die at EOD with the parent),
-            # swing/multi-day/position trades get GTC + outside_rth=True (must
-            # survive overnight to provide stop protection). See
-            # services/bracket_tif.py for the full decision tree and the bug
-            # this fixes (forensic write-up in CHANGELOG 2026-05-04 EVE).
-            _bracket_leg_tif, _bracket_leg_outside_rth = bracket_tif(
-                getattr(trade, "trade_style", None),
-                getattr(trade, "timeframe", None),
+            # v19.34.102 (Feb 2026) — single source of truth for execution
+            # policy is `services.order_policy_registry`. We resolve the
+            # policy ONCE here and reuse it for:
+            #   • parent.time_in_force + parent.outside_rth   (NEW — pre-fix
+            #     parent.tif was hardcoded "DAY" and parent.outside_rth was
+            #     missing entirely, so a multi-day parent LMT auto-cancelled
+            #     at session close before it could fill).
+            #   • stop  / target child TIF + outside_rth      (was v19.34.5
+            #     classification — now reads from the registry instead so
+            #     bracket_tif() and order_policy_registry never diverge).
+            #   • tp_ladder → multi-rung OCA targets          (v19.34.103).
+            _policy = get_policy_for_trade(trade)
+            _bracket_leg_tif = _policy.time_in_force
+            _bracket_leg_outside_rth = bool(_policy.outside_rth)
+            # Parent TIF: short-horizon parents stay DAY (so an unfilled
+            # parent dies at EOD instead of lingering overnight); long-
+            # horizon parents go GTC so the entry order persists if not
+            # filled in the first session (a position-style entry on a
+            # weekly base is allowed to wait for the trigger).
+            _parent_tif = _bracket_leg_tif
+            _parent_outside_rth = _bracket_leg_outside_rth
+
+            # v19.34.103 — Build the OCA target ladder from the policy's
+            # tp_ladder. Quantity per rung = round(shares * pct), with the
+            # FINAL rung absorbing any rounding remainder so the total
+            # quantity across all targets sums EXACTLY to trade.shares
+            # (otherwise IB OCA-group accounting drifts and the stop's
+            # auto-reduce on partial fills under-shoots by 1 share).
+            #
+            # Rung price = entry ± r_multiple × risk_distance. If
+            # `trade.target_prices` has explicit operator/scanner-set
+            # values, they take precedence for the matching ladder index.
+            #
+            # Single shared stop, qty auto-reduces on each TP fill — IB's
+            # native OCA group semantics (per ask_human Q2 → "a").
+            risk_distance = abs(float(trade.entry_price) - float(trade.stop_price)) if (
+                trade.entry_price and trade.stop_price
+            ) else 0.0
+            explicit_targets = []
+            if hasattr(trade, "target_prices") and trade.target_prices:
+                explicit_targets = [float(t) for t in trade.target_prices if t is not None]
+
+            ladder = list(_policy.tp_ladder) if _policy.tp_ladder else []
+            target_legs = []
+            if ladder and trade.shares and trade.shares > 0:
+                # First pass: compute each rung's qty.
+                rung_qtys = [int(round(int(trade.shares) * float(r.pct_of_position))) for r in ladder]
+                # Drop trailing zero-qty rungs (tiny positions can't
+                # support a 25/25/50 ladder — collapse to fewer rungs).
+                while rung_qtys and rung_qtys[-1] == 0 and len(rung_qtys) > 1:
+                    rung_qtys.pop()
+                    ladder = ladder[: len(rung_qtys)]
+                # Force at least one share on a non-empty rung.
+                rung_qtys = [max(q, 1) for q in rung_qtys]
+                # Absorb rounding remainder into the LAST rung so the
+                # sum is exactly trade.shares.
+                drift = int(trade.shares) - sum(rung_qtys)
+                if drift != 0 and rung_qtys:
+                    rung_qtys[-1] = max(rung_qtys[-1] + drift, 1)
+
+                for idx, (rung, qty) in enumerate(zip(ladder, rung_qtys)):
+                    if idx < len(explicit_targets):
+                        rung_px = float(explicit_targets[idx])
+                    elif risk_distance > 0 and trade.entry_price:
+                        rung_px = round(
+                            float(trade.entry_price) + float(rung.r_multiple) * risk_distance
+                            if action == "BUY"
+                            else float(trade.entry_price) - float(rung.r_multiple) * risk_distance,
+                            2,
+                        )
+                    else:
+                        # Last-resort: fall back to the legacy single
+                        # target_price for this rung.
+                        rung_px = float(target_price)
+                    target_legs.append({
+                        "action": child_action,
+                        "quantity": int(qty),
+                        "order_type": "LMT",
+                        "limit_price": float(rung_px),
+                        "time_in_force": _bracket_leg_tif,
+                        "outside_rth": _bracket_leg_outside_rth,
+                        "r_multiple": float(rung.r_multiple),
+                    })
+
+            # Always preserve the legacy single-leg `target` for older
+            # pushers that haven't been upgraded to the v19.34.103
+            # multi-target contract. It mirrors the FIRST rung when a
+            # ladder exists; otherwise the legacy single 2R target_price.
+            legacy_target_price = (
+                float(target_legs[0]["limit_price"]) if target_legs else float(target_price)
+            )
+            legacy_target_qty = (
+                int(target_legs[0]["quantity"]) if target_legs else int(trade.shares)
             )
 
             payload = {
@@ -1016,7 +1106,8 @@ class TradeExecutorService:
                     "quantity": trade.shares,
                     "order_type": "LMT",
                     "limit_price": limit_price,
-                    "time_in_force": "DAY",
+                    "time_in_force": _parent_tif,
+                    "outside_rth": _parent_outside_rth,
                     "exchange": "SMART",
                 },
                 "stop": {
@@ -1029,18 +1120,39 @@ class TradeExecutorService:
                 },
                 "target": {
                     "action": child_action,
-                    "quantity": trade.shares,
+                    "quantity": legacy_target_qty,
                     "order_type": "LMT",
-                    "limit_price": float(target_price),
+                    "limit_price": legacy_target_price,
                     "time_in_force": _bracket_leg_tif,
                     "outside_rth": _bracket_leg_outside_rth,
+                },
+                # v19.34.103 — Multi-rung OCA target ladder. Additive
+                # field; older pushers ignore it and execute the legacy
+                # single-`target` leg instead (graceful degradation —
+                # documented in /app/memory/PUSHER_BRACKET_SPEC.md).
+                "targets": target_legs,
+                # v19.34.102 — Operator-facing policy stamp so the pusher
+                # log + audit trail show exactly which horizon's rules
+                # were applied to this bracket.
+                "policy": {
+                    "style": _policy.style,
+                    "horizon_label": _policy.horizon_label,
+                    "stop_trail_anchor": _policy.stop_trail_anchor,
+                    "eod_sweep_eligible": _policy.eod_sweep_eligible,
                 },
             }
 
             order_id = queue_order(payload)
+            _ladder_log = (
+                ", ".join(f"{int(t['quantity'])}@{t['limit_price']}" for t in target_legs)
+                if target_legs
+                else f"{int(trade.shares)}@{target_price}"
+            )
             logger.info(
                 f"Bracket queued: {order_id} — {action} {trade.shares} {trade.symbol} "
-                f"parent@{limit_price} stop@{trade.stop_price} target@{target_price}"
+                f"parent@{limit_price} ({_parent_tif}) stop@{trade.stop_price} "
+                f"targets={len(target_legs) or 1} ladder=[{_ladder_log}] "
+                f"style={_policy.style}"
             )
 
             # Wait for parent fill confirmation

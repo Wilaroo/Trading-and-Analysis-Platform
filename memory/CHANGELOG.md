@@ -2,6 +2,115 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.102 / 103 / 104 / 105) — Order-policy execution wiring
+
+### Why
+v19.34.100 stood up the `order_policy_registry` (single source of truth
+for TIF / outside_rth / tp_ladder / stop_trail_anchor / EOD behavior
+per trade style). v19.34.101 surfaced it in the V5 HUD pill. This batch
+finally **wires** those policies all the way through to IB:
+
+  • Pre-fix the IB bracket payload **hard-coded `parent.time_in_force = "DAY"`**
+    and **omitted `parent.outside_rth` entirely**. A multi-day/swing/
+    investment/position parent LMT auto-cancelled at session close
+    before it could ever fill on a base-breakout setup.
+  • Pre-fix the bracket carried **exactly one TP leg** even for styles
+    whose policy declared a 3-rung scale-out ladder (e.g. `position`:
+    25% @ 4R · 25% @ 8R · 50% @ 15R). 75% of the position would never
+    book partials, and the runner couldn't ride to the +15R target.
+  • Pre-fix the stop manager **only trailed on ATR/%**. A multi-month
+    `position` trade should anchor its trail on the 30-week SMA per
+    Weinstein — not whip on a 1.5×ATR intraday band.
+
+### What ships
+
+**v19.34.102 — Parent TIF + outside_rth + audit stamp**
+- `services/trade_executor_service.py::_ib_bracket` now resolves the
+  policy **once** via `get_policy_for_trade(trade)` and uses it for:
+  parent `time_in_force` + `outside_rth` (NEW — was hardcoded), stop
+  leg, and target leg(s). `bracket_tif()` retained for legacy paths
+  (`attach_oca_stop_target`, reconciler) but the bracket builder now
+  reads exclusively from the registry → zero policy drift.
+- Adds a `policy: {...}` audit stamp to every bracket payload
+  (`style`, `horizon_label`, `stop_trail_anchor`, `eod_sweep_eligible`)
+  so pusher logs + IB audit trails record which horizon's rules were
+  applied to each bracket.
+
+**v19.34.103 — Multi-rung OCA target ladder**
+- Bracket payload now carries a `targets: [...]` array built from
+  `policy.tp_ladder`. Quantities computed as `round(shares * pct)`,
+  with rounding drift absorbed into the LAST rung so the sum equals
+  `trade.shares` EXACTLY (IB OCA-group accounting must not drift).
+  Tiny positions still allocate ≥1 share per rung.
+- Operator choice (ask_human Q2 → "a"): **single shared stop, qty
+  auto-reduces on each TP fill** — IB's native OCA-group semantics
+  with `ocaType=1`. One stop child + N target children share the
+  same `ocaGroup`.
+- Limit prices: explicit `trade.target_prices[i]` wins when set
+  (operator/scanner override); else `entry ± r_multiple × risk_distance`.
+- Legacy single `target: {...}` block always populated with the
+  first rung so older pushers keep working (graceful degradation).
+- `PUSHER_BRACKET_SPEC.md` extended with the new contract; pusher
+  upgrade is independent (Spark already sends both shapes).
+
+**v19.34.104 — Trailing stop anchors (EMA-20 / SMA-50 / 30wk-SMA)**
+- New module `services/trail_anchor_service.py`:
+  - `compute_anchor_value(closes, anchor)` — pure-math EMA/SMA helpers.
+  - `compute_anchor_stop(db, symbol, anchor, direction, …)` — pulls
+    daily closes from `ib_historical_data`, computes the MA, applies a
+    protective buffer (8% of ATR if available, else 0.25% of price)
+    in the trade-protective direction. Returns `None` when not enough
+    warmup bars (per operator choice ask_human Q3 → "a" — fall back to
+    ATR/% until anchor warms up).
+- `services/stop_manager.py`:
+  - `_snap_to_anchor(trade)` — consults the policy's anchor name and
+    asks `trail_anchor_service` for a candidate stop. Short-horizon
+    styles (anchor == "atr") and unknown anchors skip this path.
+  - `_best_snap(trade, proposed_stop)` — picks the most protective
+    candidate among {anchor snap, liquidity snap}, then the existing
+    ATR/% trail. Replaces the four direct `_snap_to_liquidity` call
+    sites: periodic resnap, breakeven, trailing activation, trail
+    update.
+
+**v19.34.105 — Pytest regression suite**
+- `tests/test_v19_34_102_executor_policy_wiring.py` (8 cases):
+  parametric coverage across all 6 styles for parent TIF + outside-RTH;
+  policy audit block presence; unknown-style fallback.
+- `tests/test_v19_34_103_oca_tp_ladder.py` (10 cases):
+  rung shape, quantity sum exactness, explicit-target override, short
+  trade direction, tiny-position minimum share allocation, legacy
+  target field backward-compat.
+- `tests/test_v19_34_104_stop_trail_anchor.py` (15 cases):
+  pure-math EMA/SMA, warmup-threshold returns None, buffer direction,
+  pct fallback when no ATR, atr/structure/fixed anchors skipped,
+  StopManager.\_snap_to_anchor integration.
+
+### Verification
+- `python -m pytest tests/test_v19_34_102…105_*.py` → **33/33 PASS**.
+- Full v19.34 regression (excl. pre-existing env-bound failures unrelated
+  to this batch): **173/173 PASS** across the order-policy / bracket-tif /
+  exposure / vocabulary / setup-detector suites.
+- Lint clean on all three modified files (1 pre-existing bare-except at
+  trade_executor_service.py:1695 left untouched per scope discipline).
+
+### Pusher rollout note
+The Spark backend now SENDS the new `parent.time_in_force = "GTC"` +
+`parent.outside_rth = true` + `targets: [...]` shape for long-horizon
+trades. The Windows pusher must be upgraded per the v19.34.103
+amendment in `PUSHER_BRACKET_SPEC.md` to actually book the multi-rung
+ladder. Until then, older pushers transparently fall back to the
+legacy single-`target` leg (only the first rung books).
+
+### Next
+- V5 badge cleanup (`ORPHAN/STALE/RECONCILED`).
+- Remaining setup gaps requiring new data feeds (Earnings Drift, Short
+  Squeeze, Sector Leader).
+- V6 UI refactor execution.
+- `enhanced_scanner.py` + `server.py` monolith breakup.
+
+---
+
+
 ## 2026-05-12 (v19.34.101) — Order-policy rulebook pill in V5 HUD
 
 ### Why

@@ -169,6 +169,97 @@ curl -s "http://localhost:8001/api/trading-bot/trades/open" | \
 # the proof path. Legacy flow leaves `[LIVE-INTERACTIVE_BROKERS]`.
 ```
 
+## v19.34.103 amendment — Multi-rung OCA target ladder
+
+**Date:** Feb 2026
+**Status:** Spec extension — Spark backend now SENDS the new shape; pusher
+implementation pending. Old single-`target` payload is preserved as a
+fallback so older pushers continue to work unchanged.
+
+### Why
+v19.34.100 introduced per-style execution policies. Long-horizon styles
+(`multi_day`, `swing`, `investment`, `position`) carry multi-rung TP
+ladders (e.g. position = `25% @ 4R · 25% @ 8R · 50% @ 15R`). The single
+`target: {...}` leg only books the FIRST rung — partial-profit
+scale-outs never reach IB and the runner never gets booked.
+
+### New optional payload field
+
+When `trade.shares` and the registry's `tp_ladder` produce >1 rung,
+Spark adds a `"targets"` ARRAY of LMT legs. Each rung is OCA-grouped
+WITH THE SAME STOP — IB's native OCA-group semantics auto-reduce the
+stop's quantity as each target fills (per operator confirmation
+2026-02-12: "single shared stop, qty auto-reduces on each TP fill").
+
+```json
+{
+  "type": "bracket",
+  "trade_id": "<uuid fragment>",
+  "symbol": "NVDA",
+  "parent": { ... },
+  "stop": {
+    "action": "SELL",
+    "quantity": 100,
+    "order_type": "STP",
+    "stop_price": 95.50,
+    "time_in_force": "GTC",
+    "outside_rth": true
+  },
+  "target": {                               // legacy single rung
+    "action": "SELL", "quantity": 25, "order_type": "LMT",
+    "limit_price": 110.00, "time_in_force": "GTC", "outside_rth": true
+  },
+  "targets": [                              // v19.34.103 multi-rung ladder
+    {"action": "SELL", "quantity": 25, "order_type": "LMT",
+     "limit_price": 110.00, "r_multiple": 4.0,
+     "time_in_force": "GTC", "outside_rth": true},
+    {"action": "SELL", "quantity": 25, "order_type": "LMT",
+     "limit_price": 130.00, "r_multiple": 8.0,
+     "time_in_force": "GTC", "outside_rth": true},
+    {"action": "SELL", "quantity": 50, "order_type": "LMT",
+     "limit_price": 165.00, "r_multiple": 15.0,
+     "time_in_force": "GTC", "outside_rth": true}
+  ],
+  "policy": {                               // v19.34.102 audit stamp
+    "style": "position",
+    "horizon_label": "3+ months",
+    "stop_trail_anchor": "sma_150",
+    "eod_sweep_eligible": false
+  }
+}
+```
+
+Spark guarantees that `sum(targets[i].quantity) == stop.quantity == parent.quantity`.
+
+### Pusher upgrade path
+1. If `targets` is missing or empty → place a single target (legacy behavior).
+2. If `targets` has 1+ entries:
+   - Reserve N+2 `reqIds()` (parent + stop + N targets).
+   - Submit parent (`transmit=False`).
+   - Submit stop child (`parentId=<parent>`, `ocaGroup=<auto>`, `ocaType=1`, `transmit=False`).
+   - Submit each `targets[i]` child (`parentId=<parent>`, same `ocaGroup`, `ocaType=1`, `transmit=False`) — except the LAST one which sets `transmit=True` to activate atomically.
+3. ACK back with a `target_order_ids: [...]` list (and keep `target_order_id` = `target_order_ids[0]` for backward compat).
+
+`ocaType=1` ("cancel-with-block") is correct here: when any TP fills
+partial, IB reduces all other OCA legs' quantity proportionally.
+
+### Backward compatibility
+- Older pushers ignore `targets` and execute `target` only. Spark
+  treats those trades as if only the first rung were booked (operator
+  loses the multi-rung scale-out but the trade is otherwise safe — stop
+  and first TP still active).
+- Spark continues to surface `r.target_order_id` on the response object;
+  multi-rung pushers SHOULD additionally surface `target_order_ids`.
+
+### Parent TIF + outside_rth (v19.34.102)
+Pre-v19.34.102 the parent leg was hardcoded `time_in_force: "DAY"` and
+omitted `outside_rth` entirely. Spark now sources both fields from the
+policy registry. Pushers MUST honor whatever Spark sends in the parent
+block — particularly `time_in_force: "GTC"` for long-horizon entries
+that are allowed to sit overnight if not filled in the first session.
+
+---
+
 ## Rollback
 
 If bracket submission misbehaves on Windows, return `bracket_not_supported`

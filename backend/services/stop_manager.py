@@ -114,7 +114,7 @@ class StopManager:
         if old_stop is None or old_stop <= 0:
             return
 
-        snap = self._snap_to_liquidity(trade, old_stop)
+        snap = self._best_snap(trade, old_stop)
         if not snap or not snap.get("snapped"):
             return
         candidate = snap["stop"]
@@ -182,6 +182,106 @@ class StopManager:
             )
         return None
 
+    # ── Anchor-MA snap helper (v19.34.104) ─────────────────────────────────
+    def _snap_to_anchor(self, trade: 'BotTrade') -> Optional[dict]:
+        """Try to anchor the trailing stop to the trade's per-style
+        moving-average (EMA-20 for swing/multi_day, SMA-50 for
+        investment, 30wk-SMA for position, etc.) per the v19.34.100
+        order-policy registry.
+
+        Per operator confirmation (ask_human v19.34.101 Q3 → "a"):
+          If the anchor MA hasn't warmed up yet for a freshly opened
+          position (e.g., SMA-150 needs 150 daily bars), return None.
+          Caller falls back to the existing ATR/%-trail path.
+
+        Returns a dict shaped like _snap_to_liquidity for consistent
+        downstream handling, or None when no anchor is available.
+        """
+        if self._db is None:
+            return None
+        try:
+            from services.order_policy_registry import get_policy_for_trade
+            from services.trail_anchor_service import compute_anchor_stop
+            from services.trading_bot_service import TradeDirection
+
+            policy = get_policy_for_trade(trade)
+            anchor = (policy.stop_trail_anchor or "").lower()
+            if anchor in {"", "atr", "structure", "fixed"}:
+                # Short-horizon styles + unknown anchors keep the legacy
+                # ATR/liquidity behavior — no MA snap to consider.
+                return None
+
+            atr_hint = None
+            tcfg = getattr(trade, "trailing_stop_config", {}) or {}
+            atr_hint = tcfg.get("atr") or getattr(trade, "atr", None)
+
+            direction = "long" if trade.direction == TradeDirection.LONG else "short"
+            anchor_stop = compute_anchor_stop(
+                db=self._db,
+                symbol=trade.symbol,
+                anchor=anchor,
+                direction=direction,
+                current_price=getattr(trade, "current_price", None),
+                atr=atr_hint,
+            )
+            if anchor_stop is None or anchor_stop <= 0:
+                return None
+            return {
+                "snapped": True,
+                "stop": float(anchor_stop),
+                "level_kind": f"ma_{anchor}",
+                "level_price": float(anchor_stop),
+                "level_strength": None,
+                "anchor": anchor,
+            }
+        except Exception as exc:
+            logger.warning(
+                f"StopManager: anchor snap failed for {getattr(trade, 'symbol', '?')}: {exc}"
+            )
+            return None
+
+    # ── Combined snap chooser (v19.34.104) ─────────────────────────────────
+    def _best_snap(
+        self,
+        trade: 'BotTrade',
+        proposed_stop: float,
+    ) -> Optional[dict]:
+        """Return the most protective snap candidate for this trade.
+
+        Long-horizon trades (per the order-policy registry's
+        `stop_trail_anchor` field) consult the MA anchor FIRST; if the
+        MA has warmed up and offers a more protective stop than the
+        proposed value, it wins. Otherwise the liquidity (HVN/structure)
+        snap is consulted as a secondary source. Short-horizon trades
+        skip the anchor pass entirely and use the legacy liquidity-only
+        path, preserving v19.34.5-era behavior.
+
+        "More protective" is direction-aware:
+          • LONG  → larger (closer to current price from below) stop wins
+          • SHORT → smaller (closer to current price from above) stop wins
+        """
+        from services.trading_bot_service import TradeDirection
+        is_long = trade.direction == TradeDirection.LONG
+
+        candidates = []
+        anchor_snap = self._snap_to_anchor(trade)
+        if anchor_snap and anchor_snap.get("snapped"):
+            candidates.append(anchor_snap)
+        liq_snap = self._snap_to_liquidity(trade, proposed_stop)
+        if liq_snap and liq_snap.get("snapped"):
+            candidates.append(liq_snap)
+
+        if not candidates:
+            return None
+        # Pick the most protective candidate.
+        best = candidates[0]
+        for cand in candidates[1:]:
+            if is_long and cand["stop"] > best["stop"]:
+                best = cand
+            elif (not is_long) and cand["stop"] < best["stop"]:
+                best = cand
+        return best
+
     def _move_stop_to_breakeven(self, trade: 'BotTrade'):
         """Move stop to breakeven (entry price) after Target 1 hit.
 
@@ -196,8 +296,8 @@ class StopManager:
         old_stop = trailing_config.get('current_stop', trade.stop_price)
         breakeven_stop = trade.fill_price
 
-        # Try liquidity-aware snap first; fall back to exact breakeven.
-        snap = self._snap_to_liquidity(trade, breakeven_stop)
+        # Try liquidity/anchor-aware snap first; fall back to exact breakeven.
+        snap = self._best_snap(trade, breakeven_stop)
         new_stop = snap["stop"] if snap else breakeven_stop
         snap_meta = snap or {}
 
@@ -248,16 +348,16 @@ class StopManager:
             trailing_config['high_water_mark'] = trade.current_price
             trail_pct = trailing_config.get('trail_pct', 0.02)
             atr_stop = round(trade.current_price * (1 - trail_pct), 2)
-            # Liquidity snap — prefer the nearest HVN below price if
-            # one exists in range; else fall back to ATR/% trail.
-            snap = self._snap_to_liquidity(trade, atr_stop)
+            # Liquidity / anchor-MA snap — prefer the most protective
+            # candidate below price; else fall back to ATR/% trail.
+            snap = self._best_snap(trade, atr_stop)
             new_stop = snap["stop"] if snap else atr_stop
             new_stop = max(new_stop, old_stop)
         else:
             trailing_config['low_water_mark'] = trade.current_price
             trail_pct = trailing_config.get('trail_pct', 0.02)
             atr_stop = round(trade.current_price * (1 + trail_pct), 2)
-            snap = self._snap_to_liquidity(trade, atr_stop)
+            snap = self._best_snap(trade, atr_stop)
             new_stop = snap["stop"] if snap else atr_stop
             new_stop = min(new_stop, old_stop)
 
@@ -289,7 +389,7 @@ class StopManager:
             if trade.current_price > high_water:
                 trailing_config['high_water_mark'] = trade.current_price
                 atr_stop = round(trade.current_price * (1 - trail_pct), 2)
-                snap = self._snap_to_liquidity(trade, atr_stop)
+                snap = self._best_snap(trade, atr_stop)
                 new_stop = snap["stop"] if snap else atr_stop
                 if new_stop > old_stop:
                     trailing_config['current_stop'] = new_stop
@@ -304,7 +404,7 @@ class StopManager:
             if trade.current_price < low_water:
                 trailing_config['low_water_mark'] = trade.current_price
                 atr_stop = round(trade.current_price * (1 + trail_pct), 2)
-                snap = self._snap_to_liquidity(trade, atr_stop)
+                snap = self._best_snap(trade, atr_stop)
                 new_stop = snap["stop"] if snap else atr_stop
                 if new_stop < old_stop:
                     trailing_config['current_stop'] = new_stop
