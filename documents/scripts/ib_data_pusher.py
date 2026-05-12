@@ -2699,12 +2699,62 @@ class IBDataPusher:
             # `transmit=True` is the canonical IB pattern — submitting one
             # at a time with all `transmit=True` causes IB to route the
             # parent before the children attach, producing naked entries.
+            #
+            # 2026-02-12 v19.34.103 — Multi-rung TP ladder support.
+            # Backend now sends a `targets: [...]` array (per-rung qty +
+            # limit) for long-horizon trades (multi_day/swing/investment/
+            # position). When >1 rung is present we explicitly OCA-group
+            # the stop + all target legs under `ocaGroup` with
+            # `ocaType=1` (reduce-others-on-fill). Single-rung trades
+            # keep using the legacy `target: {...}` block. Spec is in
+            # /app/memory/PUSHER_BRACKET_SPEC.md.
             if is_bracket:
                 stop_payload = order.get("stop") or {}
                 target_payload = order.get("target") or {}
+                # v19.34.103 — Multi-rung ladder. Fall back to the legacy
+                # single-target leg when missing/empty.
+                targets_list = order.get("targets") or []
+                if not isinstance(targets_list, list) or len(targets_list) == 0:
+                    targets_list = [target_payload]
 
                 opp_action = "SELL" if action.upper() == "BUY" else "BUY"
                 qty = int(quantity)
+
+                # Sanity check: every rung must declare a positive qty.
+                # Silently coalesce missing qty into the legacy total
+                # (older-shape payloads send `target: {quantity: <full>}`
+                # without per-rung splits).
+                normalized_targets = []
+                for t in targets_list:
+                    if not isinstance(t, dict):
+                        continue
+                    rung_qty = int(t.get("quantity") or 0)
+                    rung_px = float(t.get("limit_price") or 0)
+                    if rung_qty <= 0 or rung_px <= 0:
+                        continue
+                    normalized_targets.append({
+                        "quantity": rung_qty,
+                        "limit_price": rung_px,
+                        "time_in_force": t.get("time_in_force") or "GTC",
+                        "outside_rth": bool(t.get("outside_rth", True)),
+                    })
+                if not normalized_targets:
+                    # All rungs were malformed — fall back to a single
+                    # leg sized at the full parent quantity using the
+                    # legacy target payload.
+                    normalized_targets = [{
+                        "quantity": qty,
+                        "limit_price": float(target_payload.get("limit_price", 0) or 0),
+                        "time_in_force": target_payload.get("time_in_force") or "GTC",
+                        "outside_rth": bool(target_payload.get("outside_rth", True)),
+                    }]
+
+                # OCA group binds stop + all target rungs. ocaType=1 =
+                # "cancel-with-block" → on partial TP fill, IB reduces
+                # the other legs' qty proportionally (single shared stop
+                # auto-reduces as each rung fills — per operator choice
+                # 2026-02-12).
+                oca_group = f"oca_{symbol}_{order_id[-8:]}"
 
                 parent_ib = LimitOrder(action.upper(), qty, float(limit_price))
                 parent_ib.orderId = self.ib.client.getReqId()
@@ -2712,15 +2762,19 @@ class IBDataPusher:
                 parent_ib.outsideRth = bool(parent_payload.get("outside_rth", False))
                 parent_ib.transmit = False  # hold while we attach children
 
-                tgt_ib = LimitOrder(
-                    opp_action, qty,
-                    float(target_payload.get("limit_price", 0) or 0),
-                )
-                tgt_ib.orderId = self.ib.client.getReqId()
-                tgt_ib.parentId = parent_ib.orderId
-                tgt_ib.tif = (target_payload.get("time_in_force") or "GTC").upper()
-                tgt_ib.outsideRth = bool(target_payload.get("outside_rth", True))
-                tgt_ib.transmit = False
+                # Build all target rungs (transmit=False on every one;
+                # the stop will be the final transmit=True leg).
+                tgt_orders = []
+                for rung in normalized_targets:
+                    tgt_ib = LimitOrder(opp_action, int(rung["quantity"]), float(rung["limit_price"]))
+                    tgt_ib.orderId = self.ib.client.getReqId()
+                    tgt_ib.parentId = parent_ib.orderId
+                    tgt_ib.tif = str(rung["time_in_force"]).upper()
+                    tgt_ib.outsideRth = bool(rung["outside_rth"])
+                    tgt_ib.ocaGroup = oca_group
+                    tgt_ib.ocaType = 1
+                    tgt_ib.transmit = False
+                    tgt_orders.append(tgt_ib)
 
                 stp_ib = StopOrder(
                     opp_action, qty,
@@ -2737,15 +2791,22 @@ class IBDataPusher:
                 # triggers RTH-only either way; the take-profit LMT keeps
                 # `outsideRth=True` because IB DOES honour it on LMTs.
                 stp_ib.outsideRth = False
+                stp_ib.ocaGroup = oca_group
+                stp_ib.ocaType = 1
                 stp_ib.transmit = True  # last leg flushes the bracket to TWS
 
+                _ladder_summary = ", ".join(
+                    f"{int(t.totalQuantity)}@${float(t.lmtPrice):.2f}" for t in tgt_orders
+                )
                 logger.info(
                     f"[OrderQueue] Submitting BRACKET {order_id}: "
                     f"{action} {qty} {symbol} @ ${limit_price:.2f} "
-                    f"(stop ${stp_ib.auxPrice:.2f} / target ${tgt_ib.lmtPrice:.2f})"
+                    f"({parent_ib.tif}) stop ${stp_ib.auxPrice:.2f} "
+                    f"targets=[{_ladder_summary}] oca={oca_group}"
                 )
                 parent_trade = self.ib.placeOrder(contract, parent_ib)
-                self.ib.placeOrder(contract, tgt_ib)
+                for tgt_ib in tgt_orders:
+                    self.ib.placeOrder(contract, tgt_ib)
                 self.ib.placeOrder(contract, stp_ib)
                 # Stamp idempotency cache after parent submission so a
                 # claim-retry storm doesn't reroute the same bracket.
@@ -2758,10 +2819,13 @@ class IBDataPusher:
                     self.ib.sleep(0.5)
                     s = parent_trade.orderStatus.status
                     if s == "Filled":
+                        # v19.34.103 — expose ALL target order IDs so the
+                        # backend can track each rung's fill individually.
+                        target_ids = [int(t.orderId) for t in tgt_orders]
                         logger.info(
                             f"[OrderQueue] Bracket {order_id} parent FILLED @ "
                             f"${parent_trade.orderStatus.avgFillPrice} "
-                            f"(target+stop attached)"
+                            f"(target+stop attached, {len(target_ids)} rung(s))"
                         )
                         self._report_order_result(
                             order_id,
@@ -2769,6 +2833,10 @@ class IBDataPusher:
                             fill_price=float(parent_trade.orderStatus.avgFillPrice),
                             filled_qty=int(parent_trade.orderStatus.filled),
                             ib_order_id=parent_ib.orderId,
+                            stop_order_id=int(stp_ib.orderId),
+                            target_order_id=target_ids[0] if target_ids else None,
+                            target_order_ids=target_ids,
+                            oca_group=oca_group,
                         )
                         return
                     if s in ("Cancelled", "ApiCancelled"):
@@ -2781,6 +2849,7 @@ class IBDataPusher:
                         return
                 # Timeout — leave parent working, report as pending so the
                 # backend tracks fills via reconciliation.
+                target_ids = [int(t.orderId) for t in tgt_orders]
                 logger.warning(f"[OrderQueue] Bracket {order_id} parent still pending after {max_wait}s")
                 self._report_order_result(
                     order_id,
@@ -2792,6 +2861,10 @@ class IBDataPusher:
                     filled_qty=int(parent_trade.orderStatus.filled or 0),
                     remaining_qty=int(parent_trade.orderStatus.remaining or qty),
                     ib_order_id=parent_ib.orderId,
+                    stop_order_id=int(stp_ib.orderId),
+                    target_order_id=target_ids[0] if target_ids else None,
+                    target_order_ids=target_ids,
+                    oca_group=oca_group,
                     error="Bracket parent still pending — children GTC on book",
                 )
                 return

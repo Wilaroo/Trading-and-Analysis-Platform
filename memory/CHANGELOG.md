@@ -2,6 +2,85 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.106) — Pusher multi-rung support · Legend cleanup · simulate-bracket endpoint
+
+### What ships
+
+**Windows pusher upgrade (`documents/scripts/ib_data_pusher.py`)**
+- Bracket handler now reads `order.get("targets")` array and places N
+  target legs (one per ladder rung) instead of a single target.
+- All target legs + the stop share an explicit `ocaGroup = oca_{symbol}_<id>`
+  with `ocaType=1` (cancel-with-block). On partial TP fill, IB
+  auto-reduces the stop's quantity to match — single shared stop, no
+  manual reconciliation needed.
+- Submission order: parent (transmit=False) → all targets (transmit=False)
+  → stop (transmit=True flushes the whole bracket to TWS atomically).
+- Response payload now includes `target_order_ids: [int, ...]` so the
+  backend can track each rung's fill individually. Legacy
+  `target_order_id` retained = `target_order_ids[0]`.
+- Graceful degradation: if backend sends only the legacy single `target`
+  (no `targets` array), the pusher still builds one OCA group with a
+  single TP leg. Older Spark backends keep working unchanged.
+
+**V5 legend cleanup (`OpenPositionsLegend.jsx`)**
+- Removed obsolete `BOT` and `RECONCILED` rows from the legend popover.
+  Their per-row chips were retired in v19.34.23 (bot auto-heals these
+  cases seamlessly); keeping them in the legend was operator-confusing
+  noise. Only the actionable `⚠ CONFLICT` chip remains — it triggers
+  when the bot's recent verdicts disagreed with an adopted position.
+- Section header renamed "Provenance chip (RECONCILED / CONFLICT)" →
+  "Per-row chips" to match what actually renders.
+- Provenance details for adopted positions are still preserved in the
+  expanded-row "Reconciled from IB orphan" callout (only visible when
+  operator clicks the row).
+
+**New endpoint `POST /api/trading-bot/simulate-bracket`**
+- Returns the EXACT bracket payload Spark would queue to the pusher
+  for a hypothetical (symbol, trade_style, direction, shares, entry,
+  stop, target_prices) input. Pure offline — no IB calls, no Mongo
+  writes, no queue mutation.
+- Use cases:
+  • Smoke-test the v19.34.103 pusher upgrade on Windows. Curl this
+    endpoint, copy the returned `payload` to the pusher log + IB
+    audit screen, confirm parent.tif/outside_rth/targets[] match
+    your expectations.
+  • Operator audit: "if I fired 100 shares of a position-style
+    trade on NVDA right now, what would IB see?"
+- Same payload-construction logic as `_ib_bracket` (identical TIF /
+  outside_rth / ladder qty splits / drift absorption rules) so the
+  simulator and the real path can never drift.
+
+### Verification
+- `pytest tests/test_v19_34_106_simulate_bracket_endpoint.py` → 7/7 PASS
+  (parametric coverage: position 3-rung, scalp 1-rung, explicit-target
+  override, short trade, unknown-style fallback, policy stamp, no-side-
+  effects).
+- Pusher script: `python -m ast.parse` syntax check PASS. Lint clean on
+  the new code (pre-existing E722/F541 warnings throughout pusher are
+  out of scope).
+- `OpenPositionsLegend.jsx` ESLint clean.
+- All v19.34.100-105 backend tests still pass (33/33 last run; full
+  v19.34 regression 173/173).
+
+### Pusher rollout reminder
+The Spark backend has been sending the new `parent.time_in_force=GTC` +
+`targets: [...]` shape since v19.34.102/103. Until you deploy this
+updated `ib_data_pusher.py` on Windows, only the **first rung** of any
+multi-rung ladder gets booked (the rest are silently dropped). Run:
+
+```bash
+curl -s -X POST http://localhost:8001/api/trading-bot/simulate-bracket \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"NVDA","trade_style":"position","direction":"long","shares":100,"entry_price":150.0,"stop_price":140.0}' \
+  | jq .
+```
+
+…and confirm the returned `payload.targets` has 3 rungs at +4R/+8R/+15R.
+That's the exact JSON your pusher needs to handle.
+
+---
+
+
 ## 2026-02-12 (v19.34.102 / 103 / 104 / 105) — Order-policy execution wiring
 
 ### Why

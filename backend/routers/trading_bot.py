@@ -3,7 +3,7 @@ Trading Bot API Router
 Endpoints for controlling the autonomous trading bot,
 managing trades, and viewing trade explanations.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Body
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -3297,6 +3297,160 @@ def get_order_policies():
     try:
         from services.order_policy_registry import all_policies_summary
         return {"success": True, "policies": all_policies_summary()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/simulate-bracket")
+def simulate_bracket(payload: Dict[str, Any] = Body(...)):
+    """v19.34.106 — return the EXACT IB bracket payload Spark would send
+    to the Windows pusher for a hypothetical trade.
+
+    Useful for:
+      • Smoke-testing the v19.34.103 pusher upgrade without firing a
+        real bracket — confirms TIF, outside_rth, OCA target ladder,
+        and per-rung qty splits look correct end-to-end.
+      • Operator audit: "if I fired a 100-share position trade on NVDA
+        right now, what would IB see?".
+
+    Request body (all fields optional except symbol + style):
+      {
+        "symbol":      "NVDA",
+        "trade_style": "position",          // scalp/intraday/multi_day/swing/investment/position
+        "direction":   "long",              // or "short"
+        "shares":      100,
+        "entry_price": 100.0,
+        "stop_price":  95.0,                 // entry-stop = risk distance
+        "target_prices": [110.0, 130.0]      // optional explicit overrides
+      }
+
+    Response: the full bracket payload (parent + stop + target + targets[]
+    + policy stamp) — same shape `_ib_bracket` queues to the pusher.
+    Does NOT touch the queue. Pure offline simulation.
+    """
+    try:
+        from services.order_policy_registry import get_policy
+        # Local-import for clarity; this endpoint never touches IB.
+        import math
+
+        symbol = str(payload.get("symbol") or "TEST").upper()
+        style = str(payload.get("trade_style") or "intraday").lower()
+        direction = str(payload.get("direction") or "long").lower()
+        shares = int(payload.get("shares") or 100)
+        entry_price = float(payload.get("entry_price") or 100.0)
+        stop_price = float(payload.get("stop_price") or (
+            entry_price * 0.98 if direction == "long" else entry_price * 1.02
+        ))
+        explicit_targets = [
+            float(t) for t in (payload.get("target_prices") or []) if t is not None
+        ]
+
+        policy = get_policy(style)
+        action = "BUY" if direction == "long" else "SELL"
+        child_action = "SELL" if action == "BUY" else "BUY"
+        risk_distance = abs(entry_price - stop_price)
+
+        # Build the multi-rung target ladder — mirrors _ib_bracket exactly.
+        ladder = list(policy.tp_ladder) if policy.tp_ladder else []
+        target_legs = []
+        if ladder and shares > 0:
+            rung_qtys = [int(round(shares * float(r.pct_of_position))) for r in ladder]
+            while rung_qtys and rung_qtys[-1] == 0 and len(rung_qtys) > 1:
+                rung_qtys.pop()
+                ladder = ladder[: len(rung_qtys)]
+            rung_qtys = [max(q, 1) for q in rung_qtys]
+            drift = shares - sum(rung_qtys)
+            if drift != 0 and rung_qtys:
+                rung_qtys[-1] = max(rung_qtys[-1] + drift, 1)
+
+            for idx, (rung, qty) in enumerate(zip(ladder, rung_qtys)):
+                if idx < len(explicit_targets):
+                    rung_px = float(explicit_targets[idx])
+                elif risk_distance > 0:
+                    rung_px = round(
+                        entry_price + float(rung.r_multiple) * risk_distance
+                        if action == "BUY"
+                        else entry_price - float(rung.r_multiple) * risk_distance,
+                        2,
+                    )
+                else:
+                    rung_px = entry_price
+                target_legs.append({
+                    "action": child_action,
+                    "quantity": int(qty),
+                    "order_type": "LMT",
+                    "limit_price": float(rung_px),
+                    "time_in_force": policy.time_in_force,
+                    "outside_rth": bool(policy.outside_rth),
+                    "r_multiple": float(rung.r_multiple),
+                })
+
+        legacy_target_price = (
+            float(target_legs[0]["limit_price"])
+            if target_legs
+            else (
+                round(entry_price + 2 * risk_distance, 2)
+                if action == "BUY" else round(entry_price - 2 * risk_distance, 2)
+            )
+        )
+        legacy_target_qty = int(target_legs[0]["quantity"]) if target_legs else shares
+
+        bracket_payload = {
+            "type": "bracket",
+            "trade_id": "SIM",
+            "symbol": symbol,
+            "parent": {
+                "action": action,
+                "quantity": shares,
+                "order_type": "LMT",
+                "limit_price": entry_price,
+                "time_in_force": policy.time_in_force,
+                "outside_rth": bool(policy.outside_rth),
+                "exchange": "SMART",
+            },
+            "stop": {
+                "action": child_action,
+                "quantity": shares,
+                "order_type": "STP",
+                "stop_price": float(stop_price),
+                "time_in_force": policy.time_in_force,
+                "outside_rth": bool(policy.outside_rth),
+            },
+            "target": {
+                "action": child_action,
+                "quantity": legacy_target_qty,
+                "order_type": "LMT",
+                "limit_price": legacy_target_price,
+                "time_in_force": policy.time_in_force,
+                "outside_rth": bool(policy.outside_rth),
+            },
+            "targets": target_legs,
+            "policy": {
+                "style": policy.style,
+                "horizon_label": policy.horizon_label,
+                "stop_trail_anchor": policy.stop_trail_anchor,
+                "eod_sweep_eligible": policy.eod_sweep_eligible,
+            },
+        }
+
+        return {
+            "success": True,
+            "inputs": {
+                "symbol": symbol,
+                "trade_style": style,
+                "direction": direction,
+                "shares": shares,
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "risk_distance": round(risk_distance, 4),
+            },
+            "payload": bracket_payload,
+            "notes": (
+                f"Simulated — would queue this payload to the IB pusher. "
+                f"Style={policy.style} ({policy.horizon_label}). "
+                f"{len(target_legs)} OCA target rung(s)."
+            ),
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

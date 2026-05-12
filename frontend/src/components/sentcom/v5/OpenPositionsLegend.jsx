@@ -14,8 +14,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 const _PROVENANCE_ROWS = [
-  { name: 'BOT',         cls: 'bg-zinc-900 text-zinc-400 border-zinc-700',         desc: 'Default. The bot\'s own evaluation + execution path opened this trade. Setup math, R:R check, all green.' },
-  { name: 'RECONCILED',  cls: 'bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800', desc: 'Bot ADOPTED an IB orphan it did not open. Could be carry-over from prior session, manual TWS click, or stale bracket. SL/PT may be synthetic defaults. Manage carefully.' },
+  // v19.34.106 (Feb 2026) — Per-row RECONCILED chip was retired in
+  // v19.34.23 (bot auto-heals adoptions seamlessly; chip added
+  // operator noise with no action attached). Only the ⚠ CONFLICT chip
+  // still renders per-row — it indicates the operator should manually
+  // re-evaluate. The "Reconciled from IB orphan" callout still appears
+  // inside the EXPANDED row detail when an adoption happened, so the
+  // full provenance is one click away.
   { name: '⚠ CONFLICT',  cls: 'bg-amber-950/70 text-amber-300 border-amber-700',   desc: 'Reconciled position whose recent setup verdicts were REJECT (e.g. R:R below min). The bot inherited a position it would have rejected. Strongly consider closing or overriding SL/PT.' },
 ];
 
@@ -108,7 +113,7 @@ export default function OpenPositionsLegend() {
           </div>
           <div className="px-3 py-2.5 text-[14px] leading-relaxed text-zinc-300 space-y-3">
             <section>
-              <div className="text-zinc-500 uppercase tracking-wider text-[13px] mb-1">Provenance chip (RECONCILED / CONFLICT)</div>
+              <div className="text-zinc-500 uppercase tracking-wider text-[13px] mb-1">Per-row chips</div>
               <ul className="space-y-1.5">
                 {_PROVENANCE_ROWS.map((r) => (
                   <li key={r.name} className="flex items-start gap-2">
