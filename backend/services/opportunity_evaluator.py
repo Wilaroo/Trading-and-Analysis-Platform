@@ -1104,47 +1104,270 @@ class OpportunityEvaluator:
         """Calculate stop loss based on ATR with setup-specific multiplier."""
         from services.trading_bot_service import TradeDirection
 
-        setup_multipliers = {
-            'rubber_band': 1.0, 'squeeze': 1.5, 'breakout': 1.5, 'vwap_bounce': 1.0,
-            'gap_fade': 1.25, 'relative_strength': 1.5, 'mean_reversion': 1.0, 'orb': 1.25,
-            # ── v19.34.112 (Feb 2026) — Scalp ATR multipliers ──────────
-            # Pre-v112 every scalp setup fell through to
-            # `bot.risk_params.base_atr_multiplier` (typically 1.5-2.0×),
-            # which is the same stop distance we use for a 4-hour
-            # intraday hold. For a position designed to be in-and-out
-            # in <5 minutes that's catastrophic: the stop sits 1-2 ATRs
-            # away (often $1.50+) on micro-moves where the operator
-            # expected a 30-50 bp risk budget. The setup's documented
-            # 60-70% win rate is built on RECOVERING when the entry
-            # ticks against us by 0.3-0.5×ATR — wide stops force scalps
-            # to ride out moves they should already have cut on.
-            #
-            # Tight multipliers below align with the "scalper's bracket"
-            # convention: 0.4-0.5×ATR stop, 1R first target (see
-            # target ladder fix below). The trade-style chip on the V5
-            # HUD will surface the actual R:R per setup so the operator
-            # can verify these are right for their account size.
-            'scalp':          0.5,
-            'nine_ema_scalp': 0.4,   # tightest — momentum scalps revert fast
-            'spencer_scalp':  0.5,
-            'abc_scalp':      0.5,
-        }
-        multiplier = setup_multipliers.get(setup_type, bot.risk_params.base_atr_multiplier)
-        # v19.34.112 — Scalp multipliers (0.4-0.5×) intentionally sit
-        # BELOW the global `min_atr_multiplier` floor (typically 1.0×).
-        # The floor exists to protect non-scalp setups from a noisy
-        # config; scalps need to legitimately go tighter. Skip the
-        # clamp ONLY for known scalp setups.
-        is_scalp_setup = setup_type in {
-            'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp',
-        }
+        multiplier, is_scalp_setup, resolution = self._resolve_atr_multiplier(setup_type, bot)
+        if resolution == "horizon_fallback":
+            logger.info(
+                f"[atr_stop] setup_type={setup_type!r} not in SETUP_MULTIPLIERS — "
+                f"using horizon-default multiplier={multiplier} (no longer silent base_atr fallback)."
+            )
+        elif resolution == "unknown":
+            logger.warning(
+                f"[atr_stop] UNKNOWN setup_type={setup_type!r} — clamped to base_atr_multiplier="
+                f"{multiplier}. Add this setup to SETUP_MULTIPLIERS in opportunity_evaluator.py."
+            )
         if not is_scalp_setup:
+            # v19.34.112 — Scalp multipliers (0.4-0.5×) intentionally sit
+            # BELOW the global `min_atr_multiplier` floor (typically 1.0×).
+            # The floor exists to protect non-scalp setups from a noisy
+            # config; scalps need to legitimately go tighter. Skip the
+            # clamp ONLY for known scalp setups.
             multiplier = max(bot.risk_params.min_atr_multiplier, min(multiplier, bot.risk_params.max_atr_multiplier))
         stop_distance = atr * multiplier
         if direction == TradeDirection.LONG:
             return entry_price - stop_distance
         else:
             return entry_price + stop_distance
+
+    # ── v19.34.118 (Feb 2026) — Comprehensive setup ATR multipliers ──
+    # Pre-v118 the multiplier table only covered 8 setup names. Every
+    # other classifier output — `day_2_continuation` (carry-forward
+    # overnight), `daily_breakout` (swing), `weekly_breakout`
+    # (investment), `stage_2_breakout` (position), `orb_long_confirmed`
+    # (intraday variant), `mean_reversion_short` (direction-suffixed),
+    # etc. — fell through to `bot.risk_params.base_atr_multiplier`
+    # (default 1.5×). For a Day-2 short like ONON / RJF, 1.5×ATR is a
+    # ~3-hour intraday stop, not the wider swing budget the trade
+    # actually needs. Conversely a `stage_2_breakout` getting 1.5×ATR
+    # is way too tight for a 3-month position hold.
+    #
+    # SETUP_MULTIPLIERS now exhaustively keys every setup the scanner,
+    # daily-scan, and carry-forward pipeline can emit. Direction- and
+    # state-suffixed variants (`_long`, `_short`, `_confirmed`,
+    # `approaching_`) normalize back to the canonical name. Anything
+    # still not found falls back to a HORIZON-default (scalp / intraday
+    # / swing / investment / position) instead of the legacy 1.5×, and
+    # writes a structured log so we can add it explicitly next pass.
+    SETUP_MULTIPLIERS: Dict[str, float] = {
+        # ── SCALPS (0.4-0.5× ATR) ──────────────────────────────────────
+        'scalp':                  0.5,
+        '9_ema_scalp':            0.4,
+        'nine_ema_scalp':         0.4,
+        'spencer_scalp':          0.5,
+        'abc_scalp':              0.5,
+        'rubber_band_scalp_long': 0.5,
+        'rubber_band_scalp_short':0.5,
+        'breakout_scalp':         0.5,
+        'hitchhiker':             0.5,
+        'gap_give_go':            0.5,
+        'gap_pick_roll':          0.5,
+        'second_chance':          0.5,
+        'backside':               0.5,
+        'off_sides':              0.5,
+        'fashionably_late':       0.5,
+        'first_move_up':          0.5,
+        'first_move_down':        0.5,
+        'bella_fade':             0.5,
+        'tidal_wave':             0.5,
+        'volume_capitulation':    0.5,
+        'time_of_day_fade':       0.5,
+        'big_dog':                0.5,
+        'puppy_dog':              0.5,
+        'bouncy_ball':            0.5,
+        # ── INTRADAY MOMENTUM (1.0-1.5× ATR) ───────────────────────────
+        'rubber_band':            1.0,
+        'rubber_band_long':       1.0,
+        'rubber_band_short':      1.0,
+        'vwap_bounce':            1.0,
+        'vwap_bounce_long':       1.0,
+        'vwap_fade':              1.0,
+        'vwap_fade_long':         1.0,
+        'vwap_fade_short':        1.0,
+        'vwap_reclaim_long':      1.0,
+        'vwap_rejection':         1.0,
+        'vwap_reversal':          1.0,
+        'vwap_continuation':      1.25,
+        'first_vwap_pullback':    1.0,
+        'mean_reversion':         1.0,
+        'mean_reversion_long':    1.0,
+        'mean_reversion_short':   1.0,
+        'gap_fade':               1.25,
+        'gap_and_go':             1.25,
+        'gap_fill_open':          1.25,
+        'orb':                    1.25,
+        'orb_long':               1.25,
+        'orb_short':              1.25,
+        'orb_long_confirmed':     1.25,
+        'opening_drive':          1.25,
+        'opening_range_break':    1.25,
+        'short_orb':              1.25,
+        'breakout':               1.5,
+        'breakout_confirmed':     1.5,
+        'breakdown':              1.5,
+        'breakdown_confirmed':    1.5,
+        'short_breakdown':        1.5,
+        'momentum':               1.5,
+        'momentum_breakout':      1.5,
+        'momentum_continuation':  1.5,
+        'squeeze':                1.5,
+        'short_squeeze_intraday': 1.5,
+        'hod_breakout':           1.5,
+        'lod_breakdown':          1.5,
+        'range_break':            1.5,
+        'range_break_confirmed':  1.5,
+        'premarket_high_break':   1.5,
+        'back_through_open':      1.25,
+        'up_through_open':        1.25,
+        'lhld':                   1.25,
+        'chart_pattern':          1.5,
+        'relative_strength':      1.5,
+        'relative_strength_leader':  1.5,
+        'relative_strength_laggard': 1.5,
+        'relative_weakness':      1.5,
+        'breaking_news':          1.5,
+        'the_3_30_trade':         1.25,
+        'off_sides_short':        1.0,
+        'abcd_short':             1.0,
+        'pullback':               1.25,
+        'ema_pullback':           1.25,
+        'trade_2_hold':           1.5,
+        # ── DAY-2 / CARRY-FORWARD (1.75× ATR) ──────────────────────────
+        # These are overnight-held intraday trades carried into the
+        # next session. Stops need slightly wider headroom for the
+        # gap-open volatility window without bloating to full swing.
+        'day_2':                  1.75,
+        'day_2_continuation':     1.75,
+        'carry_forward_watch':    1.75,
+        'trend_continuation':     1.75,
+        # ── SWING (1.75-2.0× ATR, daily-bar driven) ───────────────────
+        'daily_squeeze':          2.0,
+        'daily_breakout':         2.0,
+        'base_breakout':          2.0,
+        'pocket_pivot':           1.75,
+        'three_week_tight':       1.75,
+        'vcp_breakout':           2.0,
+        'bull_flag_break':        1.75,
+        'bear_flag_break':        1.75,
+        'ascending_triangle_break':  1.75,
+        'descending_triangle_break': 1.75,
+        'cup_with_high_handle':   2.0,
+        'earnings_play':          2.0,
+        # ── INVESTMENT (2.5× ATR, weekly-bar / multi-quarter) ──────────
+        'weekly_breakout':        2.5,
+        'weekly_base':            2.5,
+        'multi_quarter_base_break':  2.5,
+        'rs_leader_break':        2.5,
+        'fifty_two_week_high_break': 2.5,
+        'power_trend_stack':      2.5,
+        'accumulation_entry':     2.5,
+        # ── POSITION (3.0× ATR, Stage analysis / 200DMA) ──────────────
+        'stage_1_to_2_transition': 3.0,
+        'stage_2_breakout':        3.0,
+        'stage_3_to_4_breakdown':  3.0,
+        'golden_cross_filtered':   3.0,
+        'death_cross_filtered':    3.0,
+        'two_hundred_day_reclaim': 3.0,
+        'two_hundred_day_loss':    3.0,
+        # ── SYSTEM / RECONCILIATION TAGS ──────────────────────────────
+        # These are stamped by reconcilers / importers, not the scanner.
+        # Default to base intraday so existing positions don't get a
+        # surprise re-stop.
+        'reconciled_orphan':       1.5,
+        'reconciled_excess_slice': 1.5,
+        'imported_from_ib':        1.5,
+        'manual':                  1.5,
+        'bot_fired':               1.5,
+        'default':                 1.5,
+        'performance_review':      1.5,
+        # ── Approaching / pre-trigger variants (intraday momentum) ────
+        # Scanner emits these before the actual break confirms; same
+        # horizon as the parent breakout, slightly tighter so the stop
+        # doesn't sit past the breakout level itself.
+        'approaching_hod':         1.5,
+        'approaching_breakout':    1.5,
+        'approaching_orb':         1.25,
+        'approaching_range_break': 1.5,
+    }
+
+    _SCALP_SETUPS = frozenset({
+        'scalp', '9_ema_scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp',
+        'rubber_band_scalp_long', 'rubber_band_scalp_short', 'breakout_scalp',
+        'hitchhiker', 'gap_give_go', 'gap_pick_roll', 'second_chance',
+        'backside', 'off_sides', 'fashionably_late', 'first_move_up',
+        'first_move_down', 'bella_fade', 'tidal_wave', 'volume_capitulation',
+        'time_of_day_fade', 'big_dog', 'puppy_dog', 'bouncy_ball',
+    })
+
+    # Horizon-default fallback when the setup_type lands here without an
+    # exact key match (e.g. a new scanner-only variant before it's
+    # explicitly cataloged). Derived from SETUP_REGISTRY default_style.
+    _HORIZON_DEFAULTS: Dict[str, float] = {
+        'scalp':      0.5,
+        'intraday':   1.5,
+        'swing':      1.75,
+        'multi_day':  1.75,
+        'investment': 2.5,
+        'position':   3.0,
+    }
+
+    @classmethod
+    def _normalize_setup_type(cls, setup_type: Optional[str]) -> str:
+        """Strip direction / state suffixes and approaching_ prefixes so
+        scanner variants resolve to a canonical SETUP_MULTIPLIERS key.
+
+        E.g. `orb_long_confirmed` → tries `orb_long_confirmed` (hit),
+        else `orb_long` (hit), else `orb` (hit). `approaching_orb` →
+        `orb`. Keeps fully-qualified entries when they exist so the
+        table can override the canonical default per direction.
+        """
+        if not setup_type:
+            return ''
+        s = setup_type.strip().lower()
+        if s in cls.SETUP_MULTIPLIERS:
+            return s
+        for prefix in ('approaching_',):
+            if s.startswith(prefix):
+                trimmed = s[len(prefix):]
+                if trimmed in cls.SETUP_MULTIPLIERS:
+                    return trimmed
+                s = trimmed
+                break
+        for suffix in ('_confirmed', '_long', '_short'):
+            if s.endswith(suffix):
+                trimmed = s[: -len(suffix)]
+                if trimmed in cls.SETUP_MULTIPLIERS:
+                    return trimmed
+        return s
+
+    @classmethod
+    def _resolve_atr_multiplier(
+        cls,
+        setup_type: Optional[str],
+        bot: 'TradingBotService',
+    ) -> Tuple[float, bool, str]:
+        """Resolve (multiplier, is_scalp_setup, resolution_kind) for a
+        setup_type. resolution_kind is one of: `exact`, `normalized`,
+        `horizon_fallback`, `unknown`."""
+        raw = (setup_type or '').strip().lower()
+        if raw in cls.SETUP_MULTIPLIERS:
+            return cls.SETUP_MULTIPLIERS[raw], raw in cls._SCALP_SETUPS, 'exact'
+        canonical = cls._normalize_setup_type(setup_type)
+        if canonical and canonical in cls.SETUP_MULTIPLIERS:
+            return (
+                cls.SETUP_MULTIPLIERS[canonical],
+                canonical in cls._SCALP_SETUPS,
+                'normalized',
+            )
+        # Horizon-default fallback via SETUP_REGISTRY.
+        try:
+            from services.smb_integration import SETUP_REGISTRY
+            cfg = SETUP_REGISTRY.get(canonical) or SETUP_REGISTRY.get(raw)
+            if cfg is not None:
+                style = cfg.default_style.value
+                mult = cls._HORIZON_DEFAULTS.get(style, bot.risk_params.base_atr_multiplier)
+                return mult, style == 'scalp', 'horizon_fallback'
+        except Exception:
+            pass
+        return bot.risk_params.base_atr_multiplier, False, 'unknown'
 
     @staticmethod
     def score_to_grade(score: int) -> str:

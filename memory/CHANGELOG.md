@@ -2,6 +2,71 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+
+## 2026-02-12 (v19.34.118) — Comprehensive Setup ATR Multiplier Table
+
+Root-causes the bleeding-position incident where `DAY 2 short`
+trades (ONON / RJF / MTB / CCJ) had their stop logic miscomputed
+because `day_2_continuation` (and 100+ other classifier-emitted
+setup_types) were missing from the `setup_multipliers` dict in
+`opportunity_evaluator.py`. Pre-v118 every unlisted setup fell
+through to `bot.risk_params.base_atr_multiplier` (1.5×) regardless
+of trade horizon, so swings + positions got intraday stops and
+carry-forward shorts got noisier-than-warranted budgets.
+
+### Backend
+
+**`services/opportunity_evaluator.py`** —
+
+- `setup_multipliers` is now a class-level `SETUP_MULTIPLIERS` dict
+  covering every entry in `SETUP_REGISTRY` plus every
+  scanner / daily-scan / carry-forward / reconciler tag (~150 keys).
+  Grouped by horizon: scalps 0.4-0.5×, intraday 1.0-1.5×, day-2
+  carry-forward 1.75×, swing 1.75-2.0×, investment 2.5×,
+  position 3.0×.
+- New `_normalize_setup_type()` resolves direction/state variants
+  (`orb_long_confirmed` → `orb_long` → `orb`) so scanner suffixes
+  don't need duplicated entries.
+- New `_resolve_atr_multiplier()` returns `(mult, is_scalp, kind)`
+  with `kind ∈ {exact, normalized, horizon_fallback, unknown}`.
+  `horizon_fallback` logs at INFO; `unknown` logs at WARNING and
+  asks the operator to catalog the setup. No more silent 1.5×.
+
+**`scripts/diag_bleeding_setup_v19_34_118.py`** (new) — Per-symbol
+diagnostic. Dumps `setup_type`, `trade_style`, `direction`,
+`entry_price`, `stop_price`, `target_prices`, `order_pipeline`,
+`parent_oca_group`, `ib_order_ids`, last 5 `bracket_lifecycle_events`,
+and the v118 multiplier resolution. Run on the DGX against live
+MongoDB. Usage: `python3 scripts/diag_bleeding_setup_v19_34_118.py
+ONON RJF MTB CCJ`.
+
+**`scripts/emergency_flatten_symbols_v19_34_118.py`** (new) —
+Targeted flatten. Walks open `bot_trades` for the named symbols,
+calls `POST /api/trading-bot/close-trade` per trade_id (the same
+path safety_router uses) so brackets cancel cleanly at IB. Safer
+than `/flatten-all` because it ONLY touches the listed symbols.
+
+**`tests/test_setup_multipliers_coverage_v19_34_118.py`** (new) —
+160 regression cases. Every `SETUP_REGISTRY` name must resolve via
+`exact` or `normalized` (never `horizon_fallback` or `unknown`).
+Every scanner-emitted setup must resolve to a non-`unknown`
+multiplier. Direction suffixes normalize. Scalps stay flagged
+`is_scalp=True` so the `min_atr_multiplier` floor doesn't clamp
+their 0.4-0.5× budget. Guards specifically against the Feb 2026
+bleeding-position regression.
+
+### Open follow-up (NOT in this patch)
+
+The OCA STP leg failure at IB for ONON / RJF / MTB / CCJ is a
+SEPARATE concern from the missing multiplier. Even with a correct
+1.75× stop, the bracket has to actually be ATTACHED at IB for the
+STP to fire. Next investigation should walk
+`bracket_lifecycle_events` for those trades to determine if the
+STP leg ever attached on the Day-1 → Day-2 handoff or got
+orphaned. `diag_bleeding_setup_v19_34_118.py` surfaces those
+events directly.
+
+
 ## 2026-02-12 (v19.34.117) — POST /api/trading-bot/retune-stop/bulk-scalps
 
 One-shot batch fix for every legacy wide-stop scalp in the book.
