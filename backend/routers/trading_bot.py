@@ -3595,6 +3595,122 @@ def simulate_bracket(payload: Dict[str, Any] = Body(...)):
 
 # ─────────────────────────── v19.34.116 — retune-stop ───────────────────────────
 
+
+# v19.34.117 — Per-trade retune helper shared by both
+# /retune-stop and /retune-stop/bulk-scalps. Returns a result dict
+# on success. Raises ValueError with a structured `code` attribute
+# for caller-handled validation failures so the single-trade endpoint
+# can map them to HTTPExceptions while the bulk endpoint can skip
+# + continue with a recorded reason.
+class _RetuneStopValidationError(ValueError):
+    def __init__(self, code: str, detail: str, status_code: int = 400):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.status_code = status_code
+
+
+def _resolve_atr_for_symbol(symbol: str) -> Optional[float]:
+    """Same lookup order the executor uses: bot's live 5m ATR cache →
+    scanner's last-known ATR cache."""
+    atr = None
+    try:
+        atr_cache = getattr(_trading_bot, "_latest_atr_5m", {}) or {}
+        atr = atr_cache.get(symbol)
+    except Exception:
+        atr = None
+    if not atr or atr <= 0:
+        try:
+            scanner = getattr(_trading_bot, "_scanner", None)
+            if scanner is not None:
+                latest = getattr(scanner, "_latest_atr", {}) or {}
+                atr = latest.get(symbol)
+        except Exception:
+            atr = None
+    return float(atr) if (atr and atr > 0) else None
+
+
+async def _retune_stop_core(trade, dry_run: bool) -> Dict[str, Any]:
+    """Compute + (optionally) apply a v112-style stop retune for a
+    single trade. Pure helper — does not raise HTTPException; raises
+    `_RetuneStopValidationError` instead so callers control HTTP
+    semantics. The bulk endpoint catches these and records them as
+    skipped trades; the single endpoint maps them to HTTPException."""
+    setup_type = (getattr(trade, "setup_type", "") or "").strip()
+    trade_style = (getattr(trade, "trade_style", "") or "").strip()
+    entry_price = float(getattr(trade, "entry_price", 0) or 0)
+    old_stop = float(getattr(trade, "stop_price", 0) or 0)
+    symbol = getattr(trade, "symbol", "?")
+    direction = getattr(trade, "direction", None)
+
+    if not setup_type:
+        raise _RetuneStopValidationError(
+            "no_setup_type",
+            f"trade {trade.id} has no setup_type — cannot pick ATR multiplier",
+        )
+    if entry_price <= 0:
+        raise _RetuneStopValidationError(
+            "no_entry_price",
+            f"trade {trade.id} has no entry_price — cannot recompute stop",
+        )
+
+    atr = _resolve_atr_for_symbol(symbol)
+    if atr is None:
+        raise _RetuneStopValidationError(
+            "atr_unavailable",
+            (
+                f"ATR for {symbol} unavailable from bot or scanner cache — "
+                f"cannot retune stop. Wait for the next 5m bar and retry."
+            ),
+            status_code=409,
+        )
+
+    from services.opportunity_evaluator import OpportunityEvaluator
+    evaluator = OpportunityEvaluator()
+    new_stop = evaluator.calculate_atr_based_stop(
+        entry_price=entry_price,
+        direction=direction,
+        atr=atr,
+        setup_type=setup_type,
+        bot=_trading_bot,
+    )
+    new_stop = round(float(new_stop), 4)
+    multiplier_used = round(abs(entry_price - new_stop) / atr, 4)
+
+    base_result = {
+        "trade_id": trade.id,
+        "symbol": symbol,
+        "setup_type": setup_type,
+        "trade_style": trade_style,
+        "old_stop": old_stop,
+        "new_stop": new_stop,
+        "atr": atr,
+        "multiplier_used": multiplier_used,
+    }
+
+    if dry_run:
+        return {"success": True, "dry_run": True, **base_result}
+
+    trade.stop_price = new_stop
+    try:
+        await asyncio.to_thread(_trading_bot._persist_trade, trade)
+    except Exception as _e:
+        logger.warning(f"[v19.34.116 RETUNE] persist failed for {trade.id}: {_e}")
+
+    attach_result: Dict[str, Any] = {"success": False, "error": "executor missing"}
+    if _trade_executor and hasattr(_trade_executor, "attach_oca_stop_target"):
+        try:
+            attach_result = await _trade_executor.attach_oca_stop_target(trade)
+        except Exception as e:
+            attach_result = {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+    return {
+        "success": bool(attach_result.get("success") or attach_result.get("skipped")),
+        **base_result,
+        "attach_result": attach_result,
+    }
+
+
 @router.post("/retune-stop")
 async def retune_stop(payload: Dict[str, Any] = Body(...)):
     """v19.34.116 — Retune an open trade's stop loss using v112's
@@ -3658,107 +3774,172 @@ async def retune_stop(payload: Dict[str, Any] = Body(...)):
             detail=f"trade_id {trade_id!r} not found in open trades",
         )
 
-    setup_type = (getattr(trade, "setup_type", "") or "").strip()
-    trade_style = (getattr(trade, "trade_style", "") or "").strip()
-    entry_price = float(getattr(trade, "entry_price", 0) or 0)
-    old_stop = float(getattr(trade, "stop_price", 0) or 0)
-    symbol = getattr(trade, "symbol", "?")
-    direction = getattr(trade, "direction", None)
-
-    if not setup_type:
-        raise HTTPException(
-            status_code=400,
-            detail=f"trade {trade_id} has no setup_type — cannot pick ATR multiplier",
-        )
-    if entry_price <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"trade {trade_id} has no entry_price — cannot recompute stop",
-        )
-
-    # Pull ATR. Prefer the bot's live 5m ATR cache (same as the
-    # executor); fall back to the scanner's last-known ATR.
-    atr = None
     try:
-        atr_cache = getattr(_trading_bot, "_latest_atr_5m", {}) or {}
-        atr = atr_cache.get(symbol)
-    except Exception:
-        atr = None
-    if not atr or atr <= 0:
-        try:
-            scanner = getattr(_trading_bot, "_scanner", None)
-            if scanner is not None:
-                # Same field the executor falls back to.
-                latest = getattr(scanner, "_latest_atr", {}) or {}
-                atr = latest.get(symbol)
-        except Exception:
-            atr = None
-    if not atr or atr <= 0:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"ATR for {symbol} unavailable from bot or scanner cache — "
-                f"cannot retune stop. Wait for the next 5m bar and retry."
-            ),
-        )
+        return await _retune_stop_core(trade, dry_run=dry_run)
+    except _RetuneStopValidationError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
 
-    # Recompute the stop using v112's style-aware multiplier table.
-    from services.opportunity_evaluator import OpportunityEvaluator
-    evaluator = OpportunityEvaluator()
-    new_stop = evaluator.calculate_atr_based_stop(
-        entry_price=entry_price,
-        direction=direction,
-        atr=float(atr),
-        setup_type=setup_type,
-        bot=_trading_bot,
-    )
-    new_stop = round(float(new_stop), 4)
-    multiplier_used = round(abs(entry_price - new_stop) / float(atr), 4) if atr else None
 
-    if dry_run:
-        return {
-            "success": True,
-            "dry_run": True,
-            "trade_id": trade_id,
-            "symbol": symbol,
-            "setup_type": setup_type,
-            "trade_style": trade_style,
-            "old_stop": old_stop,
-            "new_stop": new_stop,
-            "atr": float(atr),
-            "multiplier_used": multiplier_used,
+# ─────────────────────────── v19.34.117 — bulk-scalps ───────────────────────────
+
+
+@router.post("/retune-stop/bulk-scalps")
+async def retune_stop_bulk_scalps(payload: Dict[str, Any] = Body(default=None)):
+    """v19.34.117 — Bulk retune all open SCALP positions whose
+    current stop sits more than `atr_threshold × ATR` away from
+    entry (default 1.0×). Mirrors the V6 Position Health Console's
+    STOP-WIDE-FOR-STYLE detection logic, batched server-side.
+
+    Request body (all optional):
+      {
+        "dry_run":         true,    // default true — must explicitly
+                                    // pass false to actually re-issue.
+                                    // Defaults inverted vs the single
+                                    // endpoint because bulk-fire is
+                                    // higher-risk: easier to send a
+                                    // dozen STP cancellations into IB
+                                    // by accident.
+        "atr_threshold":   1.0,     // a scalp with stop_distance /
+                                    // atr > threshold is considered
+                                    // legacy-wide. v112 expects
+                                    // 0.4-0.5× so 1.0 catches every
+                                    // pre-v112 scalp without snagging
+                                    // a freshly-opened one.
+        "trade_styles":    ["scalp"]  // which styles to scan.
+                                       // Default ["scalp"] — the
+                                       // operator who wants to bulk
+                                       // retune intraday/swing
+                                       // positions can pass those
+                                       // explicitly, but doing so is
+                                       // a deliberate decision.
+      }
+
+    Response:
+      {
+        "success": true,
+        "dry_run": true,
+        "scanned": 13,
+        "matched": 4,
+        "skipped": [{"trade_id": "...", "reason": "atr_unavailable"}, ...],
+        "results": [
+          {"trade_id": "...", "old_stop": ..., "new_stop": ..., ...},
+          ...
+        ],
+        "totals": {
+          "tightened":  3,
+          "skipped":    1,
+          "failed":     0
         }
+      }
 
-    # Mutate trade in-memory and re-fire attach_oca_stop_target. v111's
-    # cooldown guard + queue trade_id idempotency keep this safe under
-    # a double-click — second invocation inside 60s returns the
-    # existing in-flight order_id.
-    trade.stop_price = new_stop
-    try:
-        await asyncio.to_thread(_trading_bot._persist_trade, trade)
-    except Exception as _e:
-        # Persist failure isn't fatal; in-memory mutation still drives
-        # the attach. Log + continue.
-        logger.warning(f"[v19.34.116 RETUNE] persist failed for {trade_id}: {_e}")
+    Safety properties (every one test-locked):
+      • Default dry-run — operator must explicitly pass dry_run=false
+        to retune live. Prevents accidental bulk-fire from a fat
+        finger or stale curl history.
+      • Per-trade isolation — a validation error on one trade does
+        NOT abort the batch. The trade lands in `skipped[]` and
+        processing continues.
+      • v111 cooldown applies per trade independently — bulk fire on
+        the same set inside 60s deduplicates at the queue layer.
+      • Each retune calls the SAME `_retune_stop_core` helper as the
+        single endpoint, so the math and side-effects are identical.
+    """
+    payload = payload or {}
+    dry_run = bool(payload.get("dry_run", True))  # SAFETY: default True
+    atr_threshold = float(payload.get("atr_threshold", 1.0))
+    raw_styles = payload.get("trade_styles") or ["scalp"]
+    trade_styles = {(s or "").strip().lower() for s in raw_styles if s}
 
-    attach_result: Dict[str, Any] = {"success": False, "error": "executor missing"}
-    if _trade_executor and hasattr(_trade_executor, "attach_oca_stop_target"):
+    if _trading_bot is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+
+    open_trades = getattr(_trading_bot, "_open_trades", None) or {}
+    results: List[Dict[str, Any]] = []
+    skipped: List[Dict[str, Any]] = []
+    scanned = 0
+    matched = 0
+    tightened = 0
+    failed = 0
+
+    for _sym, trade in open_trades.items():
+        scanned += 1
+        trade_style = (getattr(trade, "trade_style", "") or "").strip().lower()
+        if trade_style not in trade_styles:
+            continue
+
+        symbol = getattr(trade, "symbol", "?")
+        entry_price = float(getattr(trade, "entry_price", 0) or 0)
+        stop_price = float(getattr(trade, "stop_price", 0) or 0)
+        if entry_price <= 0 or stop_price <= 0:
+            skipped.append({
+                "trade_id": getattr(trade, "id", None),
+                "symbol": symbol,
+                "reason": "missing_entry_or_stop",
+            })
+            continue
+
+        atr = _resolve_atr_for_symbol(symbol)
+        if atr is None:
+            skipped.append({
+                "trade_id": getattr(trade, "id", None),
+                "symbol": symbol,
+                "reason": "atr_unavailable",
+            })
+            continue
+
+        current_distance = abs(entry_price - stop_price)
+        current_multiplier = current_distance / atr
+        if current_multiplier <= atr_threshold:
+            # Stop is already tight enough — skip silently. Not an
+            # error; just nothing to do. We don't list it in skipped[]
+            # because the operator only cares about positions that
+            # need attention.
+            continue
+
+        matched += 1
         try:
-            attach_result = await _trade_executor.attach_oca_stop_target(trade)
+            result = await _retune_stop_core(trade, dry_run=dry_run)
+            # Annotate with the WIDE detection metadata so the V6
+            # panel can show both the trigger and the proposed fix.
+            result["current_multiplier"] = round(current_multiplier, 4)
+            result["wide_by_x"] = round(current_multiplier - atr_threshold, 4)
+            results.append(result)
+            if result.get("success"):
+                tightened += 1
+            else:
+                failed += 1
+        except _RetuneStopValidationError as e:
+            skipped.append({
+                "trade_id": getattr(trade, "id", None),
+                "symbol": symbol,
+                "reason": e.code,
+                "detail": e.detail,
+            })
         except Exception as e:
-            attach_result = {"success": False, "error": f"{type(e).__name__}: {e}"}
+            failed += 1
+            skipped.append({
+                "trade_id": getattr(trade, "id", None),
+                "symbol": symbol,
+                "reason": "exception",
+                "detail": f"{type(e).__name__}: {e}",
+            })
 
     return {
-        "success": bool(attach_result.get("success") or attach_result.get("skipped")),
-        "trade_id": trade_id,
-        "symbol": symbol,
-        "setup_type": setup_type,
-        "trade_style": trade_style,
-        "old_stop": old_stop,
-        "new_stop": new_stop,
-        "atr": float(atr),
-        "multiplier_used": multiplier_used,
-        "attach_result": attach_result,
+        "success": True,
+        "dry_run": dry_run,
+        "scanned": scanned,
+        "matched": matched,
+        "skipped": skipped,
+        "results": results,
+        "totals": {
+            "tightened": tightened,
+            "skipped": len(skipped),
+            "failed": failed,
+        },
+        "params": {
+            "atr_threshold": atr_threshold,
+            "trade_styles": sorted(trade_styles),
+        },
     }
 
 

@@ -348,3 +348,14 @@ WITHOUT waiting for V6 to ship. 18/18 new tests, 238/238 cumulative.
 
 V6 Integration index marked the only remaining Phase C backend
 dependency SHIPPED.
+
+## v19.34.117 — POST /api/trading-bot/retune-stop/bulk-scalps (2026-02-12)
+
+Bulk-fire version of v116's retune-stop. Default `dry_run=true`
+(safety inversion vs single endpoint). Scans all open scalps, filters
+by `stop_distance/atr > 1.0` (configurable), and applies v112's
+corrected stop via shared `_retune_stop_core` helper. v111 cooldown
++ idempotency apply per-trade. One operator call to fix every
+legacy wide-stop scalp in the book. Wires into V6 Position Health
+Console's "Tighten all wide-stop scalps" batch action.
+17/17 new tests, 255/255 cumulative v100→v117 PASS.

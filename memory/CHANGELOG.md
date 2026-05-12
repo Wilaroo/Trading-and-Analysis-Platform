@@ -2,6 +2,130 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.117) — POST /api/trading-bot/retune-stop/bulk-scalps
+
+One-shot batch fix for every legacy wide-stop scalp in the book.
+Operator hits this once and the v116 retune logic ripples across
+all matching positions under v111 cooldown protection.
+
+### Backend
+
+**`routers/trading_bot.py`** — refactored v116 + added v117:
+
+- Extracted `_retune_stop_core(trade, dry_run)` private helper. Same
+  math + side-effects path used by BOTH the single (`/retune-stop`)
+  and bulk (`/retune-stop/bulk-scalps`) endpoints, so they can't
+  drift. `_RetuneStopValidationError` raised on caller-handled
+  failures (no-setup_type, no-entry, atr-unavailable) — single
+  endpoint maps to HTTPException, bulk endpoint records in skipped[].
+- New helper `_resolve_atr_for_symbol(symbol)` — same fallback
+  ladder both endpoints use (bot._latest_atr_5m → scanner cache).
+- New endpoint `POST /api/trading-bot/retune-stop/bulk-scalps`:
+
+```
+Body (all optional):
+  {
+    "dry_run":       true,    // DEFAULT TRUE — explicit opt-in for
+                              // live fire. Inverted from single
+                              // endpoint's default because bulk fire
+                              // is higher-risk (easier to send a
+                              // dozen STP cancellations into IB by
+                              // accident).
+    "atr_threshold": 1.0,     // stop_distance / atr > threshold →
+                              // matches. v112 expects 0.4-0.5× so
+                              // 1.0 catches pre-v112 scalps cleanly.
+    "trade_styles":  ["scalp"]  // which styles to scan. Default
+                                // ["scalp"]. Operator who wants to
+                                // bulk-retune intraday or swing
+                                // must pass those explicitly.
+  }
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "dry_run": true,
+  "scanned": 13,
+  "matched": 4,
+  "skipped": [{"trade_id": "...", "reason": "atr_unavailable"}, ...],
+  "results": [
+    {
+      "trade_id": "tr-9a1", "symbol": "SBUX",
+      "old_stop": 97.0, "new_stop": 99.2,
+      "atr": 2.0, "multiplier_used": 0.4,
+      "current_multiplier": 1.5,    // pre-retune width
+      "wide_by_x": 0.5,             // how much over threshold
+      "attach_result": {...}
+    }
+  ],
+  "totals": {"tightened": 3, "skipped": 1, "failed": 0},
+  "params": {"atr_threshold": 1.0, "trade_styles": ["scalp"]}
+}
+```
+
+### Safety properties (test-locked)
+
+- **Default dry-run** — empty body / `{}` / `null` all yield
+  `dry_run=true`. Operator must explicitly pass `dry_run=false` to
+  fire. Source-grep test locks the default.
+- **Per-trade isolation** — `attach_oca_stop_target` raising on one
+  trade does NOT abort the batch. That trade lands in `results[]`
+  with `success=false` and `attach_result.error` set; the rest
+  process.
+- **v111 cooldown integration** — `{"skipped": "bracket_attach_cooldown"}`
+  counted as `tightened` (operator intent honored).
+- **Silent skip for tight scalps** — already-correct scalps are not
+  errors. They simply don't appear in `results[]` or `skipped[]`.
+  Operator only sees actionable rows.
+- **Atomic re-use of v112's `_retune_stop_core`** — math is
+  guaranteed identical to the single endpoint.
+
+### V6 wiring
+
+The V6 Position Health Console's `[Tighten all wide-stop scalps]`
+batch action (right-rail action button on the STOP-WIDE-FOR-STYLE
+state) maps directly to this endpoint with `dry_run=false`. The
+preview pop-over uses the same endpoint with the default `dry_run=true`.
+
+### Regression — 17 / 17 new + 255 / 255 cumulative v100→v117 PASS
+
+`tests/test_v19_34_117_bulk_scalps.py`:
+- `TestBulkSafetyDefaults` (3) — default dry-run, empty/None payload,
+  explicit live-fire opt-in
+- `TestBulkFilterLogic` (6) — matches only wide-scalps, intraday
+  excluded by default, tight scalp silently skipped, ATR
+  unavailable lands in skipped[], custom threshold loosens filter,
+  custom trade_styles includes intraday
+- `TestBulkPerTradeIsolation` (1) — one attach exception doesn't
+  abort batch (2-trade case verified)
+- `TestBulkCooldownIntegration` (1) — v111 cooldown skip counted
+  as `tightened`
+- `TestBulkResponseShape` (3) — top-level keys, totals match arrays,
+  params echo back
+- `TestBulkRoutingContract` (3) — endpoint registered, delegates to
+  `_retune_stop_core`, default dry-run locked in source
+
+### Operator workflow
+
+```bash
+# 1. Preview — see every legacy wide-stop scalp and the proposed fix:
+curl -X POST http://localhost:8001/api/trading-bot/retune-stop/bulk-scalps \
+  -H 'Content-Type: application/json' -d '{}' | jq
+
+# 2. Inspect results[]. If the proposed `new_stop` values look right,
+#    fire live:
+curl -X POST http://localhost:8001/api/trading-bot/retune-stop/bulk-scalps \
+  -H 'Content-Type: application/json' -d '{"dry_run": false}' | jq
+
+# 3. If you want to be picky — tighter threshold (more aggressive):
+curl -X POST http://localhost:8001/api/trading-bot/retune-stop/bulk-scalps \
+  -H 'Content-Type: application/json' \
+  -d '{"dry_run": false, "atr_threshold": 0.8}' | jq
+```
+
+
 ## 2026-02-12 (v19.34.116) — POST /api/trading-bot/retune-stop
 
 The only remaining backend dependency for V6 Phase C's

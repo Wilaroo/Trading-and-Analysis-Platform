@@ -255,10 +255,12 @@ class TestRetuneStopRoutingContract:
 
     def test_endpoint_calls_v112_evaluator(self):
         """The whole point of this endpoint is to USE v112's table.
-        Source-grep the import + call so a future refactor can't
-        accidentally bypass it."""
+        v117 extracted the per-trade logic to `_retune_stop_core` —
+        check the import + call live in that helper (which both the
+        single and bulk endpoints share)."""
         src = (BACKEND_DIR / "routers" / "trading_bot.py").read_text()
-        idx = src.find('@router.post("/retune-stop")')
+        idx = src.find("async def _retune_stop_core(")
+        assert idx >= 0, "v117 _retune_stop_core helper missing — single + bulk endpoints will diverge"
         window = src[idx:idx + 5000]
         assert "from services.opportunity_evaluator import OpportunityEvaluator" in window
         assert "calculate_atr_based_stop(" in window
