@@ -1,22 +1,30 @@
 """
 emergency_flatten_symbols_v19_34_118.py
 ─────────────────────────────────────────────────────────────────────────────
-Per-symbol emergency flatten. Targets the bot.close_trade() path used by
-the safety_router so every bracket leg is properly cancelled at IB.
+EMERGENCY FLATTEN — Routes through the v19.34.45 *nuclear* endpoint
+`/api/safety/emergency-flatten-ib`, which bypasses `bot._open_trades`
+and `close_trade()` entirely. Reads the live IB position list via
+`ib_direct_service` (clientId 11), cancels working orders, fires a
+single MKT close per symbol.
 
-Run on the DGX (where the bot service is actually live):
+Use this when the regular "Close all / cancel" button reports
+"close_returned_false" for every position — the exact failure mode
+v19.34.45 was built to fix.
+
+Run on the DGX:
     cd ~/Trading-and-Analysis-Platform/backend
-    MONGO_URL=mongodb://localhost:27017 DB_NAME=tradecommand \
-        APP_URL=http://localhost:8001 \
+    APP_URL=http://localhost:8001 \
         python3 scripts/emergency_flatten_symbols_v19_34_118.py ONON RJF MTB CCJ
 
-The script:
-  1. Resolves every OPEN bot_trades doc for each symbol.
-  2. Calls POST /api/safety/flatten-symbol per trade_id (one-by-one so
-     a single failure doesn't block the rest).
-  3. Prints a summary of OK / FAIL.
+Or to flatten EVERY IB position the direct API sees:
+    APP_URL=http://localhost:8001 \
+        python3 scripts/emergency_flatten_symbols_v19_34_118.py --all
 
-Safer than /flatten-all because it ONLY touches the listed symbols.
+Requires:
+  - `ib_direct_service` connected (IB_DIRECT_ENABLED=true, clientId=11).
+  - If not connected the script tells you, and your only remaining
+    paths are TWS-manual or `/api/safety/flatten-all` (which is the
+    path that just failed for you).
 """
 from __future__ import annotations
 
@@ -25,14 +33,10 @@ import os
 import sys
 import urllib.request
 import urllib.error
-from pathlib import Path
-
-HERE = Path(__file__).resolve()
-BACKEND_DIR = HERE.parent.parent
-sys.path.insert(0, str(BACKEND_DIR))
+from typing import Any
 
 
-def _post(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict | str]:
+def _post(url: str, payload: dict, timeout: int = 60) -> tuple[int, Any]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, method="POST",
@@ -55,62 +59,69 @@ def _post(url: str, payload: dict, timeout: int = 30) -> tuple[int, dict | str]:
         return 0, str(exc)
 
 
-def main(symbols: list[str]) -> int:
-    from pymongo import MongoClient
+def _get(url: str, timeout: int = 10) -> tuple[int, Any]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            try:
+                return resp.status, json.loads(body)
+            except Exception:
+                return resp.status, body
+    except urllib.error.HTTPError as exc:
+        return exc.code, str(exc)
+    except Exception as exc:
+        return 0, str(exc)
 
-    mongo_url = os.environ.get("MONGO_URL")
-    db_name = os.environ.get("DB_NAME", "tradecommand")
+
+def main(argv: list[str]) -> int:
     app_url = (os.environ.get("APP_URL") or "http://localhost:8001").rstrip("/")
-    if not mongo_url:
-        print("ERROR: MONGO_URL not set.")
-        return 1
 
-    client = MongoClient(mongo_url)
-    db = client[db_name]
-    symbols = [s.upper() for s in symbols]
-    print(f"\n=== Emergency flatten target symbols: {symbols} ===")
-    print(f"=== Bot service URL: {app_url} ===\n")
+    flatten_all = "--all" in argv
+    symbols = [a.upper() for a in argv if not a.startswith("--")]
 
-    trade_ids: list[tuple[str, str]] = []
-    for sym in symbols:
-        for t in db.bot_trades.find(
-            {"symbol": sym, "status": {"$in": ["open", "OPEN", "partial", "filled"]}},
-            {"_id": 0, "id": 1, "trade_id": 1, "symbol": 1, "shares": 1, "direction": 1},
-        ):
-            tid = t.get("id") or t.get("trade_id")
-            if not tid:
-                continue
-            trade_ids.append((sym, tid))
-            print(
-                f"  found OPEN  {sym}  trade_id={tid}  "
-                f"shares={t.get('shares')}  dir={t.get('direction')}"
-            )
+    print(f"\n=== v19.34.118 Emergency Flatten (nuclear path) ===")
+    print(f"Bot URL : {app_url}")
+    print(f"Symbols : {'ALL IB-held' if flatten_all else symbols}")
+    print()
 
-    if not trade_ids:
-        print("  no open trades found in bot_trades — nothing to do.")
-        return 0
+    # Pre-flight: check ib_direct connection
+    status, body = _get(f"{app_url}/api/ib/pusher-health")
+    if isinstance(body, dict):
+        hb = body.get("heartbeat") or {}
+        print(f"Pusher connected   : {body.get('pusher_connected')}")
+        print(f"IB-direct connected: {hb.get('ib_direct_connected')}")
+    else:
+        print(f"Pusher health probe failed: {status} {body}")
 
-    print(f"\nFlattening {len(trade_ids)} trade(s) via bot.close_trade …")
-    ok, fail = 0, 0
-    for sym, tid in trade_ids:
-        status, body = _post(
-            f"{app_url}/api/trading-bot/close-trade",
-            {"trade_id": tid, "reason": "emergency_flatten_v19_34_118"},
-        )
-        if 200 <= status < 300:
-            ok += 1
-            print(f"  ✓ {sym} {tid}  → {status}  {body if isinstance(body, str) else body.get('status', body)}")
-        else:
-            fail += 1
-            print(f"  ✗ {sym} {tid}  → {status}  {body}")
+    payload: dict[str, Any] = {"confirm": "FLATTEN_IB"}
+    if symbols and not flatten_all:
+        payload["symbols"] = symbols
 
-    print(f"\nDone. OK={ok}  FAIL={fail}")
-    if fail:
-        print("\nRetry the failed ones, or fall back to /api/safety/flatten-all?confirm=FLATTEN")
-        print("(or manually flatten in IB Gateway).")
-    return 0 if fail == 0 else 2
+    print(f"\nCalling POST {app_url}/api/safety/emergency-flatten-ib …")
+    status, body = _post(
+        f"{app_url}/api/safety/emergency-flatten-ib", payload, timeout=120,
+    )
+    print(f"HTTP {status}")
+    if isinstance(body, dict):
+        print(json.dumps(body, indent=2, default=str)[:8000])
+        success = bool(body.get("success"))
+        summary = body.get("summary") or {}
+        closes = summary.get("closes") or []
+        if closes:
+            print(f"\n── per-symbol results ──")
+            for c in closes:
+                ok = "✓" if c.get("close_success") else "✗"
+                print(
+                    f"  {ok} {c.get('symbol'):8s} qty={c.get('qty'):>6}  "
+                    f"action={c.get('close_action'):4s}  "
+                    f"status={c.get('close_status')}  "
+                    f"err={c.get('close_error', '')}"
+                )
+        return 0 if success else 2
+    else:
+        print(body)
+        return 2
 
 
 if __name__ == "__main__":
-    syms = sys.argv[1:] or ["ONON", "RJF", "MTB", "CCJ"]
-    sys.exit(main(syms))
+    sys.exit(main(sys.argv[1:] or ["--all"]))
