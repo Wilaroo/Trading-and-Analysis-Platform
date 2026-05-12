@@ -62,6 +62,12 @@ import SystemBanner from './v5/SystemBanner';
 import BootReconcilePill from './v5/BootReconcilePill';
 import DriftGuardPill from './v5/DriftGuardPill';
 import LLMRulesPill from './v5/LLMRulesPill';
+// v19.34.101 (Feb 2026) — Order-policy rulebook pill. Surfaces the live
+// per-style execution rulebook (TIF, scale-outs, trail anchor, EOD
+// behavior) from GET /api/trading-bot/order-policies so the operator
+// can audit at-a-glance what the bot WILL do for any horizon before
+// we wire the executor side in the next pass.
+import OrderPoliciesHelpPill from './v5/OrderPoliciesHelpPill';
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -436,6 +442,11 @@ export const SentComV5View = ({
                 chat-AI enforces. 11/13 · risk $2.5K · DLP -0.4%. Hover
                 for full rules list + breach detection. */}
             <LLMRulesPill />
+            {/* v19.34.101 — Per-style execution rulebook (TIF, scale-outs,
+                trail anchor, EOD behavior). Hover for the full 6-horizon
+                policy table. Single source of truth =
+                services/order_policy_registry.py. */}
+            <OrderPoliciesHelpPill />
             <AccountGuardChipV5 safety={safety} />
             {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
                 chip. Distinguishes 'logged in elsewhere' / socket-down /

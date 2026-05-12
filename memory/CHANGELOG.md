@@ -2,6 +2,42 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.101) — Order-policy rulebook pill in V5 HUD
+
+### Why
+After v19.34.100 stood up the per-style order-management registry, the operator had no visual way to audit the live rulebook short of reading source. Before we wire executors / stop-manager / OCA-ladder expansion to the registry, the operator wants to confirm what the bot WILL do for each horizon at-a-glance.
+
+### What ships
+**New component — `frontend/src/components/sentcom/v5/OrderPoliciesHelpPill.jsx`**
+- Tiny violet "policies" pill in the V5 HUD top strip (sits beside `LLMRulesPill`).
+- Hover → 520px popover listing all 6 horizons (scalp / intraday / multi_day / swing / investment / position) with:
+  - TIF badge (DAY amber / GTC emerald)
+  - Outside-RTH badge (when enabled)
+  - EOD-safe badge (when `eod_sweep_eligible: false`)
+  - Full TP ladder ("33% @ 2R · 33% @ 5R · 34% @ 10R")
+  - Trail-anchor (friendly indicator name: 20-EMA, 50-SMA, 30-week SMA, ATR, …)
+  - Break-even rule
+  - EOD behavior ("Force-close at bell" vs "Hold overnight" · sweep-eligible vs sweep-protected)
+  - Operator-facing note string
+- Lazy-fetches `GET /api/trading-bot/order-policies` only when first opened. Pure read-only renderer.
+- Cohesive with existing `LLMRulesPill` pattern; uses `v5-mono` typography and shadcn-compatible Tailwind classes.
+
+**Wiring**
+- `SentComV5View.jsx` HUD top strip imports + renders `<OrderPoliciesHelpPill />` immediately after `<LLMRulesPill />`.
+
+### Verification
+- Backend regression: 24/24 pytest cases in `test_v19_34_100_order_policy_registry.py` pass.
+- ESLint clean on both touched files.
+- Smoke-screenshot (preview localhost): pill renders, hover opens tooltip, all 6 horizon rows present with correct TIF/ladder values pulled live from the registry.
+
+### Next
+- v19.34.102: Wire `BotTrade.order_policy.tif` + `outside_rth` into the actual IB bracket payload in `trade_executor_service.py` / `bracket_tif.py`.
+- v19.34.103: Expand `tp_ladder` into multi-rung OCA targets (single shared stop, qty auto-reduces on each TP fill, per operator choice).
+- v19.34.104: `stop_manager.py` — map `stop_trail_anchor_for(trade)` to EMA/SMA-based trailing on long-horizon trades; ATR fallback until anchor MA warms up.
+
+---
+
+
 ## 2026-05-12 (v19.34.100) — Per-style order-management policy registry
 
 ### Why
