@@ -147,6 +147,7 @@ class PositionSizingConfigUpdate(BaseModel):
     max_risk_per_trade_pct: Optional[float] = None
     max_risk_per_trade_dollar: Optional[float] = None
     max_position_pct: Optional[float] = None
+    max_position_style_exposure_pct: Optional[float] = None
     tqs_min_score: Optional[float] = None
     tqs_base_score: Optional[float] = None
     tqs_max_score: Optional[float] = None
@@ -177,17 +178,48 @@ class PositionSizeRequest(BaseModel):
     win_rate: float = 0.5
     avg_win_r: float = 1.5
     avg_loss_r: float = 1.0
+    # v19.34.96 — optional, enables portfolio-level cap when caller knows
+    # the trade style. If unset, behaves exactly like pre-v19.34.96.
+    trade_style: Optional[str] = None
 
 
 @router.post("/position-sizing/calculate")
 async def calculate_position_size(request: PositionSizeRequest):
-    """Calculate optimal position size"""
+    """Calculate optimal position size.
+
+    v19.34.96: when `trade_style` is 'position', the result is additionally
+    capped by the portfolio-level position-style exposure guard (default
+    30% of account_value across all simultaneously-open position-style
+    trades). The endpoint loads the current snapshot from the in-memory
+    `_open_trades` registry on the trading_bot router.
+    """
     service = get_position_sizer_service()
-    
+
     # Check circuit breaker constraint
     cb_service = get_circuit_breaker_service()
     permission = await cb_service.check_trading_permission(tqs_score=request.tqs_score)
-    
+
+    # v19.34.96 — compute live position-style exposure snapshot
+    style_norm = (request.trade_style or "").strip().lower()
+    style_exposure_remaining: Optional[float] = None
+    exposure_snapshot: Optional[dict] = None
+    if style_norm == "position":
+        try:
+            from services.portfolio_exposure_guard import compute_exposure
+            try:
+                from routers import trading_bot as _tb
+                open_trades = list((_tb._open_trades or {}).values())
+            except Exception:
+                open_trades = []
+            cfg = service.get_config()
+            cap_pct = cfg.get("max_position_style_exposure_pct", 30.0)
+            snap = compute_exposure(open_trades, request.account_value, cap_pct=cap_pct)
+            exposure_snapshot = snap.to_dict()
+            style_exposure_remaining = snap.remaining_value
+        except Exception as exc:
+            # Fail open — log only. Per-trade caps still apply.
+            exposure_snapshot = {"error": str(exc)}
+
     result = await service.calculate_size(
         entry_price=request.entry_price,
         stop_price=request.stop_price,
@@ -197,13 +229,40 @@ async def calculate_position_size(request: PositionSizeRequest):
         win_rate=request.win_rate,
         avg_win_r=request.avg_win_r,
         avg_loss_r=request.avg_loss_r,
-        circuit_breaker_multiplier=permission.max_size_multiplier
+        circuit_breaker_multiplier=permission.max_size_multiplier,
+        trade_style=style_norm,
+        position_style_exposure_remaining_value=style_exposure_remaining,
     )
-    
-    return {
+
+    response = {
         "success": True,
-        "position_size": result.to_dict()
+        "position_size": result.to_dict(),
     }
+    if exposure_snapshot is not None:
+        response["position_style_exposure"] = exposure_snapshot
+    return response
+
+
+@router.get("/position-sizing/portfolio-exposure")
+def get_portfolio_position_exposure(account_value: float = Query(gt=0)):
+    """v19.34.96 — current portfolio-level exposure to position-style trades.
+
+    Returns the cap state (cap %, current $, current %, remaining $, remaining %)
+    plus a per-trade breakdown for the V5/V6 UI safety dashboard.
+    """
+    try:
+        from services.portfolio_exposure_guard import compute_exposure
+        try:
+            from routers import trading_bot as _tb
+            open_trades = list((_tb._open_trades or {}).values())
+        except Exception:
+            open_trades = []
+        cfg = get_position_sizer_service().get_config()
+        cap_pct = cfg.get("max_position_style_exposure_pct", 30.0)
+        snap = compute_exposure(open_trades, account_value, cap_pct=cap_pct)
+        return {"success": True, "exposure": snap.to_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/position-sizing/table")

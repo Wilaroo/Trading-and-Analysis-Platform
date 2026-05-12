@@ -2,6 +2,46 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.96) — Portfolio-level position-style exposure cap (30%)
+
+### Why
+With v19.34.95 adding 8 new POSITION-style detectors (Stage 2, golden cross, 200DMA reclaim, etc.) holding for weeks-to-months, a single bullish month could pile 6-8 simultaneous multi-month bets at 10% each, hogging 60-80% of capital in one regime call. Scalp/intraday positions naturally recycle intraday so they self-bound; long-horizon ones don't.
+
+### Scope
+Hard cap of 30% of account_value across all simultaneously-open `trade_style="position"` trades. Default configurable via `PORTFOLIO_POSITION_EXPOSURE_CAP_PCT` env var or `max_position_style_exposure_pct` in position-sizer config. Cap is enforced at the LAST step of the sizing pipeline so it composes correctly with all existing caps (per-trade risk %, per-trade dollar risk, max-position %, circuit breakers).
+
+### What ships
+
+**New service**: `services/portfolio_exposure_guard.py`
+- `compute_exposure(open_trades, account_value, cap_pct=None, styles=None)` returns `ExposureSnapshot` with cap_value, current_value, current_pct, remaining_value, remaining_pct, cap_breached, breakdown[], styles_counted[].
+- `POSITION_STYLES` constant — `frozenset({"position"})` by default; callers can pass `styles={"swing", "investment", "position"}` to widen.
+- `max_additional_shares(snapshot, entry_price)` helper.
+- Accepts both dataclass-like `BotTrade` and plain dict trade objects.
+
+**Extended position sizer** (`services/position_sizer.py`)
+- `SizingConfig.max_position_style_exposure_pct = 30.0` (configurable).
+- `calculate_size(...)` gains `trade_style` + `position_style_exposure_remaining_value` kwargs.
+- New step 8 in the sizing pipeline clamps `final_shares * entry_price <= remaining_value` when `trade_style == "position"`. Emits warning "Portfolio 30% cap on position-style trades exhausted; entry blocked" when fully exhausted.
+- Legacy callers unaffected — defaults preserve pre-v19.34.96 behavior.
+
+**Risk router** (`routers/risk_router.py`)
+- `POST /api/risk/position-sizing/calculate` now accepts optional `trade_style` in the request body. When `trade_style="position"`, the endpoint pulls live `_open_trades` from `trading_bot`, computes the exposure snapshot, and passes `remaining_value` into the sizer. Response includes a new `position_style_exposure` block with cap state + per-trade breakdown.
+- **NEW** `GET /api/risk/position-sizing/portfolio-exposure?account_value=N` — read-only snapshot for the V5/V6 UI safety dashboard.
+- `PositionSizingConfigUpdate` Pydantic model gains `max_position_style_exposure_pct: Optional[float]` for hot-config changes.
+
+### Verification
+- New test file: `/app/backend/tests/test_v19_34_96_portfolio_position_exposure_cap.py` — **21/21 passing** across 3 test classes (compute_exposure, position_sizer integration, realistic scenarios).
+- Full v19.34.x regression: **98/98 passing**.
+- Live endpoint smoke test: `GET /api/risk/position-sizing/portfolio-exposure?account_value=100000` returns `{cap_pct:30, cap_value:30000, current_value:0, remaining_value:30000}`.
+- Live `POST /api/risk/position-sizing/calculate` with `trade_style:"position"` returns both the sized position AND the exposure snapshot.
+
+### Files touched
+- NEW: `backend/services/portfolio_exposure_guard.py`
+- NEW: `backend/tests/test_v19_34_96_portfolio_position_exposure_cap.py`
+- MOD: `backend/services/position_sizer.py` — config field + new kwargs + step-8 cap clamp
+- MOD: `backend/routers/risk_router.py` — request body extension + new exposure GET endpoint + config update model
+
+
 ## 2026-05-12 (v19.34.95) — Swing / Investment / Position detector expansion
 
 ### Scope

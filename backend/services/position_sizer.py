@@ -81,6 +81,14 @@ class SizingConfig:
     max_risk_per_trade_pct: float = 1.0   # Max % of account to risk
     max_risk_per_trade_dollar: float = 500.0  # Max $ to risk
     max_position_pct: float = 10.0  # Max % of account in one position
+
+    # v19.34.96 — portfolio-level cap across simultaneously-open trades
+    # whose `trade_style` falls in the POSITION_STYLES set (default just
+    # "position"). Without this cap a bullish month can pile 6-8 multi-
+    # month bets at 10% each, hogging buying power and concentrating risk
+    # in one regime call. Default 30% per spec; configurable via env var
+    # PORTFOLIO_POSITION_EXPOSURE_CAP_PCT.
+    max_position_style_exposure_pct: float = 30.0
     
     # TQS scaling
     tqs_min_score: float = 35.0   # Below this, don't trade
@@ -104,6 +112,7 @@ class SizingConfig:
             "max_risk_per_trade_pct": self.max_risk_per_trade_pct,
             "max_risk_per_trade_dollar": self.max_risk_per_trade_dollar,
             "max_position_pct": self.max_position_pct,
+            "max_position_style_exposure_pct": self.max_position_style_exposure_pct,
             "tqs_scaling": {
                 "min_score": self.tqs_min_score,
                 "base_score": self.tqs_base_score,
@@ -148,6 +157,8 @@ class PositionSizerService:
             self._config.max_risk_per_trade_dollar = config["max_risk_per_trade_dollar"]
         if "max_position_pct" in config:
             self._config.max_position_pct = config["max_position_pct"]
+        if "max_position_style_exposure_pct" in config:
+            self._config.max_position_style_exposure_pct = float(config["max_position_style_exposure_pct"])
             
         # TQS scaling
         if "tqs_min_score" in config:
@@ -177,7 +188,9 @@ class PositionSizerService:
         win_rate: float = 0.5,
         avg_win_r: float = 1.5,
         avg_loss_r: float = 1.0,
-        circuit_breaker_multiplier: float = 1.0
+        circuit_breaker_multiplier: float = 1.0,
+        trade_style: str = "",
+        position_style_exposure_remaining_value: Optional[float] = None,
     ) -> PositionSizeResult:
         """
         Calculate optimal position size.
@@ -192,6 +205,14 @@ class PositionSizerService:
             avg_win_r: Average R on winning trades
             avg_loss_r: Average R on losing trades
             circuit_breaker_multiplier: Constraint from circuit breakers
+            trade_style: v19.34.96 — "scalp"/"intraday"/"swing"/"investment"/
+                "position". Used to enforce the portfolio-level cap on
+                long-horizon styles.
+            position_style_exposure_remaining_value: v19.34.96 — dollars
+                still available under the position-style exposure cap (computed
+                upstream via portfolio_exposure_guard.compute_exposure). If
+                None, no portfolio-level cap is applied (preserves legacy
+                callers).
             
         Returns:
             PositionSizeResult with shares and all scaling factors
@@ -293,6 +314,30 @@ class PositionSizerService:
         if final_risk > max_risk:
             final_shares = int(max_risk / risk_per_share)
             result.warnings.append(f"Capped at max risk ${max_risk:.0f}")
+
+        # 8. v19.34.96 — portfolio-level cap on simultaneously-open
+        # position-style trades. Only applies when trade_style is one of
+        # the long-horizon styles AND caller supplied remaining-room
+        # value. Set to 0 to fully block new entries when cap exhausted.
+        from services.portfolio_exposure_guard import POSITION_STYLES
+        style_norm = (trade_style or "").strip().lower()
+        if (
+            style_norm in POSITION_STYLES
+            and position_style_exposure_remaining_value is not None
+        ):
+            remaining = max(0.0, float(position_style_exposure_remaining_value))
+            max_shares_by_style_cap = int(remaining // entry_price) if entry_price > 0 else 0
+            if final_shares > max_shares_by_style_cap:
+                final_shares = max_shares_by_style_cap
+                cap_pct = self._config.max_position_style_exposure_pct
+                if final_shares == 0:
+                    result.warnings.append(
+                        f"Portfolio {cap_pct:.0f}% cap on {style_norm}-style trades exhausted; entry blocked"
+                    )
+                else:
+                    result.warnings.append(
+                        f"Capped at remaining ${remaining:,.0f} under portfolio {cap_pct:.0f}% {style_norm}-style cap"
+                    )
             
         # Set final values
         result.shares = max(0, final_shares)
