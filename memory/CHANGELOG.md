@@ -3,6 +3,89 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.121) — Live Post-Mortem + Setup Win-Rate Analytics
+
+Operator's WR 7% / 9W-112L / −$25,045 day post-mortem. Forensic walk
+of the trade tape + IB order tape (130 trades) surfaced 5 distinct
+failure patterns. Code shipped: setup-by-setup win-rate analytics
+script for `alert_outcomes`.
+
+### Forensic findings (from operator's pasted tape)
+
+**Finding A — Per-symbol re-entry runaway (~$7.5k on RJF alone).**
+RJF fired 28 separate SHORT entries in 76 minutes between
+$150.00–$152.65. The classifier cycled through 6+ distinct
+setup_types on the same symbol (backside, bouncy_ball, gap_give_go,
+mean_reversion, puppy_dog, reconciled_excess_slice, +6) — each one
+opening its own fresh `(symbol, setup_type)` cooldown bucket and
+bypassing the others.
+
+Fix needed: per-symbol per-direction open-exposure cap that's
+INDEPENDENT of setup_type. Today's cooldown is too granular.
+
+**Finding B — All bot-placed stops cancelled in two mass waves
+(11:21-11:23 and 15:28-15:29).** Every "Stop Loss" leg in the IB
+order tape shows `Cancelled` with `0/X` filled. Zero bot stops
+actually fired today. Wave 1 (~100 stops in 2 min) too synchronized
+to be IB-side — likely an operator action or guardrail trip. After
+Wave 1, every position ran naked until operator manual flatten.
+
+Open RCA: operator to confirm what action triggered 11:21 mass cancel.
+
+**Finding C — ARGX wrong-direction phantom not fully resolved.**
+Bot entered LONG 118+4sh ~9:51. v19.29 `wrong_direction_phantom_swept`
+ran at 10:17 and cleared only 5 shares. By 15:21 position was SHORT
+118 (−$1,111 OCA ext). v19.29 fix doesn't catch the
+sibling-roll case where consolidator merges across direction.
+
+**Finding D — PAPER trades polluting LIVE PnL.** 12 trades flagged
+`Mode: PAPER` (TPR/NTAP/ALGM/TOST/INCY/SMR/LSCC/JBLU/BOIL/NTLA/HMY/TSLQ)
+commingled into the daily total. ~$1.5k of paper-money "losses"
+skewing real PnL + grading.
+
+**Finding E — Loss concentration: 8 tickers = 84% of damage.**
+RJF $7.5k + ONON $3.1k + CW $2.8k + MTB $2.0k + ARGX $1.9k +
+NXT $1.3k + DKS $1.2k + ITT $1.1k = $20.9k of $25.0k. 7 of 8 are
+SHORTS on what was likely a chop-uptrend day. Either regime
+detection or short-setup mass-firing is bias-driving exposure.
+
+### Backend
+
+**`scripts/setup_winrate_breakdown_v19_34_121.py`** (new) — reads
+`alert_outcomes` over a lookback window, aggregates by `setup_type`
+(direction-suffixes normalized so `_long`/`_short` variants
+combine), sorts by net PnL ascending (worst first). Flags:
+- `🔴 KILL`   — WR < 25% with n ≥ 5 samples  
+- `🟡 review` — WR < 35% AND net < 0
+- `🟢 keep`   — WR ≥ 55% AND net > 0
+- `⚪ neutral` — anything else
+
+Operator runs after market close to identify chronically-bleeding
+setups for `_enabled_setups` removal. Usage:
+```
+MONGO_URL=... python3 scripts/setup_winrate_breakdown_v19_34_121.py --days 30
+```
+
+### Open follow-up (next session, prioritized)
+
+1. **#0 (free safety net, ship first)**: Daily trade-count circuit
+   breaker — auto-pause scanner after N=30 entries/day. Tiny diff,
+   would have stopped today's runaway at 8% of actual damage.
+2. **#1 + #1B**: Per-symbol per-direction open-exposure cap
+   (setup_type-agnostic) + entry-attempt audit log so every
+   suppression decision is visible.
+3. **#2**: Bracket-lifecycle audit endpoint
+   (`GET /api/diagnostics/bracket-lifecycle?symbol=X&date=today`) —
+   walks `bracket_lifecycle_events` to find why all today's stops
+   were cancelled. Needed before #3.
+4. **#3**: Bracket re-issue on consolidator merge — when siblings
+   roll into canonical, fire ONE fresh STP+TP sized for the merged
+   share count.
+5. **#4**: Stronger wrong-direction guard (covers sibling-roll case).
+6. **#5**: PAPER/LIVE mode segregation in Closed Today panel.
+
+
+
 ## 2026-02-12 (v19.34.120) — diagnose-close-readiness accuracy + phantom detection
 
 Follow-up to v19.34.119 after the operator's first live run of the
