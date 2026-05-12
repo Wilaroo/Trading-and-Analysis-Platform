@@ -240,6 +240,37 @@ explain: (1) which cap triggered (position-only 30% or combined 55%),
 (2) current $ used vs remaining, (3) the per-trade breakdown, (4) suggest
 scaling out the smallest-conviction open position to free room.
 
+=== v19.34.100 — ORDER-MANAGEMENT POLICIES ===
+
+Each trade style has a DISTINCT execution / management policy. The bot
+applies these at order placement, stop adjustment, EOD sweep, and
+cancellation. Single source of truth: `services/order_policy_registry.py`.
+Live spec available at GET /api/trading-bot/order-policies.
+
+  style       | TIF | Outside-RTH | TP ladder                          | Stop trail   | EOD sweep?
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  scalp       | DAY | no          | 100% @ +1R                         | 0.5 × ATR    | YES
+  intraday    | DAY | no          | 50% @ +2R · 50% @ +5R              | 1.5 × ATR    | YES
+  multi_day   | GTC | YES         | 33% @ +2R · 33% @ +5R · 34% @ +10R | EMA-20       | NO
+  swing       | GTC | YES         | 50% @ +2R · 50% @ +5R              | EMA-20       | NO
+  investment  | GTC | YES         | 30% @ +3R · 30% @ +6R · 40% @ +12R | SMA-50       | NO
+  position    | GTC | YES         | 25% @ +4R · 25% @ +8R · 50% @ +15R | 30wk-SMA     | NO
+
+BREAK-EVEN AUTO-PULL (move stop to entry after this much profit):
+  scalp +0.5R · intraday +1R · multi_day +1.5R · swing +2R
+  investment +2.5R · position +3R
+
+EOD-SWEEP PROTECTION:
+  The bot's `POST /api/trading-bot/cancel-all-pending-orders` defaults to
+  `protect_long_horizon=true`. This SKIPS any pending order attached to a
+  multi_day/swing/investment/position trade so its GTC bracket survives
+  overnight. Operator override `protect_long_horizon=false` flattens
+  EVERYTHING (rare escape hatch). The response carries `protected_symbols`
+  + `protected_details` so the operator sees what was left untouched.
+
+When asked "how do you manage an X trade?" or "what's our stop / TP / TIF
+on a Y trade?", QUOTE THE TABLE ABOVE VERBATIM. Don't paraphrase.
+
 Format responses with clear sections. Cite specific rules from the playbook."""
 
     def __init__(self, db=None):

@@ -2,6 +2,64 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.100) — Per-style order-management policy registry
+
+### Why
+After v19.34.95 added 20 long-horizon detectors (swing / investment / position), the existing order-execution pipeline (which had been hardened in v19.34.85-94 for scalp + intraday) lacked style-aware rules. Concrete risks:
+- A swing/investment/position bracket placed as DAY order auto-cancels at session close, leaving the position naked overnight.
+- The v19.34.89/90 EOD orphan sweep would cancel pending GTC brackets attached to multi-day trades that are SUPPOSED to persist.
+- Trailing stops trail on ATR for everyone — fine for scalp/intraday, useless for a multi-month position that should trail on 30-week SMA.
+- The bot's chat couldn't answer "how do you manage a swing trade?" because there was no canonical answer.
+
+Single source of truth needed — same pattern as `SETUP_REGISTRY` and `portfolio_exposure_guard.{POSITION_STYLES, LONG_HORIZON_STYLES}`.
+
+### What ships
+
+**New module — `backend/services/order_policy_registry.py`**
+- `OrderPolicy` dataclass: style · time_in_force · outside_rth · tp_ladder · stop_trail_anchor · stop_atr_multiple · stop_breakeven_at_r · close_at_eod · eod_sweep_eligible · horizon_label · notes
+- 6 frozen policies (one per style):
+
+```
+style       | TIF | Outside-RTH | TP ladder                          | Stop trail   | EOD sweep?
+─────────────────────────────────────────────────────────────────────────────────────────────
+scalp       | DAY | no          | 100% @ +1R                         | 0.5 × ATR    | YES
+intraday    | DAY | no          | 50% @ +2R · 50% @ +5R              | 1.5 × ATR    | YES
+multi_day   | GTC | YES         | 33% @ +2R · 33% @ +5R · 34% @ +10R | EMA-20       | NO
+swing       | GTC | YES         | 50% @ +2R · 50% @ +5R              | EMA-20       | NO
+investment  | GTC | YES         | 30% @ +3R · 30% @ +6R · 40% @ +12R | SMA-50       | NO
+position    | GTC | YES         | 25% @ +4R · 25% @ +8R · 50% @ +15R | 30wk-SMA     | NO
+```
+
+- Break-even auto-pull thresholds: scalp +0.5R · intraday +1R · multi_day +1.5R · swing +2R · investment +2.5R · position +3R
+- `DEFAULT_POLICY = intraday` (conservative — unknown style still gets DAY+close_at_EOD so an orphan bracket can't leak overnight)
+- Public API: `get_policy(style)`, `get_policy_for_trade(trade)`, `is_eod_sweep_eligible(trade)`, `time_in_force_for(trade)`, `stop_trail_anchor_for(trade)`, `all_policies_summary()`
+
+**`backend/routers/trading_bot.py` — wired into 3 paths**
+1. `submit_trade()` — stamps `order_policy`, `tif`, `outside_rth`, `eod_sweep_eligible` onto both the dict trade response AND the BotTrade object, so downstream executors (queue_order builders, fill listeners, stop_manager) read the right rules.
+2. `cancel_all_pending_orders()` — gains new field `protect_long_horizon: bool = True`. When True (default), iterates `_trading_bot._open_trades` to build a `protected_symbols` set of symbols whose `is_eod_sweep_eligible()` is False (multi_day/swing/investment/position). Both the queue-layer and IB-direct-cancel layers skip those symbols. Response now includes `protected_symbols` + `protected_details` so operator sees what survived.
+3. New endpoint `GET /api/trading-bot/order-policies` — returns all 6 policies as JSON for the UI + bot agents to reference.
+
+**Bot vocabulary — `backend/agents/vocabulary.py` + `services/ai_assistant_service.py`**
+- Both SYSTEM_PROMPT and the shared VOCABULARY_BLOCK now carry the full per-style policy table verbatim, plus the EOD-sweep protection rules and the live endpoint URL. When the operator asks "how do you manage a swing trade?" the bot quotes the table directly — no paraphrasing.
+
+### Verification
+- New test file: `/app/backend/tests/test_v19_34_100_order_policy_registry.py` — **24/24 passing** across 4 test classes:
+  - TestRegistryCoverage (8) — all 6 styles, short/long horizon constraints, TP ladders sum to 1.0, monotonically increasing R-multiples, stop anchors per horizon, monotonic break-even thresholds, default-is-intraday safety check
+  - TestPublicAPI (12) — all 5 helpers tested (get_policy, get_policy_for_trade, is_eod_sweep_eligible, time_in_force_for, stop_trail_anchor_for) + case insensitivity + dict-shape support + fallback to default + trade_style-beats-setup precedence
+  - TestVocabularyIntegration (2) — VOCABULARY_BLOCK + SYSTEM_PROMPT both contain the policy table
+  - TestSetupRegistryIntegration (2) — every setup in SETUP_REGISTRY resolves (no silent fallthroughs); all 20 new v19.34.95 setups resolve to their correct style
+- Full v19.34.x regression: **162/162 passing**.
+- Live endpoint smoke verified — `GET /api/trading-bot/order-policies` returns all 6 with correct TIF / sweep / trail-anchor.
+
+### Files touched
+- NEW: `backend/services/order_policy_registry.py`
+- NEW: `backend/tests/test_v19_34_100_order_policy_registry.py`
+- MOD: `backend/routers/trading_bot.py` — policy stamping in submit_trade + protected_symbols filter in cancel_all_pending_orders + new GET /order-policies endpoint
+- MOD: `backend/agents/vocabulary.py` — policy table added to VOCABULARY_BLOCK
+- MOD: `backend/services/ai_assistant_service.py` — policy section added to SYSTEM_PROMPT
+- MOD: `/app/memory/ROADMAP.md` — proactive cap-downsize notification saved to P2
+
+
 ## 2026-05-12 (v19.34.99 part 2) — Bot vocabulary awareness
 
 ### Why

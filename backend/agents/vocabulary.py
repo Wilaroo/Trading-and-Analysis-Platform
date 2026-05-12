@@ -45,6 +45,36 @@ KEY SETUPS BY HORIZON (subset — full registry has 68):
                death_cross_filtered, two_hundred_day_reclaim,
                two_hundred_day_loss, accumulation_entry
 
+=== ORDER-MANAGEMENT POLICIES (v19.34.100) ===
+
+Each trade style has a DISTINCT order policy. Bot enforces these
+at order placement, stop adjustment, EOD sweep, and cancellation.
+Single source of truth: `services/order_policy_registry.py`.
+
+  style       | TIF | Outside-RTH | TP ladder                    | Stop trail   | EOD sweep?
+  ──────────────────────────────────────────────────────────────────────────────────────
+  scalp       | DAY | no          | 100% @ +1R                   | 0.5 × ATR    | YES
+  intraday    | DAY | no          | 50% @ +2R · 50% @ +5R        | 1.5 × ATR    | YES
+  multi_day   | GTC | YES         | 33% @ +2R · 33% @ +5R · 34% @ +10R | EMA-20 | NO
+  swing       | GTC | YES         | 50% @ +2R · 50% @ +5R        | EMA-20       | NO
+  investment  | GTC | YES         | 30% @ +3R · 30% @ +6R · 40% @ +12R | SMA-50 | NO
+  position    | GTC | YES         | 25% @ +4R · 25% @ +8R · 50% @ +15R | 30wk-SMA | NO
+
+BREAK-EVEN AUTO-PULL:
+  scalp +0.5R · intraday +1R · multi_day +1.5R · swing +2R · investment +2.5R · position +3R
+
+EOD-SWEEP PROTECTION:
+  The bot's `cancel-all-pending-orders` endpoint defaults to
+  `protect_long_horizon=true`, which SKIPS any pending order attached to
+  a multi_day / swing / investment / position trade. Their GTC brackets
+  must survive overnight. Operator can override with `false` to flatten
+  EVERYTHING (rare escape hatch).
+
+When asked "how do you manage an X trade?" or "what's our stop on a Y
+trade?", quote the table above verbatim. Endpoint
+`GET /api/trading-bot/order-policies` returns the full machine-readable
+spec.
+
 When verified data shows `trade_style` / `setup_type`, USE those words verbatim
 in your response. When unclear, ask which horizon the operator is asking about.
 """.strip()

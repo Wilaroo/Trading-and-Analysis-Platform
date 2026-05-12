@@ -4,6 +4,14 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🟢 P2 — Proactive teammate-voice notifications for cap downsizing (saved 2026-05-12)
+
+When a trade gets auto-downsized by the 30% / 55% exposure caps, emit a chat-style nudge into the V5 activity feed (not just a passive log entry). Uses the existing `exposure_cap_warnings` array attached to BotTrade. Example: "Hey, our 55% long-horizon cap is tight — I downsized AAPL from 200 → 80 shares. Want me to scale out NVDA position trade to free room for full size?"
+- Estimated effort: ~30 min frontend + ~15 min backend to push to the activity stream
+- Engagement bump: turns silent risk decisions into conversational teamwork moments
+
+
+
 ## 🟢 P2 — Trade-style click-filter on V5/V6 surfaces (saved 2026-05-12)
 
 Now that v19.34.99 stamped every row with a `data-trade-style` attribute via `TradeStyleChip`, build a one-click filter:

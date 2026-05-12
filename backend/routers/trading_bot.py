@@ -3074,6 +3074,11 @@ class CancelAllPendingRequest(BaseModel):
     confirm: Optional[str] = None
     symbols: Optional[List[str]] = None
     dry_run: bool = False
+    # v19.34.100 — when True (default), skip orders attached to long-horizon
+    # trades (swing / investment / position) so their GTC brackets survive
+    # an EOD sweep. Set False to nuke EVERY pending order regardless of
+    # style (manual operator escape hatch).
+    protect_long_horizon: bool = True
 
 
 @router.post("/cancel-all-pending-orders")
@@ -3131,6 +3136,32 @@ async def cancel_all_pending_orders(req: CancelAllPendingRequest):
     if req.symbols:
         sym_filter = {s.strip().upper() for s in req.symbols if s and s.strip()}
 
+    # v19.34.100 — build the "protected symbols" set from open trades whose
+    # order_policy.eod_sweep_eligible is False (swing / investment / position
+    # / multi_day). When `protect_long_horizon` is True (default), these
+    # symbols are filtered out of the cancel sweep so their GTC brackets
+    # survive overnight. Override by passing `protect_long_horizon=false`.
+    protected_symbols: set = set()
+    protected_details: List[Dict[str, Any]] = []
+    if req.protect_long_horizon:
+        try:
+            from services.order_policy_registry import is_eod_sweep_eligible
+            if _trading_bot is not None:
+                for _t in (getattr(_trading_bot, "_open_trades", {}) or {}).values():
+                    sym = (getattr(_t, "symbol", None) or "").upper()
+                    if not sym:
+                        continue
+                    if not is_eod_sweep_eligible(_t):
+                        protected_symbols.add(sym)
+                        protected_details.append({
+                            "symbol": sym,
+                            "trade_style": getattr(_t, "trade_style", None),
+                            "setup_type": getattr(_t, "setup_type", None),
+                            "trade_id": getattr(_t, "id", None),
+                        })
+        except Exception as exc:
+            logger.warning(f"v19.34.100 long-horizon protection build failed: {exc}")
+
     # ─── Layer 1: Mongo `order_queue` ────────────────────────────────────
     queue_cancelled = 0
     queue_skipped = 0
@@ -3150,6 +3181,11 @@ async def cancel_all_pending_orders(req: CancelAllPendingRequest):
                 for row in rows:
                     sym = (row.get("symbol") or "").upper()
                     if sym_filter is not None and sym not in sym_filter:
+                        skipped += 1
+                        continue
+                    if sym in protected_symbols:
+                        # v19.34.100 — long-horizon trade's GTC bracket
+                        # survives the sweep.
                         skipped += 1
                         continue
                     order_id = row.get("order_id")
@@ -3202,6 +3238,10 @@ async def cancel_all_pending_orders(req: CancelAllPendingRequest):
                 if sym_filter is not None and sym not in sym_filter:
                     ib_skipped += 1
                     continue
+                if sym in protected_symbols:
+                    # v19.34.100 — long-horizon trade protection.
+                    ib_skipped += 1
+                    continue
                 ib_order_id = o.get("order_id") or o.get("orderId") or o.get("id")
                 if ib_order_id is None:
                     continue
@@ -3233,12 +3273,32 @@ async def cancel_all_pending_orders(req: CancelAllPendingRequest):
         "ib_skipped": ib_skipped,
         "ib_unavailable": ib_unavailable,
         "ib_error": ib_error,
+        # v19.34.100 — surface what was protected so the operator can see
+        # which long-horizon trades skipped the sweep and why.
+        "protect_long_horizon": bool(req.protect_long_horizon),
+        "protected_symbols": sorted(protected_symbols),
+        "protected_details": protected_details,
         "details": {
             "queue": queue_details,
             "ib_orders_open_before": ib_open_before,
         },
     }
 
+
+
+@router.get("/order-policies")
+def get_order_policies():
+    """v19.34.100 — return all 6 per-style order-management policies.
+
+    Used by the UI to render a help/legend panel, and by the bot's chat
+    agents to answer "how do you manage a swing trade?" type questions.
+    Single source of truth lives in `services/order_policy_registry.py`.
+    """
+    try:
+        from services.order_policy_registry import all_policies_summary
+        return {"success": True, "policies": all_policies_summary()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/trades")
@@ -3477,6 +3537,24 @@ async def submit_trade(request: TradeSubmitRequest):
                     setattr(bot_trade, "exposure_cap_warnings", cap_warnings)
             except Exception:
                 pass
+            # v19.34.100 — stamp the resolved order-management policy on the
+            # BotTrade so downstream executors (queue_order builders, EOD
+            # sweep, stop_manager) can read it. Single source of truth lives
+            # in services/order_policy_registry.py.
+            try:
+                from services.order_policy_registry import get_policy_for_trade
+                policy = get_policy_for_trade(bot_trade)
+                setattr(bot_trade, "order_policy", policy.to_dict())
+                setattr(bot_trade, "tif", policy.time_in_force)
+                setattr(bot_trade, "outside_rth", policy.outside_rth)
+                setattr(bot_trade, "eod_sweep_eligible", policy.eod_sweep_eligible)
+                # Mirror into the trade dict so the API response carries it.
+                trade["order_policy"] = policy.to_dict()
+                trade["tif"] = policy.time_in_force
+                trade["outside_rth"] = policy.outside_rth
+                trade["eod_sweep_eligible"] = policy.eod_sweep_eligible
+            except Exception as pol_err:
+                logger.warning(f"v19.34.100 order policy resolution failed for {symbol}: {pol_err}")
             _trading_bot._pending_trades[trade_id] = bot_trade
         except Exception as e:
             logger.warning(f"Could not create BotTrade object: {e}")
