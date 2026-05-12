@@ -2,6 +2,103 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.114) — Yesterday's grade card in morning briefing
+
+Closes the visual loop on v113: every morning the operator now sees
+yesterday's concrete receipt before deciding what to trade today.
+
+### Backend
+
+**`services/setup_grading_service.py`** — new method
+`get_yesterday_recap(reference_date, max_winners=3, max_losers=3)`:
+- Walks back up to 7 calendar days from `reference_date` to find the
+  most recent trading day with grade records. Skips weekends and
+  market holidays automatically.
+- Returns winners (top setups by avg_r, must be positive), losers
+  (only F-graded setups — not C-grade breakevens), and a
+  deterministic `summary_line` the LLM briefing can quote verbatim.
+- Excludes INSUFFICIENT_DATA setups from both buckets — they have
+  no track record yet.
+- Caps winners/losers at 3 each so the summary line stays readable.
+- Singular/plural grammar correct ("1 setup graded" vs "3 setups
+  graded").
+- Stale-data refusal: if the only data is >7 days old, returns
+  `has_data: false`. We won't cite a stale receipt in today's
+  briefing.
+
+**`routers/setup_grades.py`** — new endpoint
+`GET /api/setup-grades/yesterday-recap`:
+- Declared BEFORE `/{setup_type}` so FastAPI doesn't route
+  `/yesterday-recap` through the generic path-param handler. The
+  route-ordering fix is regression-locked in
+  `TestYesterdayRecapEndpointWiring`.
+- Returns `{ success, recap: {...} }` with the same shape as the
+  service method.
+- Service errors degrade gracefully — the briefing card never breaks
+  on a Mongo blip; it just shows the fallback summary line.
+
+### Frontend
+
+**`hooks/useMorningBriefing.js`**:
+- Fanned out a new `GET /api/setup-grades/yesterday-recap` call
+  alongside the existing `gameplan` / `drc` / `portfolio` /
+  `scanner` / `bot` / `safety` / `drift` reads.
+- All-settled semantics preserved — a recap failure doesn't break
+  any other briefing section.
+- New `data.grade_recap` field on the briefing payload.
+
+**`MorningPrepCard` (`components/sentcom/v5/BriefingsV5.jsx`)**:
+- Expanded section now renders a "Yesterday" block before the
+  watchlist when `data.grade_recap.has_data === true`:
+  - `Winners: vwap_bounce A+ (66% · +1.2R · 6t), scalp A (60% · +0.8R · 7t)`
+    in emerald-400
+  - `Watch: breakout F (33% · -0.4R · 9t) — consider widening stops
+    or pausing` in rose-400
+- `hasData` gate extended to include `data.grade_recap.has_data` so
+  the expanded section opens even when game-plan / DRC are empty
+  but yesterday's grade card has data.
+- `data-testid` chips: `briefing-yesterday-grades`,
+  `briefing-yesterday-winners`, `briefing-yesterday-losers` for
+  operator + future RLHF testing.
+
+### LLM integration path
+The `summary_line` field on the recap is deliberately
+single-string / deterministic so the LLM morning briefing can quote
+it verbatim:
+
+> "Yesterday (2026-02-12): 3 setups graded. Top winner:
+> vwap_bounce A+ (66% WR, +1.2R, 6 trades). Watch: breakout F
+> (33% WR, -0.4R, 9 trades) — consider widening stops or pausing."
+
+The human operator (expanded V5 card) and the LLM briefing read
+identical text. Operator can verify the LLM's citation against the
+card directly — no hallucination surface.
+
+### Regression — 14 / 14 new + 208 / 208 cumulative PASS
+
+`tests/test_v19_34_114_yesterday_recap.py`:
+- `TestYesterdayRecapBasic` (3) — no-data fallback, weekend walk-
+  back to Friday, >7-day-old data rejected
+- `TestYesterdayRecapWinnersLosers` (5) — winners sorted by avg_r
+  desc, losers ONLY F-grade (not C), winners excluded when avg_r ≤
+  0, INSUFFICIENT_DATA skipped, max-winners/losers cap
+- `TestYesterdayRecapSummaryLine` (4) — date in line, top winner
+  formatting, loser formatting + advice text, singular/plural
+  grammar
+- `TestYesterdayRecapEndpointWiring` (2) — route declared BEFORE
+  catch-all, no duplicate declarations
+
+### Operator notes
+- **No DGX restart** — backend hot-reloads. Frontend `yarn build`
+  already run.
+- **First week**: card shows the fallback line ("No graded setups
+  in the last 7 trading days. Track record starts on first close.")
+  until v113 has had time to grade real bot_trades.
+- The collapsed briefing line is UNCHANGED. The yesterday recap
+  lives in the expanded section only — operator clicks the card to
+  see it. Keeps the always-visible row focused on current-state info.
+
+
 ## 2026-02-12 (v19.34.113) — Setup Grading Subsystem
 
 The 30-day rolling R-multiple tracker + EOD self-grading shipped as

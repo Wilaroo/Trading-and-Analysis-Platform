@@ -489,6 +489,125 @@ class SetupGradingService:
             logger.debug("get_grade_warning(%s) failed: %s", setup_type, e)
             return None
 
+    # ───────────────────────── Morning Briefing recap ─────────────────────────
+
+    def get_yesterday_recap(
+        self,
+        reference_date: Optional[str] = None,
+        max_winners: int = 3,
+        max_losers: int = 3,
+    ) -> Dict[str, Any]:
+        """v19.34.114 — Yesterday's grade card, formatted for the
+        morning briefing line.
+
+        Returns a structured recap with a deterministic `summary_line`
+        the LLM briefing can quote verbatim. Pulls the most recent
+        trading day with data (≤ `reference_date`, default = today
+        US/Eastern) so weekend / holiday loads don't show a blank.
+
+        Output shape:
+            {
+              "trading_date": "2026-02-12" | null,
+              "total_setups": int,
+              "winners":  [{"setup_type", "grade", "avg_r", "trades_count", "win_rate"}, ...],
+              "losers":   [{"setup_type", "grade", "avg_r", "trades_count", "win_rate"}, ...],
+              "summary_line": "Yesterday: 3 graded. nine_ema_scalp B (61%, +0.6R, 7t). breakout F (33%, -0.4R, 9t) — consider widening.",
+              "has_data": bool,
+            }
+        """
+        from zoneinfo import ZoneInfo
+
+        et = ZoneInfo("US/Eastern")
+        today = (
+            datetime.strptime(reference_date, "%Y-%m-%d").date()
+            if reference_date else datetime.now(et).date()
+        )
+
+        # Walk back up to 7 calendar days to find the most recent date
+        # with any grade records (skips weekends / market holidays).
+        db = self._resolve_db()
+        target_date: Optional[str] = None
+        rows: List[Dict[str, Any]] = []
+        for delta in range(1, 8):
+            probe = (today - timedelta(days=delta)).strftime("%Y-%m-%d")
+            cursor = db[GRADE_COLLECTION].find(
+                {"trading_date": probe},
+                {"_id": 0},
+            )
+            probe_rows = list(cursor)
+            if probe_rows:
+                target_date = probe
+                rows = probe_rows
+                break
+
+        if not rows or target_date is None:
+            return {
+                "trading_date": None,
+                "total_setups": 0,
+                "winners": [],
+                "losers": [],
+                "summary_line": "No graded setups in the last 7 trading days. Track record starts on first close.",
+                "has_data": False,
+            }
+
+        # Filter to setups with a real letter grade (skip INSUFFICIENT_DATA).
+        graded = [r for r in rows if (r.get("grade") or "") not in ("", "INSUFFICIENT_DATA")]
+        graded_sorted = sorted(graded, key=lambda r: r.get("avg_r", 0.0), reverse=True)
+
+        def _pick_fields(r: Dict[str, Any]) -> Dict[str, Any]:
+            return {
+                "setup_type": r.get("setup_type"),
+                "grade": r.get("grade"),
+                "avg_r": r.get("avg_r"),
+                "trades_count": r.get("trades_count"),
+                "win_rate": r.get("win_rate"),
+                "total_realized_pnl": r.get("total_realized_pnl"),
+            }
+
+        winners = [_pick_fields(r) for r in graded_sorted[:max_winners] if r.get("avg_r", 0) > 0]
+        losers = [
+            _pick_fields(r) for r in graded_sorted
+            if r.get("grade") == "F"
+        ][:max_losers]
+
+        # Compose the summary line. Format chosen so a human can read
+        # it at a glance AND the LLM can quote it verbatim:
+        #   "Yesterday (2026-02-12): 5 setups graded.
+        #    Top winner: nine_ema_scalp B (61% WR, +0.6R, 7 trades).
+        #    Watch: breakout F (33% WR, -0.4R, 9 trades) — consider widening or pausing."
+        parts: List[str] = [
+            f"Yesterday ({target_date}): {len(graded)} setup{'s' if len(graded) != 1 else ''} graded."
+        ]
+        if winners:
+            top = winners[0]
+            wr_pct = round((top.get("win_rate") or 0.0) * 100)
+            avg_r = top.get("avg_r") or 0.0
+            avg_r_str = f"+{avg_r:.1f}R" if avg_r >= 0 else f"{avg_r:.1f}R"
+            parts.append(
+                f"Top winner: {top.get('setup_type')} {top.get('grade')} "
+                f"({wr_pct}% WR, {avg_r_str}, {top.get('trades_count')} trades)."
+            )
+        if losers:
+            worst = losers[0]
+            wr_pct = round((worst.get("win_rate") or 0.0) * 100)
+            avg_r = worst.get("avg_r") or 0.0
+            avg_r_str = f"+{avg_r:.1f}R" if avg_r >= 0 else f"{avg_r:.1f}R"
+            parts.append(
+                f"Watch: {worst.get('setup_type')} F "
+                f"({wr_pct}% WR, {avg_r_str}, {worst.get('trades_count')} trades) — "
+                f"consider widening stops or pausing."
+            )
+        summary_line = " ".join(parts)
+
+        return {
+            "trading_date": target_date,
+            "total_setups": len(graded),
+            "winners": winners,
+            "losers": losers,
+            "summary_line": summary_line,
+            "has_data": True,
+        }
+
 
 # Module-level singleton — most callers want a shared instance.
 _SERVICE: Optional[SetupGradingService] = None

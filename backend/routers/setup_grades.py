@@ -52,6 +52,34 @@ def list_setup_grades(days: int = Query(30, ge=1, le=365)):
         }
 
 
+@router.get("/yesterday-recap")
+def get_yesterday_grade_recap(reference_date: Optional[str] = Query(None)):
+    """v19.34.114 — Yesterday's grade card, formatted for the morning
+    briefing. Walks back up to 7 calendar days to find the most recent
+    trading day with grade data, so weekend / holiday loads return a
+    valid recap instead of a blank.
+
+    IMPORTANT: this route is declared BEFORE `/{setup_type}` so FastAPI
+    doesn't route `/yesterday-recap` into the generic path-param handler.
+    """
+    try:
+        svc = get_setup_grading_service()
+        recap = svc.get_yesterday_recap(reference_date=reference_date)
+        return {"success": True, "recap": recap}
+    except Exception as e:
+        logger.error(f"get_yesterday_grade_recap error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "recap": {
+                "trading_date": None, "total_setups": 0,
+                "winners": [], "losers": [],
+                "summary_line": "Grade recap unavailable — service error.",
+                "has_data": False,
+            },
+        }
+
+
 @router.get("/{setup_type}")
 def get_setup_grade(setup_type: str, days: int = Query(30, ge=1, le=365)):
     """Return the rolling card for a single setup_type. 404 if the

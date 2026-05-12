@@ -95,7 +95,7 @@ export const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolCli
   const botStatus = bot?.running ? 'ACTIVE' : 'IDLE';
   const botMode = bot?.mode || bot?.trading_phase;
 
-  const hasData = regime || bias || watch.length > 0 || maxRisk != null || drcHealth || scannerHits > 0;
+  const hasData = regime || bias || watch.length > 0 || maxRisk != null || drcHealth || scannerHits > 0 || data?.grade_recap?.has_data;
 
   return (
     <div
@@ -141,6 +141,52 @@ export const MorningPrepCard = ({ data, loading, expanded, onToggle, onSymbolCli
         <div className="mt-2 pt-2 border-t border-zinc-800 text-[12px] space-y-1 text-zinc-400">
           {gp?.thesis && (
             <div><span className="text-zinc-500">Thesis: </span>{gp.thesis}</div>
+          )}
+          {/* v19.34.114 — Yesterday's grade card. Surfaces last
+              trading day's setup performance so the operator sees a
+              concrete receipt before the open. The summary_line is
+              server-built (deterministic, LLM-quotable) — we render
+              it verbatim plus a colored chip per winner/loser. */}
+          {data?.grade_recap?.has_data && (
+            <div data-testid="briefing-yesterday-grades" className="pt-1">
+              <div className="text-zinc-500 mb-0.5">
+                Yesterday <span className="text-zinc-400">({data.grade_recap.trading_date})</span>
+                <span className="text-zinc-600"> · {data.grade_recap.total_setups} graded</span>
+              </div>
+              {(data.grade_recap.winners || []).length > 0 && (
+                <div data-testid="briefing-yesterday-winners">
+                  <span className="text-zinc-500">Winners: </span>
+                  {data.grade_recap.winners.map((w, i) => {
+                    const wr = Math.round((w.win_rate ?? 0) * 100);
+                    const r = (w.avg_r ?? 0) >= 0 ? `+${w.avg_r.toFixed(1)}R` : `${w.avg_r.toFixed(1)}R`;
+                    return (
+                      <React.Fragment key={`${w.setup_type}-${i}`}>
+                        {i > 0 && <span className="text-zinc-600">, </span>}
+                        <span className="text-emerald-400 font-semibold">{w.setup_type}</span>
+                        <span className="text-zinc-500"> {w.grade} ({wr}% · {r} · {w.trades_count}t)</span>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              )}
+              {(data.grade_recap.losers || []).length > 0 && (
+                <div data-testid="briefing-yesterday-losers">
+                  <span className="text-zinc-500">Watch: </span>
+                  {data.grade_recap.losers.map((l, i) => {
+                    const wr = Math.round((l.win_rate ?? 0) * 100);
+                    const r = (l.avg_r ?? 0) >= 0 ? `+${l.avg_r.toFixed(1)}R` : `${l.avg_r.toFixed(1)}R`;
+                    return (
+                      <React.Fragment key={`${l.setup_type}-${i}`}>
+                        {i > 0 && <span className="text-zinc-600">, </span>}
+                        <span className="text-rose-400 font-semibold">{l.setup_type}</span>
+                        <span className="text-zinc-500"> F ({wr}% · {r} · {l.trades_count}t)</span>
+                      </React.Fragment>
+                    );
+                  })}
+                  <span className="text-zinc-600 italic"> — consider widening stops or pausing</span>
+                </div>
+              )}
+            </div>
           )}
           {watch.length > 0 && (
             <div>

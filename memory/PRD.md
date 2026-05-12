@@ -315,3 +315,14 @@ live data validates the formula.
 **Validates v112**: scalp ATR multiplier choices now have a measurable
 scorecard. If `nine_ema_scalp` grades F at 0.4× consistently, widen
 empirically rather than guessing.
+
+## v19.34.114 — Yesterday's grade card in morning briefing (2026-02-12)
+
+`GET /api/setup-grades/yesterday-recap` walks back up to 7 days to
+find the most recent trading day with grade data; returns winners /
+losers / a deterministic `summary_line` the LLM briefing can quote
+verbatim. V5 `MorningPrepCard` renders the recap in its expanded
+section: emerald winners, rose F-grade losers, italic advice.
+Operator and LLM briefing now read identical text — no hallucination
+surface on the citation.
+

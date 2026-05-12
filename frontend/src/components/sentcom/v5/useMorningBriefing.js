@@ -26,7 +26,7 @@ export const useMorningBriefing = ({ refreshMs = 60_000, enabled = true } = {}) 
     setLoading(true);
     setError(null);
     try {
-      const [gp, drc, pf, sc, bot, safety, drift] = await Promise.allSettled([
+      const [gp, drc, pf, sc, bot, safety, drift, gradeRecap] = await Promise.allSettled([
         api.get('/api/journal/gameplan/today', { timeout: 8000 }),
         api.get('/api/journal/drc/today',      { timeout: 8000 }),
         api.get('/api/portfolio',              { timeout: 8000 }),
@@ -34,6 +34,14 @@ export const useMorningBriefing = ({ refreshMs = 60_000, enabled = true } = {}) 
         api.get('/api/trading-bot/status',     { timeout: 8000 }),
         api.get('/api/safety/status',          { timeout: 8000 }),
         api.get('/api/sentcom/drift',          { timeout: 8000 }),
+        // v19.34.114 — Yesterday's grade card. Surfaces the most
+        // recent trading day with data (walks back up to 7 days so
+        // weekend / holiday loads aren't blank). Lets the morning
+        // briefing cite a concrete receipt: "Yesterday: vwap_bounce
+        // graded A+ (66% WR, +1.2R, 6 trades). breakout F — consider
+        // pausing." All in one server-side line so the LLM briefing
+        // and the human operator read identical text.
+        api.get('/api/setup-grades/yesterday-recap', { timeout: 8000 }),
       ]);
 
       setData({
@@ -45,6 +53,7 @@ export const useMorningBriefing = ({ refreshMs = 60_000, enabled = true } = {}) 
         bot:       bot.status === 'fulfilled' ? bot.value.data : null,
         safety:    safety.status === 'fulfilled' ? safety.value.data : null,
         drift:     drift.status === 'fulfilled' ? (drift.value.data?.results ?? []) : [],
+        grade_recap: gradeRecap.status === 'fulfilled' ? (gradeRecap.value.data?.recap ?? null) : null,
         fetched_at: new Date().toISOString(),
       });
     } catch (err) {
