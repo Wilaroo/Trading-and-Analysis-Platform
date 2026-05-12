@@ -973,6 +973,7 @@ async def _pusher_fallback_close_groups(
     return result
 
 
+@router.get("/diagnose-close-readiness")
 @router.post("/diagnose-close-readiness")
 async def diagnose_close_readiness() -> Dict[str, Any]:
     """v19.34.119 — Pre-flight before clicking 'Close all'.
