@@ -248,3 +248,24 @@ training pipeline.
 - **WS surface**: `eod_close_started` (window opens) + `eod_close_completed`
   (final state) + `eod_after_close_alarm` (positions still open after 4:00 PM).
 
+
+## v19.34.110 — Pipeline Tile Split + Event-Driven Pusher ACK (2026-02-12)
+
+**P3-A**: V5 HUD ORDER tile now renders `5q + 3@ib` split when there
+are orders sitting at IB in `IB_PENDING` (v109). Falls back to flat
+count when `ib_pending = 0`. Backend `SentComStatus` exposes
+`order_pipeline.ib_pending`; also fixes a latent typo where the
+service was reading `pending_count` / `executing_count` / `filled_today`
+instead of the actual `get_queue_status` keys.
+
+**P3-B**: `ib_data_pusher.py` no longer blocks on a 30s `while` loop
+after `placeOrder`. Subscribes `trade.statusEvent` and reports
+terminal states (Filled / Cancelled / Inactive) back to Spark
+immediately. Pre-v110 polling capped queue throughput; v110
+serializes only on `placeOrder` itself, not on terminal-state
+discovery. The "still pending after 30s" fallback branch and the
+"Unknown status:" rejection branch are removed entirely — under
+event-driven dispatch we never time-out a transient.
+
+Pusher redeploy required for P3-B; backend hot-reloads for P3-A
+after frontend `yarn build`.

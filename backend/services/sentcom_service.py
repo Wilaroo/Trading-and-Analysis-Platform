@@ -104,6 +104,12 @@ class SentComStatus:
     pending_orders: int = 0
     executing_orders: int = 0
     filled_orders: int = 0
+    # 2026-02-12 v19.34.110 — `ib_pending` is the "submitted to IB, awaiting
+    # terminal state" cohort introduced by v19.34.109. Surfacing it on the
+    # status payload lets the V5 HUD render an order-tile split like
+    # `5q + 3@ib` so the operator can distinguish queued work from work
+    # actively in IB's hands.
+    ib_pending_orders: int = 0
     last_activity: Optional[str] = None
     # V5 HUD enrichment — populated by get_status() below. All optional so
     # older consumers that ignore these keys keep working.
@@ -122,7 +128,11 @@ class SentComStatus:
             "order_pipeline": {
                 "pending": self.pending_orders,
                 "executing": self.executing_orders,
-                "filled": self.filled_orders
+                "filled": self.filled_orders,
+                # v19.34.110 — Distinct from `pending`. Orders sitting in
+                # IB awaiting a terminal state. Frontend renders these as
+                # `N@ib` next to the queued count.
+                "ib_pending": self.ib_pending_orders,
             },
             "trading_phase": self.trading_phase,
             "account_equity": self.account_equity,
@@ -540,6 +550,7 @@ class SentComService:
         pending = 0
         executing = 0
         filled = 0
+        ib_pending = 0
         
         if trading_bot:
             try:
@@ -575,9 +586,18 @@ class SentComService:
             if order_queue:
                 queue_status = order_queue.get_queue_status()
                 if isinstance(queue_status, dict):
-                    pending = queue_status.get("pending_count", 0)
-                    executing = queue_status.get("executing_count", 0)
-                    filled = queue_status.get("filled_today", 0)
+                    # v19.34.110 — `get_queue_status` returns keys
+                    # `pending`, `executing`, `filled`, `ib_pending`. The
+                    # legacy reads of `pending_count` / `executing_count`
+                    # / `filled_today` here were a latent typo (pre-v110)
+                    # that silently masked all queue counts as zero — the
+                    # tile drilldown rebuilt from positions hid the bug
+                    # in normal operation. Fixed in the same patch that
+                    # exposes `ib_pending`.
+                    pending = queue_status.get("pending", queue_status.get("pending_count", 0))
+                    executing = queue_status.get("executing", queue_status.get("executing_count", 0))
+                    filled = queue_status.get("filled", queue_status.get("filled_today", 0))
+                    ib_pending = queue_status.get("ib_pending", 0)
         except Exception as e:
             logger.error(f"Error getting order queue status: {e}")
         
@@ -670,6 +690,7 @@ class SentComService:
             pending_orders=pending,
             executing_orders=executing,
             filled_orders=filled,
+            ib_pending_orders=ib_pending,
             last_activity=datetime.now(timezone.utc).isoformat(),
             trading_phase=trading_phase,
             account_equity=account_equity,

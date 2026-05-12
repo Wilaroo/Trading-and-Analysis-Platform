@@ -137,15 +137,39 @@ class TestPusherReportSignature:
             )
 
     def test_bracket_placement_callsite_uses_v34_103_kwargs(self, report_fn):
-        """The bracket-path call site MUST pass all 4 enrichment kwargs."""
-        # Find the bracket parent-FILLED call (the original site).
-        idx = report_fn.find("parent FILLED")
-        assert idx >= 0, "Could not find bracket-fill log line"
-        # Grab the surrounding 800 chars (enough to cover the
-        # _report_order_result call).
-        window = report_fn[idx : idx + 1200]
+        """The bracket-path call site MUST pass all 4 enrichment kwargs.
+
+        v19.34.110 SUPERSEDES the original site: the synchronous
+        "parent FILLED" branch was replaced with an event-driven
+        statusEvent listener. The kwargs still travel into the handler
+        via `_attach_status_event(... oca_group=, stop_order_id=,
+        target_order_ids=)` so the same Spark-side payload gets built
+        from the Filled branch of `_on_trade_status_change`. We assert
+        both the attach call site (bracket placement) and the report
+        call inside the handler.
+        """
+        # Bracket placement attach call site — must forward the 4 kwargs
+        # so the handler can splat them into _report_order_result on
+        # terminal events.
+        attach_idx = report_fn.find("_attach_status_event(\n                    parent_trade")
+        assert attach_idx >= 0, (
+            "Could not find bracket-placement _attach_status_event call. "
+            "v19.34.103 bracket-ACK enrichment may have regressed."
+        )
+        attach_window = report_fn[attach_idx : attach_idx + 600]
+        for kw in _REQUIRED_KW - {"target_order_id"}:  # target_order_id is derived from target_order_ids[0] in the handler
+            assert kw in attach_window, (
+                f"Bracket _attach_status_event call site is missing "
+                f"`{kw}` — v19.34.103 enrichment lost in v110 refactor."
+            )
+        # The handler itself must splat all 4 kwargs into the filled ACK.
+        handler_idx = report_fn.find('"filled",\n                    fill_price=float(avg_fill)')
+        assert handler_idx >= 0, (
+            "Could not find filled-branch ACK in _on_trade_status_change."
+        )
+        handler_window = report_fn[handler_idx : handler_idx + 800]
         for kw in _REQUIRED_KW:
-            assert kw in window, (
-                f"Bracket parent-FILLED ACK is missing `{kw}` — "
-                f"v19.34.103 enrichment lost."
+            assert kw in handler_window, (
+                f"Event-driven filled ACK is missing `{kw}` — "
+                f"v19.34.103 enrichment lost in v110 refactor."
             )

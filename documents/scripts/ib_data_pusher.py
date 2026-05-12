@@ -21,7 +21,7 @@ import random
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional
-from functools import wraps
+from functools import wraps, partial
 
 # Python 3.10+ compatibility: create event loop before ib_insync import
 import asyncio
@@ -2812,61 +2812,49 @@ class IBDataPusher:
                 # claim-retry storm doesn't reroute the same bracket.
                 self._recently_submitted[order_id] = (now_ts, parent_ib.orderId)
 
-                # Wait for parent fill (children sit GTC on the book).
-                max_wait = 30
-                start_time = time.time()
-                while time.time() - start_time < max_wait:
-                    self.ib.sleep(0.5)
-                    s = parent_trade.orderStatus.status
-                    if s == "Filled":
-                        # v19.34.103 — expose ALL target order IDs so the
-                        # backend can track each rung's fill individually.
-                        target_ids = [int(t.orderId) for t in tgt_orders]
-                        logger.info(
-                            f"[OrderQueue] Bracket {order_id} parent FILLED @ "
-                            f"${parent_trade.orderStatus.avgFillPrice} "
-                            f"(target+stop attached, {len(target_ids)} rung(s))"
-                        )
-                        self._report_order_result(
-                            order_id,
-                            "filled",
-                            fill_price=float(parent_trade.orderStatus.avgFillPrice),
-                            filled_qty=int(parent_trade.orderStatus.filled),
-                            ib_order_id=parent_ib.orderId,
-                            stop_order_id=int(stp_ib.orderId),
-                            target_order_id=target_ids[0] if target_ids else None,
-                            target_order_ids=target_ids,
-                            oca_group=oca_group,
-                        )
-                        return
-                    if s in ("Cancelled", "ApiCancelled"):
-                        logger.warning(f"[OrderQueue] Bracket {order_id} parent CANCELLED")
-                        self._report_order_result(order_id, "cancelled", error="Parent cancelled")
-                        return
-                    if s == "Inactive":
-                        logger.warning(f"[OrderQueue] Bracket {order_id} parent REJECTED by IB")
-                        self._report_order_result(order_id, "rejected", error="Parent rejected by IB")
-                        return
-                # Timeout — leave parent working, report as pending so the
-                # backend tracks fills via reconciliation.
+                # v19.34.110 — Event-driven ACK. Pre-v110 we span in a 30s
+                # `while time.time() < max_wait` loop polling orderStatus.
+                # That capped queue throughput and required a "still
+                # pending after 30s" fallback branch. Now we attach a
+                # `statusEvent` callback that fires the moment IB
+                # reaches a terminal state — Filled / Cancelled /
+                # Inactive — and reports it back to Spark immediately.
+                # The executor itself returns synchronously after a
+                # `pending+ib_order_id` ACK so Spark's v109 translation
+                # moves the row to IB_PENDING and stops re-polling it.
                 target_ids = [int(t.orderId) for t in tgt_orders]
-                logger.warning(f"[OrderQueue] Bracket {order_id} parent still pending after {max_wait}s")
-                self._report_order_result(
-                    order_id,
-                    "pending",
-                    fill_price=(
-                        float(parent_trade.orderStatus.avgFillPrice)
-                        if parent_trade.orderStatus.avgFillPrice else None
-                    ),
-                    filled_qty=int(parent_trade.orderStatus.filled or 0),
-                    remaining_qty=int(parent_trade.orderStatus.remaining or qty),
-                    ib_order_id=parent_ib.orderId,
-                    stop_order_id=int(stp_ib.orderId),
-                    target_order_id=target_ids[0] if target_ids else None,
-                    target_order_ids=target_ids,
+                self._attach_status_event(
+                    parent_trade, order_id,
                     oca_group=oca_group,
-                    error="Bracket parent still pending — children GTC on book",
+                    stop_order_id=int(stp_ib.orderId),
+                    target_order_ids=target_ids,
                 )
+                # If the synchronous attach already reported a terminal
+                # state (immediate rejection / instant fill on MKT),
+                # `_terminal_reported[order_id]` is set — skip the
+                # IB_PENDING ACK so we don't overwrite the terminal row.
+                if order_id not in getattr(self, "_terminal_reported", {}):
+                    logger.info(
+                        f"[OrderQueue] Bracket {order_id} submitted "
+                        f"(parent ib_id={parent_ib.orderId}) — switching "
+                        f"to event-driven ACK"
+                    )
+                    self._report_order_result(
+                        order_id,
+                        "pending",
+                        fill_price=(
+                            float(parent_trade.orderStatus.avgFillPrice)
+                            if parent_trade.orderStatus.avgFillPrice else None
+                        ),
+                        filled_qty=int(parent_trade.orderStatus.filled or 0),
+                        remaining_qty=int(parent_trade.orderStatus.remaining or qty),
+                        ib_order_id=parent_ib.orderId,
+                        stop_order_id=int(stp_ib.orderId),
+                        target_order_id=target_ids[0] if target_ids else None,
+                        target_order_ids=target_ids,
+                        oca_group=oca_group,
+                        error="Submitted to IB — awaiting terminal event",
+                    )
                 return
 
             if order_type == "MKT":
@@ -2913,52 +2901,23 @@ class IBDataPusher:
             # Stamp idempotency cache IMMEDIATELY after placeOrder returns — even if
             # we crash/disconnect before the fill loop completes, we won't re-submit.
             self._recently_submitted[order_id] = (now_ts, trade.order.orderId)
-            
-            # Wait for fill (with timeout)
-            max_wait = 30
-            start_time = time.time()
-            
-            while time.time() - start_time < max_wait:
-                self.ib.sleep(0.5)
-                
-                if trade.orderStatus.status == "Filled":
-                    logger.info(f"[OrderQueue] Order {order_id} FILLED @ ${trade.orderStatus.avgFillPrice}")
-                    self._report_order_result(
-                        order_id, 
-                        "filled",
-                        fill_price=float(trade.orderStatus.avgFillPrice),
-                        filled_qty=int(trade.orderStatus.filled),
-                        ib_order_id=trade.order.orderId
-                    )
-                    return
-                    
-                elif trade.orderStatus.status in ["Cancelled", "ApiCancelled"]:
-                    logger.warning(f"[OrderQueue] Order {order_id} CANCELLED")
-                    self._report_order_result(order_id, "cancelled", error="Order cancelled")
-                    return
-                    
-                elif trade.orderStatus.status == "Inactive":
-                    logger.warning(f"[OrderQueue] Order {order_id} REJECTED")
-                    self._report_order_result(order_id, "rejected", error="Order rejected by IB")
-                    return
-            
-            # Timeout - order may still be working
-            # v19.34.108 (Feb 2026) — `PendingSubmit` is IB's FIRST
-            # transient state (order transmitted but not yet ack'd by the
-            # order destination). Pre-v108 we omitted it here, so any
-            # order that stayed in `PendingSubmit` past the 30s timeout
-            # (common when the pusher event loop is busy with the bracket
-            # poll) fell through to the `else` and was reported as
-            # `rejected: Unknown status: PendingSubmit`. Spark's
-            # reconciler interpreted that as "adoption failed, retry"
-            # and spawned a new ADOPT-OCA wrapper → reconciler storm.
-            # `PendingCancel` is the cancel-side mirror and is also a
-            # normal transient — treat it the same way.
-            if trade.orderStatus.status in (
-                "Submitted", "PreSubmitted", "PendingSubmit", "PendingCancel"
-            ):
-                logger.warning(f"[OrderQueue] Order {order_id} still pending after {max_wait}s (state={trade.orderStatus.status})")
-                # Report as partial/pending
+
+            # v19.34.110 — Event-driven ACK. Pre-v110 we span in a 30s
+            # `while time.time() < max_wait` loop polling
+            # `trade.orderStatus.status`. The whole "still pending after
+            # 30s" branch is now gone — `trade.statusEvent` fires the
+            # moment IB transitions to Filled / Cancelled / Inactive and
+            # the callback reports it back to Spark. The executor itself
+            # ACKs Spark with `pending+ib_order_id` synchronously
+            # (Spark's v109 translation → IB_PENDING) and returns.
+            self._attach_status_event(trade, order_id)
+            if order_id not in getattr(self, "_terminal_reported", {}):
+                logger.info(
+                    f"[OrderQueue] Order {order_id} submitted "
+                    f"(ib_id={trade.order.orderId}, state="
+                    f"{trade.orderStatus.status}) — switching to "
+                    f"event-driven ACK"
+                )
                 self._report_order_result(
                     order_id,
                     "pending",
@@ -2966,15 +2925,146 @@ class IBDataPusher:
                     filled_qty=int(trade.orderStatus.filled) if trade.orderStatus.filled else 0,
                     remaining_qty=int(trade.orderStatus.remaining) if trade.orderStatus.remaining else quantity,
                     ib_order_id=trade.order.orderId,
-                    error=f"Order still pending (state={trade.orderStatus.status})"
+                    error="Submitted to IB — awaiting terminal event",
                 )
-            else:
-                self._report_order_result(order_id, "rejected", error=f"Unknown status: {trade.orderStatus.status}")
                 
         except Exception as e:
             logger.error(f"[OrderQueue] Execution error for {order_id}: {e}")
             self._report_order_result(order_id, "rejected", error=str(e))
     
+    # ==================== v19.34.110: EVENT-DRIVEN ACK ====================
+    #
+    # Pre-v110 architecture: after `placeOrder`, the executor spun in a
+    # `while time.time() - start < 30: ib.sleep(0.5)` loop polling
+    # `trade.orderStatus.status`. Two problems:
+    #
+    #   1. Queue-throughput cap — every order tied up the executor for
+    #      up to 30s even when IB had already accepted the parent in
+    #      `PendingSubmit`. Bracket bursts (10+ adoptions on reconnect)
+    #      serialized to >5 min wall-clock to drain.
+    #   2. "Still pending after 30s" branch — orders that didn't reach a
+    #      terminal state inside the window had to be ACK'd as `pending`
+    #      to Spark, which v109 then folded into `IB_PENDING`. The branch
+    #      was load-bearing but a code smell: the timeout duration was
+    #      arbitrary and IB *will* fire `orderStatus` events when the
+    #      order actually transitions. We were just choosing not to listen.
+    #
+    # v110 fix: attach a `trade.statusEvent` callback after placeOrder.
+    # ib_insync fires that event on every status transition for that
+    # specific trade. The handler reports terminal states (Filled /
+    # Cancelled / Inactive) back to Spark immediately. The executor
+    # itself ACKs Spark with `pending + ib_order_id` synchronously and
+    # returns — Spark's v109 translation moves the row to IB_PENDING and
+    # stops re-polling it. If IB never delivers a terminal event, the
+    # v109 10-min auto-expiry on stale IB_PENDING rows is the safety net.
+    #
+    # The whole "still pending after 30s" branch is gone. The executor
+    # no longer waits for terminal states at all — it transitions the
+    # order to "delivered to IB, now monitor passively" and moves on to
+    # the next queued order in the same poll cycle.
+    def _on_trade_status_change(
+        self,
+        order_id: str,
+        oca_group: Optional[str],
+        stop_order_id: Optional[int],
+        target_order_ids: Optional[list],
+        trade,
+    ):
+        """statusEvent callback: terminal-state ACK back to Spark.
+
+        Bound per-trade via `functools.partial`; ib_insync invokes it
+        with the `trade` positional argument on every status transition.
+        Idempotent — each (order_id, terminal_status) tuple is reported
+        at most once.
+        """
+        try:
+            if not hasattr(self, "_terminal_reported"):
+                self._terminal_reported = {}  # order_id -> terminal status string
+
+            already = self._terminal_reported.get(order_id)
+            if already is not None:
+                return  # Terminal ACK already delivered.
+
+            status_obj = getattr(trade, "orderStatus", None)
+            status = (getattr(status_obj, "status", "") or "").strip()
+
+            if status == "Filled":
+                avg_fill = getattr(status_obj, "avgFillPrice", None)
+                filled = getattr(status_obj, "filled", None) or 0
+                ib_order_id = int(getattr(trade.order, "orderId", 0) or 0) or None
+                self._terminal_reported[order_id] = status
+                self._report_order_result(
+                    order_id,
+                    "filled",
+                    fill_price=float(avg_fill) if avg_fill else None,
+                    filled_qty=int(filled),
+                    ib_order_id=ib_order_id,
+                    stop_order_id=stop_order_id,
+                    target_order_id=target_order_ids[0] if target_order_ids else None,
+                    target_order_ids=target_order_ids or [],
+                    oca_group=oca_group,
+                )
+                logger.info(
+                    f"[OrderQueue:event] {order_id} FILLED @ ${avg_fill} "
+                    f"(passive ACK via statusEvent)"
+                )
+                return
+
+            if status in ("Cancelled", "ApiCancelled"):
+                self._terminal_reported[order_id] = status
+                self._report_order_result(
+                    order_id, "cancelled",
+                    error="Order cancelled at IB (passive ACK)",
+                )
+                logger.warning(f"[OrderQueue:event] {order_id} CANCELLED (passive ACK)")
+                return
+
+            if status == "Inactive":
+                self._terminal_reported[order_id] = status
+                why = getattr(status_obj, "whyHeld", "") or ""
+                self._report_order_result(
+                    order_id, "rejected",
+                    error=f"Order rejected by IB (Inactive){f' — {why}' if why else ''}",
+                )
+                logger.warning(f"[OrderQueue:event] {order_id} REJECTED (passive ACK)")
+                return
+
+            # Transient — Submitted / PreSubmitted / PendingSubmit /
+            # PendingCancel — no-op. Spark already has the order in
+            # IB_PENDING from the executor's synchronous ACK.
+        except Exception as e:
+            logger.error(f"[OrderQueue:event] handler error for {order_id}: {e}")
+
+    def _attach_status_event(
+        self,
+        trade,
+        order_id: str,
+        oca_group: Optional[str] = None,
+        stop_order_id: Optional[int] = None,
+        target_order_ids: Optional[list] = None,
+    ):
+        """Subscribe a per-trade statusEvent callback.
+
+        ib_insync `Trade.statusEvent` is an Event object — `+=` adds a
+        listener that fires on every status transition for that trade.
+        """
+        try:
+            cb = partial(
+                self._on_trade_status_change,
+                order_id, oca_group, stop_order_id, target_order_ids,
+            )
+            trade.statusEvent += cb
+            # Some Trade transitions can land before the subscribe (e.g.
+            # an immediate Inactive rejection on bad params). Fire the
+            # callback once synchronously to catch that case.
+            cb(trade)
+        except Exception as e:
+            logger.warning(
+                f"[OrderQueue:event] could not attach statusEvent for "
+                f"{order_id}: {e} — falling back to passive IB_PENDING."
+            )
+
+
     def _report_order_result(self, order_id: str, status: str, fill_price: float = None, 
                             filled_qty: int = None, remaining_qty: int = None,
                             ib_order_id: int = None, error: str = None,

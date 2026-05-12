@@ -32,9 +32,14 @@ const stageColor = {
   close:   { border: 'border-slate-700',     bg: 'bg-slate-900/20',  text: 'text-slate-400' },
 };
 
-const Stage = ({ stage, label, count, sub, accent, onClick, dataTestId }) => {
+const Stage = ({ stage, label, count, sub, accent, splitCount, onClick, dataTestId }) => {
   const c = stageColor[stage];
   const interactive = typeof onClick === 'function';
+  // v19.34.110 — ORDER tile split. When `splitCount = { queued, ibPending }`
+  // is provided and `ibPending > 0`, render `5q + 3@ib` instead of the
+  // flat number. Lets the operator see at a glance how much work is
+  // locally queued vs. how much is sitting at IB in `PendingSubmit`.
+  const hasSplit = splitCount && (splitCount.ibPending ?? 0) > 0;
   return (
     <div
       data-testid={dataTestId || `v5-pipeline-stage-${stage}`}
@@ -55,7 +60,21 @@ const Stage = ({ stage, label, count, sub, accent, onClick, dataTestId }) => {
           {accent && (
             <span className={`v5-mono text-[14px] font-bold ${accent.color}`}>{accent.text}</span>
           )}
-          <span className="v5-mono text-xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
+          {hasSplit ? (
+            <span
+              className="v5-mono text-xl font-bold text-zinc-100 leading-none whitespace-nowrap"
+              data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split`}
+              title={`${splitCount.queued ?? 0} queued locally · ${splitCount.ibPending ?? 0} awaiting IB terminal state`}
+            >
+              <span data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split-queued`}>{splitCount.queued ?? 0}</span>
+              <span className="text-zinc-500 text-xs font-normal">q</span>
+              <span className="text-zinc-500 text-sm px-0.5">+</span>
+              <span className={c.text} data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split-ibpending`}>{splitCount.ibPending ?? 0}</span>
+              <span className="text-zinc-500 text-xs font-normal">@ib</span>
+            </span>
+          ) : (
+            <span className="v5-mono text-xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
+          )}
         </div>
       </div>
       {sub && (
@@ -90,6 +109,7 @@ export const PipelineHUDV5 = ({
   evalCount = 0,
   evalSub,
   orderCount = 0,
+  orderSplit,
   orderSub,
   manageCount = 0,
   manageSub,
@@ -212,7 +232,7 @@ export const PipelineHUDV5 = ({
           <span className="text-zinc-700 font-mono shrink-0">→</span>
           <div ref={orderStageRef} className="flex-1 min-w-0 relative">
             <Stage
-              stage="order" label="Order" count={orderCount} sub={orderSub}
+              stage="order" label="Order" count={orderCount} sub={orderSub} splitCount={orderSplit}
               dataTestId="v5-pipeline-stage-order"
               onClick={() => toggle('order')}
             />

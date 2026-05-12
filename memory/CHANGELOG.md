@@ -2,6 +2,146 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.110) — Pipeline tile split + event-driven pusher ACK
+
+Two P3 items shipped under one version tag.
+
+### P3-A — `ORDER · 5q + 3@ib` HUD tile split
+
+Pre-v110 the V5 HUD's ORDER pipeline tile showed a single fused
+count: `pending + executing + filled`. After v109 surfaced
+`ib_pending` as its own queue bucket (orders submitted to IB,
+awaiting terminal state), the operator had no fast read of
+"locally queued vs. live at IB" — both rolled into the same number.
+
+**Backend (`services/sentcom_service.py`)**
+- `SentComStatus` gains an `ib_pending_orders: int = 0` field.
+- `to_dict().order_pipeline.ib_pending` exposes it to the HUD.
+- Fixed a latent typo: pre-v110 the service read `pending_count` /
+  `executing_count` / `filled_today` from `get_queue_status`, but
+  the real method returns `pending` / `executing` / `filled` /
+  `ib_pending`. The mis-key silently masked every queue count as
+  zero (the V5 drilldown rebuild from `positions` hid the bug in
+  normal operation). v110 reads the correct keys + the new
+  `ib_pending` value with a `pending_count` fallback for safety.
+- `routers/sentcom.py` exception fallback now includes
+  `ib_pending: 0` so the frontend never sees an undefined field.
+
+**Frontend (`SentComV5View.jsx` + `panels/PipelineHUDV5.jsx`)**
+- `derivePipelineCounts` now reads `pipeline.ib_pending` and emits
+  a structured `order_split: { queued, ibPending }` when either
+  bucket is non-zero. `queued = pending + executing`.
+- `Stage` component accepts a new `splitCount` prop. When
+  `ibPending > 0`, renders `5q + 3@ib` (queued in zinc, `q` and
+  `@ib` in muted micro-labels, `ibPending` in the tile's stage
+  accent color). When `ibPending === 0`, falls back to the
+  original flat-count render — no visual change on quiet days.
+- Hover tooltip: `5 queued locally · 3 awaiting IB terminal state`.
+- New `data-testid`s: `*-split`, `*-split-queued`, `*-split-ibpending`.
+
+### P3-B — Event-driven pusher ACK (replaces 30s blocking poll)
+
+Pre-v110 `ib_data_pusher.py` had two near-identical `while
+time.time() - start < 30: ib.sleep(0.5)` loops — one for the
+single-order placement path, one for the bracket-parent path.
+Each placement could tie up the executor for up to 30 seconds.
+Bracket bursts (10+ adoptions on reconnect) serialized to
+several minutes wall-clock to drain.
+
+The polling architecture also forced a "still pending after 30s"
+fallback branch (v108 had to enumerate IB's transient states
+inside this branch to keep `PendingSubmit` from being
+misclassified as `rejected`, which is what caused the ADOPT-OCA
+storm). v110 removes the branch entirely.
+
+**`documents/scripts/ib_data_pusher.py`**
+- New `_on_trade_status_change(self, order_id, oca_group,
+  stop_order_id, target_order_ids, trade)` — `ib_insync`
+  `Trade.statusEvent` callback. Maps `orderStatus.status` →
+  Spark ACK:
+  - `Filled` → `_report_order_result(order_id, "filled", ...)`
+    with full v107 bracket-ACK kwargs forwarded.
+  - `Cancelled` / `ApiCancelled` → `"cancelled"`.
+  - `Inactive` → `"rejected"` with `whyHeld` enriched error string.
+  - Transient (`Submitted` / `PreSubmitted` / `PendingSubmit` /
+    `PendingCancel`) → no-op. Spark already holds the row in
+    `IB_PENDING` via the synchronous submit ACK (v109).
+  - Idempotent: per-`order_id` terminal ACK is delivered at most
+    once even though IB fires multiple status events.
+- New `_attach_status_event(self, trade, order_id, ...)` — wires
+  the callback via `functools.partial`, also fires it once
+  synchronously to catch trades that landed terminal before the
+  subscribe (e.g. immediate Inactive rejections).
+- **Single-order path**: 30s `while` loop deleted. Executor now
+  calls `_attach_status_event(trade, order_id)`, then (if the
+  attach didn't already report terminal) sends Spark a synchronous
+  `pending+ib_order_id` ACK with error
+  `"Submitted to IB — awaiting terminal event"`. Spark's v109
+  translation flips the row to `IB_PENDING` and stops re-polling
+  it. Executor returns immediately.
+- **Bracket path**: same pattern, with `oca_group` /
+  `stop_order_id` / `target_order_ids` forwarded into the event
+  callback so the eventual Filled ACK still carries them.
+- The legacy "Order still pending after 30s" / "parent still
+  pending after 30s" branches are GONE. The `Unknown status:`
+  rejection branch is GONE. Both were artefacts of the polling
+  architecture; under event-driven dispatch we never time-out a
+  transient.
+- Added `from functools import wraps, partial` import.
+
+### Regression — 21 / 21 new + 116 / 116 cumulative PASS
+
+**`tests/test_v19_34_110_pipeline_split_and_event_ack.py`** (21 new tests):
+- `TestSentComStatusIbPendingField` (3 cases) — `ib_pending` field
+  on the dataclass + `to_dict` + router fallback.
+- `TestSentComServiceQueueKeyMapping` (2 cases) — service reads
+  correct queue_status keys + propagates ib_pending.
+- `TestEventDrivenAckMapping` (6 cases) — Filled / Cancelled /
+  ApiCancelled / Inactive (with whyHeld) / 4 transients / dedup.
+- `TestEventDrivenAckSourceContract` (5 cases) — no more 30s
+  poll, no still-pending branch, attach call sites for both
+  single-order and bracket paths, synchronous IB_PENDING ACK.
+- `TestV5FrontendWiring` (5 cases) — `SentComV5View.jsx` reads
+  `ib_pending`, passes `orderSplit`, HUD consumes it, renders
+  `q` + `@ib` labels, falls back to flat count when ibPending=0.
+
+**v107 + v108 source-grep tests updated** — they previously
+asserted the polling-loop structure that v110 superseded. The
+semantic guarantees (PendingSubmit never reported as rejected,
+v107 bracket ACK kwargs forwarded) now hold via the event-handler
+path; tests were rewritten to assert the new code shape with
+clear "v110 SUPERSEDES" doc-strings explaining the migration.
+
+### Cumulative incident-chain regression — 116 / 116 PASS
+
+```
+v100 order_policy_registry         — 24 tests
+v102 executor_policy_wiring        —  8 tests
+v103 oca_tp_ladder                 — 10 tests
+v104 stop_trail_anchor             — 15 tests
+v106 simulate_bracket_endpoint     —  7 tests
+v107 bracket_ack_signature         —  4 tests
+v107b cancel_adopt_oca_storm       —  8 tests
+v108 pending_submit_status_fix     —  6 tests (rewritten for v110)
+v109 ib_pending_bounce_fix         — 13 tests
+v110 pipeline_split + event_ack    — 21 tests
+                                   ──────────
+Total                                116 / 116
+```
+
+### Operator notes
+- **No DGX restart required for P3-A** — backend hot-reloads.
+  Pull → frontend `yarn build` to deploy the new HUD render.
+- **Pusher redeploy required for P3-B** — copy
+  `ib_data_pusher.py` to the Windows machine and restart the
+  pusher process. Old pushers continue to work; they just don't
+  benefit from the throughput improvement.
+- The synchronous `pending+ib_order_id` ACK rides directly on
+  v109's `IB_PENDING` translation. If v109 is rolled back, v110
+  reverts to a less granular `pending` state but stays correct —
+  no double-submit risk (idempotency cache is independent).
+
+
 ## 2026-02-12 (v19.34.109) — IB_PENDING status breaks the duplicate-block bounce loop
 
 ### The bug v108 didn't fully kill

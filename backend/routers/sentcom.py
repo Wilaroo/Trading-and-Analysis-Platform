@@ -77,7 +77,7 @@ async def get_status():
                 "regime": None,
                 "positions_count": 0,
                 "watching_count": 0,
-                "order_pipeline": {"pending": 0, "executing": 0, "filled": 0}
+                "order_pipeline": {"pending": 0, "executing": 0, "filled": 0, "ib_pending": 0}
             }
         }
 
