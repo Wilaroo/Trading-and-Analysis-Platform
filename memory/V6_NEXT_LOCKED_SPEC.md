@@ -139,3 +139,39 @@ Goal: zero behavior change, just decompose `App.js`/`v5/*.jsx` into stand-alone 
 - More tabs in Thinking pane (use chat drawer instead)
 - Bigger fonts / lower density
 - Full-UI rewind (V6.3)
+
+---
+
+## 10. v110–v114 Integration (added 2026-02-12)
+
+See `/app/memory/V6_INTEGRATION_v110_v114.md` for the full cross-cut
+contract. Quick summary of additions Plan A must honor:
+
+**§4 Layout grid** — TopStrip ORDER pill MUST render the v110 split
+`5q + 3@ib` when `order_pipeline.ib_pending > 0`. The KPI ribbon's
+"Open Risk" column gains a micro-bar showing
+`pending / ib_pending / executing` segments. Helper
+`utils/orderPipelineSplit.js` lifted from V5 in Phase A so both V5
+and V6 share one implementation.
+
+**§3 State machine** — optional v113 amber trigger:
+"any open position whose setup_type has graded F for 5+ consecutive
+days." Default OFF until operator confirms after a week of v113 data.
+
+**Phase A** adds two extractions: `orderPipelineSplit.js` helper and
+the shared `<RowMetaChips>` component (wraps TradeStyleChip +
+SetupGradeChip).
+
+**Phase B** wires `useAppState()` to honor the new amber trigger and
+TopStrip + KPI ribbon to the new split helper.
+
+**Phase C** mounts the new V6 `SetupGradeBoard` panel in the right
+sidebar, adds GRADE column to Position Health Console, the
+`bracket_attach_cooldown` event kind to Safety Activity Stream, the
+yesterday-recap row to Day Narrative, and `yesterday_grade_recap` to
+the Chat Drawer system context. Ships
+`POST /api/trading-bot/retune-stop` for the Tighten-stop action.
+
+Five non-negotiable invariants codified in the integration doc — any
+PR touching pipeline pills, position health, safety stream, grade
+chips, or briefing narrative must satisfy them.

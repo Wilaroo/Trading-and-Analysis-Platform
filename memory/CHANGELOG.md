@@ -2,6 +2,106 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.115) — V6 integration prep + locked contracts
+
+Recent v110–v114 changes (pipeline split, queue idempotency,
+reconciler cooldown, scalp SL/TP fix, setup grading subsystem,
+yesterday's recap in briefing) all introduce data and contracts the
+V6 redesign work needs to consume seamlessly. v115 locks the
+integration plan and makes the one backend surface change the V6
+Safety Activity Stream depends on.
+
+### Backend — bracket-attach cooldown deque (V6 Safety Stream prep)
+
+`services/position_reconciler.py`:
+- New deque `_bracket_attach_recent_skips` (maxlen=200) alongside
+  the legacy `_bracket_attach_cooldown_skips` int counter. Mirrors
+  the `_guard_recent_skips` pattern on the drift-guard path.
+- New `_record_bracket_attach_skip(trade_id, cooldown_remaining_s, symbol)`
+  helper — appends a structured event to the deque AND bumps the
+  counter. Production code MUST call this helper (not the counter
+  directly) so the V6 Safety Activity Stream feed stays in sync
+  with the counter.
+- New `get_attach_cooldown_skips()` public read — returns a snapshot
+  copy of the deque so consumers can't mutate the reconciler state.
+- All three production cooldown-skip call sites (orphan-adoption,
+  grow-existing-excess-slice, spawn-excess-slice) rewritten to
+  use the helper.
+
+Event shape on the deque:
+
+```json
+{
+  "ts": "2026-02-12T14:31:52Z",
+  "trade_id": "tr-9a1",
+  "symbol": "SBUX",
+  "cooldown_remaining_s": 13.2,
+  "cooldown_window_s": 60.0
+}
+```
+
+This is what the future V6 aggregator will pump into the activity
+stream as `kind: "bracket_attach_cooldown"` events.
+
+### Documentation — V6 integration index + spec appends
+
+New: **`/app/memory/V6_INTEGRATION_v110_v114.md`** — single source
+of truth for how v110–v114 plug into the existing V6 specs.
+Contains the quick-map of which version affects which V6 panel,
+the contracts each panel must honor, and the five non-negotiable
+invariants V6 PRs must satisfy:
+
+1. ORDER pipeline pill MUST split when `ib_pending > 0`
+2. Scalp position with stop-distance >1×ATR MUST surface as
+   STOP-WIDE-FOR-STYLE
+3. Every bracket-attach cooldown skip MUST produce a feed event
+4. SetupGradeChip cache MUST be shared session-wide (one fetch)
+5. Yesterday's `summary_line` is verbatim — operator + LLM see
+   identical text
+
+Appended cross-reference sections to the three existing V6 specs:
+
+- **`V6_NEXT_LOCKED_SPEC.md §10`** — TopStrip ORDER pill v110 split,
+  KPI ribbon micro-bar, optional v113 amber state trigger, Phase A
+  extractions (`orderPipelineSplit.js` helper, `<RowMetaChips>`),
+  Phase C panel additions.
+- **`V6_POSITION_HEALTH_CONSOLE_SPEC.md §10`** — STOP-WIDE-FOR-STYLE
+  row state for v112, GRADE column from v113, `wide-stop` count in
+  header, dependency on the not-yet-built
+  `POST /api/trading-bot/retune-stop` endpoint.
+- **`V6_SAFETY_ACTIVITY_STREAM_SPEC.md §10`** — `bracket_attach_cooldown`
+  event kind for v111, aggregator update reading
+  `get_attach_cooldown_skips()`, 5-up header counts panel.
+
+### Regression — 12 / 12 new + 220 / 220 cumulative PASS
+
+`tests/test_v19_34_115_v6_integration_prep.py`:
+- `TestBracketAttachCooldownDeque` (5) — empty init, record append +
+  counter bump, 200-cap eviction, public read returns copy not
+  live deque, falsy trade_id safe
+- `TestProductionCallsitesUseRecordHelper` (2) — exactly ONE
+  direct counter bump (inside helper), exactly THREE
+  `_record_bracket_attach_skip` call sites at production paths
+- `TestV6IntegrationDocs` (4) — integration index exists with all
+  v110/v111/v112/v113/v114 sections; each V6 spec has its
+  integration cross-reference section
+- `TestV111LegacyTestsStillPass` (1) — backward compat with v111
+
+### Operator notes
+- **No DGX restart** — backend hot-reloads. No frontend changes
+  required in this PR; v6 frontend work consumes these contracts in
+  Phase A–C.
+- **The integration index is the canonical doc** going forward.
+  Read it BEFORE starting any V6 Plan A panel extraction. Updating
+  either the index or a spec appendix without updating the other is
+  caught by the v115 test suite.
+- **One pending backend dependency** for V6 Phase C:
+  `POST /api/trading-bot/retune-stop` (~30 LOC) for the
+  Tighten-stop action in the Position Health Console. Documented in
+  the integration index. Not blocking — Phase A/B work can proceed
+  in parallel.
+
+
 ## 2026-02-12 (v19.34.114) — Yesterday's grade card in morning briefing
 
 Closes the visual loop on v113: every morning the operator now sees

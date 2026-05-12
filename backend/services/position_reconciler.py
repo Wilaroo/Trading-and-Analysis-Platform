@@ -173,6 +173,29 @@ class PositionReconciler:
             self._BRACKET_ATTACH_COOLDOWN_S = 60.0
         # Cooldown skip counter (operator-visible diagnostic).
         self._bracket_attach_cooldown_skips: int = 0
+        # ── v19.34.115 (V6-integration prep) ───────────────────────
+        # Promote the simple int counter to a recent-skips deque so
+        # the future V6 Safety Activity Stream can render per-event
+        # detail rows, not just totals. Mirrors the
+        # `_guard_recent_skips` deque on the drift-guard path.
+        from collections import deque as _deque
+        self._bracket_attach_recent_skips: 'deque' = _deque(maxlen=200)
+
+    def get_attach_cooldown_skips(self) -> List[Dict[str, Any]]:
+        """v19.34.115 — Public read for the V6 Safety Activity Stream
+        aggregator. Returns a snapshot list of recent
+        bracket-attach cooldown skips (newest last). Each entry has:
+
+            {
+              "ts": iso-utc,
+              "trade_id": str,
+              "symbol": str | None,
+              "cooldown_remaining_s": float,
+              "cooldown_window_s": float,
+            }
+        """
+        # Snapshot copy so the caller can't mutate the deque.
+        return list(self._bracket_attach_recent_skips)
 
     def _bracket_attach_in_cooldown(self, trade_id: str) -> Optional[float]:
         """Return seconds remaining in cooldown for `trade_id`, or None
@@ -202,6 +225,32 @@ class PositionReconciler:
             return
         import time as _time
         self._last_bracket_attach_at[trade_id] = _time.monotonic()
+
+    def _record_bracket_attach_skip(
+        self,
+        trade_id: str,
+        cooldown_remaining_s: float,
+        symbol: Optional[str] = None,
+    ) -> None:
+        """v19.34.115 — Bookkeeping for the V6 Safety Activity Stream.
+
+        Each production call site (orphan-adoption, grow-slice,
+        spawn-slice) calls this AFTER detecting a cooldown skip so
+        the aggregator can render per-event detail rows. The legacy
+        int counter still increments for backward-compat consumers.
+        """
+        self._bracket_attach_cooldown_skips += 1
+        try:
+            self._bracket_attach_recent_skips.append({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "trade_id": trade_id,
+                "symbol": symbol,
+                "cooldown_remaining_s": round(float(cooldown_remaining_s), 1),
+                "cooldown_window_s": float(self._BRACKET_ATTACH_COOLDOWN_S),
+            })
+        except Exception:
+            # Never let bookkeeping crash the reconciler.
+            pass
 
     def _stats_roll_day_if_needed(self):
         """Reset counters on UTC midnight."""
@@ -1337,7 +1386,7 @@ class PositionReconciler:
                         # on top of the queue-level trade_id idempotency.
                         _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
                         if _cooldown_left is not None:
-                            self._bracket_attach_cooldown_skips += 1
+                            self._record_bracket_attach_skip(trade.id, _cooldown_left, symbol=sym)
                             bracket_attach_result = {
                                 "success": False,
                                 "skipped": "bracket_attach_cooldown",
@@ -2555,7 +2604,7 @@ class PositionReconciler:
             # v19.34.111 — cooldown guard (see PositionReconciler init).
             _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
             if _cooldown_left is not None:
-                self._bracket_attach_cooldown_skips += 1
+                self._record_bracket_attach_skip(trade.id, _cooldown_left, symbol=sym)
                 logger.info(
                     f"[v19.34.111 COOLDOWN] {sym} {trade.id} skip grow-attach "
                     f"— {_cooldown_left:.1f}s left in cooldown."
@@ -2763,7 +2812,7 @@ class PositionReconciler:
                 # v19.34.111 — cooldown guard (see PositionReconciler init).
                 _cooldown_left = self._bracket_attach_in_cooldown(trade.id)
                 if _cooldown_left is not None:
-                    self._bracket_attach_cooldown_skips += 1
+                    self._record_bracket_attach_skip(trade.id, _cooldown_left, symbol=sym)
                     logger.info(
                         f"[v19.34.111 COOLDOWN] {sym} {trade.id} skip "
                         f"spawn-attach — {_cooldown_left:.1f}s left in cooldown."

@@ -291,3 +291,71 @@ New component `frontend/src/components/sentcom/v6/SafetyActivityStream.jsx`. Sit
 - ⏳ V6 right-sidebar slot — depends on Plan A panel extraction landing first
 
 No new third-party dependencies. No DB schema changes (uses existing collections + in-memory singletons).
+
+---
+
+## 10. v110–v114 Integration (added 2026-02-12)
+
+Cross-reference: `/app/memory/V6_INTEGRATION_v110_v114.md`.
+
+### v111 — New event kind: `bracket_attach_cooldown`
+
+v111 added a per-`trade.id` 60s cooldown wrapping all three
+`attach_oca_stop_target` call sites in `PositionReconciler`. Every
+blocked attempt increments `_bracket_attach_cooldown_skips`. The
+Safety Activity Stream MUST surface these so a sustained pattern
+becomes visible:
+
+| Icon | Kind | Tone | Operator action |
+|---|---|---|---|
+| 🧯 | `bracket_attach_cooldown` | slate | View detail (info-only) |
+
+Event shape:
+
+```json
+{
+  "ts": "2026-02-12T14:31:52Z",
+  "kind": "bracket_attach_cooldown",
+  "symbol": "SBUX",
+  "headline": "bracket attach skipped — cooldown",
+  "detail": "Reconciler attempted to attach OCA bracket for trade tr-9a1 47s after the previous attempt. 13s remaining in 60s cooldown window.",
+  "metadata": {
+    "trade_id": "tr-9a1",
+    "cooldown_remaining_s": 13.2,
+    "cooldown_window_s": 60.0
+  },
+  "actions": []
+}
+```
+
+### Aggregator update (§3)
+
+Add to `build_activity_stream`:
+
+```python
+# 6. Bracket-attach cooldown skips (v19.34.111)
+from services.position_reconciler import get_position_reconciler
+for skip in get_position_reconciler().get_attach_cooldown_skips():
+    events.append({...})
+```
+
+This requires promoting `_bracket_attach_cooldown_skips` from an
+int counter to a recent-skips deque on `PositionReconciler` (mirror
+of `_guard_recent_skips`). ~5 LOC service-side change + a method
+`get_attach_cooldown_skips()` exposing the deque.
+
+### Header counter
+
+Counts panel becomes 5-up:
+
+```
+🛑 2 flatten-suppressed · 🧊 1 cooldown · ⚠️ 4 drift-skips ·
+🛡️ 0 kill refusals · 🧯 7 attach-cooldown skips today
+```
+
+### Invariants
+
+1. Every cooldown-blocked `attach_oca_stop_target` call MUST produce
+   exactly one `bracket_attach_cooldown` event
+2. The counter MUST match the count of events visible in the feed
+   (no orphan counter increments)

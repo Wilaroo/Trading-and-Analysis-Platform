@@ -334,3 +334,51 @@ Both panels are queued. Build order matters:
 The Position Health Console answers **"Am I safe right now?"** in one glance. The Safety Activity Stream answers **"How did I get here?"** as a post-mortem. The first is more frequently consulted, has higher operator value per minute of build effort, and reuses 100% of the backend you shipped today.
 
 Recommend: ship Position Health Console first (Phase 1+2 = 1.5 days), then Safety Activity Stream (3 days end-to-end per its own spec).
+
+---
+
+## 10. v110–v114 Integration (added 2026-02-12)
+
+Cross-reference: `/app/memory/V6_INTEGRATION_v110_v114.md`.
+
+### v112 — New row state: `STOP-WIDE-FOR-STYLE`
+
+Scalp positions opened BEFORE v112 deployed are running with
+1.5–2.0×ATR stops where v112 expects 0.4–0.5×ATR. Surface them:
+
+| Icon | State | Trigger | Action |
+|---|---|---|---|
+| 🟣 | STOP-WIDE-FOR-STYLE | `trade.trade_style == 'scalp'` AND `abs(entry_price - stop_price) / atr > 1.0` | `Tighten stop →` (calls new `POST /api/trading-bot/retune-stop`) |
+
+Backend dependency: `POST /api/trading-bot/retune-stop` (~30 LOC,
+NOT YET BUILT). Reads `trade.trade_style`, computes the v112-correct
+stop via `OpportunityEvaluator.calculate_atr_based_stop`, moves the
+existing STP via `attach_oca_stop_target` (which respects v111
+cooldown).
+
+Header summary chip row gains `wide-stop` count:
+
+```
+6 tracked · 1 unprotected · 2 stacked · 1 zombie · 1 wide-stop
+```
+
+### v113 — New GRADE column
+
+Add a column between TARGET COVER and STATE showing the rolling
+30-day grade for the position's `setup_type` (sourced from
+`/api/setup-grades/{setup_type}`). F-graded + UNPROTECTED is a
+double-red-flag pattern the operator must see together.
+
+```
+SYMBOL  BOT   IB   STOP   TARGET   GRADE  STATE
+NBIS    658   658  0      0        F      🔴 UNPROTECTED
+```
+
+Grade lookup uses the same session cache as `SetupGradeChip` — one
+HTTP request per page load fans every row.
+
+### Invariants
+
+1. Scalp with stop-distance > 1×ATR MUST render STOP-WIDE-FOR-STYLE
+2. GRADE column fed from the SHARED `useSetupGrades()` cache — no
+   per-row fetches

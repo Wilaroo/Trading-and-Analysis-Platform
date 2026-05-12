@@ -326,3 +326,13 @@ section: emerald winners, rose F-grade losers, italic advice.
 Operator and LLM briefing now read identical text — no hallucination
 surface on the citation.
 
+
+## v19.34.115 — V6 integration prep + locked contracts (2026-02-12)
+
+Locked the integration plan for v110–v114 → V6 panel rollout.
+New: `/app/memory/V6_INTEGRATION_v110_v114.md` (master index).
+Appended cross-reference sections to all three existing V6 specs.
+Backend: promoted v111 cooldown counter to a 200-entry deque with
+`get_attach_cooldown_skips()` public read — V6 Safety Activity Stream
+aggregator dependency now satisfied. 5 non-negotiable invariants
+codified for V6 implementation. 220/220 cumulative tests pass.
