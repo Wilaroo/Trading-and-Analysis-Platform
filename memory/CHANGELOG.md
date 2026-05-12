@@ -2,6 +2,89 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.107b) — Surgical ADOPT-OCA storm flush endpoint
+
+### Why
+When the pusher's ACK to Spark fails (v107's signature-mismatch bug,
+HTTP transient, etc.), Spark's executor treats the bracket as
+`rejected` and falls back to placing single-leg ADOPT-OCA wrapper
+orders to "recover" the position. If the underlying bracket actually
+placed at IB, those wrappers end up as live orphans clogging the
+open-orders panel. Pre-v107b the only flush option was the V5 HUD's
+`CLOSE/CANCEL ALL` button, which **also** nukes legitimate bot-managed
+brackets and any operator-placed orders. Operator wanted a scalpel,
+not a sledgehammer.
+
+### What ships
+
+**New endpoint — `POST /api/trading-bot/cancel-adopt-oca-storm`**
+
+```bash
+curl -s -X POST http://localhost:8001/api/trading-bot/cancel-adopt-oca-storm \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true,"symbol":"RJF"}' | jq .
+```
+
+Request body (all optional):
+- `symbol` — limit cancel to one ticker
+- `dry_run` — preview targets without queueing
+- `reason` — audit string (default `adopt_oca_storm_flush`)
+
+Reads the live `_pushed_ib_data["orders"]` snapshot (refreshed every
+push tick), filters to orders whose `oca_group` starts with
+`ADOPT-OCA-` **and** whose `status` is still pending (`Submitted` /
+`PreSubmitted` / `PendingSubmit`), then enqueues each via the
+v19.34.88 cancellation queue. Legitimate bracket OCA groups (which
+follow the `oca_<symbol>_<trade_id>` naming convention from
+v19.34.103) are explicitly **not** matched and stay alive.
+
+Response includes:
+- `queued` — how many cancels were enqueued
+- `targets[]` — full per-order details for the audit log
+- `oca_groups_touched[]` — list of distinct ADOPT-OCA groups affected
+- `snapshot_age_seconds` — staleness of the pusher feed (helps the
+  operator understand if the targets are still actually live)
+- `summary` — single-line operator-readable string
+- Idempotency: orders that already have a `pending`/`claimed`
+  cancellation in the v88 queue are silently skipped (won't double-queue).
+
+### Regression suite
+**`tests/test_v19_34_107b_cancel_adopt_oca_storm.py`** — 8/8 PASS:
+- Empty snapshot returns 0.
+- Dry-run lists targets without queueing.
+- Live flush queues all 4 ADOPT-OCA pending orders in a realistic
+  mixed snapshot, leaves the v34.103 legitimate bracket
+  (`oca_RJF_0486f940`) untouched, leaves the Filled wrapper alone.
+- `symbol` filter is case-insensitive and ticker-scoped.
+- Already-queued cancels are not re-queued.
+- Summary string is human-readable.
+- Only `Submitted`/`PreSubmitted`/`PendingSubmit` are eligible.
+- `None`/empty body uses safe defaults.
+
+Tests call the route handler directly (not via HTTP) so we can mutate
+the in-memory `_pushed_ib_data` snapshot the handler reads from. Each
+test snapshots/restores `_pushed_ib_data["orders"]` and
+`_cancellation_queue` so production state stays pristine.
+
+### Operator usage example (today's incident)
+After deploying v107 + v107b, when you `git pull` + restart the
+pusher, run this from your DGX to flush yesterday's ADOPT-OCA storm
+(MTB 115150 / 115509 / 115697 / 115729, RJF 115765 / 115795 / 115818 /
+115847) without touching the legitimate RJF bracket (115748/9/50):
+
+```bash
+curl -s -X POST http://localhost:8001/api/trading-bot/cancel-adopt-oca-storm | jq .
+```
+
+Or preview first:
+```bash
+curl -s -X POST http://localhost:8001/api/trading-bot/cancel-adopt-oca-storm \
+  -d '{"dry_run":true}' -H "Content-Type: application/json" | jq .
+```
+
+---
+
+
 ## 2026-02-12 (v19.34.107) — Bracket ACK signature compat fix · PRODUCTION HOTFIX
 
 ### The bug (paper-account incident 2026-02-12 10:00:25)

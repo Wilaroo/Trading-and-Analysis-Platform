@@ -3301,6 +3301,144 @@ def get_order_policies():
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/cancel-adopt-oca-storm")
+def cancel_adopt_oca_storm(payload: Optional[Dict[str, Any]] = Body(default=None)):
+    """v19.34.107b — Surgical flush of orphan ADOPT-OCA recovery wrappers.
+
+    Backstory: when a pusher ACK fails (e.g. v19.34.107's signature
+    mismatch bug, or a transient HTTP error), Spark's executor treats
+    the bracket as `rejected` and falls back to placing single-leg
+    ADOPT-OCA wrap orders to "recover". If the underlying bracket
+    actually placed successfully at IB, those wrappers end up as live
+    orphans clogging the open-orders panel. Pre-v107b the only flush
+    option was `CLOSE/CANCEL ALL`, which also nukes legitimate
+    bot-managed brackets and ANY operator-placed orders.
+
+    This endpoint reads the live `_pushed_ib_data["orders"]` snapshot
+    (refreshed every push tick), filters to orders whose `oca_group`
+    starts with `ADOPT-OCA-` and whose `status` is still pending
+    (`Submitted` / `PreSubmitted` / `PendingSubmit`), and queues a
+    cancel for each via the existing v19.34.88 cancellation queue.
+
+    Request body (all optional):
+      {
+        "symbol":  "RJF",       // limit to a single symbol's storm
+        "dry_run": true,         // preview targets without cancelling
+        "reason":  "ack_signature_storm"   // audit string
+      }
+
+    Response:
+      {
+        "success": true,
+        "queued": 8,
+        "dry_run": false,
+        "snapshot_age_seconds": 1.4,
+        "targets": [
+          {"ib_order_id": 115150, "symbol":"MTB", "oca_group":"ADOPT-OCA-MTB-c0b9db64-a5df6d", "order_type":"STP", "status":"PreSubmitted"},
+          ...
+        ],
+        "oca_groups_touched": ["ADOPT-OCA-MTB-c0b9db64-a5df6d", "ADOPT-OCA-RJF-950c1787-4d1ad8"]
+      }
+    """
+    try:
+        from routers.ib import (
+            _pushed_ib_data,
+            queue_cancellation,
+            get_cancellation_status,
+        )
+        import time as _time
+
+        payload = payload or {}
+        symbol_filter = (payload.get("symbol") or "").strip().upper() or None
+        dry_run = bool(payload.get("dry_run", False))
+        reason = str(payload.get("reason") or "adopt_oca_storm_flush")
+
+        snapshot = _pushed_ib_data or {}
+        last_update = snapshot.get("last_update")
+        snapshot_age = None
+        if last_update:
+            try:
+                from datetime import datetime as _dt
+                dt = _dt.fromisoformat(str(last_update).replace("Z", "+00:00"))
+                snapshot_age = max(
+                    0.0,
+                    (_dt.now(dt.tzinfo).timestamp() - dt.timestamp())
+                    if dt.tzinfo else (_time.time() - dt.timestamp()),
+                )
+            except Exception:
+                snapshot_age = None
+
+        orders = list(snapshot.get("orders") or [])
+        # Live statuses only — Filled / Cancelled orders shouldn't be
+        # re-cancelled (would 200-OK as no-op but pollutes the audit log).
+        _live_statuses = {"Submitted", "PreSubmitted", "PendingSubmit"}
+
+        targets = []
+        for o in orders:
+            oca = (o.get("oca_group") or "").strip()
+            if not oca.startswith("ADOPT-OCA-"):
+                continue
+            status = (o.get("status") or "").strip()
+            if status not in _live_statuses:
+                continue
+            if symbol_filter and (o.get("symbol") or "").upper() != symbol_filter:
+                continue
+            try:
+                ib_id = int(o.get("order_id"))
+            except (TypeError, ValueError):
+                continue
+            # Skip if a cancel is already in flight for this id.
+            existing = get_cancellation_status(ib_id)
+            if existing and existing.get("status") in ("pending", "claimed"):
+                continue
+            targets.append({
+                "ib_order_id": ib_id,
+                "symbol": o.get("symbol"),
+                "oca_group": oca,
+                "order_type": o.get("order_type"),
+                "status": status,
+                "limit_price": o.get("limit_price"),
+                "aux_price": o.get("aux_price"),
+                "quantity": o.get("quantity"),
+            })
+
+        queued = 0
+        if not dry_run:
+            for t in targets:
+                try:
+                    queue_cancellation(
+                        ib_order_id=t["ib_order_id"],
+                        reason=reason,
+                        requested_by="operator:adopt_oca_storm_flush",
+                    )
+                    queued += 1
+                except Exception as exc:
+                    t["queue_error"] = str(exc)
+
+        oca_groups_touched = sorted({t["oca_group"] for t in targets})
+
+        return {
+            "success": True,
+            "queued": queued,
+            "dry_run": dry_run,
+            "snapshot_age_seconds": (
+                round(snapshot_age, 2) if snapshot_age is not None else None
+            ),
+            "symbol_filter": symbol_filter,
+            "reason": reason,
+            "targets": targets,
+            "oca_groups_touched": oca_groups_touched,
+            "summary": (
+                f"{'Would cancel' if dry_run else 'Queued cancel for'} "
+                f"{len(targets)} ADOPT-OCA order(s) across "
+                f"{len(oca_groups_touched)} OCA group(s)"
+                + (f" for {symbol_filter}" if symbol_filter else "")
+            ),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/simulate-bracket")
 def simulate_bracket(payload: Dict[str, Any] = Body(...)):
     """v19.34.106 — return the EXACT IB bracket payload Spark would send
