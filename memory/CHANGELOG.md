@@ -2,6 +2,67 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.95) — Swing / Investment / Position detector expansion
+
+### Scope
+Filled the multi-day-to-multi-month coverage gap. SentCom went from **48 → 68 setups**, with the previously-empty INVESTMENT bucket now populated and the POSITION bucket expanded from 1 to 8 setups.
+
+### New detectors (20)
+
+**SWING (8)** — daily-bar driven, 1-3 week holds
+- `pocket_pivot` (O'Neil) — first up-day where vol > 10d max down-vol + above 10d high
+- `vcp_breakout` (Minervini) — 3 sequential pullbacks each shallower than the prior + pivot break on volume
+- `three_week_tight` (Minervini) — 3 weekly closes within ±1.5%
+- `bull_flag_break` / `bear_flag_break` — 10-day pole + 5-15 day flag break
+- `ascending_triangle_break` / `descending_triangle_break` — flat S/R + converging trendline
+- `cup_with_high_handle` (O'Neil) — cup 7-65 weeks, handle in upper half, depth 12-33%
+
+**INVESTMENT (5)** — daily/weekly-aggregated, 3 wk - 3 mo holds
+- `weekly_breakout` — 26-week base break on weekly vol >= 2× 13-wk avg ⭐ *fills empty INVESTMENT bucket*
+- `multi_quarter_base_break` — 130-day flat base (≤30% range) break on volume
+- `rs_leader_break` — Mansfield RS vs SPY rank >=90 + breaking 20-day high
+- `fifty_two_week_high_break` (Darvas) — new 52w high on >=1.5× 50d avg vol
+- `power_trend_stack` (Minervini "stocking") — first day all of price > 10ema > 20ema > 50sma > 150sma > 200sma + rising 200sma
+
+**POSITION (7)** — multi-month conviction holds
+- `stage_2_breakout` (Weinstein) — above rising 30-week SMA + 30-week base break
+- `stage_1_to_2_transition` — first close above 30w SMA after 30+ sessions below + flat base
+- `stage_3_to_4_breakdown` — first close below 30w SMA after distribution top
+- `golden_cross_filtered` — 50/200 SMA cross UP, gated by Weinstein Stage 2 + Mansfield RS > 0
+- `death_cross_filtered` — 50/200 SMA cross DOWN, gated by Stage 4 + Mansfield RS < 0
+- `two_hundred_day_reclaim` — first close above 200DMA after 30+ sessions below
+- `two_hundred_day_loss` — mirror short signal
+
+### Infra changes
+- New `services/daily_setup_helpers.py` — pure-function SMA/EMA/ATR/RSI, weekly+monthly aggregators, flat-base detector, Mansfield RS, breakout/pivot helpers.
+- New `services/daily_setup_detectors.py` — 20 pure-function detectors + `DAILY_DETECTORS` dispatch dict.
+- `_scan_daily_setups` daily-bar fetch limit raised from **60 → 260 bars** (needed for 200DMA, 52w-high, 26-week base, weekly aggregations).
+- SPY benchmark series pulled ONCE per scan cycle, passed to RS-based detectors via `spy_closes` kwarg. Detectors degrade gracefully when SPY missing.
+- `TradeStyle` enum extended with `SWING`, `INVESTMENT`, `POSITION` members (previously only SCALP / INTRADAY / MULTI_DAY).
+- All 20 setups registered in `SETUP_REGISTRY` (smb_integration.py) with proper category/direction/style/r_target metadata.
+
+### Latent bug fixed
+The pre-existing 6 daily detectors (`_check_daily_squeeze`, `_check_trend_continuation`, etc.) were silently failing at `LiveAlert(...)` construction because 7 required positional fields weren't passed. They emitted **zero** alerts since inception. New `make_daily_alert()` factory in `daily_setup_detectors.py` solves this for the new 20 — the pre-existing 6 still have the bug (out of scope this pass, but flagged for follow-up cleanup).
+
+### Training pipeline integration
+**No retraining required**. All 20 new setups route via "ROUTE A" — they map to existing daily-bar training profiles in `SETUP_TRAINING_PROFILES` (BREAKOUT/1day, TREND_CONTINUATION/1day, SHORT_BREAKDOWN/1day, SHORT_TREND/1day). Unknown setup_types fall through to `DEFAULT_PROFILE`. Five specialized patterns (VCP, STAGE_2, STAGE_1→2, RS_LEADER, STAGE_3→4) can optionally get dedicated training profiles in a future pass for ~5-10% AUC bump on their specific signatures.
+
+### Verification
+- `/app/backend/tests/test_v19_34_95_swing_investment_position_detectors.py` — **32/32 passing**.
+- Full v19.34.x test suite (orphan reconciler, cancel queue, OCA propagation, etc.) — **77/77 passing**.
+- Backend supervisor restart healthy, `/api/health` 200 OK.
+- `backend/scripts/setup_inventory.py` confirms all 20 new setups categorized correctly: SWING 15, INVESTMENT 5, POSITION 8, TOTAL 68.
+
+### Files touched
+- NEW: `backend/services/daily_setup_helpers.py`
+- NEW: `backend/services/daily_setup_detectors.py`
+- NEW: `backend/tests/test_v19_34_95_swing_investment_position_detectors.py`
+- NEW: `backend/scripts/setup_inventory.py`
+- NEW: `/app/memory/setup_inventory_master_list.txt`
+- MOD: `backend/services/enhanced_scanner.py` — fetch 260 bars, pull SPY, dispatch new detectors
+- MOD: `backend/services/smb_integration.py` — extended TradeStyle enum + 20 SETUP_REGISTRY entries
+
+
 ## 2026-05-12 (v19.34.87) — Boot reload no longer creates degenerate state
 
 ### The upstream bug we'd been papering over

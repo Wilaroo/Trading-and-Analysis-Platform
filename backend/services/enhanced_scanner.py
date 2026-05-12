@@ -5494,13 +5494,31 @@ class EnhancedBackgroundScanner:
             
             scanned = 0
             alerts_found = 0
+
+            # v19.34.95 — pull SPY benchmark series ONCE per scan cycle
+            # for relative-strength detectors (rs_leader_break,
+            # golden_cross_filtered, death_cross_filtered). Detectors
+            # degrade gracefully if SPY is unavailable.
+            spy_closes: list = []
+            try:
+                spy_bars = list(self.db["ib_historical_data"].find(
+                    {"symbol": "SPY", "bar_size": "1 day"},
+                    {"_id": 0, "close": 1, "date": 1},
+                ).sort("date", -1).limit(260))
+                spy_bars.reverse()
+                spy_closes = [float(b["close"]) for b in spy_bars if b.get("close")]
+            except Exception:
+                pass
+
             for symbol in symbols:
                 try:
-                    # Get historical daily bars from MongoDB
+                    # v19.34.95 — extended fetch from 60 → 260 daily bars to
+                    # support investment/position detectors (52w high, 200d
+                    # SMA, multi-quarter base, weekly aggregations).
                     bars = list(self.db["ib_historical_data"].find(
                         {"symbol": symbol, "bar_size": "1 day"},
                         {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}
-                    ).sort("date", -1).limit(60))
+                    ).sort("date", -1).limit(260))
                     
                     if len(bars) < 15:
                         continue
@@ -5545,6 +5563,24 @@ class EnhancedBackgroundScanner:
                                 alerts_found += 1
                         except Exception:
                             pass
+
+                    # v19.34.95 — new swing / investment / position detectors.
+                    # Pure-function detectors live in daily_setup_detectors.py;
+                    # registered via DAILY_DETECTORS dispatch dict. SPY benchmark
+                    # series is passed for RS-based detectors (graceful no-op
+                    # if SPY is missing).
+                    try:
+                        from services.daily_setup_detectors import DAILY_DETECTORS
+                        for setup_name, detector in DAILY_DETECTORS.items():
+                            try:
+                                alert = detector(symbol, bars, spy_closes=spy_closes)
+                                if alert:
+                                    await self._process_new_alert(alert)
+                                    alerts_found += 1
+                            except Exception as det_err:
+                                logger.debug(f"v19.34.95 detector {setup_name} on {symbol} failed: {det_err}")
+                    except Exception as imp_err:
+                        logger.debug(f"v19.34.95 detector import failed: {imp_err}")
                     
                     scanned += 1
                 except Exception:

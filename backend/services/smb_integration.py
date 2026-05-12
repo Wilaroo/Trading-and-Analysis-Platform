@@ -28,6 +28,9 @@ class TradeStyle(Enum):
     SCALP: Quick in-and-out capturing immediate move (minutes to 1 hour)
     INTRADAY: Hold for intraday swing until Reason2Sell trigger (1-6 hours)
     MULTI_DAY: Max conviction multi-day hold when all 5 variables align (1-5 days)
+    SWING: Multi-day to ~3 weeks (daily-bar driven)
+    INVESTMENT: 3 weeks to ~3 months (weekly-bar / multi-quarter base)
+    POSITION: 3+ months (Weinstein stage / 200-day MA / golden cross)
     
     Note: "A+" now refers to GRADE (quality) not STYLE.
     A scalp can be A+ quality, and a multi-day hold can be C quality.
@@ -35,6 +38,9 @@ class TradeStyle(Enum):
     SCALP = "scalp"              # Target 1R, 60-70% win rate, minutes to 1 hour
     INTRADAY = "intraday"        # Target 3-5R, 40-50% win rate, 1-6 hours  
     MULTI_DAY = "multi_day"      # Target 10R+, max conviction, 1-5 days
+    SWING = "swing"              # 1-3 weeks (v19.34.95)
+    INVESTMENT = "investment"    # 3 weeks - 3 months (v19.34.95)
+    POSITION = "position"        # 3+ months (v19.34.95)
     
     # Backwards compatibility aliases (deprecated - will be removed)
     MOVE_2_MOVE = "scalp"        # DEPRECATED: Use SCALP
@@ -573,6 +579,174 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         typical_r_target=2.0,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
         valid_regimes=["momentum", "range_bound"]
+    ),
+
+    # ==================== v19.34.95 — SWING / INVESTMENT / POSITION ====================
+    # 20 new daily-bar setups added in v19.34.95 covering the under-served
+    # multi-day to multi-month time horizons. Detector implementations live in
+    # services/daily_setup_detectors.py.
+
+    "pocket_pivot": SetupConfig(
+        name="pocket_pivot",
+        display_name="Pocket Pivot (O'Neil)",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=2.5,
+    ),
+    "vcp_breakout": SetupConfig(
+        name="vcp_breakout",
+        display_name="VCP Breakout (Minervini)",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=3.0,
+    ),
+    "three_week_tight": SetupConfig(
+        name="three_week_tight",
+        display_name="3-Week Tight (Minervini)",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=2.5,
+    ),
+    "bull_flag_break": SetupConfig(
+        name="bull_flag_break",
+        display_name="Bull Flag Break",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=2.5,
+    ),
+    "bear_flag_break": SetupConfig(
+        name="bear_flag_break",
+        display_name="Bear Flag Break",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.SHORT,
+        typical_r_target=2.5,
+    ),
+    "ascending_triangle_break": SetupConfig(
+        name="ascending_triangle_break",
+        display_name="Ascending Triangle Break",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=2.0,
+    ),
+    "descending_triangle_break": SetupConfig(
+        name="descending_triangle_break",
+        display_name="Descending Triangle Break",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.SHORT,
+        typical_r_target=2.0,
+    ),
+    "cup_with_high_handle": SetupConfig(
+        name="cup_with_high_handle",
+        display_name="Cup-w/-High-Handle (O'Neil)",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.SWING,
+        direction=SetupDirection.LONG,
+        typical_r_target=3.0,
+    ),
+
+    "weekly_breakout": SetupConfig(
+        name="weekly_breakout",
+        display_name="Weekly Breakout (26-wk base)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.INVESTMENT,
+        direction=SetupDirection.LONG,
+        typical_r_target=4.0,
+    ),
+    "multi_quarter_base_break": SetupConfig(
+        name="multi_quarter_base_break",
+        display_name="Multi-Quarter Base Break",
+        category=SetupCategory.CONSOLIDATION,
+        default_style=TradeStyle.INVESTMENT,
+        direction=SetupDirection.LONG,
+        typical_r_target=4.0,
+    ),
+    "rs_leader_break": SetupConfig(
+        name="rs_leader_break",
+        display_name="RS Leader Break (Mansfield)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.INVESTMENT,
+        direction=SetupDirection.LONG,
+        typical_r_target=3.5,
+    ),
+    "fifty_two_week_high_break": SetupConfig(
+        name="fifty_two_week_high_break",
+        display_name="52-Week High Break (Darvas)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.INVESTMENT,
+        direction=SetupDirection.LONG,
+        typical_r_target=4.0,
+    ),
+    "power_trend_stack": SetupConfig(
+        name="power_trend_stack",
+        display_name="Power Trend Stack (Minervini)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.INVESTMENT,
+        direction=SetupDirection.LONG,
+        typical_r_target=4.0,
+    ),
+
+    "stage_2_breakout": SetupConfig(
+        name="stage_2_breakout",
+        display_name="Stage-2 Breakout (Weinstein)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.LONG,
+        typical_r_target=6.0,
+    ),
+    "stage_1_to_2_transition": SetupConfig(
+        name="stage_1_to_2_transition",
+        display_name="Stage 1->2 Transition (Weinstein)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.LONG,
+        typical_r_target=5.0,
+    ),
+    "stage_3_to_4_breakdown": SetupConfig(
+        name="stage_3_to_4_breakdown",
+        display_name="Stage 3->4 Breakdown (Weinstein)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.SHORT,
+        typical_r_target=5.0,
+    ),
+    "golden_cross_filtered": SetupConfig(
+        name="golden_cross_filtered",
+        display_name="Filtered Golden Cross",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.LONG,
+        typical_r_target=6.0,
+    ),
+    "death_cross_filtered": SetupConfig(
+        name="death_cross_filtered",
+        display_name="Filtered Death Cross",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.SHORT,
+        typical_r_target=6.0,
+    ),
+    "two_hundred_day_reclaim": SetupConfig(
+        name="two_hundred_day_reclaim",
+        display_name="200DMA Reclaim",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.LONG,
+        typical_r_target=5.0,
+    ),
+    "two_hundred_day_loss": SetupConfig(
+        name="two_hundred_day_loss",
+        display_name="200DMA Loss",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.POSITION,
+        direction=SetupDirection.SHORT,
+        typical_r_target=5.0,
     ),
 }
 
