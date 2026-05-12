@@ -2943,8 +2943,21 @@ class IBDataPusher:
                     return
             
             # Timeout - order may still be working
-            if trade.orderStatus.status == "Submitted" or trade.orderStatus.status == "PreSubmitted":
-                logger.warning(f"[OrderQueue] Order {order_id} still pending after {max_wait}s")
+            # v19.34.108 (Feb 2026) — `PendingSubmit` is IB's FIRST
+            # transient state (order transmitted but not yet ack'd by the
+            # order destination). Pre-v108 we omitted it here, so any
+            # order that stayed in `PendingSubmit` past the 30s timeout
+            # (common when the pusher event loop is busy with the bracket
+            # poll) fell through to the `else` and was reported as
+            # `rejected: Unknown status: PendingSubmit`. Spark's
+            # reconciler interpreted that as "adoption failed, retry"
+            # and spawned a new ADOPT-OCA wrapper → reconciler storm.
+            # `PendingCancel` is the cancel-side mirror and is also a
+            # normal transient — treat it the same way.
+            if trade.orderStatus.status in (
+                "Submitted", "PreSubmitted", "PendingSubmit", "PendingCancel"
+            ):
+                logger.warning(f"[OrderQueue] Order {order_id} still pending after {max_wait}s (state={trade.orderStatus.status})")
                 # Report as partial/pending
                 self._report_order_result(
                     order_id,
@@ -2953,7 +2966,7 @@ class IBDataPusher:
                     filled_qty=int(trade.orderStatus.filled) if trade.orderStatus.filled else 0,
                     remaining_qty=int(trade.orderStatus.remaining) if trade.orderStatus.remaining else quantity,
                     ib_order_id=trade.order.orderId,
-                    error="Order still pending"
+                    error=f"Order still pending (state={trade.orderStatus.status})"
                 )
             else:
                 self._report_order_result(order_id, "rejected", error=f"Unknown status: {trade.orderStatus.status}")
