@@ -1734,6 +1734,18 @@ class PositionManager:
                         f"close_trade: executor refused close for {trade.symbol} "
                         f"({shares_to_close} shares, reason={reason}): {err}"
                     )
+                    # v19.34.119 — surface the IB error so callers
+                    # (safety_router, retry loops) can branch on the
+                    # specific failure mode instead of seeing an
+                    # opaque False. Stashed on the trade object as a
+                    # transient attribute so the next manage-loop
+                    # close-attempt can clear it cleanly without DB
+                    # schema churn.
+                    try:
+                        trade._last_close_error = str(err)[:300]
+                        trade._last_close_error_at = datetime.now(timezone.utc).isoformat()
+                    except Exception:
+                        pass
                     try:
                         from services.trade_drop_recorder import record_trade_drop
                         record_trade_drop(

@@ -503,9 +503,18 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
                     canonical.shares = old_canonical_shares
                 except Exception:
                     pass
+                # v19.34.119 — Surface the actual broker error so the
+                # operator's "Close all" failure list isn't an opaque
+                # `close_returned_false`. Read the transient stash
+                # position_manager.close_trade set before returning False.
+                broker_err = (
+                    getattr(canonical, "_last_close_error", None)
+                    or "close_trade returned False (no broker error stashed)"
+                )
                 return {
                     "group_status": "close_returned_false",
                     "canonical_id": canonical_id,
+                    "broker_err": broker_err,
                     "siblings_marked_closed": [],
                     "succeeded": False,
                 }
@@ -612,6 +621,95 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
         logger.error("[SAFETY] flatten-all: close-positions step crashed: %s", e)
         summary["close_errors"].append({"stage": "close-positions", "err": str(e)[:200]})
 
+    # ── v19.34.119 (Feb 2026) — Auto-chain to nuclear + pusher fallback ──
+    # Pre-v119, if the primary `bot.close_trade()` path returned False
+    # for every group (the BMNR/ONON pattern: IB Error 201 working-order
+    # cap, "managedAccounts" stripped after a TWS login kicked the
+    # session, or pusher RPC timeout), the endpoint surfaced 26 ×
+    # `close_returned_false` and the operator was stranded — the
+    # secondary `/emergency-flatten-ib` endpoint required `ib_direct`
+    # connected, but the same condition that broke the primary path
+    # often also degraded clientId=11.
+    #
+    # Post-v119: when the primary loop finishes with zero closes
+    # succeeded AND positions were requested, this block runs two
+    # additional attempts BEFORE returning to the operator:
+    #
+    #   1. NUCLEAR (clientId=11 direct path)
+    #      `_attempt_emergency_flatten_ib_inline()` — same logic as
+    #      `/api/safety/emergency-flatten-ib` but inlined here so the
+    #      caller doesn't need to know about two endpoints.
+    #
+    #   2. PUSHER-FALLBACK (clientId=15 cancel-queue path)
+    #      `_pusher_fallback_close_groups()` — enumerates every
+    #      pusher-placed working order via MongoDB `order_queue`,
+    #      enqueues cancellations via `queue_cancellation`, waits for
+    #      the cap to clear, then retries `bot.close_trade()` per
+    #      group. This path works even when `ib_direct` is fully
+    #      offline (heartbeat failure, login conflict, etc.).
+    #
+    # Order matters: nuclear is faster + atomic when available; pusher
+    # fallback is universally available but slower (~10s wait for IB to
+    # process the cancel-queue burst).
+    if (
+        summary["positions_requested_close"] > 0
+        and summary["positions_succeeded"] == 0
+    ):
+        logger.error(
+            "[SAFETY v19.34.119] Primary flatten returned 0/%d successes — "
+            "auto-chaining nuclear (ib_direct) + pusher-fallback paths",
+            summary["positions_requested_close"],
+        )
+        summary["auto_chain_v19_34_119"] = {"attempted": [], "succeeded": []}
+
+        # Attempt 1: Nuclear (ib_direct clientId=11)
+        try:
+            nuclear_result = await _attempt_emergency_flatten_ib_inline(
+                target_symbols=None,
+            )
+            summary["auto_chain_v19_34_119"]["attempted"].append("nuclear")
+            summary["auto_chain_v19_34_119"]["nuclear_result"] = nuclear_result
+            if nuclear_result.get("success"):
+                # Re-count successes from per-symbol close outcomes.
+                closes = (nuclear_result.get("summary") or {}).get("closes") or []
+                n_ok = sum(1 for c in closes if c.get("close_success"))
+                if n_ok > 0:
+                    summary["positions_succeeded"] += n_ok
+                    summary["positions_failed"] = max(
+                        0, summary["positions_failed"] - n_ok,
+                    )
+                    summary["auto_chain_v19_34_119"]["succeeded"].append("nuclear")
+                    logger.warning(
+                        "[SAFETY v19.34.119] Nuclear path closed %d positions",
+                        n_ok,
+                    )
+        except Exception as nuc_err:
+            logger.error("[SAFETY v19.34.119] Nuclear auto-chain crashed: %s", nuc_err)
+            summary["auto_chain_v19_34_119"]["nuclear_error"] = str(nuc_err)[:300]
+
+        # Attempt 2: Pusher fallback — only if nuclear didn't fully resolve
+        if summary["positions_succeeded"] < summary["positions_requested_close"]:
+            try:
+                pusher_result = await _pusher_fallback_close_groups(
+                    bot=bot, groups=groups,
+                )
+                summary["auto_chain_v19_34_119"]["attempted"].append("pusher_fallback")
+                summary["auto_chain_v19_34_119"]["pusher_fallback_result"] = pusher_result
+                n_ok = pusher_result.get("succeeded_count", 0)
+                if n_ok > 0:
+                    summary["positions_succeeded"] += n_ok
+                    summary["positions_failed"] = max(
+                        0, summary["positions_failed"] - n_ok,
+                    )
+                    summary["auto_chain_v19_34_119"]["succeeded"].append("pusher_fallback")
+                    logger.warning(
+                        "[SAFETY v19.34.119] Pusher-fallback closed %d positions",
+                        n_ok,
+                    )
+            except Exception as pf_err:
+                logger.error("[SAFETY v19.34.119] Pusher-fallback crashed: %s", pf_err)
+                summary["auto_chain_v19_34_119"]["pusher_fallback_error"] = str(pf_err)[:300]
+
     # 2. Cancel every pending (unfilled) bracket in Mongo's order_queue
     try:
         import motor.motor_asyncio
@@ -669,6 +767,382 @@ async def flatten_all(confirm: str = "") -> Dict[str, Any]:
     guard.clear_flatten_in_progress()
 
     return {"success": success, "summary": summary, "state": guard.status()["state"]}
+
+
+
+# ── v19.34.119 (Feb 2026) — Auto-chain helpers + diagnose-close-readiness ──
+#
+# Shipped after the live "26 / 26 close_returned_false" incident where
+# the operator clicked "Close all" with 26 day_2_continuation shorts open
+# and every group failed silently. Both the primary path (bot.close_trade
+# via pusher) AND the secondary path (`/emergency-flatten-ib` via
+# ib_direct) returned no successes because:
+#   • Working-order cap (IB Error 201) had saturated → pusher rejected
+#     every close MKT, AND
+#   • clientId=11 socket was flapping → nuclear endpoint couldn't run.
+# The operator had to flatten manually in TWS. These helpers are the
+# resilience layer: PRE-FLIGHT diagnostic + AUTO-CHAIN nuclear + pusher
+# fallback that bypasses ib_direct entirely.
+
+async def _attempt_emergency_flatten_ib_inline(
+    target_symbols: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """v19.34.119 — Same logic as the `/emergency-flatten-ib` endpoint,
+    callable directly from `/flatten-all` so the operator doesn't need
+    to know about two endpoints. Returns the endpoint's response dict
+    verbatim. Failure (ib_direct not connected, no IB positions, etc.)
+    is non-fatal — the caller falls back to pusher-fallback."""
+    summary: Dict[str, Any] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "ib_snapshot": [], "closes": [], "errors": [],
+    }
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ib_direct = get_ib_direct_service()
+        try:
+            connected = await asyncio.wait_for(
+                ib_direct.ensure_connected(), timeout=3.0,
+            )
+        except (asyncio.TimeoutError, Exception):
+            connected = False
+        if not connected:
+            return {
+                "success": False,
+                "error": "ib_direct_service not connected (clientId=11 down)",
+                "summary": summary,
+            }
+        if not ib_direct.is_authorized_to_trade():
+            return {
+                "success": False,
+                "error": "ib_direct connected but NOT authorized to trade — managedAccounts empty (likely TWS login conflict)",
+                "summary": summary,
+            }
+        positions = await ib_direct.get_positions()
+        filter_set = (
+            {s.upper() for s in target_symbols} if target_symbols else None
+        )
+        positions = [
+            p for p in positions
+            if abs(float(p.get("position") or 0)) > 0
+            and (filter_set is None or (p.get("symbol") or "").upper() in filter_set)
+        ]
+        summary["ib_snapshot"] = positions
+        if not positions:
+            return {"success": True, "message": "no IB positions", "summary": summary}
+        for p in positions:
+            sym = (p.get("symbol") or "").upper()
+            qty = abs(int(round(float(p.get("position") or 0))))
+            side_long = float(p.get("position") or 0) > 0
+            close_action = "SELL" if side_long else "BUY"
+            entry: Dict[str, Any] = {
+                "symbol": sym, "qty": qty, "close_action": close_action,
+            }
+            try:
+                cancel_rep = await ib_direct.cancel_all_open_orders_for_symbol(
+                    sym, side=close_action,
+                )
+                entry["zombie_cancelled"] = len(cancel_rep.get("cancelled", []))
+                await asyncio.sleep(0.5)
+                mkt_rep = await ib_direct.place_market_order(sym, close_action, qty)
+                entry["close_status"] = mkt_rep.get("status")
+                entry["close_success"] = bool(mkt_rep.get("success"))
+                if not mkt_rep.get("success"):
+                    entry["close_error"] = mkt_rep.get("error")
+            except Exception as e:
+                entry["close_success"] = False
+                entry["close_error"] = str(e)[:200]
+            summary["closes"].append(entry)
+        any_success = any(c.get("close_success") for c in summary["closes"])
+        return {"success": any_success, "summary": summary}
+    except Exception as e:
+        logger.error("[v19.34.119] inline-nuclear crashed: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)[:200], "summary": summary}
+
+
+async def _pusher_fallback_close_groups(
+    bot, groups: Dict[tuple, List[Any]],
+) -> Dict[str, Any]:
+    """v19.34.119 — Pusher-only fallback that doesn't need ib_direct.
+
+    Strategy:
+      1. Enumerate every pusher-placed order for the affected symbols
+         from MongoDB `order_queue` (the pusher records `ib_order_id`
+         on every successful submit). Find still-working bracket
+         children on the close-side.
+      2. Enqueue cancellations via `queue_cancellation(ib_order_id)`.
+         The pusher polls `/api/ib/cancellations/pending` every ~5s
+         and cancels each via `self.ib.cancelOrder(...)`.
+      3. Wait ~10s for cancellations to land at IB and free up the
+         15-orders-per-side cap.
+      4. Retry `bot.close_trade()` per group.
+
+    Returns: {succeeded_count, failed_count, attempts: [...]}
+    """
+    import os
+    import motor.motor_asyncio
+    from routers.ib import queue_cancellation
+
+    result: Dict[str, Any] = {
+        "succeeded_count": 0, "failed_count": 0,
+        "cancellations_queued": 0, "groups": [],
+    }
+
+    affected_syms = {sym.upper() for (sym, _d) in groups.keys() if sym}
+    if not affected_syms:
+        return result
+
+    # Step 1+2 — enumerate + queue cancels
+    try:
+        mongo_url = os.environ.get("MONGO_URL")
+        if not mongo_url:
+            raise RuntimeError("MONGO_URL not set")
+        client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
+        db = client[os.environ.get("DB_NAME", "tradecommand")]
+        cur = db.order_queue.find(
+            {
+                "symbol": {"$in": list(affected_syms)},
+                "ib_order_id": {"$ne": None},
+                "status": {"$in": ["filled", "pending", "submitted", "queued"]},
+            },
+            {"_id": 0, "ib_order_id": 1, "symbol": 1, "action": 1, "status": 1},
+        )
+        async for row in cur:
+            try:
+                queue_cancellation(
+                    ib_order_id=int(row["ib_order_id"]),
+                    reason="v19_34_119_pusher_fallback_precancel",
+                    requested_by="safety_router_auto_chain",
+                )
+                result["cancellations_queued"] += 1
+            except Exception as q_err:
+                logger.debug(
+                    "[v19.34.119 pusher_fallback] cancel-queue failed for "
+                    "ib_order_id=%s: %s", row.get("ib_order_id"), q_err,
+                )
+    except Exception as enum_err:
+        logger.error(
+            "[v19.34.119 pusher_fallback] enumerate working orders failed: %s",
+            enum_err,
+        )
+
+    # Step 3 — let pusher chew through the cancellations (5s poll cadence
+    # so 10s is enough for one poll + one cancel round trip per order).
+    if result["cancellations_queued"] > 0:
+        await asyncio.sleep(10.0)
+
+    # Step 4 — retry closes per group
+    for (sym, _d_val), trades in groups.items():
+        if not trades:
+            continue
+        # Pick canonical = oldest non-reconciled, same as primary path.
+        def _ts(t):
+            for attr in ("entry_time", "executed_at", "created_at"):
+                v = getattr(t, attr, None)
+                if v:
+                    return str(v)
+            return ""
+        non_recon = [
+            t for t in trades
+            if not (getattr(t, "entered_by", "") or "").startswith("reconciled_excess")
+        ]
+        pool = non_recon or trades
+        canonical = sorted(pool, key=_ts)[0]
+        tid = getattr(canonical, "id", None) or getattr(canonical, "trade_id", None)
+        if not tid:
+            continue
+        attempt: Dict[str, Any] = {"symbol": sym, "trade_id": tid}
+        try:
+            # Reset the stashed last_close_error so we get fresh signal
+            try:
+                canonical._last_close_error = None
+            except Exception:
+                pass
+            ok = await bot.close_trade(tid, reason="v19_34_119_pusher_fallback")
+            attempt["ok"] = bool(ok)
+            if ok:
+                result["succeeded_count"] += 1
+            else:
+                result["failed_count"] += 1
+                attempt["err"] = getattr(canonical, "_last_close_error", None) or "close returned False"
+        except Exception as e:
+            attempt["ok"] = False
+            attempt["err"] = str(e)[:200]
+            result["failed_count"] += 1
+        result["groups"].append(attempt)
+
+    return result
+
+
+@router.post("/diagnose-close-readiness")
+async def diagnose_close_readiness() -> Dict[str, Any]:
+    """v19.34.119 — Pre-flight before clicking 'Close all'.
+
+    Shipped after the 26/26 incident — the operator needs to know
+    BEFORE clicking the button whether the close paths will actually
+    work, and which one will run. Surfaces every signal that gates the
+    flatten-all auto-chain:
+
+      • pusher_connected         (clientId=15 close path)
+      • ib_direct_connected      (clientId=11 nuclear path)
+      • ib_direct_authorized     (managedAccounts non-empty)
+      • per-symbol working-order count + close-side count (IB Error 201)
+      • bot._open_trades vs IB-actual position divergence
+      • close-readiness verdict: green / yellow / red
+
+    Returns:
+      {
+        "verdict": "green" | "yellow" | "red",
+        "summary": "...",
+        "pusher": {connected, ...},
+        "ib_direct": {connected, authorized, ...},
+        "open_positions": {bot_count, ib_count, ...},
+        "working_orders_by_symbol": [
+          {"symbol": "ONON", "close_side": "BUY", "working_count": 18,
+           "near_cap": true, "over_cap": true},
+          ...
+        ],
+        "expected_path": "primary | nuclear | pusher_fallback",
+      }
+    """
+    out: Dict[str, Any] = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "pusher": {}, "ib_direct": {},
+        "open_positions": {}, "working_orders_by_symbol": [],
+    }
+    issues: List[str] = []
+
+    # Pusher health
+    try:
+        from routers.ib import is_pusher_connected, _pushed_ib_data
+        out["pusher"]["connected"] = bool(is_pusher_connected())
+        if not out["pusher"]["connected"]:
+            issues.append("pusher (clientId=15) NOT connected")
+    except Exception as e:
+        out["pusher"]["error"] = str(e)[:200]
+        issues.append(f"pusher health check failed: {str(e)[:80]}")
+
+    # IB-direct health
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ibd = get_ib_direct_service()
+        ibd_connected = ibd.is_connected()
+        ibd_authorized = ibd.is_authorized_to_trade()
+        out["ib_direct"] = {
+            "connected": ibd_connected,
+            "authorized_to_trade": ibd_authorized,
+            "status": ibd.status(),
+        }
+        if not ibd_connected:
+            issues.append("ib_direct (clientId=11) NOT connected — nuclear path unavailable")
+        elif not ibd_authorized:
+            issues.append("ib_direct connected but NOT authorized (managedAccounts empty — TWS login conflict?)")
+    except Exception as e:
+        out["ib_direct"]["error"] = str(e)[:200]
+        issues.append(f"ib_direct probe failed: {str(e)[:80]}")
+
+    # Bot open-trades vs IB positions
+    bot = None
+    open_trades: List[Any] = []
+    try:
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
+        open_trades = list(getattr(bot, "_open_trades", {}).values()) if bot else []
+        out["open_positions"]["bot_open_count"] = len(open_trades)
+    except Exception as e:
+        out["open_positions"]["bot_error"] = str(e)[:200]
+
+    try:
+        if out["ib_direct"].get("connected"):
+            from services.ib_direct_service import get_ib_direct_service
+            ibd_positions = await get_ib_direct_service().get_positions()
+            ibd_positions = [
+                p for p in ibd_positions if abs(float(p.get("position") or 0)) > 0
+            ]
+            out["open_positions"]["ib_direct_count"] = len(ibd_positions)
+            out["open_positions"]["ib_direct_symbols"] = [
+                p.get("symbol") for p in ibd_positions
+            ]
+    except Exception as e:
+        out["open_positions"]["ib_direct_error"] = str(e)[:200]
+
+    # Working orders per symbol per close-side — the Error 201 trigger
+    try:
+        import os
+        import motor.motor_asyncio
+        mongo_url = os.environ.get("MONGO_URL")
+        if not mongo_url:
+            raise RuntimeError("MONGO_URL not set")
+        client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
+        db = client[os.environ.get("DB_NAME", "tradecommand")]
+
+        # Build symbol → expected close-side from bot._open_trades
+        symbol_close_side: Dict[str, str] = {}
+        for t in open_trades:
+            sym = (getattr(t, "symbol", "") or "").upper()
+            d = getattr(t, "direction", None)
+            dv = getattr(d, "value", str(d) if d else "long").lower()
+            if sym:
+                symbol_close_side[sym] = "SELL" if dv == "long" else "BUY"
+        if not symbol_close_side:
+            out["working_orders_by_symbol"] = []
+        else:
+            for sym, close_side in symbol_close_side.items():
+                # All working (filled-bracket-children or pending) orders
+                # on the close-side for this symbol. `filled` is the
+                # parent fill that spawned the OCA children which then
+                # sit WORKING — that's what counts toward Error 201.
+                count = await db.order_queue.count_documents({
+                    "symbol": sym,
+                    "ib_order_id": {"$ne": None},
+                    "status": {"$in": ["filled", "pending", "submitted", "queued"]},
+                })
+                row = {
+                    "symbol": sym,
+                    "close_side": close_side,
+                    "working_count": int(count),
+                    "near_cap": count >= 12,
+                    "over_cap": count >= 15,
+                }
+                out["working_orders_by_symbol"].append(row)
+                if row["over_cap"]:
+                    issues.append(
+                        f"{sym}: {count} working orders ≥ 15-cap — IB Error 201 imminent"
+                    )
+                elif row["near_cap"]:
+                    issues.append(
+                        f"{sym}: {count} working orders (close to 15-cap)"
+                    )
+    except Exception as e:
+        out["working_orders_error"] = str(e)[:200]
+
+    # Verdict + expected path
+    over_cap_count = sum(
+        1 for r in out["working_orders_by_symbol"] if r.get("over_cap")
+    )
+    if over_cap_count > 0 or not out["pusher"].get("connected"):
+        verdict = "red"
+        if not out["pusher"].get("connected") and not out["ib_direct"].get("connected"):
+            expected_path = "none — both paths down"
+        elif over_cap_count > 0:
+            expected_path = "pusher_fallback (auto-cancel working orders first)"
+        else:
+            expected_path = "nuclear (ib_direct)" if out["ib_direct"].get("connected") else "pusher_fallback"
+    elif issues:
+        verdict = "yellow"
+        expected_path = "primary (with auto-chain ready)"
+    else:
+        verdict = "green"
+        expected_path = "primary"
+
+    out["verdict"] = verdict
+    out["expected_path"] = expected_path
+    out["issues"] = issues
+    out["summary"] = (
+        f"{verdict.upper()}: {len(issues)} issue(s). "
+        f"Expected close path: {expected_path}."
+    )
+    return out
+
 
 
 

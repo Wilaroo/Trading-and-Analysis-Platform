@@ -3,6 +3,95 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.119) — Close-all Resilience (Auto-chain + Pre-flight)
+
+Shipped after the live incident where the operator clicked "Close all"
+on 26 open positions and every single one returned
+`close_returned_false` — the secondary `/emergency-flatten-ib` endpoint
+*also* failed (`ib_direct_service` clientId=11 was flapping). Operator
+had to flatten manually in TWS. Root causes:
+  1. **Working-order cap** (IB Error 201, 15-orders-per-side-per-symbol)
+     saturated by 26 OCA brackets sitting at IB.
+  2. **`ib_direct` socket flap** (documented as 1-3×/day per v19.34.54)
+     happened to coincide, breaking the nuclear fallback.
+  3. **Opaque error envelope** — `bot.close_trade()` returned just a
+     bool, so the actual IB error never made it to the UI.
+
+### Backend
+
+**`services/position_manager.py`** — `close_trade()` now stashes the
+actual broker error on `trade._last_close_error` (+ timestamp) before
+returning False. Transient attribute, no DB schema change; lets every
+caller branch on the specific failure mode instead of an opaque bool.
+
+**`routers/safety_router.py`** —
+
+- New endpoint **`POST /api/safety/diagnose-close-readiness`** — runs
+  BEFORE the operator clicks Close-all. Surfaces:
+  • pusher (clientId=15) connection state
+  • ib_direct (clientId=11) connection + `managedAccounts` authorization
+  • per-symbol working-order count (flags `near_cap` ≥12, `over_cap` ≥15)
+  • bot._open_trades vs IB-actual position drift
+  • verdict (green / yellow / red) + expected close path
+
+- **`/flatten-all` auto-chain** — when the primary loop finishes with
+  zero successes, automatically tries (1) inline-nuclear (ib_direct
+  clientId=11) then (2) pusher-fallback (clientId=15 cancellations
+  queue + retry close_trade). Result reported under
+  `summary.auto_chain_v19_34_119`. One operator click now exhausts
+  every available recovery path before reporting failure.
+
+- New helper `_attempt_emergency_flatten_ib_inline()` — same logic as
+  the existing `/emergency-flatten-ib` endpoint, callable directly.
+  Returns clean error messages on the two known failure modes:
+  "ib_direct not connected (clientId=11 down)" and "ib_direct
+  connected but NOT authorized (managedAccounts empty — TWS login
+  conflict)".
+
+- New helper `_pusher_fallback_close_groups()` — works WITHOUT
+  ib_direct. Enumerates every pusher-placed working order for the
+  affected symbols from MongoDB `order_queue` (which stores
+  `ib_order_id` on every successful submit), enqueues cancellations
+  via `queue_cancellation()`, waits ~10s for the cap to clear, then
+  retries `bot.close_trade()` per group.
+
+- `close_returned_false` envelope now includes `broker_err` field
+  surfaced from `trade._last_close_error` so the UI can show
+  "IB Error 201: 15-order cap" or "not authorized
+  (managedAccounts empty)" instead of an opaque False.
+
+**`tests/test_safety_close_resilience_v19_34_119.py`** (new, 9 tests):
+covers (1) close_trade stashes the real broker error on executor
+failure; (2) successful close doesn't leave a stale error; (3)
+diagnose returns red when pusher down; (4) diagnose returns red when
+any symbol over the 15-cap and routes to pusher_fallback; (5) green
+verdict when everything healthy; (6) pusher-fallback enqueues
+cancellations and retries close_trade; (7) pusher-fallback surfaces
+broker error on retry failure; (8) inline-nuclear clean-fails when
+ib_direct is down; (9) inline-nuclear clean-fails on the "logged in
+elsewhere" managedAccounts-empty case.
+
+### What this fixes for the operator
+
+When the operator clicks **Close all** going forward:
+
+  1. Single click = up to 3 attempts (primary → nuclear → pusher-fallback).
+  2. Each failure surfaces the SPECIFIC IB error in the UI.
+  3. Hitting `/diagnose-close-readiness` first gives a green/yellow/red
+     verdict with the EXACT problem (working-order cap, TWS login
+     conflict, ib_direct down).
+
+### Deferred to v19.34.120
+
+- UI: replace the "Close all" button with a smarter modal that shows
+  the diagnose-readiness output BEFORE confirming + streams per-path
+  results.
+- ib_direct: alert when heartbeat fails twice consecutively (raise a
+  P0 stream warning) so the operator knows the nuclear path is
+  unavailable BEFORE they need it.
+
+
+
 ## 2026-02-12 (v19.34.118) — Comprehensive Setup ATR Multiplier Table
 
 Root-causes the bleeding-position incident where `DAY 2 short`
