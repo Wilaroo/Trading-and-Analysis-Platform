@@ -19,7 +19,9 @@ from typing import Optional
 import pytest
 
 from services.portfolio_exposure_guard import (
+    DEFAULT_LONG_HORIZON_EXPOSURE_CAP_PCT,
     DEFAULT_POSITION_EXPOSURE_CAP_PCT,
+    LONG_HORIZON_STYLES,
     POSITION_STYLES,
     compute_exposure,
     max_additional_shares,
@@ -252,3 +254,141 @@ class TestRealisticScenarios:
         assert "position" in POSITION_STYLES
         assert "scalp" not in POSITION_STYLES
         assert "intraday" not in POSITION_STYLES
+
+
+# ─────────────────────────────────────────────────────────────────
+# v19.34.97 — combined long-horizon cap (55%)
+# ─────────────────────────────────────────────────────────────────
+class TestLongHorizonCap:
+    def test_default_long_horizon_cap_55(self):
+        assert DEFAULT_LONG_HORIZON_EXPOSURE_CAP_PCT == 55.0
+
+    def test_long_horizon_styles_constant(self):
+        assert "multi_day" in LONG_HORIZON_STYLES
+        assert "swing" in LONG_HORIZON_STYLES
+        assert "investment" in LONG_HORIZON_STYLES
+        assert "position" in LONG_HORIZON_STYLES
+        assert "scalp" not in LONG_HORIZON_STYLES
+        assert "intraday" not in LONG_HORIZON_STYLES
+
+    def test_long_horizon_combined_aggregation(self):
+        # 20% in swing + 15% in investment + 10% in position = 45% combined
+        trades = [
+            FakeTrade(symbol="SW", trade_style="swing", remaining_shares=400, current_price=50),     # $20K
+            FakeTrade(symbol="IV", trade_style="investment", remaining_shares=300, current_price=50), # $15K
+            FakeTrade(symbol="PO", trade_style="position", remaining_shares=200, current_price=50),  # $10K
+            FakeTrade(symbol="SC", trade_style="scalp", remaining_shares=500, current_price=100),    # ignored
+        ]
+        snap = compute_exposure(trades, account_value=100_000, styles=LONG_HORIZON_STYLES)
+        assert snap.current_value == 45_000
+        assert snap.open_trades_count == 3
+        # Cap 55% → 55K cap → 10K remaining
+        snap55 = compute_exposure(trades, account_value=100_000, cap_pct=55.0, styles=LONG_HORIZON_STYLES)
+        assert snap55.cap_value == 55_000
+        assert snap55.remaining_value == 10_000
+
+    def test_combined_cap_breach(self):
+        # Push combined to 55% exactly
+        trades = [
+            FakeTrade(symbol="A", trade_style="swing", remaining_shares=600, current_price=50),     # $30K
+            FakeTrade(symbol="B", trade_style="position", remaining_shares=500, current_price=50),  # $25K
+        ]
+        snap = compute_exposure(trades, account_value=100_000, cap_pct=55.0, styles=LONG_HORIZON_STYLES)
+        assert snap.current_value == 55_000
+        assert snap.cap_breached is True
+        assert snap.remaining_value == 0
+
+
+class TestStackedCaps:
+    """Both 30% position AND 55% long-horizon caps must be honored —
+    whichever is more restrictive wins."""
+
+    def setup_method(self):
+        self.svc = PositionSizerService()
+        self.svc.configure({
+            "mode": "fixed_percent",
+            "max_risk_per_trade_pct": 1.0,
+            "max_position_pct": 100.0,
+        })
+
+    def _calc(self, **kw):
+        defaults = {
+            "entry_price": 50.0,
+            "stop_price": 48.0,
+            "account_value": 100_000,
+            "tqs_score": 70.0,
+        }
+        defaults.update(kw)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self.svc.calculate_size(**defaults))
+        finally:
+            loop.close()
+
+    def test_long_horizon_cap_applies_to_swing(self):
+        # 0 position used, $10K long-horizon remaining (e.g., 45% already in
+        # swing+investment, so only 10K to go before 55% cap).
+        result = self._calc(
+            trade_style="swing",
+            long_horizon_exposure_remaining_value=10_000.0,
+        )
+        assert result.shares <= 200  # $10K / $50 = 200
+        assert any("long-horizon" in w.lower() for w in result.warnings)
+
+    def test_long_horizon_cap_exhausted_blocks_swing(self):
+        result = self._calc(
+            trade_style="swing",
+            long_horizon_exposure_remaining_value=0.0,
+        )
+        assert result.shares == 0
+        assert any("exhausted" in w.lower() for w in result.warnings)
+
+    def test_position_uses_more_restrictive_of_two_caps(self):
+        # Position cap has $20K room, long-horizon has $5K room.
+        # More restrictive ($5K) should win.
+        result = self._calc(
+            trade_style="position",
+            position_style_exposure_remaining_value=20_000.0,
+            long_horizon_exposure_remaining_value=5_000.0,
+        )
+        assert result.shares <= 100  # $5K / $50
+        warning_text = " ".join(result.warnings).lower()
+        assert "long-horizon" in warning_text
+
+    def test_position_uses_more_restrictive_when_position_tighter(self):
+        # Position cap has $3K room, long-horizon $40K room.
+        # Position cap wins.
+        result = self._calc(
+            trade_style="position",
+            position_style_exposure_remaining_value=3_000.0,
+            long_horizon_exposure_remaining_value=40_000.0,
+        )
+        assert result.shares <= 60  # $3K / $50
+        warning_text = " ".join(result.warnings).lower()
+        assert "position-style" in warning_text
+
+    def test_scalp_immune_to_both_caps(self):
+        result = self._calc(
+            trade_style="scalp",
+            position_style_exposure_remaining_value=0.0,
+            long_horizon_exposure_remaining_value=0.0,
+        )
+        assert result.shares > 0
+
+    def test_intraday_immune_to_both_caps(self):
+        result = self._calc(
+            trade_style="intraday",
+            position_style_exposure_remaining_value=0.0,
+            long_horizon_exposure_remaining_value=0.0,
+        )
+        assert result.shares > 0
+
+    def test_config_exposes_both_cap_pcts(self):
+        cfg = self.svc.get_config()
+        assert cfg["max_position_style_exposure_pct"] == 30.0
+        assert cfg["max_long_horizon_exposure_pct"] == 55.0
+
+    def test_long_horizon_cap_config_override(self):
+        self.svc.configure({"max_long_horizon_exposure_pct": 50.0})
+        cfg = self.svc.get_config()
+        assert cfg["max_long_horizon_exposure_pct"] == 50.0

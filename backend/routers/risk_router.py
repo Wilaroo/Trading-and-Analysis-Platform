@@ -148,6 +148,7 @@ class PositionSizingConfigUpdate(BaseModel):
     max_risk_per_trade_dollar: Optional[float] = None
     max_position_pct: Optional[float] = None
     max_position_style_exposure_pct: Optional[float] = None
+    max_long_horizon_exposure_pct: Optional[float] = None
     tqs_min_score: Optional[float] = None
     tqs_base_score: Optional[float] = None
     tqs_max_score: Optional[float] = None
@@ -199,26 +200,43 @@ async def calculate_position_size(request: PositionSizeRequest):
     cb_service = get_circuit_breaker_service()
     permission = await cb_service.check_trading_permission(tqs_score=request.tqs_score)
 
-    # v19.34.96 — compute live position-style exposure snapshot
+    # v19.34.96/97 — compute live exposure snapshots for both caps
     style_norm = (request.trade_style or "").strip().lower()
-    style_exposure_remaining: Optional[float] = None
-    exposure_snapshot: Optional[dict] = None
-    if style_norm == "position":
+    position_remaining: Optional[float] = None
+    long_horizon_remaining: Optional[float] = None
+    position_snapshot: Optional[dict] = None
+    long_horizon_snapshot: Optional[dict] = None
+    try:
+        from services.portfolio_exposure_guard import (
+            LONG_HORIZON_STYLES,
+            POSITION_STYLES,
+            compute_exposure,
+        )
         try:
-            from services.portfolio_exposure_guard import compute_exposure
-            try:
-                from routers import trading_bot as _tb
-                open_trades = list((_tb._open_trades or {}).values())
-            except Exception:
-                open_trades = []
-            cfg = service.get_config()
-            cap_pct = cfg.get("max_position_style_exposure_pct", 30.0)
-            snap = compute_exposure(open_trades, request.account_value, cap_pct=cap_pct)
-            exposure_snapshot = snap.to_dict()
-            style_exposure_remaining = snap.remaining_value
-        except Exception as exc:
-            # Fail open — log only. Per-trade caps still apply.
-            exposure_snapshot = {"error": str(exc)}
+            from routers import trading_bot as _tb
+            open_trades = list((_tb._open_trades or {}).values())
+        except Exception:
+            open_trades = []
+        cfg = service.get_config()
+        if style_norm in POSITION_STYLES:
+            snap = compute_exposure(
+                open_trades, request.account_value,
+                cap_pct=cfg.get("max_position_style_exposure_pct", 30.0),
+                styles=POSITION_STYLES,
+            )
+            position_snapshot = snap.to_dict()
+            position_remaining = snap.remaining_value
+        if style_norm in LONG_HORIZON_STYLES:
+            snap = compute_exposure(
+                open_trades, request.account_value,
+                cap_pct=cfg.get("max_long_horizon_exposure_pct", 55.0),
+                styles=LONG_HORIZON_STYLES,
+            )
+            long_horizon_snapshot = snap.to_dict()
+            long_horizon_remaining = snap.remaining_value
+    except Exception as exc:
+        # Fail open — log only. Per-trade caps still apply.
+        position_snapshot = {"error": str(exc)}
 
     result = await service.calculate_size(
         entry_price=request.entry_price,
@@ -231,36 +249,59 @@ async def calculate_position_size(request: PositionSizeRequest):
         avg_loss_r=request.avg_loss_r,
         circuit_breaker_multiplier=permission.max_size_multiplier,
         trade_style=style_norm,
-        position_style_exposure_remaining_value=style_exposure_remaining,
+        position_style_exposure_remaining_value=position_remaining,
+        long_horizon_exposure_remaining_value=long_horizon_remaining,
     )
 
     response = {
         "success": True,
         "position_size": result.to_dict(),
     }
-    if exposure_snapshot is not None:
-        response["position_style_exposure"] = exposure_snapshot
+    if position_snapshot is not None:
+        response["position_style_exposure"] = position_snapshot
+    if long_horizon_snapshot is not None:
+        response["long_horizon_exposure"] = long_horizon_snapshot
     return response
 
 
 @router.get("/position-sizing/portfolio-exposure")
 def get_portfolio_position_exposure(account_value: float = Query(gt=0)):
-    """v19.34.96 — current portfolio-level exposure to position-style trades.
+    """v19.34.96/97 — current portfolio-level exposure snapshots for both
+    long-horizon caps:
 
-    Returns the cap state (cap %, current $, current %, remaining $, remaining %)
-    plus a per-trade breakdown for the V5/V6 UI safety dashboard.
+      * position_exposure   — POSITION-style trades only (30% default cap)
+      * long_horizon_exposure — multi_day + swing + investment + position
+                                combined (55% default cap)
+
+    Returned together so the V5/V6 safety dashboard can render both meters.
     """
     try:
-        from services.portfolio_exposure_guard import compute_exposure
+        from services.portfolio_exposure_guard import (
+            LONG_HORIZON_STYLES,
+            POSITION_STYLES,
+            compute_exposure,
+        )
         try:
             from routers import trading_bot as _tb
             open_trades = list((_tb._open_trades or {}).values())
         except Exception:
             open_trades = []
         cfg = get_position_sizer_service().get_config()
-        cap_pct = cfg.get("max_position_style_exposure_pct", 30.0)
-        snap = compute_exposure(open_trades, account_value, cap_pct=cap_pct)
-        return {"success": True, "exposure": snap.to_dict()}
+        pos_snap = compute_exposure(
+            open_trades, account_value,
+            cap_pct=cfg.get("max_position_style_exposure_pct", 30.0),
+            styles=POSITION_STYLES,
+        )
+        lh_snap = compute_exposure(
+            open_trades, account_value,
+            cap_pct=cfg.get("max_long_horizon_exposure_pct", 55.0),
+            styles=LONG_HORIZON_STYLES,
+        )
+        return {
+            "success": True,
+            "position_exposure": pos_snap.to_dict(),
+            "long_horizon_exposure": lh_snap.to_dict(),
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

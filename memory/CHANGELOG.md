@@ -2,6 +2,57 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.97) — Combined long-horizon exposure cap (55%)
+
+### Why
+v19.34.96 capped POSITION-style exposure at 30%. Operator follow-up: even with that cap honored, simultaneously running max-position (30%) + max-swing + max-investment can still consume >75% of buying power, starving scalp/intraday during high-conviction multi-day periods. Need a second, looser cap covering the full long-horizon bucket.
+
+### Scope
+Stacked second cap of **55%** of account_value across all `trade_style in {multi_day, swing, investment, position}`. With the prior 30% position-only cap still in force, both apply simultaneously — whichever is more restrictive wins. Guarantees scalp/intraday always retain ~45% buying power.
+
+### What ships
+
+**`services/portfolio_exposure_guard.py`**
+- New constant `LONG_HORIZON_STYLES = frozenset({"multi_day", "swing", "investment", "position"})`.
+- New env-tunable default `DEFAULT_LONG_HORIZON_EXPOSURE_CAP_PCT = 55.0` (`PORTFOLIO_LONG_HORIZON_EXPOSURE_CAP_PCT`).
+- `compute_exposure()` unchanged signature — second cap is just a different `styles=` set passed in.
+
+**`services/position_sizer.py`**
+- `SizingConfig.max_long_horizon_exposure_pct = 55.0` (alongside the existing 30%).
+- `calculate_size()` gains `long_horizon_exposure_remaining_value` kwarg.
+- Step 8 rewritten to evaluate BOTH guards and apply the more restrictive remaining-room. Warning text identifies which cap triggered (`"position-style"` vs `"long-horizon"`).
+
+**`routers/risk_router.py`**
+- `POST /api/risk/position-sizing/calculate` now computes BOTH live snapshots when `trade_style` is in the long-horizon bucket. Response gains optional `long_horizon_exposure` block; `position_style_exposure` block only included for position trades.
+- `GET /api/risk/position-sizing/portfolio-exposure?account_value=N` now returns BOTH `position_exposure` (30% cap) and `long_horizon_exposure` (55% cap) snapshots in a single call.
+- `PositionSizingConfigUpdate` gains `max_long_horizon_exposure_pct` for hot-config.
+
+### Verification
+- 12 new test cases added to `test_v19_34_96_portfolio_position_exposure_cap.py` (file now covers BOTH caps).
+- Suite total: **33/33 passing** (up from 21 in v19.34.96).
+- Full v19.34.x regression: **110/110 passing**.
+- Live endpoint verified: returns both `{position_exposure: cap_pct=30, cap_value=$30K}` and `{long_horizon_exposure: cap_pct=55, cap_value=$55K, styles_counted=[investment,multi_day,position,swing]}` on clean account.
+- POST `/calculate` with `trade_style:"swing"` correctly returns the `long_horizon_exposure` block (no position block since swing isn't position-style).
+
+### Cap interaction reference
+
+```
+trade_style     | 30% position cap | 55% long-horizon cap | effective
+scalp           |       —          |         —            |  none (only per-trade caps)
+intraday        |       —          |         —            |  none (only per-trade caps)
+multi_day       |       —          |       APPLIES        |  55% combined
+swing           |       —          |       APPLIES        |  55% combined
+investment      |       —          |       APPLIES        |  55% combined
+position        |    APPLIES       |       APPLIES        |  more restrictive of {30% pos, 55% long}
+```
+
+### Files touched
+- MOD: `backend/services/portfolio_exposure_guard.py` — new constants
+- MOD: `backend/services/position_sizer.py` — new cfg field + new kwarg + step-8 rewrite
+- MOD: `backend/routers/risk_router.py` — dual-snapshot endpoint + flow
+- MOD: `backend/tests/test_v19_34_96_portfolio_position_exposure_cap.py` — +12 cases
+
+
 ## 2026-05-12 (v19.34.96) — Portfolio-level position-style exposure cap (30%)
 
 ### Why

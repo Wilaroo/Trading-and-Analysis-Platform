@@ -32,11 +32,22 @@ DEFAULT_POSITION_EXPOSURE_CAP_PCT: float = float(
     os.environ.get("PORTFOLIO_POSITION_EXPOSURE_CAP_PCT", "30.0")
 )
 
+# v19.34.97 — combined long-horizon cap (swing + investment + position).
+DEFAULT_LONG_HORIZON_EXPOSURE_CAP_PCT: float = float(
+    os.environ.get("PORTFOLIO_LONG_HORIZON_EXPOSURE_CAP_PCT", "55.0")
+)
+
 # Trade styles that count toward the "position" exposure bucket.
 # v19.34.95 added SWING/INVESTMENT/POSITION enum members; only POSITION
 # is rate-limited by default (longest hold horizon). Operators can
 # include INVESTMENT by passing a custom `styles` set to compute().
 POSITION_STYLES: frozenset = frozenset({"position"})
+
+# v19.34.97 — combined long-horizon bucket. Covers every style that
+# does NOT auto-recycle intraday. Used by a second, looser cap (default
+# 55%) so scalp/intraday always has ~45% buying power free even during
+# a high-conviction swing+investment+position run.
+LONG_HORIZON_STYLES: frozenset = frozenset({"multi_day", "swing", "investment", "position"})
 
 
 @dataclass

@@ -89,6 +89,12 @@ class SizingConfig:
     # in one regime call. Default 30% per spec; configurable via env var
     # PORTFOLIO_POSITION_EXPOSURE_CAP_PCT.
     max_position_style_exposure_pct: float = 30.0
+
+    # v19.34.97 — combined long-horizon cap (multi_day + swing +
+    # investment + position). Guarantees scalp/intraday has at least
+    # 45% buying power free at all times. Default 55%; configurable
+    # via env var PORTFOLIO_LONG_HORIZON_EXPOSURE_CAP_PCT.
+    max_long_horizon_exposure_pct: float = 55.0
     
     # TQS scaling
     tqs_min_score: float = 35.0   # Below this, don't trade
@@ -113,6 +119,7 @@ class SizingConfig:
             "max_risk_per_trade_dollar": self.max_risk_per_trade_dollar,
             "max_position_pct": self.max_position_pct,
             "max_position_style_exposure_pct": self.max_position_style_exposure_pct,
+            "max_long_horizon_exposure_pct": self.max_long_horizon_exposure_pct,
             "tqs_scaling": {
                 "min_score": self.tqs_min_score,
                 "base_score": self.tqs_base_score,
@@ -159,6 +166,8 @@ class PositionSizerService:
             self._config.max_position_pct = config["max_position_pct"]
         if "max_position_style_exposure_pct" in config:
             self._config.max_position_style_exposure_pct = float(config["max_position_style_exposure_pct"])
+        if "max_long_horizon_exposure_pct" in config:
+            self._config.max_long_horizon_exposure_pct = float(config["max_long_horizon_exposure_pct"])
             
         # TQS scaling
         if "tqs_min_score" in config:
@@ -191,6 +200,7 @@ class PositionSizerService:
         circuit_breaker_multiplier: float = 1.0,
         trade_style: str = "",
         position_style_exposure_remaining_value: Optional[float] = None,
+        long_horizon_exposure_remaining_value: Optional[float] = None,
     ) -> PositionSizeResult:
         """
         Calculate optimal position size.
@@ -315,28 +325,56 @@ class PositionSizerService:
             final_shares = int(max_risk / risk_per_share)
             result.warnings.append(f"Capped at max risk ${max_risk:.0f}")
 
-        # 8. v19.34.96 — portfolio-level cap on simultaneously-open
-        # position-style trades. Only applies when trade_style is one of
-        # the long-horizon styles AND caller supplied remaining-room
-        # value. Set to 0 to fully block new entries when cap exhausted.
-        from services.portfolio_exposure_guard import POSITION_STYLES
+        # 8. v19.34.96/97 — portfolio-level caps. Two stacked guards:
+        #   (a) v19.34.96 position-style cap (30% default) — applies only
+        #       when trade_style == "position".
+        #   (b) v19.34.97 long-horizon combined cap (55% default) — applies
+        #       to any style in {multi_day, swing, investment, position},
+        #       guaranteeing scalp/intraday always retain ~45% buying power.
+        # Each guard requires the caller to pass the corresponding
+        # remaining-room value (computed upstream). Whichever cap is more
+        # restrictive wins.
+        from services.portfolio_exposure_guard import (
+            LONG_HORIZON_STYLES,
+            POSITION_STYLES,
+        )
         style_norm = (trade_style or "").strip().lower()
+
+        cap_remaining: Optional[float] = None
+        cap_label: str = ""
+        cap_pct_label: float = 0.0
+
         if (
             style_norm in POSITION_STYLES
             and position_style_exposure_remaining_value is not None
         ):
-            remaining = max(0.0, float(position_style_exposure_remaining_value))
-            max_shares_by_style_cap = int(remaining // entry_price) if entry_price > 0 else 0
+            pos_rem = max(0.0, float(position_style_exposure_remaining_value))
+            cap_remaining = pos_rem
+            cap_label = "position-style"
+            cap_pct_label = self._config.max_position_style_exposure_pct
+
+        if (
+            style_norm in LONG_HORIZON_STYLES
+            and long_horizon_exposure_remaining_value is not None
+        ):
+            lh_rem = max(0.0, float(long_horizon_exposure_remaining_value))
+            # More-restrictive wins
+            if cap_remaining is None or lh_rem < cap_remaining:
+                cap_remaining = lh_rem
+                cap_label = "long-horizon"
+                cap_pct_label = self._config.max_long_horizon_exposure_pct
+
+        if cap_remaining is not None and entry_price > 0:
+            max_shares_by_style_cap = int(cap_remaining // entry_price)
             if final_shares > max_shares_by_style_cap:
                 final_shares = max_shares_by_style_cap
-                cap_pct = self._config.max_position_style_exposure_pct
                 if final_shares == 0:
                     result.warnings.append(
-                        f"Portfolio {cap_pct:.0f}% cap on {style_norm}-style trades exhausted; entry blocked"
+                        f"Portfolio {cap_pct_label:.0f}% {cap_label} cap exhausted; entry blocked"
                     )
                 else:
                     result.warnings.append(
-                        f"Capped at remaining ${remaining:,.0f} under portfolio {cap_pct:.0f}% {style_norm}-style cap"
+                        f"Capped at remaining ${cap_remaining:,.0f} under portfolio {cap_pct_label:.0f}% {cap_label} cap"
                     )
             
         # Set final values
