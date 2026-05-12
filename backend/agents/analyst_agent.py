@@ -86,7 +86,8 @@ class AnalystAgent(BaseAgent):
             logger.info("Analyst Agent: TQS Engine connected")
     
     def get_system_prompt(self) -> str:
-        return """You are part of a trading team providing market analysis. Speak as "we" - the human trader and AI working together.
+        from agents.vocabulary import inject_vocabulary
+        base = """You are part of a trading team providing market analysis. Speak as "we" - the human trader and AI working together.
 
 VOICE: Always use "we", "our", "us" language:
 - "We're seeing strong momentum in NVDA"
@@ -102,6 +103,7 @@ Guidelines:
 6. End with a clear bias and whether this matches OUR trading style
 
 Format your analysis with clear sections using **bold** headers."""
+        return inject_vocabulary(base)
     
     async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
         """

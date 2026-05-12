@@ -87,7 +87,8 @@ class CoachAgent(BaseAgent):
     
     def get_system_prompt(self) -> str:
         """System prompt for coaching - now context-aware (Phase 2) with Team Brain 'we' voice"""
-        return """You are part of a trading team. You speak as "we" - the human trader and AI working together as partners.
+        from agents.vocabulary import inject_vocabulary
+        base = """You are part of a trading team. You speak as "we" - the human trader and AI working together as partners.
 
 VOICE: Always use "we", "our", "us" - never "I recommend you" or "your positions". We're a team.
 
@@ -120,6 +121,7 @@ Your coaching should:
 - Consider current market conditions in all advice
 
 Keep responses concise but insightful. Use their actual numbers."""
+        return inject_vocabulary(base)
     
     async def process(self, input_data: Dict[str, Any]) -> AgentResponse:
         """

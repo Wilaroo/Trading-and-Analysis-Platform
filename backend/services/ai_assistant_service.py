@@ -163,6 +163,83 @@ You are integrated with an autonomous trading bot. When the user asks about "the
 - Track pending, open, and closed trades with full P&L
 When asked about bot trades, always reference the actual trade data from the context.
 
+=== v19.34.95+ — 5-HORIZON TRADE-STYLE TAXONOMY ===
+
+Every SentCom trade now belongs to exactly ONE of 5 styles, each with a distinct
+hold horizon. Use these labels whenever discussing setups, alerts, or open trades:
+
+  SCALP       (minutes – 1 hour)         Target 1R · ~60-70% win rate
+  INTRADAY    (1 – 6 hours)              Target 3-5R · ~40-50% win rate
+  SWING       (1 – 3 weeks)              Daily-bar driven
+  INVESTMENT  (3 weeks – 3 months)       Weekly/multi-quarter base driven
+  POSITION    (3+ months)                Weinstein stage / 200-day / golden cross
+
+Legacy synonyms: "multi_day" = SWING-ish (1-5 day swing), "A+" / "TRADE_2_HOLD" /
+"MOVE_2_MOVE" are pre-v19.34.95 aliases — translate to SCALP / INTRADAY / MULTI_DAY
+when seen in old data.
+
+Resolution precedence in UI + API responses:
+  trade_style → scan_tier → tier → derive from setup_type
+The TradeStyleChip in the UI renders these in 5 distinct colors:
+  fuchsia=scalp · sky=intraday · emerald=swing/multi_day · amber=investment · rose=position
+
+=== v19.34.95 NEW SETUPS (20 daily-bar detectors) ===
+
+SWING — pocket_pivot (O'Neil first up-day where vol > 10d max down-vol, above 10d
+high); vcp_breakout (Minervini 3 sequential contractions each shallower + pivot
+break on vol); three_week_tight (Minervini 3 weekly closes within ±1.5%);
+bull_flag_break / bear_flag_break (10d pole + 5-15d flag break); ascending_triangle_break
+/ descending_triangle_break (flat S/R + converging trendline); cup_with_high_handle
+(O'Neil cup 7-65 wks, handle in upper half, depth 12-33%).
+
+INVESTMENT — weekly_breakout (26-wk base break on weekly vol ≥2× 13-wk avg);
+multi_quarter_base_break (130d flat base ≤30% range, break on vol);
+rs_leader_break (Mansfield RS vs SPY rank ≥90 + breaking 20d high);
+fifty_two_week_high_break (Darvas new 52w high on ≥1.5× 50d avg vol);
+power_trend_stack (Minervini "stocking" — price > 10ema > 20ema > 50sma > 150sma
+> 200sma, 200sma rising ≥30 sessions).
+
+POSITION — stage_2_breakout (Weinstein above rising 30wk SMA + 30wk base break);
+stage_1_to_2_transition (first close above 30wk SMA after 30+ sessions below);
+stage_3_to_4_breakdown (first close below 30wk SMA after distribution top);
+golden_cross_filtered (50sma↑200sma gated by Stage 2 + Mansfield RS > 0);
+death_cross_filtered (50sma↓200sma gated by Stage 4 + RS < 0);
+two_hundred_day_reclaim / two_hundred_day_loss (first 200DMA cross after 30+
+sessions on opposite side, ≥1.5× / 1.3× vol).
+
+Pre-existing daily setups (now wired correctly per v19.34.98 LiveAlert fix):
+daily_squeeze (multi_day), trend_continuation (multi_day), daily_breakout
+(multi_day), base_breakout (position), accumulation_entry (position),
+breakdown_confirmed (multi_day).
+
+=== v19.34.96 / v19.34.97 — PORTFOLIO EXPOSURE CAPS ===
+
+Two stacked caps apply to long-horizon trades only — scalp/intraday are immune
+and recycle intraday:
+
+  30% POSITION-only cap     across all open trade_style="position" trades
+  55% LONG-HORIZON cap      across all open trade_style in
+                            {multi_day, swing, investment, position}
+
+Both caps are enforced inside `position_sizer.calculate_size()` and at the bot's
+`POST /api/trading-bot/submit-trade` order-placement path. When `trade_style` is
+omitted on submit, the bot infers it from setup_type via SETUP_REGISTRY.
+
+If a trade is blocked or downsized, the response carries
+`exposure_cap_warnings: [...]` and (when fully blocked) returns
+`{success: false, error: "Portfolio exposure cap exhausted"}`. The more
+restrictive cap wins when both apply (position trade also subject to 55%).
+
+Live snapshots available at:
+  GET /api/risk/position-sizing/portfolio-exposure?account_value=NNNN
+  → returns both `position_exposure` and `long_horizon_exposure` blocks with
+    cap_pct, cap_value, current_value, remaining_value, breakdown[].
+
+When the operator asks "why was my trade capped / blocked / downsized?",
+explain: (1) which cap triggered (position-only 30% or combined 55%),
+(2) current $ used vs remaining, (3) the per-trade breakdown, (4) suggest
+scaling out the smallest-conviction open position to free room.
+
 Format responses with clear sections. Cite specific rules from the playbook."""
 
     def __init__(self, db=None):
@@ -1524,9 +1601,28 @@ DECISION: {score_result['trade_or_skip']}
                 context_parts.append("MARKET NEWS: Unavailable")
         
         # 2. Check if user is asking about strategies
-        strategy_keywords = ['strategy', 'strategies', 'setup', 'setups', 'scalp', 'rubberband', 'rubber band', 
-                            'breakout', 'momentum', 'vwap', 'bounce', 'fade', 'gap', 'squeeze', 'hitchhiker',
-                            'spencer', 'range break', 'tidal wave', 'second chance', 'off sides', 'backside']
+        # v19.34.99 — keyword list extended to include the 20 new daily-bar
+        # setups from v19.34.95 (swing / investment / position) so the bot
+        # detects when the operator is asking about them.
+        strategy_keywords = [
+            'strategy', 'strategies', 'setup', 'setups', 'scalp', 'rubberband', 'rubber band',
+            'breakout', 'momentum', 'vwap', 'bounce', 'fade', 'gap', 'squeeze', 'hitchhiker',
+            'spencer', 'range break', 'tidal wave', 'second chance', 'off sides', 'backside',
+            # v19.34.99 — 5-horizon vocabulary + new setup names
+            'intraday', 'swing', 'investment', 'position trade', 'multi-day', 'multi day',
+            'horizon', 'time horizon', 'trade style',
+            'pocket pivot', 'vcp', 'three week tight', '3-week tight',
+            'bull flag', 'bear flag', 'ascending triangle', 'descending triangle',
+            'cup and handle', 'cup with handle', 'cup w/ handle',
+            'weekly breakout', '26-week', 'multi-quarter base', 'multi quarter base',
+            'rs leader', 'relative strength leader', 'mansfield',
+            '52-week high', '52 week high', 'fifty-two week',
+            'power trend stack', 'minervini', 'stocking',
+            'stage 2', 'stage 1', 'stage 3', 'stage 4', 'weinstein',
+            'golden cross', 'death cross', '200dma', '200-day',
+            'daily squeeze', 'trend continuation', 'daily breakout',
+            'base breakout', 'accumulation', 'breakdown confirmed',
+        ]
         wants_strategy_info = any(keyword in user_message.lower() for keyword in strategy_keywords)
         
         if wants_strategy_info:
@@ -1539,6 +1635,83 @@ DECISION: {score_result['trade_or_skip']}
             
             strategy_context = self.get_strategy_context(strategy_name)
             context_parts.append(strategy_context)
+
+        # v19.34.99 — exposure / cap / sizing intent. Inject the LIVE portfolio
+        # exposure snapshot (30% position cap + 55% long-horizon cap) so the
+        # bot can answer "why was my trade blocked / downsized?" with real
+        # numbers, not generic prose.
+        exposure_keywords = [
+            "cap", "capped", "exposure", "blocked", "downsized", "downsize",
+            "rejected", "buying power", "portfolio limit", "position limit",
+            "30%", "55%", "long-horizon", "long horizon",
+        ]
+        if any(kw in user_message.lower() for kw in exposure_keywords):
+            try:
+                from services.portfolio_exposure_guard import (
+                    LONG_HORIZON_STYLES,
+                    POSITION_STYLES,
+                    compute_exposure,
+                )
+                from services.position_sizer import get_position_sizer_service
+
+                # Live open-trade snapshot from trading_bot
+                open_trades_list = []
+                try:
+                    from routers import trading_bot as _tb
+                    if getattr(_tb, "_trading_bot", None) is not None:
+                        open_trades_list = list((_tb._trading_bot._open_trades or {}).values())
+                except Exception:
+                    pass
+
+                # Best-effort account value (IB live first, fall back to env or 100k)
+                account_value = 0.0
+                try:
+                    from routers.ib import _extract_account_value, _pushed_ib_data
+                    _acc = (_pushed_ib_data or {}).get("account") if isinstance(_pushed_ib_data, dict) else None
+                    if _acc:
+                        account_value = float(_extract_account_value(_acc, "NetLiquidation", 0) or 0)
+                except Exception:
+                    pass
+                if account_value <= 0:
+                    account_value = float(os.environ.get("FALLBACK_ACCOUNT_VALUE", "100000"))
+
+                cfg = get_position_sizer_service().get_config()
+                pos_cap = cfg.get("max_position_style_exposure_pct", 30.0)
+                lh_cap = cfg.get("max_long_horizon_exposure_pct", 55.0)
+                pos_snap = compute_exposure(open_trades_list, account_value, cap_pct=pos_cap, styles=POSITION_STYLES)
+                lh_snap = compute_exposure(open_trades_list, account_value, cap_pct=lh_cap, styles=LONG_HORIZON_STYLES)
+
+                lines = [
+                    "=== LIVE PORTFOLIO EXPOSURE (v19.34.96/97 caps) ===",
+                    f"Account value: ${account_value:,.0f}",
+                    "",
+                    f"POSITION-only cap ({pos_cap:.0f}%):",
+                    f"  Cap value:       ${pos_snap.cap_value:,.0f}",
+                    f"  Current value:   ${pos_snap.current_value:,.0f}  ({pos_snap.current_pct:.1f}%)",
+                    f"  Remaining room:  ${pos_snap.remaining_value:,.0f}  ({pos_snap.remaining_pct:.1f}%)",
+                    f"  Open trades:     {pos_snap.open_trades_count}",
+                    f"  Cap breached:    {pos_snap.cap_breached}",
+                    "",
+                    f"LONG-HORIZON combined cap ({lh_cap:.0f}%):  styles={sorted(LONG_HORIZON_STYLES)}",
+                    f"  Cap value:       ${lh_snap.cap_value:,.0f}",
+                    f"  Current value:   ${lh_snap.current_value:,.0f}  ({lh_snap.current_pct:.1f}%)",
+                    f"  Remaining room:  ${lh_snap.remaining_value:,.0f}  ({lh_snap.remaining_pct:.1f}%)",
+                    f"  Open trades:     {lh_snap.open_trades_count}",
+                    f"  Cap breached:    {lh_snap.cap_breached}",
+                ]
+                if lh_snap.breakdown:
+                    lines.append("")
+                    lines.append("Per-trade breakdown:")
+                    for row in lh_snap.breakdown:
+                        lines.append(
+                            f"  - {row.get('symbol', '?')}  {row.get('setup_type', '?')}  "
+                            f"{row.get('trade_style', '?')}  "
+                            f"{row.get('remaining_shares', 0)} sh  "
+                            f"${row.get('value', 0):,.0f} ({row.get('pct_of_account', 0):.1f}% acct)"
+                        )
+                context_parts.append("\n".join(lines))
+            except Exception as exc:
+                logger.warning(f"v19.34.99 exposure-cap context injection failed: {exc}")
         
         # 2b. Check if user is asking about CHART PATTERNS
         chart_pattern_keywords = ['pattern', 'patterns', 'triangle', 'flag', 'pennant', 'wedge', 'head and shoulders',

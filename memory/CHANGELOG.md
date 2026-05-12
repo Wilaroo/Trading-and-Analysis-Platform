@@ -2,6 +2,51 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.99 part 2) — Bot vocabulary awareness
+
+### Why
+After shipping 20 new setups (v19.34.95), two exposure caps (v19.34.96/97), and UI labelling (v19.34.99 part 1), the in-app chat bot was still operating on the pre-v19.34.95 system prompt — it didn't know what a "pocket pivot" or "stage 2 breakout" was, what the 30% / 55% caps meant, or how to explain why a trade was blocked. Operator asks the bot "why was my trade capped?" and gets generic prose. Fix: stuff the new vocabulary into both the legacy `AIAssistantService.SYSTEM_PROMPT` AND every orchestrator-routed agent.
+
+### What ships
+
+**`backend/services/ai_assistant_service.py` — legacy direct-chat path**
+- `SYSTEM_PROMPT` gains 3 new sections:
+  - **5-Horizon Trade-Style Taxonomy** — scalp / intraday / swing / investment / position with durations, win rates, legacy aliases (A_PLUS / TRADE_2_HOLD / MOVE_2_MOVE / multi_day), resolution precedence
+  - **v19.34.95 New Setups** — all 20 new detectors with one-line trigger descriptions + the 6 pre-existing daily detectors now correctly wired (v19.34.98)
+  - **Portfolio Exposure Caps** — 30% position-only + 55% combined long-horizon, how blocked-trade responses look (`exposure_cap_warnings`), the live snapshot endpoint URL
+- `strategy_keywords` keyword list extended with: pocket pivot, vcp, three week tight, bull/bear flag, ascending/descending triangle, cup w/ handle, weekly breakout, 26-week, multi-quarter base, rs leader, mansfield, 52-week high, fifty-two week, power trend stack, minervini, stocking, stage 1/2/3/4, weinstein, golden cross, death cross, 200dma, 200-day, daily squeeze, trend continuation, daily breakout, base breakout, accumulation, breakdown confirmed + horizon words (swing, investment, position trade, multi-day, horizon, trade style)
+- New `exposure_keywords` branch in `_build_context_internal()` injects a **live exposure snapshot** into the prompt when the user mentions cap/exposure/blocked/downsized/etc. Snapshot pulls live `_open_trades` + IB NetLiquidation, formats both caps with per-trade breakdown. So when the operator asks "why was my swing trade downsized?" the bot sees the actual $ used / $ remaining numbers and answers concretely.
+
+**`backend/agents/vocabulary.py` — new shared module**
+- `VOCABULARY_BLOCK` — compact 5-horizon + caps + key-setups reference (~30 lines)
+- `inject_vocabulary(prompt)` — idempotent appender used by every agent
+- Single source of truth for the orchestrator-routed multi-agent system
+
+**`backend/agents/analyst_agent.py` + `backend/agents/coach_agent.py`**
+- Both `get_system_prompt()` methods now call `inject_vocabulary()` so each agent sees the 5-horizon taxonomy + cap rules + key setups appended to their domain-specific prompt.
+- Idempotent — re-running adds nothing.
+
+### Verification
+- New test file: `/app/backend/tests/test_v19_34_99_bot_vocabulary_awareness.py` — **19/19 passing** across 3 test classes:
+  - TestSystemPromptVocabulary (11 cases) — every section, every setup name, every horizon, both caps, all 5 author name-checks (Minervini, O'Neil, Weinstein, Darvas, Mansfield)
+  - TestKeywordCoverage (4 cases) — keyword list additions verified via source-file scan
+  - TestAgentVocabularyInjection (3 cases) — both AnalystAgent + CoachAgent system prompts include the shared vocabulary; idempotency proven
+- Full v19.34.x regression: **138/138 passing**.
+- Backend healthy post-restart.
+
+### Operator example
+**Before**: "Why was my AAPL trade blocked?" → "I don't have visibility into your specific trade rejections..."
+**After**:  "Why was my AAPL trade blocked?" → bot sees `LIVE PORTFOLIO EXPOSURE` context with `Position-only cap 30%: $30K cap, $30K used, $0 remaining, breached: True`, lists the 6 open position trades and their $ values, explains it's the position cap not the long-horizon cap, suggests scaling out smallest-conviction trade to free room.
+
+### Files touched
+- MOD: `backend/services/ai_assistant_service.py` — SYSTEM_PROMPT expanded + exposure_keywords intent branch + strategy_keywords list extended
+- NEW: `backend/agents/vocabulary.py`
+- MOD: `backend/agents/analyst_agent.py` — get_system_prompt() injects vocabulary
+- MOD: `backend/agents/coach_agent.py` — get_system_prompt() injects vocabulary
+- NEW: `backend/tests/test_v19_34_99_bot_vocabulary_awareness.py`
+- MOD: `memory/ROADMAP.md` — saved the trade-style click-filter enhancement to P2 backlog
+
+
 ## 2026-05-12 (v19.34.99) — UI: trade-style + horizon labelling on every surface
 
 ### Why

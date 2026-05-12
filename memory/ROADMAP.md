@@ -4,6 +4,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🟢 P2 — Trade-style click-filter on V5/V6 surfaces (saved 2026-05-12)
+
+Now that v19.34.99 stamped every row with a `data-trade-style` attribute via `TradeStyleChip`, build a one-click filter:
+- Clicking the chip in any panel (LiveAlertsPanel / OpenPositionsV5 / ScannerCardsV5) filters that panel to rows of the same style.
+- Shift-click toggles multiple styles (e.g. "swing + position" only).
+- Filter state persists in URL hash so links into the dashboard preserve the view.
+- Estimated effort: ~15 min frontend, zero backend changes (chip attribute already in place).
+- Compounding benefit: when 8+ live trades across horizons, operator can isolate "only my multi-month bets" instantly.
+
+
+
 ## ✅ 2026-05-12 — v19.34.81 / .82 SHIPPED — Singular-target detection + force-reconcile-down
 
 **v19.34.81** — `attach-brackets-to-unprotected` was producing false-positive "unprotected" rows for every trade brackeded via `attach_oca_stop_target` (which writes the **singular** `target_order_id`), because the v19.34.76 logic only checked the plural `target_order_ids` list. Patched to recognize both. Without this fix, applying the dry-run output would have stacked duplicate target legs — recreating the exact problem v19.34.79 sealed. Regression test: `test_singular_target_order_id_is_recognized_as_bracketed`.
