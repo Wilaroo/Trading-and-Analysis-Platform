@@ -293,6 +293,16 @@ class OrderExecutionResult(BaseModel):
     error: Optional[str] = None
     ib_order_id: Optional[int] = None  # IB's internal order ID
     executed_at: Optional[str] = None
+    # v19.34.107 (Feb 2026) — Bracket ACK enrichment. Pusher now reports
+    # the stop + per-rung target order IDs and the shared OCA group on
+    # bracket fills so the backend can map each rung's lifecycle and
+    # reconcile OCA cancels. All optional — legacy single-leg pushers
+    # send None and the bracket lifecycle layer falls back to its
+    # existing reconcile-by-symbol path.
+    stop_order_id: Optional[int] = None
+    target_order_id: Optional[int] = None
+    target_order_ids: Optional[List[int]] = None
+    oca_group: Optional[str] = None
 
 
 def get_order_queue() -> dict:
@@ -1835,6 +1845,13 @@ def report_order_result(result: OrderExecutionResult):
         "remaining_qty": result.remaining_qty,
         "error": result.error,
         "ib_order_id": result.ib_order_id,
+        # v19.34.107 — Forward bracket ACK enrichment into the order
+        # queue result so trade_executor_service / bracket_lifecycle
+        # can stamp these onto BotTrade + bracket_lifecycle_events.
+        "stop_order_id": result.stop_order_id,
+        "target_order_id": result.target_order_id,
+        "target_order_ids": result.target_order_ids or [],
+        "oca_group": result.oca_group,
         "executed_at": result.executed_at or datetime.now(timezone.utc).isoformat()
     })
     

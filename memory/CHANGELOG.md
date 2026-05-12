@@ -2,6 +2,83 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.107) — Bracket ACK signature compat fix · PRODUCTION HOTFIX
+
+### The bug (paper-account incident 2026-02-12 10:00:25)
+After deploying v19.34.103 to the Windows pusher, the user fired a test
+bracket on RJF. The bracket placed **correctly at IB** (parent filled
+at $150.43, OCA stop + target attached, exactly as designed). But the
+pusher log showed:
+
+```
+10:00:25 [ERROR] [OrderQueue] Execution error for 0486f940:
+  IBDataPusher._report_order_result() got an unexpected keyword
+  argument 'stop_order_id'. Did you mean 'ib_order_id'?
+10:00:25 [INFO] [OrderQueue] Result reported: 0486f940 -> rejected
+```
+
+**Root cause**: v19.34.103 added four new kwargs to the
+`_report_order_result()` call inside the bracket placement path
+(`stop_order_id` / `target_order_id` / `target_order_ids` / `oca_group`)
+but **did not widen the function signature**. Every bracket ACK
+crashed with `TypeError`, the pusher's exception handler converted the
+crash into a `rejected` status, and Spark — believing the bracket
+hadn't actually placed — fell back to single-leg ADOPT-OCA wraps,
+which then idempotency-blocked themselves into oblivion (visible in
+the log as the "IDEMPOTENCY BLOCK: already submitted Xs ago" cascade).
+
+### The fix
+**`documents/scripts/ib_data_pusher.py::_report_order_result`** —
+signature widened to accept all four bracket-ACK kwargs as optional
+parameters. The cloud HTTP payload now forwards them so the backend
+gets richer per-rung mapping data.
+
+**`backend/routers/ib.py::OrderExecutionResult`** — Pydantic model
+extended with the four new optional fields so `POST /api/ib/orders/result`
+validates the new payload shape cleanly (previously the model silently
+ignored unknowns, but explicit declaration makes the contract
+documentable + persists the values via `complete_order`).
+
+### Regression suite
+**`tests/test_v19_34_107_bracket_ack_signature_regression.py`** —
+4-case fence so this exact bug can never re-land:
+- Backend accepts the full v107 payload (404 not 422).
+- Backend accepts the legacy v22 payload (no required fields).
+- Pusher's `_report_order_result` signature includes all 4 kwargs
+  (source-level introspection — works even though the pusher itself
+  can't be imported in the Linux test environment).
+- The bracket parent-FILLED call site STILL passes all 4 kwargs.
+
+All 4/4 PASS. Test discovery requires the local backend (uses a
+`module-scope` autouse fixture for the skip — pytest's `skipif` race
+with backend readiness was producing false skips).
+
+### Operator action
+1. `git pull` on the Windows pusher PC.
+2. Restart the pusher.
+3. **The previously-fired RJF bracket (`0486f940` → IB order 115748/9/50)
+   IS STILL ALIVE at IB** — parent filled, stop+target OCA-grouped.
+   You don't need to re-fire it. You can verify in TWS open orders:
+   look for the SELL 43 RJF filled at $150.43 with two BUY children
+   (LMT @ $140.68 and STP @ $154.08) sharing `oca_RJF_0486f940`.
+4. The shadow ADOPT-OCA spam orders (115150 / 115509 / 115697 / 115729 /
+   115765 / 115795 / 115818 / 115847 etc.) that the rejected ACK
+   triggered will idempotency-block themselves out; if any are still
+   sitting `PreSubmitted`, click `CLOSE/CANCEL ALL` to flush them.
+
+### Lessons learned
+- When extending a pusher contract, **always widen the
+  signature first, write the test second, then update the call sites**.
+  In v19.34.103 I touched the call sites first and never circled back
+  to the receiver — the wrong order of operations on a distributed
+  contract.
+- This case is now codified as the v107 regression suite so any
+  future kwarg addition to `_report_order_result` will be source-grep
+  asserted.
+
+---
+
+
 ## 2026-02-12 (v19.34.106) — Pusher multi-rung support · Legend cleanup · simulate-bracket endpoint
 
 ### What ships

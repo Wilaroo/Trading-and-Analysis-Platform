@@ -2964,7 +2964,20 @@ class IBDataPusher:
     
     def _report_order_result(self, order_id: str, status: str, fill_price: float = None, 
                             filled_qty: int = None, remaining_qty: int = None,
-                            ib_order_id: int = None, error: str = None):
+                            ib_order_id: int = None, error: str = None,
+                            # v19.34.107 (Feb 2026) — Bracket ACK fields. The
+                            # bracket placement path needs to report the
+                            # child order IDs + OCA group back so the Spark
+                            # backend can map fills per-rung and reconcile
+                            # OCA-group cancels. v19.34.103 added the call
+                            # sites but forgot to widen this signature →
+                            # every bracket was ACK'd as `rejected` and
+                            # Spark fell back to ADOPT-OCA spam. Fixed by
+                            # accepting + forwarding the new fields.
+                            stop_order_id: int = None,
+                            target_order_id: int = None,
+                            target_order_ids: list = None,
+                            oca_group: str = None):
         """Report order execution result back to cloud"""
         try:
             payload = {
@@ -2975,7 +2988,14 @@ class IBDataPusher:
                 "remaining_qty": remaining_qty,
                 "ib_order_id": ib_order_id,
                 "error": error,
-                "executed_at": datetime.now().isoformat()
+                "executed_at": datetime.now().isoformat(),
+                # v19.34.107 — Bracket-specific child IDs. Backend
+                # ignores fields it doesn't understand, so older Spark
+                # builds remain compatible.
+                "stop_order_id": stop_order_id,
+                "target_order_id": target_order_id,
+                "target_order_ids": target_order_ids or [],
+                "oca_group": oca_group,
             }
             
             result = self.api.post_safe("/api/ib/orders/result", payload, timeout=10)
