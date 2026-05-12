@@ -3,6 +3,70 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.120) — diagnose-close-readiness accuracy + phantom detection
+
+Follow-up to v19.34.119 after the operator's first live run of the
+pre-flight diagnostic surfaced two pre-existing issues + one
+diagnostic accuracy bug:
+
+### Backend
+
+**`routers/safety_router.py:diagnose_close_readiness`** —
+
+1. **Working-order count accuracy**. Pre-v120 the per-symbol
+   `working_count` queried `order_queue` with `status ∈ {filled,
+   pending, submitted, queued}`. Including `filled` over-counted by
+   2-4× — those are historical parent fills, NOT live working orders
+   at IB. Bracket OCA children get their own ib_order_ids and live
+   separately. Post-v120: when `ib_direct` is connected, query
+   `_ib.trades()` after `reqAllOpenOrders()` for the authoritative
+   per-(symbol, action) working-order count + `isActive()` filter.
+   Fall back to the Mongo proxy (status ∈ {pending, submitted,
+   queued} only) when ib_direct is down. Each row now reports
+   `count_source ∈ {ib_direct, order_queue_proxy}` so the operator
+   knows which path produced the number.
+
+2. **Phantom-position detection**. New `open_positions.phantom_bot_only`
+   and `phantom_ib_only` arrays compare `bot._open_trades` against
+   the live IB position list. `phantom_bot_only` are symbols the bot
+   thinks it's holding but IB shows zero (operator-flattened-in-TWS,
+   external close, post-restart fill-ACK miss); `phantom_ib_only` are
+   the reverse (orphan positions the bot isn't tracking). Surfaces as
+   yellow-verdict issues with explicit reconcile recommendations.
+
+3. **`/diagnose-close-readiness` accepts BOTH GET and POST** so curl
+   from a terminal (`curl -s ...` with no `-X POST`) works alongside
+   tooling that prefers POST for action-style endpoints.
+
+4. **Verdict logic**: phantoms now bump green → yellow even if every
+   path is healthy, so the operator sees the stale-memory drift
+   before clicking Close-all on positions that don't exist.
+
+**`tests/test_safety_close_resilience_v19_34_119.py`** — added phantom
+detection test (`test_verdict_yellow_when_phantom_positions_present`)
++ adjusted over-cap test to mock the Mongo-proxy fallback path
+explicitly. 170/170 passing.
+
+### What the operator can see now
+
+First live diagnostic call on the DGX returned:
+
+```
+verdict:   red
+path:      nuclear (ib_direct)
+issues:    pusher (clientId=15) NOT connected
+open_pos:  bot=4 (AAPL/DG/ONON/SIVR), ib=1 (EGO)
+           → phantom_bot_only=[AAPL, DG, ONON, SIVR]
+working:   AAPL=7 DG=4 ONON=3 SIVR=1 (all under cap)
+```
+
+Diagnosis from this single call:
+  - nuclear path healthy → if Close-all is needed, it'll work via ib_direct
+  - pusher offline → no new entries can be placed (Windows pusher needs restart)
+  - 4 phantoms → run reconcile to clear stale bot._open_trades
+
+
+
 ## 2026-02-12 (v19.34.119) — Close-all Resilience (Auto-chain + Pre-flight)
 
 Shipped after the live incident where the operator clicked "Close all"

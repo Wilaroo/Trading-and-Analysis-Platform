@@ -1066,6 +1066,39 @@ async def diagnose_close_readiness() -> Dict[str, Any]:
     except Exception as e:
         out["open_positions"]["ib_direct_error"] = str(e)[:200]
 
+    # ── v19.34.120 — Phantom-position detection ──
+    # If bot._open_trades contains symbols IB does not, those are
+    # phantoms (operator flattened in TWS, restart wiped a fill ACK,
+    # external close, etc.). Surface them prominently — they pollute
+    # the V5 UI and trigger manage-loop traffic on positions that no
+    # longer exist.
+    try:
+        bot_symbols = {
+            (getattr(t, "symbol", "") or "").upper() for t in open_trades
+        }
+        bot_symbols.discard("")
+        ib_symbols = {
+            (s or "").upper() for s in out["open_positions"].get("ib_direct_symbols") or []
+        }
+        ib_symbols.discard("")
+        if out["ib_direct"].get("connected") and (bot_symbols or ib_symbols):
+            phantom_bot = sorted(bot_symbols - ib_symbols)   # bot has, IB doesn't
+            phantom_ib  = sorted(ib_symbols - bot_symbols)    # IB has, bot doesn't
+            out["open_positions"]["phantom_bot_only"] = phantom_bot
+            out["open_positions"]["phantom_ib_only"]  = phantom_ib
+            if phantom_bot:
+                issues.append(
+                    f"{len(phantom_bot)} phantom position(s) in bot._open_trades "
+                    f"(IB has zero exposure): {', '.join(phantom_bot)}. Reconcile recommended."
+                )
+            if phantom_ib:
+                issues.append(
+                    f"{len(phantom_ib)} IB-only position(s) bot isn't tracking: "
+                    f"{', '.join(phantom_ib)}. Run orphan-reconcile."
+                )
+    except Exception as e:
+        out["open_positions"]["phantom_check_error"] = str(e)[:200]
+
     # Working orders per symbol per close-side — the Error 201 trigger
     try:
         import os
@@ -1084,25 +1117,79 @@ async def diagnose_close_readiness() -> Dict[str, Any]:
             dv = getattr(d, "value", str(d) if d else "long").lower()
             if sym:
                 symbol_close_side[sym] = "SELL" if dv == "long" else "BUY"
+
+        # ── v19.34.120 — Working-order count accuracy fix ──
+        # Pre-v120 the count included `status="filled"` rows from
+        # `order_queue` — those are HISTORICAL parent fills, NOT live
+        # working orders at IB. The OCA bracket children get their own
+        # ib_order_ids and live separately at IB; whether they show up
+        # in `order_queue` at all depends on the pusher version.
+        #
+        # The authoritative source for "what's live at IB" is the
+        # IB API itself, accessed via `ib_direct._ib.trades()` after
+        # `reqAllOpenOrders()`. When ib_direct is connected, use that;
+        # fall back to the Mongo proxy only when ib_direct is down,
+        # and exclude `filled` from the fallback count.
+        ibd_working_by_symbol: Optional[Dict[tuple, int]] = None
+        if out["ib_direct"].get("connected"):
+            try:
+                import asyncio as _asyncio
+                from services.ib_direct_service import get_ib_direct_service
+                ibd = get_ib_direct_service()
+                await _asyncio.to_thread(ibd._ib.reqAllOpenOrders)
+                await _asyncio.sleep(0.5)
+                counts: Dict[tuple, int] = {}
+                for t in list(ibd._ib.trades() or []):
+                    try:
+                        contract = getattr(t, "contract", None)
+                        order = getattr(t, "order", None)
+                        if contract is None or order is None:
+                            continue
+                        # Only WORKING orders count toward the 15-cap.
+                        if hasattr(t, "isActive"):
+                            try:
+                                if not t.isActive():
+                                    continue
+                            except Exception:
+                                pass
+                        csym = (getattr(contract, "symbol", "") or "").upper()
+                        caction = (getattr(order, "action", "") or "").upper()
+                        if csym and caction:
+                            counts[(csym, caction)] = counts.get((csym, caction), 0) + 1
+                    except Exception:
+                        continue
+                ibd_working_by_symbol = counts
+            except Exception as e:
+                out["ib_direct_working_orders_error"] = str(e)[:200]
+
         if not symbol_close_side:
             out["working_orders_by_symbol"] = []
         else:
             for sym, close_side in symbol_close_side.items():
-                # All working (filled-bracket-children or pending) orders
-                # on the close-side for this symbol. `filled` is the
-                # parent fill that spawned the OCA children which then
-                # sit WORKING — that's what counts toward Error 201.
-                count = await db.order_queue.count_documents({
-                    "symbol": sym,
-                    "ib_order_id": {"$ne": None},
-                    "status": {"$in": ["filled", "pending", "submitted", "queued"]},
-                })
+                if ibd_working_by_symbol is not None:
+                    # Authoritative count from IB API (clientId=11).
+                    count = ibd_working_by_symbol.get((sym, close_side), 0)
+                    source = "ib_direct"
+                else:
+                    # Fallback: Mongo proxy. EXCLUDES `filled` per v120
+                    # accuracy fix — `filled` rows are historical, not
+                    # working. This is a CONSERVATIVE proxy (under-
+                    # counts working OCA children that don't have
+                    # their own order_queue rows); use it only when
+                    # ib_direct is unavailable.
+                    count = await db.order_queue.count_documents({
+                        "symbol": sym,
+                        "ib_order_id": {"$ne": None},
+                        "status": {"$in": ["pending", "submitted", "queued"]},
+                    })
+                    source = "order_queue_proxy"
                 row = {
                     "symbol": sym,
                     "close_side": close_side,
                     "working_count": int(count),
                     "near_cap": count >= 12,
                     "over_cap": count >= 15,
+                    "count_source": source,
                 }
                 out["working_orders_by_symbol"].append(row)
                 if row["over_cap"]:
@@ -1120,6 +1207,8 @@ async def diagnose_close_readiness() -> Dict[str, Any]:
     over_cap_count = sum(
         1 for r in out["working_orders_by_symbol"] if r.get("over_cap")
     )
+    phantom_count = len(out["open_positions"].get("phantom_bot_only", []) or []) + \
+                    len(out["open_positions"].get("phantom_ib_only", []) or [])
     if over_cap_count > 0 or not out["pusher"].get("connected"):
         verdict = "red"
         if not out["pusher"].get("connected") and not out["ib_direct"].get("connected"):
@@ -1128,7 +1217,7 @@ async def diagnose_close_readiness() -> Dict[str, Any]:
             expected_path = "pusher_fallback (auto-cancel working orders first)"
         else:
             expected_path = "nuclear (ib_direct)" if out["ib_direct"].get("connected") else "pusher_fallback"
-    elif issues:
+    elif issues or phantom_count > 0:
         verdict = "yellow"
         expected_path = "primary (with auto-chain ready)"
     else:

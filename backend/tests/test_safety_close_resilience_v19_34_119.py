@@ -171,10 +171,11 @@ class TestDiagnoseCloseReadiness:
              patch("services.trading_bot_service.get_trading_bot_service") as mk_bot, \
              patch("motor.motor_asyncio.AsyncIOMotorClient") as mk_mongo:
             ibd = MagicMock()
-            ibd.is_connected.return_value = True
-            ibd.is_authorized_to_trade.return_value = True
-            ibd.status.return_value = {"connected": True}
-            ibd.get_positions = AsyncMock(return_value=[])
+            # ib_direct DISCONNECTED → forces the Mongo-proxy fallback
+            # where count_documents is the authoritative source.
+            ibd.is_connected.return_value = False
+            ibd.is_authorized_to_trade.return_value = False
+            ibd.status.return_value = {"connected": False}
             mk_ibd.return_value = ibd
             mk_bot.return_value = SimpleNamespace(_open_trades={"t1": trade})
             # 18 working orders for ONON — over the 15-cap
@@ -182,7 +183,43 @@ class TestDiagnoseCloseReadiness:
             out = await safety_router.diagnose_close_readiness()
             assert out["verdict"] == "red", out
             assert any(r["over_cap"] for r in out["working_orders_by_symbol"])
+            # When ib_direct is down, fallback path is pusher_fallback.
             assert "pusher_fallback" in out["expected_path"]
+
+    @pytest.mark.asyncio
+    async def test_verdict_yellow_when_phantom_positions_present(self):
+        """v19.34.120 — bot._open_trades has symbols IB does NOT.
+        These are operator-flattened-in-TWS phantoms; verdict yellow
+        because closes will still work but reconcile is recommended."""
+        from routers import safety_router
+        phantom_trade = _mk_trade("t-phantom", symbol="AAPL", direction="long")
+        real_trade = _mk_trade("t-real", symbol="EGO", direction="long")
+        with patch("routers.ib.is_pusher_connected", return_value=True), \
+             patch("routers.ib._pushed_ib_data", new={}, create=True), \
+             patch("services.ib_direct_service.get_ib_direct_service") as mk_ibd, \
+             patch("services.trading_bot_service.get_trading_bot_service") as mk_bot, \
+             patch("motor.motor_asyncio.AsyncIOMotorClient") as mk_mongo:
+            ibd = MagicMock()
+            ibd.is_connected.return_value = True
+            ibd.is_authorized_to_trade.return_value = True
+            ibd.status.return_value = {"connected": True}
+            # IB has only EGO. AAPL is phantom (bot thinks open, IB flat).
+            ibd.get_positions = AsyncMock(return_value=[
+                {"symbol": "EGO", "position": 100.0}
+            ])
+            # No working orders at IB (post-flatten).
+            ibd._ib.trades.return_value = []
+            ibd._ib.reqAllOpenOrders = MagicMock()
+            mk_ibd.return_value = ibd
+            mk_bot.return_value = SimpleNamespace(_open_trades={
+                "t-phantom": phantom_trade, "t-real": real_trade,
+            })
+            mk_mongo.return_value.__getitem__.return_value.order_queue.count_documents = AsyncMock(return_value=0)
+            out = await safety_router.diagnose_close_readiness()
+            assert out["verdict"] == "yellow", out
+            assert "AAPL" in out["open_positions"]["phantom_bot_only"]
+            assert "EGO" not in out["open_positions"]["phantom_bot_only"]
+            assert any("phantom" in i.lower() for i in out["issues"])
 
     @pytest.mark.asyncio
     async def test_verdict_green_when_all_healthy(self):
