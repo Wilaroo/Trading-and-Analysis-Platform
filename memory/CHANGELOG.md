@@ -2,6 +2,98 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.109) — IB_PENDING status breaks the duplicate-block bounce loop
+
+### The bug v108 didn't fully kill
+After v108 stopped misclassifying `PendingSubmit` as `rejected`, the
+operator still saw a constant trickle of `"Duplicate submission blocked"`
+rejections — about 5–10 per minute. Investigation mapped the loop:
+
+```
+1. Pusher submits abc123 → IB returns PendingSubmit
+2. Pusher waits 30s timeout
+3. v108 reports back to Spark: status="pending", ib_order_id=119411   ← v108 fix
+4. update_order_status writes status="pending" to Mongo
+5. Mongo row is BACK in the pending pool                              ← BUG
+6. Next pusher poll → fetches abc123 again from pending pool
+7. Pusher's _recently_submitted cache hits → reports "rejected:
+   Duplicate submission blocked (previous ib_order_id=119411, age=34s)"
+8. update_order_status writes status="rejected" → reconciler sees
+   adoption failed → respawns adoption → loop
+```
+
+The literal string `"pending"` from the pusher collides with the
+queue's PENDING enum value — once an order has been *submitted to IB*
+and is awaiting a terminal state, it's NOT the same as a not-yet-touched
+PENDING order and must NOT be re-polled.
+
+### The fix
+
+**`services/order_queue_service.py`**
+- New `OrderStatus.IB_PENDING = "ib_pending"` enum value, semantically
+  "submitted to IB, awaiting terminal state".
+- `update_order_status` now translates `pending + ib_order_id is not None`
+  → `IB_PENDING`. A `pending` ack WITHOUT an `ib_order_id` (pusher
+  aborted before reaching IB) is preserved as plain `pending` — that's
+  a real signal we don't want to mask.
+- Stamps `ib_pending_at` timestamp on transition for the watchdog.
+- `get_pending_orders` now sweeps stale `IB_PENDING > 10 min` →
+  rejected with `"Auto-expired: IB never resolved terminal state
+  within 10 minutes"`. Operator sees these in the queue status; they
+  reflect genuine cases where IB Gateway lost the order.
+- `get_queue_status` surfaces `ib_pending` as a distinct count so the
+  operator can distinguish "10 orders working through IB normally"
+  from "10 orders truly stuck".
+- Backward-compat: signature now takes `**_extra_v107_fields` so the
+  v107 bracket-ACK kwargs (stop_order_id / target_order_id /
+  target_order_ids / oca_group) won't crash if a caller forwards
+  them. (Currently complete_order passes them as explicit kwargs, but
+  the **kwargs is forward-compat insurance.)
+
+### Regression suite — 13 / 13 PASS
+
+**`tests/test_v19_34_109_ib_pending_bounce_fix.py`**
+- `TestIbPendingTranslation` (5 cases) — pending+ib_id → IB_PENDING;
+  pending alone stays pending; filled/rejected/cancelled pass through.
+- `TestQueueStatusSurfacesIbPending` (2 cases) — ib_pending is its
+  own field in the summary, defaults to 0.
+- `TestIbPendingAutoExpiry` (1 case) — get_pending_orders sweeps stale
+  IB_PENDING rows with the correct filter & terminal status.
+- `TestEnumIntegrity` (3 cases) — IB_PENDING enum value sanity.
+- `TestBackwardCompatibility` (2 cases) — v107 ACK kwargs accepted;
+  pre-v109 call sites still work.
+
+Tests mock the Mongo collection (per the existing
+`test_queue_bracket_passthrough.py` pattern) — run anywhere, no
+infrastructure required.
+
+### Cumulative incident-chain regression
+**108/108 PASS** across v100 → v109:
+- v100 (order_policy_registry) — 24 tests
+- v102 (executor policy wiring) — 8 tests
+- v103 (OCA TP ladder) — 10 tests
+- v104 (stop trail anchor) — 15 tests
+- v106 (simulate-bracket endpoint) — 7 tests
+- v107 (bracket ACK signature) — 4 tests
+- v107b (cancel-adopt-oca-storm) — 8 tests
+- v108 (PendingSubmit fix) — 7 tests
+- v109 (IB_PENDING) — 13 tests
+- queue / cancellation queue regressions — 12 tests
+
+### Operator action
+- **No pusher redeploy needed.** v109 is 100% Spark-side. The fix
+  takes effect as soon as the Spark backend reloads (hot-reload is on).
+- Expect the rejection counter to stop climbing for `"Duplicate
+  submission blocked"` cases — those orders will now sit in
+  `IB_PENDING` state until IB resolves them naturally (or the 10-min
+  watchdog auto-rejects them).
+- Surface `ib_pending` count alongside `pending` in the V5 UI on a
+  future pass (small follow-up — `OrderPipelineTile` could split the
+  "ORDER" count into "queued + working-at-IB").
+
+---
+
+
 ## 2026-02-12 (v19.34.107b) — Surgical ADOPT-OCA storm flush endpoint
 
 ### Why

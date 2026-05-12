@@ -18,6 +18,18 @@ class OrderStatus(str, Enum):
     PENDING = "pending"
     CLAIMED = "claimed"      # Claimed by pusher but not yet executing
     EXECUTING = "executing"
+    # v19.34.109 (Feb 2026) — "Submitted to IB, awaiting terminal state".
+    # The pusher's 30s timeout in _execute_queued_order reports `pending`
+    # when IB hasn't yet transitioned the order out of PendingSubmit /
+    # PreSubmitted / Submitted. Pre-v109 we wrote that back as `pending`
+    # (same enum value), which dumped the order BACK into the pending
+    # pool returned by get_pending_orders(). Next pusher poll hit its
+    # idempotency cache → "Duplicate submission blocked → rejected" →
+    # reconciler saw rejection → respawned a fresh adoption → loop.
+    # v109 splits this state out so the row stays out of the pending
+    # pool while we wait for IB to settle. Cleared by a real terminal
+    # ACK (filled/cancelled/rejected) or the 10-min auto-expiry.
+    IB_PENDING = "ib_pending"
     FILLED = "filled"
     PARTIALLY_FILLED = "partial"
     REJECTED = "rejected"
@@ -284,6 +296,35 @@ class OrderQueueService:
         except Exception as e:
             logger.debug(f"Stale order cleanup error: {e}")
 
+        # v19.34.109 — Auto-expire stale IB_PENDING orders (still in
+        # PendingSubmit/PreSubmitted at IB after 10 min). At that point
+        # something is genuinely wrong — IB never resolved the order.
+        # Mark as rejected so the reconciler can move on, and tag the
+        # error so the operator can investigate.
+        try:
+            from datetime import timedelta
+            ib_pending_cutoff = (
+                datetime.now(timezone.utc) - timedelta(minutes=10)
+            ).isoformat()
+            ib_expired = self._collection.update_many(
+                {
+                    "status": OrderStatus.IB_PENDING.value,
+                    "ib_pending_at": {"$lt": ib_pending_cutoff},
+                },
+                {"$set": {
+                    "status": OrderStatus.REJECTED.value,
+                    "expired_at": datetime.now(timezone.utc).isoformat(),
+                    "error": "Auto-expired: IB never resolved terminal state within 10 minutes",
+                }},
+            )
+            if ib_expired.modified_count > 0:
+                logger.warning(
+                    f"Auto-expired {ib_expired.modified_count} stuck IB_PENDING orders "
+                    f"(IB never sent a terminal state in 10 min)"
+                )
+        except Exception as e:
+            logger.debug(f"IB_PENDING cleanup error: {e}")
+
         orders = list(self._collection.find(
             {"status": {"$in": [OrderStatus.PENDING.value, OrderStatus.CLAIMED.value]}},
             {"_id": 0}
@@ -319,16 +360,38 @@ class OrderQueueService:
     
     def update_order_status(self, order_id: str, status: str, 
                            fill_price: float = None, filled_qty: int = None,
-                           ib_order_id: int = None, error: str = None) -> bool:
-        """Update order status after execution attempt"""
+                           ib_order_id: int = None, error: str = None,
+                           # v19.34.107 bracket-ACK kwargs (pass-through);
+                           # captured here so the Pydantic v107 fields
+                           # don't go to /dev/null when complete_order
+                           # forwards everything via **kwargs in future.
+                           **_extra_v107_fields) -> bool:
+        """Update order status after execution attempt.
+
+        v19.34.109 — When the pusher reports `pending` with an
+        `ib_order_id`, the order has been SUBMITTED to IB but hasn't
+        reached a terminal state yet. Persist as IB_PENDING so the row
+        stays OUT of get_pending_orders()'s polling pool. Without this
+        translation, the row bounces back to PENDING and the next
+        poll hits the pusher's _recently_submitted idempotency cache,
+        producing a "Duplicate submission blocked → rejected" cascade.
+        """
         if not self._initialized:
             self.initialize()
-            
+
+        # v19.34.109 — translate ambiguous "pending" → IB_PENDING when
+        # the pusher actually placed the order at IB. A literal
+        # `status == "pending"` with NO ib_order_id means the pusher
+        # rejected/aborted before reaching IB, which is a legitimate
+        # terminal failure we should NOT mask.
+        if status == OrderStatus.PENDING.value and ib_order_id is not None:
+            status = OrderStatus.IB_PENDING.value
+
         update = {
             "status": status,
             "executed_at": datetime.now(timezone.utc).isoformat()
         }
-        
+
         if fill_price is not None:
             update["fill_price"] = fill_price
         if filled_qty is not None:
@@ -337,12 +400,17 @@ class OrderQueueService:
             update["ib_order_id"] = ib_order_id
         if error is not None:
             update["error"] = error
-            
+        # v19.34.109 — Stamp the time we transitioned into IB_PENDING so
+        # the auto-expiry watchdog in get_pending_orders() can find
+        # stuck rows ≥10 min old and force-close them.
+        if status == OrderStatus.IB_PENDING.value:
+            update["ib_pending_at"] = datetime.now(timezone.utc).isoformat()
+
         result = self._collection.update_one(
             {"order_id": order_id},
             {"$set": update}
         )
-        
+
         if result.modified_count > 0:
             logger.info(f"Order {order_id} status updated to {status}")
             return True
@@ -388,6 +456,10 @@ class OrderQueueService:
         
         return {
             "pending": status_counts.get("pending", 0) + status_counts.get("claimed", 0),
+            # v19.34.109 — "Awaiting IB terminal state". Operator-visible
+            # so they can see how many adoptions are working through IB
+            # right now vs how many are truly stuck.
+            "ib_pending": status_counts.get("ib_pending", 0),
             "executing": status_counts.get("executing", 0),
             "filled": status_counts.get("filled", 0),
             "rejected": status_counts.get("rejected", 0),
