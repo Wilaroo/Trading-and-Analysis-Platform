@@ -24,6 +24,9 @@ import TradeTypeChip from './TradeTypeChip';
 // swing/investment/position) so the operator sees what kind of trade
 // every open position is at a glance.
 import TradeStyleChip from './TradeStyleChip';
+// v19.34.113 — Rolling 30-day grade for the position's setup_type.
+// Read-only signal; does NOT block exits. Hover for full stat card.
+import SetupGradeChip from './SetupGradeChip';
 // v19.34.2 (2026-05-04) — quote-freshness chip + legend popover.
 import QuoteFreshnessChip from './QuoteFreshnessChip';
 import OpenPositionsLegend from './OpenPositionsLegend';
@@ -214,6 +217,15 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
+          {/* v19.34.113 — rolling 30-day grade for this setup_type */}
+          {position.setup_type && (
+            <SetupGradeChip
+              setupType={position.setup_type}
+              compact={true}
+              size="xs"
+              testIdSuffix={`open-pos-${position.symbol}`}
+            />
+          )}
           {/* 2026-05-04 — ORPHAN/PARTIAL/STALE badge moved inline to the
               left cluster so it stops overlapping the right-aligned PnL.
               Multi-trade count rendered next to it. */}

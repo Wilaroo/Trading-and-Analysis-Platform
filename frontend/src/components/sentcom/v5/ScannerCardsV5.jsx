@@ -19,6 +19,8 @@ import PreMarketModeBanner from './PreMarketModeBanner';
 // scanner card so the operator sees the setup type + style + horizon at
 // a glance for setups, alerts, open positions, and closed trades.
 import TradeStyleChip from './TradeStyleChip';
+// v19.34.113 — Rolling 30-day grade for the card's setup_type.
+import SetupGradeChip from './SetupGradeChip';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
 const STAGE_CLASS = {
@@ -359,6 +361,15 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
               }}
               compact={true}
               showSetup={true}
+              size="xs"
+              testIdSuffix={`scanner-${card.symbol}`}
+            />
+          )}
+          {/* v19.34.113 — rolling 30-day grade for this scanner card's setup */}
+          {card.setup_type && (
+            <SetupGradeChip
+              setupType={card.setup_type}
+              compact={true}
               size="xs"
               testIdSuffix={`scanner-${card.symbol}`}
             />

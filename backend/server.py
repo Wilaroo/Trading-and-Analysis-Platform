@@ -1484,6 +1484,11 @@ app.include_router(config_router)
 app.include_router(market_regime_router)
 app.include_router(sentcom_router)
 app.include_router(sentcom_labels_router)  # Wave 4 (#8)
+# v19.34.113 — Per-setup_type performance scoreboard (EOD grading +
+# rolling 30-day cards). Closes the A/B feedback loop on the v112
+# scalp ATR multiplier choices and tracks every setup over time.
+from routers.setup_grades import router as setup_grades_router
+app.include_router(setup_grades_router)
 app.include_router(sentcom_chart_router)
 
 # Phase 1 — Live Data Architecture: pusher RPC + live-bar cache visibility

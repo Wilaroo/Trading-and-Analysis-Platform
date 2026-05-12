@@ -2,6 +2,124 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.113) — Setup Grading Subsystem
+
+The 30-day rolling R-multiple tracker + EOD self-grading shipped as
+one coherent subsystem. Closes the A/B feedback loop on every setup
+choice the bot makes — most pressingly the v112 scalp ATR multiplier
+choices ("0.4-0.5×" was operator intuition; v113 makes the empirical
+answer visible per-setup-per-day going forward).
+
+### Architecture
+
+**Service** (`services/setup_grading_service.py`):
+- Walks `bot_trades` where `status="closed"` and `closed_at` in the
+  US/Eastern trading-day window. Groups by `setup_type`.
+- Per-setup daily stats: `trades_count`, `wins`, `losses`,
+  `breakevens`, `win_rate`, `avg_r`, `median_r`, `total_r`,
+  `worst_r`, `best_r`, `avg_mfe_r`, `avg_mae_r`, `avg_hold_seconds`,
+  `total_realized_pnl`.
+- Upserts into `setup_grade_records` keyed on `(setup_type, trading_date)`.
+- Rolling rollup uses **sample-weighted** averages (a 1-trade day
+  doesn't count equally with a 20-trade day — a critical correctness
+  detail tested explicitly).
+- `r_multiple` derives from `realized_pnl / risk_amount` when not
+  pre-stamped on the trade row (backward-compat with pre-v19.34.x
+  bot_trades).
+
+**Grade formula** (intentionally readable, not Sharpe):
+
+| Grade | Criteria |
+|---|---|
+| A+ | win_rate ≥ 60% AND avg_r ≥ 1.0 |
+| A  | win_rate ≥ 55% AND avg_r ≥ 0.7 |
+| B+ | win_rate ≥ 50% AND avg_r ≥ 0.5 |
+| B  | win_rate ≥ 45% AND avg_r ≥ 0.3 |
+| C  | avg_r ≥ 0.0 (breakeven — still earning) |
+| F  | avg_r < 0.0 (losing money — review or kill) |
+| INSUFFICIENT_DATA | < 5 trades in window |
+
+`MIN_TRADES_FOR_GRADE = 5`. Below that, no letter grade — rare setups
+get a runway before the operator passes judgement.
+
+**Scheduler hook** (`services/trading_bot_service.py`):
+- New `_check_eod_grading()` method fires once per trading day at
+  16:10 ET (15 min after the 15:55 ET auto-close, so every scalp/
+  intraday close has had time to flush through `bot_trades`).
+- Idempotent — `_eod_grading_executed_today_key` stamp prevents
+  re-runs inside the same day. A crash before stamping replays
+  cleanly because the upsert is keyed on (setup_type, trading_date).
+- Never crashes the scan loop — wrapped in try/except with
+  operator-recoverable error log. Manual recompute via the API.
+
+**Router** (`routers/setup_grades.py`, mounted at `/api/setup-grades`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/api/setup-grades?days=30` | All rolling cards |
+| `GET`  | `/api/setup-grades/{setup_type}?days=30` | Single rolling card |
+| `POST` | `/api/setup-grades/compute?trading_date=YYYY-MM-DD` | Manual recompute |
+| `GET`  | `/api/setup-grades/history/{setup_type}?days=30` | Raw daily records (sparkline data) |
+
+**V5 surface** (`frontend/.../v5/SetupGradeChip.jsx`):
+- Compact grade chip rendered next to `TradeStyleChip` on:
+  - `OpenPositionsV5.jsx` (every open position row)
+  - `ScannerCardsV5.jsx` (every scanner card)
+- Green-to-amber gradient for A+→C, rose for F, muted slate for
+  INSUFFICIENT_DATA.
+- Hover tooltip: `nine_ema_scalp · last 30d · 42 trades · 64% WR ·
+  avg +0.8R · +$1,240`.
+- Session-scoped cache + single-fetch fanout: every chip on a list
+  view shares ONE `/api/setup-grades` request, not N.
+- **Observe-only.** The chip does NOT block alerts/exits. A future
+  PR can wire `get_grade_warning(setup_type)` into the alert
+  pipeline as a hard filter once the formula is sanity-checked
+  against a week of live data.
+
+### Regression — 35 / 35 new + 194 / 194 cumulative PASS
+
+`tests/test_v19_34_113_setup_grading.py`:
+- `TestComputeLetterGrade` (9) — every band edge locked, ordering
+  property, insufficient-data threshold, negative-avg-r → always F
+- `TestComputeDailyStats` (8) — basic aggregation, breakeven trades
+  counted separately, < min sample → INSUFFICIENT_DATA, empty
+  trades returns None, r_multiple derivation from pnl/risk, broken
+  rows skipped, MFE/MAE aggregation, hold-seconds from
+  executed_at/closed_at
+- `TestRollingRollup` (6) — basic rollup, **sample-weighted MFE/MAE
+  (not mean-of-means)**, None on empty/zero trades, last_trade_date
+  is max, worst/best across window
+- `TestComputeEodGrades` (3) — summary per setup, one upsert per
+  setup_type, query filters to closed trades only
+- `TestGradeWarning` (4) — F returns 'F', A+/A/B+/B/C return None,
+  no-data returns None, lookup exception returns None (alert
+  pipeline safety)
+- `TestSchedulerWiring` (5) — EOD grading state init, method
+  exists, called from scan loop, uses setup_grading_service,
+  router mounted in server
+
+### Operator notes
+- **No DGX restart** — backend hot-reloads. Frontend needs
+  `cd frontend && yarn build` (already run).
+- **First week**: every setup will read INSUFFICIENT_DATA until 5+
+  trades close per setup_type. This is correct — we want to refuse
+  judgement until we have a real sample. The chip falls back to a
+  muted "n/a" pill so the layout stays clean.
+- **Manual backfill**: to grade historical days, hit
+  `POST /api/setup-grades/compute?trading_date=2026-02-10` once per
+  date. Idempotent. A future PR can ship a bulk-backfill endpoint
+  if needed.
+- **Auto-tune is INTENTIONALLY out of scope.** v113 is observe + warn
+  only. The grade-warning API exists (`get_grade_warning`) and can
+  be wired into the alert pipeline in a later PR after a week of
+  data confirms the formula doesn't penalize legitimately rare
+  setups.
+- **Validates v112**: scalp setups now have a measurable scorecard.
+  If `nine_ema_scalp` consistently grades F at 0.4×ATR stops, the
+  v112 multiplier was wrong and we widen to 0.5×. The data answers
+  the question.
+
+
 ## 2026-02-12 (v19.34.112) — Scalp SL/TP calculation fix
 
 The P3 investigation under v110 surfaced a P0-grade SL/TP gap nobody

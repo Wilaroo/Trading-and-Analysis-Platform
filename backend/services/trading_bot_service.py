@@ -921,6 +921,15 @@ class TradingBotService:
         self._eod_close_hour = 15  # 3 PM ET
         self._eod_close_minute = 55  # 3:55 PM ET
         self._eod_close_executed_today = False
+        # ── v19.34.113 — EOD setup grading ──────────────────────────
+        # Fires 15 min after the EOD close (16:10 ET) so every scalp/
+        # intraday close has had time to flush through bot_trades. The
+        # grading service is read-mostly; this tick just upserts the
+        # per-(setup_type, trading_date) snapshot rows. Idempotent — a
+        # crash-and-recover during the grading window re-runs cleanly.
+        self._eod_grading_hour = 16
+        self._eod_grading_minute = 10
+        self._eod_grading_executed_today_key: Optional[str] = None  # YYYY-MM-DD of last successful run
         self._last_eod_check_date = None
         
         # Services (injected)
@@ -3153,6 +3162,16 @@ class TradingBotService:
                 except asyncio.TimeoutError:
                     print(f"⚠️ [TradingBot] _check_eod_close exceeded {_EOD_WALL_S}s budget — skipping this cycle")
 
+                # v19.34.113 — EOD setup grading. Fires once per trading
+                # day at 16:10 ET. Read-mostly; the only Mongo writes
+                # are upserts into `setup_grade_records`. Budgeted at
+                # the same wall as EOD close — generous since a single
+                # day's grading walks a few hundred bot_trades max.
+                try:
+                    await asyncio.wait_for(self._check_eod_grading(), timeout=_EOD_WALL_S)
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [TradingBot] _check_eod_grading exceeded {_EOD_WALL_S}s budget — skipping this cycle")
+
             except Exception as e:
                 print(f"❌ [TradingBot] Scan loop error: {e}")
 
@@ -3741,6 +3760,44 @@ class TradingBotService:
     async def _check_eod_close(self):
         """EOD auto-close — delegated to PositionManager module."""
         await self._position_manager.check_eod_close(self)
+
+    async def _check_eod_grading(self):
+        """v19.34.113 — Once-per-day setup grading EOD tick.
+
+        Fires at 16:10 ET (after EOD auto-close at 15:55 ET + a 15min
+        flush window). Idempotent: stamps the trading_date key after
+        a successful run, skips on subsequent calls inside the same
+        day. A crash before stamping replays cleanly because the
+        grading service itself upserts (no duplicate rows).
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            et = ZoneInfo("US/Eastern")
+            now_et = datetime.now(et)
+            today_key = now_et.strftime("%Y-%m-%d")
+
+            # Already graded today.
+            if self._eod_grading_executed_today_key == today_key:
+                return
+
+            # Only fire at/after 16:10 ET on weekdays.
+            if now_et.weekday() >= 5:  # Sat/Sun
+                return
+            if (now_et.hour, now_et.minute) < (self._eod_grading_hour, self._eod_grading_minute):
+                return
+
+            from services.setup_grading_service import get_setup_grading_service
+            svc = get_setup_grading_service()
+            result = await asyncio.to_thread(svc.compute_eod_grades, today_key)
+            self._eod_grading_executed_today_key = today_key
+            print(
+                f"📊 [v19.34.113 EOD-GRADE] {today_key} — graded "
+                f"{result.get('setups_graded', 0)} setup_type(s)"
+            )
+        except Exception as e:
+            # Never let a grading failure crash the scan loop. Operator
+            # can recompute manually via POST /api/setup-grades/compute.
+            print(f"⚠️ [v19.34.113 EOD-GRADE] error: {e}")
 
     async def _update_trailing_stop(self, trade: BotTrade):
         """Delegates to StopManager module."""

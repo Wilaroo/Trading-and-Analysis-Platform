@@ -291,3 +291,27 @@ periods. v112 ships:
 - `target_snap` skipped for scalps (avoids widening tight targets to S/R clusters)
 
 Existing positions are NOT migrated — only new alerts get the v112 treatment.
+
+## v19.34.113 — Setup Grading Subsystem (2026-02-12)
+
+Per-setup_type performance scoreboard. Daily EOD tick (16:10 ET) walks
+closed `bot_trades` and upserts per-(setup_type, date) snapshots into
+`setup_grade_records`. Rolling 30-day grade card surfaces via the
+V5 `SetupGradeChip` next to `TradeStyleChip` on positions + scanner
+cards.
+
+**Grade ladder**: A+ / A / B+ / B / C / F / INSUFFICIENT_DATA (< 5
+trades). Formula gates on win_rate + avg_r — operator-readable, not
+Sharpe. Sample-weighted rollup math (1-trade days don't count equally
+with 20-trade days).
+
+**API**: GET `/api/setup-grades`, GET `/api/setup-grades/{setup_type}`,
+POST `/api/setup-grades/compute`, GET `/api/setup-grades/history/{setup_type}`.
+
+**Observe-only**: chip and `get_grade_warning` API exist but do NOT
+block alerts. A future PR can wire as a hard filter after a week of
+live data validates the formula.
+
+**Validates v112**: scalp ATR multiplier choices now have a measurable
+scorecard. If `nine_ema_scalp` grades F at 0.4× consistently, widen
+empirically rather than guessing.
