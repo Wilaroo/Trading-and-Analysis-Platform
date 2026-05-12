@@ -3593,6 +3593,175 @@ def simulate_bracket(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ─────────────────────────── v19.34.116 — retune-stop ───────────────────────────
+
+@router.post("/retune-stop")
+async def retune_stop(payload: Dict[str, Any] = Body(...)):
+    """v19.34.116 — Retune an open trade's stop loss using v112's
+    style-aware ATR multipliers. Surgical fix for legacy positions
+    that opened BEFORE v112 (typically scalps running with 1.5–2.0×
+    ATR stops instead of the corrected 0.4–0.5×).
+
+    Request body:
+      {
+        "trade_id":   "tr-9a1",          // required, must be in _open_trades
+        "policy":     "scalp_v112_default",  // optional. Reserved for
+                                              // future ATR-multiplier
+                                              // overrides; currently
+                                              // only the default policy
+                                              // is supported.
+        "dry_run":    false               // optional. If true, returns
+                                              // the proposed new stop
+                                              // without mutating the
+                                              // trade or queueing orders.
+      }
+
+    Flow:
+      1. Validates trade exists, has trade_style + setup_type + entry
+         price, and is in an open state.
+      2. Pulls ATR from the same source the executor uses
+         (`bot._latest_atr_5m` cache, fallback to scanner cache).
+      3. Recomputes stop via
+         `OpportunityEvaluator.calculate_atr_based_stop(...)` — same
+         function v112 uses for fresh entries, so scalps land at
+         0.4–0.5×ATR.
+      4. Mutates `trade.stop_price` in-memory and re-fires
+         `attach_oca_stop_target(trade)` to replace the existing OCA
+         leg at IB. The v111 cooldown + queue-level trade_id
+         idempotency both apply — so a double-click on the Tighten
+         button doesn't spawn duplicate orders.
+
+    Response:
+      Success → {"success": true, "trade_id", "old_stop", "new_stop",
+                 "atr", "multiplier_used", "attach_result"}
+      Dry run → adds "dry_run": true and skips the attach call
+      Failure → {"success": false, "error": "..."}
+    """
+    trade_id = (payload.get("trade_id") or "").strip()
+    if not trade_id:
+        raise HTTPException(status_code=400, detail="trade_id required")
+    dry_run = bool(payload.get("dry_run", False))
+
+    if _trading_bot is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+
+    open_trades = getattr(_trading_bot, "_open_trades", None) or {}
+    # _open_trades is keyed by symbol — walk for the trade_id match.
+    trade = None
+    for _sym, _t in open_trades.items():
+        if getattr(_t, "id", None) == trade_id:
+            trade = _t
+            break
+    if trade is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"trade_id {trade_id!r} not found in open trades",
+        )
+
+    setup_type = (getattr(trade, "setup_type", "") or "").strip()
+    trade_style = (getattr(trade, "trade_style", "") or "").strip()
+    entry_price = float(getattr(trade, "entry_price", 0) or 0)
+    old_stop = float(getattr(trade, "stop_price", 0) or 0)
+    symbol = getattr(trade, "symbol", "?")
+    direction = getattr(trade, "direction", None)
+
+    if not setup_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"trade {trade_id} has no setup_type — cannot pick ATR multiplier",
+        )
+    if entry_price <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"trade {trade_id} has no entry_price — cannot recompute stop",
+        )
+
+    # Pull ATR. Prefer the bot's live 5m ATR cache (same as the
+    # executor); fall back to the scanner's last-known ATR.
+    atr = None
+    try:
+        atr_cache = getattr(_trading_bot, "_latest_atr_5m", {}) or {}
+        atr = atr_cache.get(symbol)
+    except Exception:
+        atr = None
+    if not atr or atr <= 0:
+        try:
+            scanner = getattr(_trading_bot, "_scanner", None)
+            if scanner is not None:
+                # Same field the executor falls back to.
+                latest = getattr(scanner, "_latest_atr", {}) or {}
+                atr = latest.get(symbol)
+        except Exception:
+            atr = None
+    if not atr or atr <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"ATR for {symbol} unavailable from bot or scanner cache — "
+                f"cannot retune stop. Wait for the next 5m bar and retry."
+            ),
+        )
+
+    # Recompute the stop using v112's style-aware multiplier table.
+    from services.opportunity_evaluator import OpportunityEvaluator
+    evaluator = OpportunityEvaluator()
+    new_stop = evaluator.calculate_atr_based_stop(
+        entry_price=entry_price,
+        direction=direction,
+        atr=float(atr),
+        setup_type=setup_type,
+        bot=_trading_bot,
+    )
+    new_stop = round(float(new_stop), 4)
+    multiplier_used = round(abs(entry_price - new_stop) / float(atr), 4) if atr else None
+
+    if dry_run:
+        return {
+            "success": True,
+            "dry_run": True,
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "setup_type": setup_type,
+            "trade_style": trade_style,
+            "old_stop": old_stop,
+            "new_stop": new_stop,
+            "atr": float(atr),
+            "multiplier_used": multiplier_used,
+        }
+
+    # Mutate trade in-memory and re-fire attach_oca_stop_target. v111's
+    # cooldown guard + queue trade_id idempotency keep this safe under
+    # a double-click — second invocation inside 60s returns the
+    # existing in-flight order_id.
+    trade.stop_price = new_stop
+    try:
+        await asyncio.to_thread(_trading_bot._persist_trade, trade)
+    except Exception as _e:
+        # Persist failure isn't fatal; in-memory mutation still drives
+        # the attach. Log + continue.
+        logger.warning(f"[v19.34.116 RETUNE] persist failed for {trade_id}: {_e}")
+
+    attach_result: Dict[str, Any] = {"success": False, "error": "executor missing"}
+    if _trade_executor and hasattr(_trade_executor, "attach_oca_stop_target"):
+        try:
+            attach_result = await _trade_executor.attach_oca_stop_target(trade)
+        except Exception as e:
+            attach_result = {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+    return {
+        "success": bool(attach_result.get("success") or attach_result.get("skipped")),
+        "trade_id": trade_id,
+        "symbol": symbol,
+        "setup_type": setup_type,
+        "trade_style": trade_style,
+        "old_stop": old_stop,
+        "new_stop": new_stop,
+        "atr": float(atr),
+        "multiplier_used": multiplier_used,
+        "attach_result": attach_result,
+    }
+
+
 @router.get("/trades")
 def get_trades_list():
     """

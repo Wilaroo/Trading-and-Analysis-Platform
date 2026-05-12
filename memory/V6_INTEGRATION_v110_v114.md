@@ -189,10 +189,10 @@ POST /api/trading-bot/retune-stop
 Body: { "trade_id": "tr-9a1", "policy": "scalp_v112_default" }
 ```
 
-The endpoint reads `trade.trade_style`, computes the v112-correct
-stop using `OpportunityEvaluator.calculate_atr_based_stop`, and
-moves the existing STP via `attach_oca_stop_target` (which already
-respects the v111 cooldown). Effort: ~30 LOC.
+**STATUS: ✅ SHIPPED v19.34.116** — endpoint live; reuses v112's
+`OpportunityEvaluator.calculate_atr_based_stop` table and v111's
+cooldown guard. Dry-run mode supported via `dry_run: true`. See
+`tests/test_v19_34_116_retune_stop.py` for the contract.
 
 **Header summary chip row** — add wide-stop count:
 
@@ -422,7 +422,7 @@ additionally:
 - Day narrative strip prepends the yesterday-recap row
 - Chat drawer system context includes `yesterday_grade_recap`
 - Ship the `POST /api/trading-bot/retune-stop` endpoint for the
-  Tighten-stop action
+  Tighten-stop action — ✅ SHIPPED v19.34.116
 
 **Phase D (post-V6, follow-up)** — new:
 - Wire `get_grade_warning(setup_type)` into alert pipeline as a

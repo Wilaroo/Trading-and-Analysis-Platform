@@ -336,3 +336,15 @@ Backend: promoted v111 cooldown counter to a 200-entry deque with
 `get_attach_cooldown_skips()` public read — V6 Safety Activity Stream
 aggregator dependency now satisfied. 5 non-negotiable invariants
 codified for V6 implementation. 220/220 cumulative tests pass.
+
+## v19.34.116 — POST /api/trading-bot/retune-stop (2026-02-12)
+
+The "Tighten stop →" backend for V6 Position Health Console's
+STOP-WIDE-FOR-STYLE row state. Recomputes the stop via v112's
+OpportunityEvaluator table and re-fires attach_oca_stop_target under
+v111 cooldown protection. Supports dry-run via `dry_run: true`.
+Lets the operator surgically retune legacy v111-era scalp positions
+WITHOUT waiting for V6 to ship. 18/18 new tests, 238/238 cumulative.
+
+V6 Integration index marked the only remaining Phase C backend
+dependency SHIPPED.

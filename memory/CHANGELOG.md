@@ -2,6 +2,111 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-02-12 (v19.34.116) — POST /api/trading-bot/retune-stop
+
+The only remaining backend dependency for V6 Phase C's
+`Tighten stop →` action on STOP-WIDE-FOR-STYLE rows. Ships now so
+the operator can retune the legacy scalp positions running with
+v111-era 1.5–2.0×ATR stops WITHOUT waiting for V6 to land.
+
+### Backend
+
+**`routers/trading_bot.py`** — new endpoint:
+
+```
+POST /api/trading-bot/retune-stop
+Body: {
+  "trade_id":  "tr-9a1",   // required, must be in _open_trades
+  "policy":    "scalp_v112_default",  // optional (reserved)
+  "dry_run":   false        // optional — return proposal w/o mutating
+}
+```
+
+Flow:
+1. Validates: trade exists, has `setup_type` + `entry_price`, ATR
+   resolvable from `bot._latest_atr_5m` or scanner cache.
+2. Recomputes new stop via
+   `OpportunityEvaluator.calculate_atr_based_stop(...)` — same
+   function v112 uses for fresh entries, so scalps land at 0.4–0.5×ATR
+   and respect the v112 min-clamp bypass.
+3. **Dry-run path**: returns `{old_stop, new_stop, atr, multiplier_used}`
+   without touching trade state or the queue.
+4. **Live path**: mutates `trade.stop_price` in-memory + persists
+   (best-effort) + calls `_trade_executor.attach_oca_stop_target(trade)`.
+   v111 cooldown + queue-level trade_id idempotency both apply — so
+   a double-click on the V6 Tighten button can't spawn duplicates.
+5. Cooldown skip (v111) surfaces as `success=true` with
+   `attach_result.skipped = "bracket_attach_cooldown"` — operator's
+   intent honored; cooldown is doing its job.
+
+Response shape (success):
+
+```json
+{
+  "success": true,
+  "trade_id": "tr-9a1",
+  "symbol": "SBUX",
+  "setup_type": "nine_ema_scalp",
+  "trade_style": "scalp",
+  "old_stop": 97.0,
+  "new_stop": 99.2,
+  "atr": 2.0,
+  "multiplier_used": 0.4,
+  "attach_result": { "success": true, "stop_order_id": "...", ... }
+}
+```
+
+Surfacing `old_stop → new_stop` in the response lets the V6 panel
+render the diff (`97.00 → 99.20`) without a second fetch.
+
+### V6 integration
+
+`/app/memory/V6_INTEGRATION_v110_v114.md §v112` marked **SHIPPED**.
+V6 Phase C `Tighten stop →` action now has a real backend it can
+POST to — no more "NOT YET BUILT" caveat in the spec.
+
+### Regression — 18 / 18 new + 238 / 238 cumulative PASS
+
+`tests/test_v19_34_116_retune_stop.py`:
+- `TestRetuneStopValidation` (6) — missing/blank trade_id → 400,
+  unknown trade_id → 404, no setup_type → 400, no entry_price → 400,
+  no ATR → 409
+- `TestRetuneStopMath` (5) — `nine_ema_scalp` → 0.4×, `scalp` →
+  0.5×, `breakout` → 1.5× (legacy table), short stop above entry,
+  ATR fallback to scanner cache
+- `TestRetuneStopSideEffects` (5) — dry-run no-mutation,
+  live mutation + single attach call, persist failure doesn't block
+  attach, executor exception surfaces in `attach_result`, v111
+  cooldown skip treated as success
+- `TestRetuneStopRoutingContract` (2) — endpoint registered with
+  POST, v112 evaluator import + call present (source-locked so a
+  refactor can't bypass v112's table)
+
+### Operator notes
+- **No DGX restart** — backend hot-reloads.
+- **Live smoke-test the endpoint NOW**:
+  ```bash
+  # 1. List open trades for a `trade_id`:
+  curl http://localhost:8001/api/trading-bot/trades | jq '.open[].id'
+
+  # 2. Dry-run on a legacy scalp to preview the new stop:
+  curl -X POST http://localhost:8001/api/trading-bot/retune-stop \
+    -H "Content-Type: application/json" \
+    -d '{"trade_id":"<id>", "dry_run": true}'
+  # Returns: {old_stop, new_stop, atr, multiplier_used}
+
+  # 3. If the preview looks right, fire live:
+  curl -X POST http://localhost:8001/api/trading-bot/retune-stop \
+    -H "Content-Type: application/json" \
+    -d '{"trade_id":"<id>"}'
+  ```
+- **Idempotent under repeat**: hitting the same trade_id twice
+  inside 60s the second call returns the in-flight order_id from
+  the v111 cooldown — no double-stop at IB.
+- **NOT for closing positions** — only adjusts the stop. Cancel +
+  reopen flows stay on the existing exit endpoints.
+
+
 ## 2026-02-12 (v19.34.115) — V6 integration prep + locked contracts
 
 Recent v110–v114 changes (pipeline split, queue idempotency,
