@@ -65,6 +65,11 @@ class TradeSubmitRequest(BaseModel):
     target_prices: Optional[List[float]] = None
     half_size: bool = False
     source: str = "manual"
+    # v19.34.98 — explicit trade_style override. When omitted, the bot infers
+    # the style from setup_type via SETUP_REGISTRY (e.g., stage_2_breakout →
+    # "position"). Style drives the portfolio-level exposure caps applied
+    # below: 30% for position-only, 55% for combined long-horizon.
+    trade_style: Optional[str] = None
 
 
 class StrategyConfigUpdate(BaseModel):
@@ -3337,6 +3342,80 @@ async def submit_trade(request: TradeSubmitRequest):
         # Apply half size if requested
         if request.half_size:
             max_shares = max(1, max_shares // 2)
+
+        # v19.34.98 — resolve trade_style and apply portfolio-level
+        # exposure caps (30% position-style + 55% long-horizon combined).
+        # Caps already enforce inside position_sizer.calculate_size for the
+        # `/calculate` endpoint; here we replicate the same clamp at the
+        # bot's auto-order entry point so live bot trades respect them too.
+        cap_warnings: List[str] = []
+        resolved_style = (request.trade_style or "").strip().lower()
+        if not resolved_style:
+            try:
+                from services.smb_integration import SETUP_REGISTRY
+                cfg = SETUP_REGISTRY.get((request.setup_type or "").strip().lower())
+                if cfg is not None and getattr(cfg, "default_style", None) is not None:
+                    resolved_style = cfg.default_style.value
+            except Exception:
+                resolved_style = ""
+
+        if entry_price > 0 and resolved_style:
+            try:
+                from services.portfolio_exposure_guard import (
+                    LONG_HORIZON_STYLES,
+                    POSITION_STYLES,
+                    compute_exposure,
+                )
+                from services.position_sizer import get_position_sizer_service
+
+                # Pull current open-trade snapshot + account value
+                open_trades = list((getattr(_trading_bot, "_open_trades", {}) or {}).values())
+                # Best-effort account value: prefer IB live, fall back to risk_params
+                account_value = 0.0
+                try:
+                    from routers.ib import _pushed_ib_data, _extract_account_value
+                    _acc = (_pushed_ib_data or {}).get("account") if isinstance(_pushed_ib_data, dict) else None
+                    if _acc:
+                        account_value = float(_extract_account_value(_acc, "NetLiquidation", 0) or 0)
+                except Exception:
+                    account_value = 0.0
+                if account_value <= 0:
+                    account_value = float(getattr(risk_params, "account_value", 0) or 0)
+
+                if account_value > 0:
+                    sizer_cfg = get_position_sizer_service().get_config()
+                    pos_cap_pct = sizer_cfg.get("max_position_style_exposure_pct", 30.0)
+                    lh_cap_pct = sizer_cfg.get("max_long_horizon_exposure_pct", 55.0)
+
+                    if resolved_style in POSITION_STYLES:
+                        snap = compute_exposure(
+                            open_trades, account_value, cap_pct=pos_cap_pct,
+                            styles=POSITION_STYLES,
+                        )
+                        cap_shares = int(snap.remaining_value // entry_price) if entry_price > 0 else 0
+                        if max_shares > cap_shares:
+                            cap_warnings.append(
+                                f"Portfolio {pos_cap_pct:.0f}% position-style cap: ${snap.remaining_value:,.0f} remaining → {cap_shares} shares max"
+                            )
+                            max_shares = cap_shares
+
+                    if resolved_style in LONG_HORIZON_STYLES:
+                        snap = compute_exposure(
+                            open_trades, account_value, cap_pct=lh_cap_pct,
+                            styles=LONG_HORIZON_STYLES,
+                        )
+                        cap_shares = int(snap.remaining_value // entry_price) if entry_price > 0 else 0
+                        if max_shares > cap_shares:
+                            cap_warnings.append(
+                                f"Portfolio {lh_cap_pct:.0f}% long-horizon cap: ${snap.remaining_value:,.0f} remaining → {cap_shares} shares max"
+                            )
+                            max_shares = cap_shares
+
+                    if max_shares <= 0 and cap_warnings:
+                        logger.warning(f"v19.34.98 exposure cap blocked entry for {symbol}: {cap_warnings}")
+            except Exception as exc:
+                # Fail open — log only. Per-trade caps still apply.
+                logger.warning(f"v19.34.98 exposure-cap check failed for {symbol}: {exc}")
         
         # Create trade record
         trade_id = f"trade_{uuid.uuid4().hex[:8]}"
@@ -3345,6 +3424,7 @@ async def submit_trade(request: TradeSubmitRequest):
             "symbol": symbol,
             "direction": request.direction,
             "setup_type": request.setup_type,
+            "trade_style": resolved_style,
             "status": "pending",
             "entry_price": entry_price,
             "stop_price": stop_price,
@@ -3353,13 +3433,26 @@ async def submit_trade(request: TradeSubmitRequest):
             "risk_amount": risk_per_share * max_shares if risk_per_share else 0,
             "source": request.source,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "half_size": request.half_size
+            "half_size": request.half_size,
+            "exposure_cap_warnings": cap_warnings,
         }
         
         # Add to pending trades (it's a Dict keyed by trade_id)
         if not hasattr(_trading_bot, '_pending_trades') or _trading_bot._pending_trades is None:
             _trading_bot._pending_trades = {}
         
+        # v19.34.98 — if exposure cap blocked the entry entirely, surface
+        # the rejection cleanly to the caller instead of placing a 0-share
+        # trade. Per-trade rejection (not bot shutdown).
+        if max_shares <= 0:
+            return {
+                "success": False,
+                "trade_id": None,
+                "error": "Portfolio exposure cap exhausted",
+                "exposure_cap_warnings": cap_warnings,
+                "message": f"Trade rejected — {symbol} {request.direction.upper()} blocked by exposure cap. " + " | ".join(cap_warnings),
+            }
+
         # Create a BotTrade object if possible, otherwise use dict
         try:
             from services.trading_bot_service import BotTrade
@@ -3374,6 +3467,16 @@ async def submit_trade(request: TradeSubmitRequest):
                 shares=max_shares,
                 status="pending"
             )
+            # v19.34.98 — annotate style + cap warnings post-construction so
+            # downstream consumers (exposure guard, V5/V6 UI, audit log) can
+            # see them. Done as attribute set since BotTrade dataclass may
+            # not declare these fields.
+            try:
+                setattr(bot_trade, "trade_style", resolved_style)
+                if cap_warnings:
+                    setattr(bot_trade, "exposure_cap_warnings", cap_warnings)
+            except Exception:
+                pass
             _trading_bot._pending_trades[trade_id] = bot_trade
         except Exception as e:
             logger.warning(f"Could not create BotTrade object: {e}")

@@ -2,6 +2,53 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.98) — Broken daily detectors swept + bot exposure-cap wiring
+
+### Part A — Broken daily detectors sweep-fix
+The 6 pre-existing daily detectors flagged in v19.34.95 were silently failing at `LiveAlert(...)` construction (missing 7 required positional fields, exception swallowed by `try/except` in `_scan_daily_setups`). Emitted **zero alerts** since inception. Now fully wired:
+
+- `_check_daily_squeeze` → `daily_squeeze` (style=multi_day, category=consolidation)
+- `_check_trend_continuation` → `trend_continuation` (style=multi_day, category=trend_momentum)
+- `_check_daily_breakout` → `daily_breakout` (style=multi_day, category=trend_momentum)
+- `_check_base_breakout` → `base_breakout` (style=position, category=consolidation)
+- `_check_accumulation_entry` → `accumulation_entry` (style=position, category=consolidation)
+- `_check_breakdown_confirmed_daily` → `breakdown_confirmed` (style=multi_day, category=trend_momentum)
+
+All 6 now populate every required LiveAlert field (`strategy_name`, `current_price`, `trigger_probability`, `win_probability`, `minutes_to_trigger`, `time_window`, `market_regime`, `trade_style`, `setup_category`, `scan_tier`, `direction_bias`). Emoji characters removed from headlines for cleanliness.
+
+**Bonus bug fix**: `_check_trend_continuation` had a separate latent bug — `range(-15, 0, 5)` generates `[-15, -10, -5]` and `highs[-5:0]` returns an empty list (Python slice semantics), causing `ValueError: max() arg is an empty sequence`. Rewritten with explicit window boundaries.
+
+### Part B — Bot auto-order path consults both exposure caps
+v19.34.96/97 enforced the 30%/55% exposure caps only inside the `/api/risk/position-sizing/calculate` endpoint. The live bot's `POST /api/trading-bot/submit-trade` path used a separate, simpler sizing block and bypassed both caps. Now wired:
+
+**`routers/trading_bot.py · submit_trade()`**
+- `TradeSubmitRequest` gains optional `trade_style` field. When omitted, the bot resolves the style from `SETUP_REGISTRY.get(setup_type).default_style.value`.
+- After computing `max_shares` from risk/share, a new exposure-cap block:
+  1. Loads live `_trading_bot._open_trades`
+  2. Reads account NetLiquidation from IB pusher snapshot (fallback to `risk_params.account_value`)
+  3. Pulls cap %s from `position_sizer_service.get_config()`
+  4. Applies 30% position-style cap (if `trade_style in POSITION_STYLES`)
+  5. Applies 55% long-horizon cap (if `trade_style in LONG_HORIZON_STYLES`)
+  6. Clamps `max_shares` to whichever is more restrictive
+  7. If `max_shares <= 0`, returns a clean 403-style JSON rejection (`{success: False, error: "Portfolio exposure cap exhausted", exposure_cap_warnings: [...]}`) instead of placing a 0-share trade
+- `BotTrade` records get `trade_style` and `exposure_cap_warnings` annotations so downstream consumers (exposure guard, V5/V6 UI, audit log) see them.
+- Fails open: any error in the exposure-cap path is logged and the trade proceeds with only per-trade caps applied. Live trading never blocked by a cap-check bug.
+
+**`routers/risk_router.py`**
+- Fixed accessor for `_open_trades` — was reading the module attribute `_tb._open_trades` (which doesn't exist); now correctly reads instance attribute `_tb._trading_bot._open_trades`.
+
+### Verification
+- New test file: `/app/backend/tests/test_v19_34_98_bot_order_path_exposure_caps.py` — **9/9 passing** across 3 test classes (broken-detector LiveAlert construction, style resolution from SETUP_REGISTRY, cap math).
+- Full v19.34.x regression: **119/119 passing**.
+- Live endpoint smoke tested — `/api/risk/position-sizing/portfolio-exposure?account_value=100000` returns both `position_exposure` (30%) and `long_horizon_exposure` (55%) snapshots cleanly post-restart.
+
+### Files touched
+- MOD: `backend/services/enhanced_scanner.py` — 6 detector LiveAlert constructors fixed + trend_continuation slice bug fixed
+- MOD: `backend/routers/trading_bot.py` — `TradeSubmitRequest.trade_style` field + exposure-cap clamp + clean rejection on cap exhaustion + BotTrade style annotation
+- MOD: `backend/routers/risk_router.py` — corrected `_open_trades` accessor path
+- NEW: `backend/tests/test_v19_34_98_bot_order_path_exposure_caps.py`
+
+
 ## 2026-05-12 (v19.34.97) — Combined long-horizon exposure cap (55%)
 
 ### Why

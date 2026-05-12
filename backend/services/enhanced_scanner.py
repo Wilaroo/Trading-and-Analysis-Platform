@@ -6389,19 +6389,30 @@ class EnhancedBackgroundScanner:
             id=f"daily_squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="daily_squeeze",
+            strategy_name="daily_squeeze",
             direction=direction,
             priority=AlertPriority.HIGH,
+            current_price=current,
             trigger_price=current,
             stop_loss=round(stop, 2),
             target=round(target, 2),
             risk_reward=abs(target - current) / abs(current - stop) if abs(current - stop) > 0 else 0,
-            headline=f"📊 {symbol} DAILY SQUEEZE ({direction.upper()}) - BB Width {bb_width:.1f}%",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} DAILY SQUEEZE ({direction.upper()}) - BB Width {bb_width:.1f}%",
             reasoning=[
                 "Daily Bollinger Bands INSIDE Keltner Channels = multi-day volatility squeeze",
                 f"BB Width: {bb_width:.1f}% (tight = explosive breakout imminent)",
                 f"Momentum: {'bullish' if momentum > 0 else 'bearish'} (close {'above' if momentum > 0 else 'below'} 20 SMA)",
-                f"ATR: ${atr:.2f} | Swing trade — hold overnight",
+                f"ATR: ${atr:.2f} | Swing trade - hold overnight",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="consolidation",
+            scan_tier="swing",
+            direction_bias=direction,
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 
@@ -6429,8 +6440,10 @@ class EnhancedBackgroundScanner:
             return None  # EMA not rising
         
         # Check higher highs and higher lows (last 3 swings)
-        recent_highs = [max(highs[i:i+5]) for i in range(-15, 0, 5)]
-        recent_lows = [min(lows[i:i+5]) for i in range(-15, 0, 5)]
+        # v19.34.98 — was buggy: range(-15, 0, 5) ends at -5, and highs[-5:0] is
+        # empty (Python slice semantics). Rewrite using explicit window boundaries.
+        recent_highs = [max(highs[-15:-10]), max(highs[-10:-5]), max(highs[-5:])]
+        recent_lows = [min(lows[-15:-10]), min(lows[-10:-5]), min(lows[-5:])]
         
         hh = all(recent_highs[i] > recent_highs[i-1] for i in range(1, len(recent_highs)))
         hl = all(recent_lows[i] > recent_lows[i-1] for i in range(1, len(recent_lows)))
@@ -6459,19 +6472,30 @@ class EnhancedBackgroundScanner:
             id=f"trend_continuation_{symbol}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="trend_continuation",
+            strategy_name="trend_continuation",
             direction="long",
             priority=AlertPriority.MEDIUM,
+            current_price=current,
             trigger_price=current,
             stop_loss=stop,
             target=target,
             risk_reward=round(rr, 1),
-            headline=f"📈 {symbol} Trend Continuation - Pullback to rising 20 EMA",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} Trend Continuation - Pullback to rising 20 EMA",
             reasoning=[
                 "Daily uptrend: Higher highs + higher lows confirmed",
                 f"Price {dist_from_ema:.1f}% from rising 20 EMA (pullback entry zone)",
                 f"EMA slope: rising (current ${ema20:.2f} > 5-bar-ago ${ema20_5ago:.2f})",
                 f"ATR: ${atr:.2f} | R:R {rr:.1f}:1 | Swing hold",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="trend_momentum",
+            scan_tier="swing",
+            direction_bias="long",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 
@@ -6527,19 +6551,30 @@ class EnhancedBackgroundScanner:
             id=f"daily_breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="daily_breakout",
+            strategy_name="daily_breakout",
             direction="long",
             priority=AlertPriority.HIGH,
+            current_price=current,
             trigger_price=current,
             stop_loss=stop,
             target=target,
             risk_reward=round(rr, 1),
-            headline=f"🚀 {symbol} DAILY BREAKOUT - New 20-day high on {rvol:.1f}x volume",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} DAILY BREAKOUT - New 20-day high on {rvol:.1f}x volume",
             reasoning=[
                 f"Price broke 20-day high ${prev_high:.2f} by {breakout_pct:.1f}%",
                 f"Volume confirmation: {rvol:.1f}x average daily volume",
                 f"Stop below old resistance ${stop:.2f} | Target ${target:.2f}",
-                "Swing trade — hold for follow-through",
+                "Swing trade - hold for follow-through",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="trend_momentum",
+            scan_tier="swing",
+            direction_bias="long",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 
@@ -6593,19 +6628,30 @@ class EnhancedBackgroundScanner:
             id=f"base_breakout_{symbol}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="base_breakout",
+            strategy_name="base_breakout",
             direction="long",
             priority=AlertPriority.HIGH,
+            current_price=current,
             trigger_price=current,
             stop_loss=stop,
             target=target,
             risk_reward=round(rr, 1),
-            headline=f"🏗️ {symbol} BASE BREAKOUT - {int(20)}-day base on {rvol:.1f}x volume",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} BASE BREAKOUT - 20-day base on {rvol:.1f}x volume",
             reasoning=[
                 f"20-day consolidation base (range: {base_range_pct:.1f}%)",
                 f"Broke above ${base_high:.2f} by {breakout_pct:.1f}%",
                 f"Volume: {rvol:.1f}x average | Measured move target: ${target:.2f}",
-                "Position trade — multi-week hold expected",
+                "Position trade - multi-week hold expected",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="position",
+            setup_category="consolidation",
+            scan_tier="investment",
+            direction_bias="long",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
         )
 
@@ -6663,19 +6709,30 @@ class EnhancedBackgroundScanner:
             id=f"accumulation_{symbol}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="accumulation_entry",
+            strategy_name="accumulation_entry",
             direction="long",
             priority=AlertPriority.MEDIUM,
+            current_price=current,
             trigger_price=current,
             stop_loss=stop,
             target=target,
             risk_reward=round(rr, 1),
-            headline=f"🔋 {symbol} ACCUMULATION - RSI {rsi:.0f} + volume building",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} ACCUMULATION - RSI {rsi:.0f} + volume building",
             reasoning=[
                 f"Daily RSI oversold at {rsi:.0f}",
                 f"Volume accumulating: {vol_increase:.1f}x increase vs prior 10 days",
                 f"Price {dist_from_low:.1f}% from 50-day low ${low_50:.2f}",
-                "Position trade — weeks to months hold",
+                "Position trade - weeks to months hold",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="position",
+            setup_category="consolidation",
+            scan_tier="investment",
+            direction_bias="long",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
         )
 
@@ -6718,19 +6775,30 @@ class EnhancedBackgroundScanner:
             id=f"breakdown_{symbol}_{datetime.now().strftime('%H%M%S')}",
             symbol=symbol,
             setup_type="breakdown_confirmed",
+            strategy_name="breakdown_confirmed",
             direction="short",
             priority=AlertPriority.HIGH,
+            current_price=current,
             trigger_price=current,
             stop_loss=stop,
             target=target,
             risk_reward=round(rr, 1),
-            headline=f"📉 {symbol} BREAKDOWN - Below 20-day low on {rvol:.1f}x volume",
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} BREAKDOWN - Below 20-day low on {rvol:.1f}x volume",
             reasoning=[
                 f"Price broke 20-day low ${prev_low:.2f} by {breakdown_pct:.1f}%",
                 f"Volume confirmation: {rvol:.1f}x average",
                 f"Stop above old support ${stop:.2f} | Target ${target:.2f}",
                 "Short swing trade",
             ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="trend_momentum",
+            scan_tier="swing",
+            direction_bias="short",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 

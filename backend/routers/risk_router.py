@@ -214,7 +214,7 @@ async def calculate_position_size(request: PositionSizeRequest):
         )
         try:
             from routers import trading_bot as _tb
-            open_trades = list((_tb._open_trades or {}).values())
+            open_trades = list((getattr(_tb._trading_bot, "_open_trades", {}) or {}).values()) if getattr(_tb, "_trading_bot", None) else []
         except Exception:
             open_trades = []
         cfg = service.get_config()
@@ -283,7 +283,7 @@ def get_portfolio_position_exposure(account_value: float = Query(gt=0)):
         )
         try:
             from routers import trading_bot as _tb
-            open_trades = list((_tb._open_trades or {}).values())
+            open_trades = list((getattr(_tb._trading_bot, "_open_trades", {}) or {}).values()) if getattr(_tb, "_trading_bot", None) else []
         except Exception:
             open_trades = []
         cfg = get_position_sizer_service().get_config()
