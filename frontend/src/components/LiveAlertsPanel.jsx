@@ -2,9 +2,14 @@
  * LiveAlertsPanel - Real-time trade alerts via SSE
  * Connects to the background scanner and displays live trading opportunities
  * Enhanced with customizable scan intervals and watchlist editing
+ *
+ * v19.34.99 — Shows trade-style + horizon chip on every alert row so the
+ * operator sees what type (setup), style (scalp/intraday/swing/inv/pos),
+ * and time horizon at a glance.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import TradeStyleChip from './sentcom/v5/TradeStyleChip';
 import { 
   Radio, 
   X, 
@@ -192,13 +197,15 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
             </span>
           </div>
           
-          {/* Setup Type + Trade Timeframe */}
-          <div className="flex items-center gap-2 text-sm text-zinc-300 mb-1">
-            <span className="truncate">
-              {alert.setup_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-            </span>
+          {/* v19.34.99 — Setup name + trade style + time horizon */}
+          <div className="flex items-center gap-2 mb-1.5" data-testid={`alert-style-row-${alert.id || alert.symbol}`}>
+            <TradeStyleChip
+              row={alert}
+              size="xs"
+              testIdSuffix={alert.id || alert.symbol}
+            />
             {alert.tqs_timeframe && (
-              <span className="text-xs text-zinc-500 shrink-0">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wide">
                 ({alert.tqs_timeframe})
               </span>
             )}

@@ -2,6 +2,51 @@
 
 Reverse-chronological log of shipped work. Newest first.
 
+## 2026-05-12 (v19.34.99) — UI: trade-style + horizon labelling on every surface
+
+### Why
+With 68 setups across 5 horizons (scalp · intraday · swing · investment · position), the operator could no longer tell at a glance whether a row was a 1-hour scalp or a 3-month position trade. The existing `tierLabel`/`scan_tier` chip mixed setup name with direction and tried to encode style in <=12 char shorthand — too overloaded.
+
+### What ships
+Single new chip component + shared util, wired into every surface that renders a setup, alert, open position, or closed trade.
+
+**New shared util — `frontend/src/utils/tradeStyleMeta.js`**
+Single source of truth for the 5 horizons:
+- `TRADE_STYLE_META` → label, horizon, tone, shortKey, bucket for each style
+- `resolveTradeStyle(row)` → resolves style with precedence `trade_style → scan_tier → tier → setup_type fallback`
+- Setup→style fallback table covers all 68 setups (mirrors `SETUP_REGISTRY` in `services/smb_integration.py`)
+- `humanizeSetupName(name)` → curated short-label overrides (e.g. `two_hundred_day_reclaim` → "200DMA Reclaim", `vcp_breakout` → "VCP Breakout")
+- Style alias map handles legacy enum values (`A_PLUS` → multi_day, `TRADE_2_HOLD` → intraday, etc.)
+
+**New component — `frontend/src/components/sentcom/v5/TradeStyleChip.jsx`**
+- Two modes: compact single-line (for scanner cards) and stacked two-line (for alert/position rows)
+- Color-coded by horizon: fuchsia (scalp) → sky (intraday) → emerald (swing/multi-day) → amber (investment) → rose (position)
+- Hover tooltip always shows full text: "Stage 2 Breakout · Position (3+ months)"
+- Always renders a `data-trade-style` attribute for testing + analytics tracking
+- Test IDs: `trade-style-chip-{suffix}` on every instance
+
+**Wired into**
+1. `LiveAlertsPanel.jsx` — replaces the plain setup-type string + timeframe parens; alert rows now show setup name + style + horizon chip
+2. `OpenPositionsV5.jsx` — placed next to the existing direction chip, replacing the verbose setup-name fallback in `tierLabel`
+3. `ScannerCardsV5.jsx` — replaces the prior plain `tier` chip; cards now carry `setup_type` + `trade_style` data and render the new chip across all 4 card branches (setups · alerts · positions · closed)
+
+### Verification
+- Lint clean across all 5 touched frontend files (`yarn lint` style ESLint reports zero issues).
+- Smoke test `frontend/src/utils/__tests__/tradeStyleMeta.smoke.js` — **25/25 assertions pass**: covers all 6 styles, all 4 fallback paths (explicit, scan_tier, tier, setup_type), 3 legacy aliases, 3 unknown-row guards, and 4 setup-name humaniser cases.
+- `yarn build` succeeds (build folder served by backend).
+- Backend `/api/health` and `/api/risk/position-sizing/portfolio-exposure` endpoints unaffected — UI change only, no backend touched.
+- Backend already serialises `trade_style` + `setup_type` on `LiveAlert.to_dict()` and `BotTrade` (v19.34.95/98 set them on every dataclass). Data flows end-to-end with zero new backend work needed.
+- Browser smoke: app loads cleanly, no JS console errors.
+
+### Files touched
+- NEW: `frontend/src/utils/tradeStyleMeta.js`
+- NEW: `frontend/src/components/sentcom/v5/TradeStyleChip.jsx`
+- NEW: `frontend/src/utils/__tests__/tradeStyleMeta.smoke.js`
+- MOD: `frontend/src/components/LiveAlertsPanel.jsx`
+- MOD: `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`
+- MOD: `frontend/src/components/sentcom/v5/ScannerCardsV5.jsx`
+
+
 ## 2026-05-12 (v19.34.98) — Broken daily detectors swept + bot exposure-cap wiring
 
 ### Part A — Broken daily detectors sweep-fix

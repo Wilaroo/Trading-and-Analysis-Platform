@@ -15,6 +15,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveSubscriptions } from '../../../hooks/useLiveSubscription';
 import PreMarketModeBanner from './PreMarketModeBanner';
+// v19.34.99 (2026-05-12) — trade-style + horizon chip rendered on every
+// scanner card so the operator sees the setup type + style + horizon at
+// a glance for setups, alerts, open positions, and closed trades.
+import TradeStyleChip from './TradeStyleChip';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
 const STAGE_CLASS = {
@@ -96,6 +100,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       symbol: sym,
       stage,
       stage_note: s.setup_type || s.type || 'setup',
+      // v19.34.99 — carry style/setup data so the trade-style chip can render.
+      setup_type: s.setup_type || s.type || null,
+      trade_style: s.trade_style || s.scan_tier || s.tier || null,
       change_pct: s.change_pct ?? s.relative_change ?? null,
       bot_text: s.bot_note || s.narrative || `${s.setup_type || 'setup'} flagged${s.confidence ? ` · conf ${formatPct(s.confidence)}` : ''}${s.relative_volume ? ` · RVol ${formatNum(s.relative_volume, 1)}×` : ''}.`,
       metrics: {
@@ -131,6 +138,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       symbol: sym,
       stage,
       stage_note: a.alert_type || a.setup_type || 'alert',
+      // v19.34.99 — carry style/setup data so the trade-style chip can render.
+      setup_type: a.setup_type || a.alert_type || null,
+      trade_style: a.trade_style || a.scan_tier || a.tier || a.symbol_tier || null,
       change_pct: a.change_pct ?? null,
       // Wave-1 (#2) — counter-trend warning. Surfaces the v17 soft-gate
       // matrix decision so the operator can see when an alert is
@@ -219,6 +229,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       symbol: sym,
       stage: 'manage',
       stage_note: `${dir === 'short' ? 'SHORT' : 'LONG'}${p.setup_type ? ' ' + p.setup_type : ''}`,
+      // v19.34.99 — open-position card carries style/setup data.
+      setup_type: p.setup_type || null,
+      trade_style: p.trade_style || p.scan_tier || p.tier || null,
       change_pct: p.change_pct ?? null,
       // v19.34.56 — show the CONSOLIDATED share total, not whichever
       // fragment row hashed last. Append `(N slices)` when the bot
@@ -260,6 +273,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       stage: 'close',
       stage_note: outcome === 'win' ? 'W' : outcome === 'loss' ? 'L' : '',
       closed_outcome: outcome,
+      // v19.34.99 — closed-trade card carries style/setup data.
+      setup_type: m.setup_type || null,
+      trade_style: m.trade_style || m.scan_tier || m.tier || null,
       change_pct: null,
       bot_text: m.summary || m.text || m.message || 'Trade closed.',
       metrics: {
@@ -329,20 +345,23 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
           <span className={`v5-chip ${chipClass}`}>
             {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>
-          {/* 2026-05-01 v19.23 — surface tier + setup-type so the
-              operator can read at-a-glance what scan tier (intraday /
-              swing / position) and which Bellafiore setup type the
-              alert belongs to. Both are SOFT context — visible always
-              but never gates the alert. */}
-          {card.tier && (
-            <span
-              className="v5-chip"
-              style={{ borderColor: 'rgba(82, 82, 91, 0.6)', color: '#a1a1aa' }}
-              data-testid={`scanner-card-tier-${card.symbol}`}
-              title={`Scan tier: ${card.tier}`}
-            >
-              {String(card.tier).toUpperCase()}
-            </span>
+          {/* v19.34.99 — single chip showing trade style + horizon.
+              Replaces the prior plain "tier" chip; resolves the style
+              from row.trade_style, row.scan_tier, or fallback derives
+              from row.setup_type. Renders nothing when style is unknown
+              AND no setup_type can be derived (keeps card uncluttered). */}
+          {(card.trade_style || card.setup_type || card.tier) && (
+            <TradeStyleChip
+              row={{
+                trade_style: card.trade_style,
+                setup_type: card.setup_type,
+                scan_tier: card.tier,
+              }}
+              compact={true}
+              showSetup={true}
+              size="xs"
+              testIdSuffix={`scanner-${card.symbol}`}
+            />
           )}
           {card.stage_note && card.stage_note !== 'setup' && card.stage !== 'manage' && card.stage !== 'close' && (
             <span
