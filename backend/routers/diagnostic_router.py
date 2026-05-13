@@ -3616,3 +3616,209 @@ async def bracket_status_per_symbol(symbols: Optional[str] = None):
         "rows": rows,
         "summary": {"total": len(rows), **counters},
     }
+
+
+
+@router.get("/ib-pusher-position-health")
+async def ib_pusher_position_health():
+    """v19.34.150 — per-field IB pusher position-payload diagnostic.
+
+    Answers: "why is the audit showing `unrealizedPNL=0` for all
+    21 positions?" without tailing pusher logs. Walks
+    `_pushed_ib_data["positions"]` and reports per-field:
+      • presence_pct  — how many positions carry a non-zero value
+      • zero_count    — how many have the field but it's 0
+      • missing_count — how many lack the field entirely
+      • sample        — representative non-zero value (for sanity)
+
+    Common failure modes the report identifies:
+      1. **`unrealizedPNL=0` cluster** → IB Gateway's
+         `updatePortfolio()` callback isn't firing (reqAccountUpdates
+         drifted or subscription dropped after reconnect). Bot's PnL
+         math falls back to L1 quotes.
+      2. **`marketPrice=0` cluster** → same root cause; the
+         portfolio-snapshot mark isn't being pushed.
+      3. **`avgCost=0` cluster** → pusher started before IB Gateway
+         had a chance to deliver account-update events.
+      4. **All fields zero except `symbol` and `position`** → pusher
+         is sending stub records only; reqPositions() callback is
+         alive but `reqAccountUpdates()` is dead.
+
+    Also surfaces:
+      • last_update timestamp + age
+      • push heartbeat (pushes_per_min, total_pushes)
+      • IB connection flag
+      • Per-symbol drill-down (one row per pushed position)
+    """
+    try:
+        from routers.ib import _pushed_ib_data, _push_timestamps, _push_count_total
+    except Exception as e:
+        return {"success": False, "error": f"cannot_import_pusher:{e}"}
+
+    now = datetime.now(timezone.utc)
+    positions = (_pushed_ib_data or {}).get("positions") or []
+    last_update = (_pushed_ib_data or {}).get("last_update")
+    connected = bool((_pushed_ib_data or {}).get("connected"))
+
+    # Age of last push.
+    age_seconds: Optional[int] = None
+    if last_update:
+        try:
+            dt = datetime.fromisoformat(
+                str(last_update).replace("Z", "+00:00")
+            )
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            age_seconds = int((now - dt).total_seconds())
+        except Exception:
+            age_seconds = None
+
+    # Pushes/min from the rolling timestamp deque.
+    import time as _t
+    cutoff = _t.time() - 60
+    try:
+        recent = [t for t in list(_push_timestamps) if t >= cutoff]
+        pushes_per_min = len(recent)
+    except Exception:
+        pushes_per_min = None
+
+    # Per-field aggregation across all pushed positions.
+    INTEREST_FIELDS = [
+        "position", "avgCost", "marketPrice",
+        "marketValue", "unrealizedPNL", "realizedPNL",
+    ]
+    field_stats: Dict[str, Dict[str, Any]] = {}
+    for f in INTEREST_FIELDS:
+        field_stats[f] = {
+            "non_zero_count": 0,
+            "zero_count": 0,
+            "missing_count": 0,
+            "presence_pct": 0.0,
+            "sample_non_zero": None,
+        }
+
+    per_symbol: List[Dict[str, Any]] = []
+    total = len(positions)
+    for p in positions:
+        if not isinstance(p, dict):
+            continue
+        sym = p.get("symbol", "?")
+        row = {"symbol": sym}
+        for f in INTEREST_FIELDS:
+            v = p.get(f)
+            if v is None or v == "":
+                field_stats[f]["missing_count"] += 1
+                row[f] = None
+                continue
+            try:
+                vf = float(v)
+            except (TypeError, ValueError):
+                field_stats[f]["missing_count"] += 1
+                row[f] = v
+                continue
+            if vf == 0:
+                field_stats[f]["zero_count"] += 1
+            else:
+                field_stats[f]["non_zero_count"] += 1
+                if field_stats[f]["sample_non_zero"] is None:
+                    field_stats[f]["sample_non_zero"] = {
+                        "symbol": sym, "value": vf,
+                    }
+            row[f] = vf
+        per_symbol.append(row)
+
+    # Compute presence %.
+    for f, stats in field_stats.items():
+        stats["presence_pct"] = round(
+            (stats["non_zero_count"] / total * 100.0) if total > 0 else 0.0, 1
+        )
+
+    # Diagnose. The heuristic mirrors common IB Gateway failure modes.
+    diagnosis: List[str] = []
+    suspect_account_updates_dead = (
+        total > 0
+        and field_stats["unrealizedPNL"]["non_zero_count"] == 0
+        and field_stats["marketPrice"]["non_zero_count"] == 0
+    )
+    suspect_market_price_only = (
+        total > 0
+        and field_stats["unrealizedPNL"]["non_zero_count"] == 0
+        and field_stats["marketPrice"]["non_zero_count"] > 0
+    )
+    suspect_avg_cost_dead = (
+        total > 0
+        and field_stats["avgCost"]["non_zero_count"] == 0
+    )
+    suspect_partial = (
+        total > 0
+        and 0 < field_stats["unrealizedPNL"]["non_zero_count"] < total
+    )
+
+    if suspect_account_updates_dead:
+        diagnosis.append(
+            "🔴 IB Gateway's `reqAccountUpdates()` is DEAD — "
+            "0/N positions have `marketPrice` AND 0/N have "
+            "`unrealizedPNL`. Pusher is sending position records via "
+            "`reqPositions()` (which is alive) but the account-update "
+            "stream is silent. Remediation: restart IB Gateway "
+            "session, then restart `ib_data_pusher.py` (Windows side). "
+            "On reconnect, the pusher must call `reqAccountUpdates(True, accountId)` BEFORE the first push."
+        )
+    elif suspect_market_price_only:
+        diagnosis.append(
+            "🟡 `marketPrice` is being pushed but `unrealizedPNL` is "
+            "zero across the board. IB Gateway may be deferring PnL "
+            "computation until the next account-update tick. Less "
+            "severe than full callback death; usually self-heals on "
+            "the next subscription cycle."
+        )
+    if suspect_avg_cost_dead:
+        diagnosis.append(
+            "🔴 `avgCost` is zero across all positions. The pusher "
+            "started BEFORE IB Gateway had a chance to deliver any "
+            "account-update events. Restart the pusher process "
+            "AFTER the gateway has been connected for ≥10s."
+        )
+    if suspect_partial:
+        n_missing = total - field_stats["unrealizedPNL"]["non_zero_count"]
+        diagnosis.append(
+            f"🟡 {n_missing}/{total} positions have `unrealizedPNL=0`. "
+            "Likely a per-symbol subscription issue, NOT a global "
+            "callback failure. Affected symbols below."
+        )
+    if pushes_per_min is not None and pushes_per_min < 5:
+        diagnosis.append(
+            f"⚠ Pusher heartbeat is slow: only {pushes_per_min} "
+            "pushes in the last minute. Expected >30. Pusher may be "
+            "in collection mode or fully dead."
+        )
+    if age_seconds is not None and age_seconds > 60:
+        diagnosis.append(
+            f"⚠ Last push was {age_seconds}s ago — pusher likely dead."
+        )
+    if not diagnosis:
+        if total == 0:
+            diagnosis.append(
+                "Pusher has NEVER pushed positions (or the snapshot "
+                "was reset by a recent backend restart and the "
+                "pusher hasn't reconnected yet)."
+            )
+        else:
+            diagnosis.append(
+                "✅ Pusher position payload looks healthy — all "
+                "expected fields are present and non-zero."
+            )
+
+    return {
+        "success": True,
+        "generated_at": now.isoformat(),
+        "pusher_connected": connected,
+        "last_update": last_update,
+        "age_seconds": age_seconds,
+        "pushes_per_minute_recent": pushes_per_min,
+        "total_pushes_since_start": _push_count_total,
+        "total_positions": total,
+        "field_stats": field_stats,
+        "per_symbol": per_symbol,
+        "diagnosis": diagnosis,
+    }
