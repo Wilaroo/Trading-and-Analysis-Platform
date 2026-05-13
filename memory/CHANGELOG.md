@@ -3,6 +3,92 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.138) — Mega-Cap Pin + Scanner Coverage Diagnostic
+
+Operator flagged: "TSLA / SNDK / MU / NVDA / AMD have been the biggest
+movers for weeks, but I never see them pop up in our scans." Root
+cause analysis identified three orthogonal failure modes in the
+canonical-universe pipeline that can silently drop popular movers from
+every scan tier:
+
+1. **`unqualifiable=true` false-positives.** Since 2026-04-29 the
+   `UNQUALIFIABLE_FAILURE_THRESHOLD` is 1 strike. A single transient
+   "No security definition" from IB during any backfill burst
+   permanently nukes a symbol. SNDK (Sandisk reborn Feb 2025) is a
+   prime suspect.
+2. **Stale `symbol_adv_cache`.** If `rebuild_adv_from_ib()` hasn't
+   run for days, recently-explosive names won't be ranked.
+3. **ADV dips below $50M on slow days** demote a name from intraday
+   → swing tier mid-cycle.
+
+### Mega-cap pin
+- **NEW `/app/backend/data/mega_cap_watchlist.py`** — 50 curated
+  must-scan names across Mag-7 + adjacents, semis / AI infra,
+  crypto / fintech high-beta, EV / mobility, structural ETFs, and
+  recent-cycle standouts. Hardcoded; quarterly review only.
+- **`services/wave_scanner.py::get_scan_batch()`** now merges this
+  list into Tier 1 every cycle, AFTER operator-pinned smart-watchlist
+  and recently-viewed (preserves the existing priority contract). All
+  three failure modes above are fully bypassed — these 50 names are
+  scanned regardless of `symbol_adv_cache` state.
+- Dedup logic ensures the new pin doesn't double-scan when a name
+  is already pinned by the operator.
+
+### Diagnostic endpoints
+- **NEW `GET /api/diagnostic/symbol-coverage`** — per-symbol coverage
+  audit. For each input (or for the full MEGA_CAP_WATCHLIST when
+  `include_mega_cap=true`) returns: present in `symbol_adv_cache`?,
+  `avg_dollar_volume`, computed tier, unqualifiable flag + reason +
+  failure count, Tier 2 top-200 rank, last `live_bar_cache` timestamp,
+  staleness seconds, `in_mega_cap` flag, and a per-symbol verdict
+  (`OK` / `UNQUALIFIABLE_FLAGGED` / `MISSING_FROM_CACHE` /
+  `BELOW_TIER2_THRESHOLD` / `STALE_BARS`). Top-level summary
+  aggregates each failure category and recommends concrete operator
+  actions.
+- **NEW `POST /api/diagnostic/clear-unqualifiable`** — bulk-clear the
+  `unqualifiable=true` flag. Accepts explicit `symbols=[...]` and/or
+  `target="mega_cap"` (expands to the full pin list). Designed for
+  rescuing names that got falsely promoted by a single transient IB
+  error.
+
+### Tests
+- **NEW `/app/backend/tests/test_scanner_coverage_v19_34_138.py`** —
+  16 pytest cases:
+  - MEGA_CAP_WATCHLIST contents (must include user-flagged movers).
+  - WaveScanner injects every mega-cap name into Tier 1.
+  - Operator-pinned watchlist priority preserved.
+  - Tier 1 dedup invariant.
+  - `/symbol-coverage` classifies all 5 failure modes correctly.
+  - Summary aggregates categories.
+  - Action recommendations reference each failure mode.
+  - `/clear-unqualifiable` flips the flag end-to-end.
+  - Mega-cap target expansion.
+- **Updated `test_scanner_canonical_alignment.py`** — Tier 2 test now
+  accounts for mega-cap names migrating to Tier 1 (the seeded NVDA /
+  AAPL / TSLA / PLTR / SOFI move out of Tier 2; BABA is the only
+  non-mega-cap intraday name that remains in Tier 2).
+
+All **21** tests pass. Note: pre-existing test
+`test_mark_unqualifiable_promotes_after_threshold_strikes` fails for an
+unrelated reason (it expects the old 3-strike threshold; was never
+updated when threshold dropped to 1 on 2026-04-29). Not addressed in
+this PR — out of scope.
+
+### How to verify on DGX
+```bash
+# 1. After pulling, audit the user-flagged movers
+curl 'http://localhost:8001/api/diagnostic/symbol-coverage?symbols=TSLA,NVDA,AMD,MU,SNDK&include_mega_cap=false' | jq
+
+# 2. Audit the full mega-cap pin
+curl 'http://localhost:8001/api/diagnostic/symbol-coverage' | jq '.summary'
+
+# 3. If summary.unqualifiable_flagged is non-empty, rescue them:
+curl -X POST 'http://localhost:8001/api/diagnostic/clear-unqualifiable' \
+     -H 'Content-Type: application/json' \
+     -d '{"target": "mega_cap", "reason": "v19.34.138 audit rescue"}' | jq
+```
+
+
 ## 2026-02-13 (v19.34.137) — Universal " ET" suffix on every timestamp
 
 Follow-up to v19.34.136. Now that every Date formatter renders in ET,

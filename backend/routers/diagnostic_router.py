@@ -2358,3 +2358,346 @@ def bracket_lifecycle_audit(
         ),
     }
 
+
+
+# =============================================================================
+# 2026-02-13 (v19.34.138) — Scanner Coverage Diagnostic
+# =============================================================================
+#
+# Endpoint:  GET  /api/diagnostic/scanner-coverage
+# Companion: POST /api/diagnostic/clear-unqualifiable
+#
+# Operator question: "Why aren't TSLA / NVDA / AMD / MU / SNDK appearing
+# in scans?" These endpoints surface the full state of every must-scan
+# mega-cap name across the scanner pipeline so the operator can pinpoint
+# WHERE coverage breaks in one curl call.
+#
+# Covered diagnostics per symbol:
+#   - Present in `symbol_adv_cache` (yes/no)
+#   - `avg_dollar_volume` + computed tier
+#   - `unqualifiable` flag + failure_count + reason + when_marked
+#   - In the current Tier 2 top-200 pool? (rank or null)
+#   - Last `live_bar_cache` write timestamp (staleness check)
+#   - In `MEGA_CAP_WATCHLIST` (always-on guard)
+#
+# The endpoint also computes a global "missing mega-cap" verdict:
+# every mega-cap name that isn't in `symbol_adv_cache` OR is flagged
+# unqualifiable is surfaced under `missing_from_canonical` with an
+# action recommendation.
+# =============================================================================
+
+from pydantic import BaseModel, Field  # noqa: E402
+
+
+class ClearUnqualifiableRequest(BaseModel):
+    """Bulk-clear request body. Pass either `symbols` or `target='mega_cap'`
+    (or both — they're combined into one set)."""
+
+    symbols: List[str] = Field(default_factory=list)
+    target: Optional[str] = None  # "mega_cap" → expand to MEGA_CAP_WATCHLIST
+    reason: Optional[str] = "operator manual clear"
+
+
+def _last_bar_ts(db, symbol: str) -> Optional[str]:
+    """Return ISO timestamp of the most recent `live_bar_cache` write for
+    a symbol, or None if no bar has ever been cached."""
+    try:
+        doc = db["live_bar_cache"].find_one(
+            {"symbol": symbol},
+            {"_id": 0, "ts": 1, "timestamp": 1, "updated_at": 1},
+            sort=[("ts", -1)],
+        )
+        if not doc:
+            return None
+        for k in ("ts", "timestamp", "updated_at"):
+            v = doc.get(k)
+            if v is None:
+                continue
+            if isinstance(v, datetime):
+                return v.isoformat()
+            return str(v)
+    except Exception as e:
+        logger.debug(f"_last_bar_ts({symbol}) failed: {e}")
+    return None
+
+
+def _staleness_seconds(iso_ts: Optional[str]) -> Optional[int]:
+    """How many seconds ago was iso_ts? None if iso_ts is invalid/missing."""
+    if not iso_ts:
+        return None
+    try:
+        # Accept both "...+00:00" and "...Z" + naive strings (assumed UTC).
+        s = iso_ts.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int((datetime.now(timezone.utc) - dt).total_seconds())
+    except Exception:
+        return None
+
+
+@router.get("/symbol-coverage")
+def scanner_symbol_coverage(
+    symbols: Optional[str] = None,
+    include_mega_cap: bool = True,
+    tier2_pool_size: int = 200,
+):
+    """One-shot scanner coverage audit for a curated set of symbols.
+
+    Query params:
+      symbols (optional, comma-sep): explicit symbols to audit
+                                     (e.g. "TSLA,NVDA,AMD,MU,SNDK")
+      include_mega_cap (default true): also audit every name in the
+                                       hardcoded MEGA_CAP_WATCHLIST
+      tier2_pool_size (default 200): mirror of wave_scanner._tier2_pool_size
+                                     for the "in Tier 2?" check
+
+    Response:
+      {
+        "success": true,
+        "generated_at": "...",
+        "audited_symbols": [...],
+        "coverage": [
+          {"symbol": "TSLA", "in_adv_cache": true,
+           "avg_dollar_volume": 1.23e10, "tier": "intraday",
+           "unqualifiable": false, "failure_count": 0,
+           "in_tier2_top_n": 7, "in_mega_cap": true,
+           "last_bar_ts": "...", "staleness_sec": 42,
+           "verdict": "OK"},
+          ...
+        ],
+        "summary": {
+          "total_audited": 55,
+          "missing_from_canonical": ["FOO", ...],
+          "unqualifiable_flagged":  ["BAR", ...],
+          "missing_from_tier2":     ["BAZ", ...],
+          "stale_bars_over_5min":   ["QUX", ...]
+        },
+        "actions": [
+          "Clear FOO/BAR from unqualifiable via POST /api/diagnostic/clear-unqualifiable",
+          "Force rebuild_adv_from_ib() — cache appears stale",
+          ...
+        ]
+      }
+    """
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+
+    # Compose the audit set.
+    audit: List[str] = []
+    if symbols:
+        audit.extend([s.strip().upper() for s in symbols.split(",") if s.strip()])
+    if include_mega_cap:
+        try:
+            from data.mega_cap_watchlist import get_mega_cap_watchlist
+            audit.extend(get_mega_cap_watchlist())
+        except Exception as e:
+            logger.warning(f"mega_cap_watchlist load failed: {e}")
+
+    # Dedupe preserving order.
+    seen: set = set()
+    audit = [s for s in audit if not (s in seen or seen.add(s))]
+    if not audit:
+        return {"success": False, "error": "no_symbols_to_audit"}
+
+    # Pull all ADV cache docs for the audit set in one round-trip.
+    try:
+        adv_docs = list(db["symbol_adv_cache"].find(
+            {"symbol": {"$in": audit}},
+            {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1,
+             "unqualifiable": 1, "unqualifiable_failure_count": 1,
+             "unqualifiable_reason": 1, "unqualifiable_marked_at": 1},
+        ))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"adv_cache read failed: {e}")
+    adv_by_symbol = {d["symbol"]: d for d in adv_docs if d.get("symbol")}
+
+    # Build current Tier 2 top-N (ADV-ranked) so we can rank each name.
+    try:
+        tier2_docs = list(db["symbol_adv_cache"].find(
+            {"avg_dollar_volume": {"$gte": 50_000_000},
+             "unqualifiable": {"$ne": True}},
+            {"_id": 0, "symbol": 1, "avg_dollar_volume": 1},
+        ).sort("avg_dollar_volume", -1).limit(int(tier2_pool_size)))
+    except Exception as e:
+        logger.warning(f"tier2 ranking read failed: {e}")
+        tier2_docs = []
+    tier2_rank: Dict[str, int] = {
+        d["symbol"]: idx + 1 for idx, d in enumerate(tier2_docs) if d.get("symbol")
+    }
+
+    try:
+        from data.mega_cap_watchlist import MEGA_CAP_WATCHLIST
+        mega_set = set(MEGA_CAP_WATCHLIST)
+    except Exception:
+        mega_set = set()
+
+    try:
+        from services.symbol_universe import classify_tier
+    except Exception:
+        classify_tier = lambda v: None  # noqa: E731
+
+    coverage: List[Dict[str, Any]] = []
+    missing_canonical: List[str] = []
+    unqualifiable_flagged: List[str] = []
+    missing_tier2: List[str] = []
+    stale_bars: List[str] = []
+    STALE_THRESHOLD_SEC = 5 * 60  # 5 min during RTH = suspect
+
+    for sym in audit:
+        doc = adv_by_symbol.get(sym) or {}
+        in_cache = bool(doc)
+        adv_val = float(doc.get("avg_dollar_volume") or 0.0)
+        tier = doc.get("tier") or classify_tier(adv_val)
+        unq = bool(doc.get("unqualifiable"))
+        rank = tier2_rank.get(sym)
+        last_bar = _last_bar_ts(db, sym)
+        stale_sec = _staleness_seconds(last_bar)
+
+        verdict = "OK"
+        if not in_cache:
+            verdict = "MISSING_FROM_CACHE"
+            missing_canonical.append(sym)
+        elif unq:
+            verdict = "UNQUALIFIABLE_FLAGGED"
+            unqualifiable_flagged.append(sym)
+        elif rank is None:
+            verdict = "BELOW_TIER2_THRESHOLD"
+            missing_tier2.append(sym)
+        if (stale_sec is not None and stale_sec > STALE_THRESHOLD_SEC
+                and verdict == "OK"):
+            verdict = "STALE_BARS"
+        if stale_sec is not None and stale_sec > STALE_THRESHOLD_SEC:
+            stale_bars.append(sym)
+
+        coverage.append({
+            "symbol": sym,
+            "in_adv_cache": in_cache,
+            "avg_dollar_volume": adv_val,
+            "tier": tier,
+            "unqualifiable": unq,
+            "failure_count": int(doc.get("unqualifiable_failure_count") or 0),
+            "unqualifiable_reason": doc.get("unqualifiable_reason"),
+            "unqualifiable_marked_at": doc.get("unqualifiable_marked_at"),
+            "in_tier2_top_n": rank,
+            "in_mega_cap": sym in mega_set,
+            "last_bar_ts": last_bar,
+            "staleness_sec": stale_sec,
+            "verdict": verdict,
+        })
+
+    # Build action recommendations.
+    actions: List[str] = []
+    if unqualifiable_flagged:
+        actions.append(
+            f"Clear {len(unqualifiable_flagged)} unqualifiable flag(s): "
+            f"POST /api/diagnostic/clear-unqualifiable "
+            f"{{\"symbols\": {unqualifiable_flagged!r}}}"
+        )
+    if missing_canonical:
+        actions.append(
+            f"{len(missing_canonical)} mega-cap name(s) are NOT in "
+            "`symbol_adv_cache` at all — run "
+            "`IBHistoricalCollector.rebuild_adv_from_ib()` to refresh, "
+            "or check IB Gateway for security-definition errors on those "
+            "symbols."
+        )
+    if missing_tier2:
+        actions.append(
+            f"{len(missing_tier2)} name(s) are in cache but below the "
+            f"top-{tier2_pool_size} ADV cutoff; they're still scanned via "
+            "MEGA_CAP_WATCHLIST Tier 1 pin (v19.34.138)."
+        )
+    if stale_bars:
+        actions.append(
+            f"{len(stale_bars)} symbol(s) have bars older than "
+            f"{STALE_THRESHOLD_SEC // 60} min — pusher likely isn't "
+            "streaming them. Set IB_PUSHER_L1_AUTO_TOP_N=60 on the "
+            "pusher .bat to enable dynamic L1 subscription."
+        )
+    if not actions:
+        actions.append("All audited names look healthy across the pipeline.")
+
+    return {
+        "success": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "audited_symbols": audit,
+        "tier2_pool_size_evaluated": tier2_pool_size,
+        "coverage": coverage,
+        "summary": {
+            "total_audited": len(audit),
+            "missing_from_canonical": missing_canonical,
+            "unqualifiable_flagged": unqualifiable_flagged,
+            "missing_from_tier2": missing_tier2,
+            "stale_bars_over_5min": stale_bars,
+        },
+        "actions": actions,
+    }
+
+
+@router.post("/clear-unqualifiable")
+def clear_unqualifiable(req: ClearUnqualifiableRequest):
+    """Bulk-clear the `unqualifiable=true` flag on one or more symbols.
+
+    Useful for rescuing names that got falsely promoted to unqualifiable
+    by a single transient IB error (1-strike threshold since 2026-04-29).
+
+    Body:
+      { "symbols": ["SNDK", "TSLA"], "target": "mega_cap" }
+
+    Either `symbols` or `target` (or both) may be supplied. `target='mega_cap'`
+    expands to the full MEGA_CAP_WATCHLIST. The two sources are combined
+    into one deduplicated set before processing.
+
+    Response: per-symbol result + summary counters.
+    """
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+
+    targets: List[str] = [s.upper().strip() for s in (req.symbols or []) if s]
+    if (req.target or "").lower() == "mega_cap":
+        try:
+            from data.mega_cap_watchlist import get_mega_cap_watchlist
+            targets.extend(get_mega_cap_watchlist())
+        except Exception as e:
+            raise HTTPException(status_code=500,
+                                detail=f"mega_cap_watchlist load failed: {e}")
+
+    # Dedupe.
+    seen: set = set()
+    targets = [s for s in targets if not (s in seen or seen.add(s))]
+    if not targets:
+        raise HTTPException(status_code=400, detail="no symbols supplied")
+
+    try:
+        from services.symbol_universe import reset_unqualifiable
+    except Exception as e:
+        raise HTTPException(status_code=500,
+                            detail=f"symbol_universe import failed: {e}")
+
+    results: List[Dict[str, Any]] = []
+    cleared_count = 0
+    no_op_count = 0
+    for sym in targets:
+        ok = bool(reset_unqualifiable(db, sym))
+        if ok:
+            cleared_count += 1
+        else:
+            no_op_count += 1
+        results.append({"symbol": sym, "cleared": ok})
+
+    logger.warning(
+        f"clear_unqualifiable: cleared={cleared_count} no_op={no_op_count} "
+        f"reason={req.reason!r} caller=operator"
+    )
+    return {
+        "success": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "requested": len(targets),
+        "cleared": cleared_count,
+        "no_op": no_op_count,
+        "reason": req.reason,
+        "results": results,
+    }

@@ -59,14 +59,32 @@ def test_wave_scanner_pulls_tier2_and_tier3_from_canonical_universe():
     scanner = ws_module.WaveScanner(watchlist_service=StubWatchlist(), db=db)
     batch = asyncio.run(scanner.get_scan_batch())
 
-    # Tier 2 = intraday (≥$50M), ADV-ranked desc
+    # Tier 2 = intraday (≥$50M), ADV-ranked desc — EXCLUDING any name
+    # that's already pinned into Tier 1 by the MEGA_CAP_WATCHLIST guard
+    # (v19.34.138). Among the seeded symbols, AAPL/TSLA/NVDA/PLTR/SOFI
+    # are mega-cap and migrate to Tier 1; BABA is the only intraday-tier
+    # name remaining in Tier 2.
     tier2 = batch["tier2_high_rvol"]
-    assert tier2[0] == "NVDA", f"Tier 2 must be ADV-ranked desc, got {tier2[:3]}"
+    from data.mega_cap_watchlist import MEGA_CAP_WATCHLIST
+    mega = set(MEGA_CAP_WATCHLIST)
+    assert all(s not in mega for s in tier2), (
+        f"Tier 2 must not contain mega-cap names (they live in Tier 1), "
+        f"got {tier2[:5]}"
+    )
     assert "TINY" not in tier2 and "MIDCAP" not in tier2, (
         "Tier 2 must contain only intraday-tier symbols (≥$50M ADV)."
     )
-    # Should contain all 6 intraday symbols from the seed.
-    assert {"AAPL", "TSLA", "NVDA", "PLTR", "SOFI", "BABA"}.issubset(set(tier2))
+    # BABA is the only seeded intraday-tier name that's NOT in mega-cap.
+    assert "BABA" in tier2, (
+        "Tier 2 should surface BABA — the only seeded non-mega-cap "
+        "intraday symbol."
+    )
+    # The mega-cap movers must still be scanned — they should appear in Tier 1.
+    tier1 = batch["tier1_watchlist"]
+    assert {"AAPL", "TSLA", "NVDA", "PLTR", "SOFI"}.issubset(set(tier1)), (
+        "Mega-cap seeded symbols must be pinned into Tier 1 by the "
+        "MEGA_CAP_WATCHLIST guard."
+    )
 
     # Tier 3 = canonical swing roster (≥$10M); MIDCAP/MIDCAP2 must appear,
     # TINY must not.

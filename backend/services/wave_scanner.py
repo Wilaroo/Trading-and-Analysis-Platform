@@ -30,6 +30,7 @@ import logging
 from services.smart_watchlist_service import get_smart_watchlist, SmartWatchlistService
 from services.symbol_universe import get_universe_stats
 from services.user_viewed_tracker import get_viewed_symbols
+from data.mega_cap_watchlist import get_mega_cap_watchlist
 
 logger = logging.getLogger(__name__)
 
@@ -158,15 +159,38 @@ class WaveScanner:
                 "universe_progress": {...},
             }
         """
-        # Tier 1: User watchlist + recently viewed
+        # Tier 1: User watchlist + recently viewed + mega-cap must-scan
+        #
+        # 2026-02-13 (v19.34.138) — Mega-cap pin. The hardcoded
+        # `MEGA_CAP_WATCHLIST` (50 names: Mag-7, semis, crypto/fintech,
+        # EVs, structural ETFs, recent standouts) is ALWAYS merged into
+        # Tier 1 regardless of `symbol_adv_cache` state. This guarantees
+        # TSLA / NVDA / AMD / MU / SNDK / COIN / PLTR-class movers are
+        # scanned every cycle even if:
+        #   - they've been flagged `unqualifiable` by a transient IB
+        #     "No security definition" error (1-strike threshold since
+        #     2026-04-29 is a known false-positive risk),
+        #   - the `symbol_adv_cache` collection is stale (collector
+        #     hasn't rebuilt in days), or
+        #   - their ADV temporarily dipped below the $50M threshold on
+        #     a holiday-shortened week and they got demoted from
+        #     intraday → swing tier mid-cycle.
+        # Operator-pinned (smart watchlist + recently viewed) still take
+        # priority within Tier 1 — mega-cap is appended after them.
         tier1 = list(self._watchlist.get_symbols())
         try:
             viewed = get_viewed_symbols(max_count=50)
             tier1.extend(viewed)
-            seen = set()
-            tier1 = [s for s in tier1 if not (s in seen or seen.add(s))]
         except Exception as e:
             logger.debug(f"Could not load viewed symbols: {e}")
+        # Mega-cap pin (always-on).
+        try:
+            tier1.extend(get_mega_cap_watchlist())
+        except Exception as e:
+            logger.debug(f"Could not load mega-cap watchlist: {e}")
+        # Dedupe preserving insertion order (operator pins win).
+        seen = set()
+        tier1 = [s for s in tier1 if not (s in seen or seen.add(s))]
 
         # Refresh canonical pools (10-min cache)
         self._refresh_universe_pools_if_needed()
@@ -253,7 +277,11 @@ class WaveScanner:
             "tier2_refresh_interval_sec": self._tier2_refresh_interval,
             "source": "services/symbol_universe.py (canonical AI-training universe)",
             "tier_description": {
-                "tier1": "Smart Watchlist + recently-viewed (operator override)",
+                "tier1": (
+                    "Smart Watchlist + recently-viewed (operator override) "
+                    "+ MEGA_CAP_WATCHLIST (50 must-scan names, pinned "
+                    "since v19.34.138)"
+                ),
                 "tier2": (
                     f"Top {self._tier2_pool_size} most-liquid intraday symbols "
                     "(avg_dollar_volume ≥ $50M), ADV-ranked"
