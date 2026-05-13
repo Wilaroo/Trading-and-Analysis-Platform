@@ -3,6 +3,35 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+
+## 2026-02-13 (v19.34.150) — IB Pusher Portfolio-Health Diagnostic
+
+Operator observed audit warning: `21/21 IB position(s) had
+unrealizedPNL=0 in the pusher cache` — meaning `updatePortfolio()`
+events from IB Gateway are dropping/dead while `reqPositions()`
+keeps emitting stub records.
+
+### Added
+- `GET /api/diagnostic/ib-pusher-position-health` — per-field
+  aggregation across `_pushed_ib_data["positions"]` with:
+    * `non_zero_count / zero_count / missing_count / presence_pct`
+    * `sample_non_zero` for sanity checks
+    * Per-symbol drill-down rows
+    * Pusher heartbeat (`pushes_per_minute_recent`, last-update age)
+    * Heuristic `diagnosis[]` covering: full account-update death,
+      avgCost-only death, partial unrealizedPNL, market-price-only,
+      stale heartbeat, never-pushed/reset.
+- `scripts/diagnose_ib_pusher.py` — operator wrapper around the
+  endpoint, prints a clean terminal report.
+- `backend/tests/test_ib_pusher_health_v19_34_150.py` — 12 pytest
+  cases covering each failure mode.
+
+### Fix (this fork)
+- Diagnostic emits the "never pushed / reset" message even when
+  the heartbeat warning fires (previously they were mutually
+  exclusive). All 12 tests pass.
+
+
 ## 2026-02-13 (v19.34.149) — Bot PnL prefers IB.marketPrice over quote_last
 
 After v19.34.148 healed avg_cost drift to **zero**, the operator's

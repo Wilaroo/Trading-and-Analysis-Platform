@@ -3735,6 +3735,17 @@ async def ib_pusher_position_health():
 
     # Diagnose. The heuristic mirrors common IB Gateway failure modes.
     diagnosis: List[str] = []
+
+    # Special case: pusher has NEVER pushed any positions. This is a
+    # distinct condition from "pusher is unhealthy" — emit it first so
+    # downstream heartbeat warnings don't drown it out.
+    if total == 0:
+        diagnosis.append(
+            "Pusher has NEVER pushed positions (or the snapshot was "
+            "reset by a recent backend restart and the pusher hasn't "
+            "reconnected yet)."
+        )
+
     suspect_account_updates_dead = (
         total > 0
         and field_stats["unrealizedPNL"]["non_zero_count"] == 0
@@ -3797,17 +3808,10 @@ async def ib_pusher_position_health():
             f"⚠ Last push was {age_seconds}s ago — pusher likely dead."
         )
     if not diagnosis:
-        if total == 0:
-            diagnosis.append(
-                "Pusher has NEVER pushed positions (or the snapshot "
-                "was reset by a recent backend restart and the "
-                "pusher hasn't reconnected yet)."
-            )
-        else:
-            diagnosis.append(
-                "✅ Pusher position payload looks healthy — all "
-                "expected fields are present and non-zero."
-            )
+        diagnosis.append(
+            "✅ Pusher position payload looks healthy — all "
+            "expected fields are present and non-zero."
+        )
 
     return {
         "success": True,
