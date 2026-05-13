@@ -3,6 +3,85 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.125) — Bracket-lifecycle diagnostic schema fix + kill-switch heartbeat
+
+Operator-reported issue: after v19.34.124 ship, every `/api/diagnostic/bracket-lifecycle`
+query returned `0 events across 0 trades` even on the -$25k incident day, and
+`grep "v123 kill-switch"` came up empty. Root-cause diagnosis:
+
+### Bug #1 — `/diagnostic/bracket-lifecycle` queried a non-existent field
+
+The persistence layer (`services/bracket_reissue_service.py::_persist_lifecycle_event`)
+stamps `created_at = datetime.now(timezone.utc)` (BSON datetime). The new
+v124 endpoint was reading `ts` as an ISO **string range**. Field name +
+type mismatch ⇒ MongoDB matched nothing, silently. Other readers in the
+codebase (`trading_bot.py:189`, `trading_bot.py:1265`) correctly use
+`created_at`; the v124 endpoint diverged.
+
+**Fix** (`routers/diagnostic_router.py::bracket_lifecycle_audit`):
+- Query `created_at` as a `[$gte day_start, $lt day_end]` datetime range.
+- Classify by the actual `phase` value written by the persistence layer
+  (`done`/`cancel`/`submit`/`throttle`/`boot_zombie_sweep*`) → categories
+  `reissue`/`cancel_failed`/`naked`/`throttled`/`boot_observation`.
+  The prior code looked for an `event` field that never existed.
+- New `naked_positions` array surfaces the catastrophic
+  cancel-OK-submit-FAIL state from the -$25k incident.
+- Mass-cancel cluster math (5+ in 60s) now uses real datetimes.
+- Response includes `collection_total_docs` + `collection_latest_event`
+  so the operator can sanity-check whether the writer is alive
+  before debugging "why is the query empty?".
+
+### Bug #2 — Kill-switch monitor invisible to `grep`
+
+The continuous monitor (`trading_bot_service.py::_kill_switch_monitor_loop`)
+logs `"Continuous monitor started"` once at INFO, then heartbeats at
+DEBUG. With log level INFO (default), `grep "v123 kill-switch"` on the
+log file only finds the one startup line — and only if the bot was
+actually started. On a quiet PnL day there's no proof of life.
+
+**Fix**: emit a periodic INFO heartbeat every ~4 minutes
+(16 × 15s iterations) so the operator can verify the task is alive:
+
+```
+[v123 kill-switch] heartbeat: realized=$-1200 unrealized=$-340 limit=$5000 closed=8 (alive)
+```
+
+### Bug #3 — `/setup-winrate-breakdown` empty (not a code bug)
+
+Endpoint is correct. The `alert_outcomes` writer in `pnl_compute.py`
+was only wired in **v19.34.124** — the same day. The endpoint queries
+`closed_at >= now - days` against rows that don't exist yet. As trades
+close over the next 1–3 sessions the collection will populate. The
+older writer in `enhanced_scanner.record_alert_outcome` requires
+`alert_id ∈ scanner._live_alerts`, which doesn't cover reconciler /
+flatten / phantom-recovery paths — exactly why v124 added the second
+writer.
+
+**No code change.** Documented for the operator.
+
+### Tests
+
+- New: `tests/test_bracket_lifecycle_endpoint_v19_34_125.py` (5 cases)
+  - Reader queries `created_at` as datetime, never `ts`
+  - All 5 writer `phase` values map to non-`unknown` categories
+  - Mass-cancel cluster fires on 5+ events in 60s
+  - Empty collection returns clean success summary
+  - Invalid date returns error envelope
+
+- Regression: 58 existing bracket / pnl / runaway tests still pass.
+
+### Operator verification commands (post-pull/restart)
+
+```bash
+# Should now return real numbers if anything's in the collection
+curl -s "$BACKEND_URL/api/diagnostic/bracket-lifecycle?date=$(date -u +%F)" | jq '.summary, .collection_total_docs'
+
+# Kill-switch heartbeat (wait ~4 min after restart)
+grep "v123 kill-switch" /var/log/sentcom/backend.log | tail -5
+```
+
+
+
 ## 2026-02-12 (v19.34.124) — Roadmap fixes #3 (audit) / #4 (alert_outcomes) / #5 (sign-mismatch) / #6 (PAPER filter) / #7 (enabled-setups GET)
 
 Continuing the v19.34.121 post-mortem roadmap. Five fixes shipped in

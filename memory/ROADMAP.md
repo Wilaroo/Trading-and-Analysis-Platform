@@ -4,6 +4,20 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-12 — v19.34.125 SHIPPED — Bracket-lifecycle diagnostic schema fix + kill-switch heartbeat
+
+Operator restarted after v19.34.124, ran the verification runbook, and reported all three diagnostic outputs were empty/silent on the -$25k incident day. Root-caused and patched:
+
+- **`/api/diagnostic/bracket-lifecycle`** queried a non-existent `ts` string field while the writer stamps `created_at` (BSON datetime). Result: every query silently returned `0 events`. Endpoint rewritten to match the actual writer schema (see CHANGELOG for full classification map). New `naked_positions` array surfaces the catastrophic cancel-OK-submit-FAIL state. Response now includes `collection_total_docs` + `collection_latest_event` for fast triage.
+- **Kill-switch monitor invisible to `grep`**: added a periodic INFO heartbeat (every ~4 min) so the operator can confirm the background task is alive on quiet days.
+- **`/setup-winrate-breakdown`** empty is expected — the v124 `alert_outcomes` writer was wired the same day and needs 1-3 sessions to accumulate. Documented; no code change.
+
+5 new pytest cases + 58 regression tests pass. **Next**: P0 — Bracket re-issue on consolidator merge (Issue #3 from v121 post-mortem still pending).
+
+---
+
+
+
 ## 🟢 P2 — Proactive teammate-voice notifications for cap downsizing (saved 2026-05-12)
 
 When a trade gets auto-downsized by the 30% / 55% exposure caps, emit a chat-style nudge into the V5 activity feed (not just a passive log entry). Uses the existing `exposure_cap_warnings` array attached to BotTrade. Example: "Hey, our 55% long-horizon cap is tight — I downsized AAPL from 200 → 80 shares. Want me to scale out NVDA position trade to free room for full size?"

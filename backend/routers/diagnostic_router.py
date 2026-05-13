@@ -1774,20 +1774,38 @@ def bracket_lifecycle_audit(
 ):
     """Walk `bracket_lifecycle_events` for a symbol or trade_id.
 
+    v19.34.125 — schema-fix:
+      • Filters on `created_at` (BSON datetime), NOT a non-existent `ts`
+        string. The persistence layer in `bracket_reissue_service.py`
+        stamps `created_at = datetime.now(timezone.utc)`; the prior
+        version of this endpoint queried `ts` and silently returned 0
+        events even when the collection was healthy.
+      • Maps the actual `phase` values written by the persistence layer
+        (`done`/`cancel`/`submit`/`throttle`/`boot_zombie_sweep`) into
+        operator-readable categories.
+
     Returns events grouped by trade_id with derived metrics:
-      • `attach_count`, `cancel_count`, `reissue_count` per trade
+      • `attaches`, `cancels`, `reissues`, `failures` per trade
       • `mass_cancel_clusters`: timestamp windows with 5+ cancels in 60s
-      • `orphaned_stops`: trades whose last cancel had no subsequent attach
+      • `orphaned_stops`: trades whose last event was a cancel/failure
+        with no subsequent successful re-issue
+      • `naked_positions`: trades where cancel succeeded but submit failed
+        (the catastrophic case from the -$25k incident)
     """
+    from datetime import datetime as _dt, timedelta as _td
+
     db = _get_db()
 
     if not date:
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    start_iso = f"{date}T00:00:00"
-    end_iso   = f"{date}T23:59:59"
+        date = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        day_start = _dt.fromisoformat(f"{date}T00:00:00").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return {"success": False, "error": f"invalid date format: {date} (expected YYYY-MM-DD)"}
+    day_end = day_start + _td(days=1)
 
     q: Dict[str, Any] = {
-        "ts": {"$gte": start_iso, "$lte": end_iso},
+        "created_at": {"$gte": day_start, "$lt": day_end},
     }
     if symbol:
         q["symbol"] = symbol.upper()
@@ -1797,62 +1815,103 @@ def bracket_lifecycle_audit(
     events = list(
         db["bracket_lifecycle_events"]
           .find(q, {"_id": 0})
-          .sort("ts", 1)
+          .sort("created_at", 1)
           .limit(limit)
     )
 
-    # Group by trade_id
+    # Normalize created_at → ISO string for JSON responses, preserve
+    # the datetime for cluster math below.
+    def _iso(v):
+        return v.isoformat() if hasattr(v, "isoformat") else (v or "")
+    for ev in events:
+        ev["created_at_iso"] = _iso(ev.get("created_at"))
+
+    # Phase → category map. Mirrors the writer in `bracket_reissue_service.py`
+    #   phase="done"     + success=True   → reissue (cancel-old + submit-new OK)
+    #   phase="cancel"   + success=False  → cancel_failed (old bracket survived)
+    #   phase="submit"   + success=False  → naked  (cancel OK but submit FAIL)
+    #   phase="throttle" + success=False  → throttled (refused, no IB action)
+    #   phase="boot_zombie_sweep*"        → boot_observation
+    def _classify(ev: Dict[str, Any]) -> str:
+        phase = (ev.get("phase") or "").lower()
+        ok = bool(ev.get("success"))
+        if phase == "done" and ok:
+            return "reissue"
+        if phase == "cancel" and not ok:
+            return "cancel_failed"
+        if phase == "submit" and not ok:
+            return "naked"
+        if phase == "throttle":
+            return "throttled"
+        if phase.startswith("boot_zombie_sweep"):
+            return "boot_observation"
+        return f"unknown:{phase or 'none'}"
+
     from collections import defaultdict
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for ev in events:
+        ev["_category"] = _classify(ev)
         grouped[ev.get("trade_id") or "<no_trade_id>"].append(ev)
 
-    # Derived metrics per trade
     per_trade: List[Dict[str, Any]] = []
+    naked_trades: List[Dict[str, Any]] = []
+    orphaned: List[Dict[str, Any]] = []
     for tid, evts in grouped.items():
-        attaches  = [e for e in evts if (e.get("event") or "").lower() in ("attach", "attached", "submitted", "presubmitted")]
-        cancels   = [e for e in evts if (e.get("event") or "").lower() in ("cancel", "cancelled", "canceled")]
-        reissues  = [e for e in evts if (e.get("event") or "").lower() in ("reissue", "reissued")]
-        last_event = evts[-1] if evts else None
-        orphaned = (
-            last_event is not None
-            and (last_event.get("event") or "").lower() in ("cancel", "cancelled", "canceled")
-        )
-        per_trade.append({
+        cats = [e["_category"] for e in evts]
+        reissues = sum(1 for c in cats if c == "reissue")
+        cancels  = sum(1 for c in cats if c in ("cancel_failed", "naked"))
+        naked    = sum(1 for c in cats if c == "naked")
+        last_cat = cats[-1] if cats else ""
+        is_orphaned = last_cat in ("cancel_failed", "naked")
+        row = {
             "trade_id": tid,
             "symbol": (evts[0].get("symbol") if evts else None),
             "event_count": len(evts),
-            "attaches": len(attaches),
-            "cancels": len(cancels),
-            "reissues": len(reissues),
-            "orphaned_stop": orphaned,
-            "first_event_at": evts[0].get("ts") if evts else None,
-            "last_event_at":  evts[-1].get("ts") if evts else None,
+            "reissues": reissues,
+            "cancels": cancels,
+            "naked_events": naked,
+            "throttled": sum(1 for c in cats if c == "throttled"),
+            "last_category": last_cat,
+            "orphaned_stop": is_orphaned,
+            "first_event_at": evts[0].get("created_at_iso") if evts else None,
+            "last_event_at":  evts[-1].get("created_at_iso") if evts else None,
             "events": evts,
-        })
+        }
+        per_trade.append(row)
+        if naked > 0:
+            naked_trades.append({
+                "trade_id": tid,
+                "symbol": row["symbol"],
+                "last_event_at": row["last_event_at"],
+                "naked_events": naked,
+            })
+        if is_orphaned:
+            orphaned.append({
+                "trade_id": tid,
+                "symbol": row["symbol"],
+                "last_event_at": row["last_event_at"],
+                "last_category": last_cat,
+            })
 
-    # Mass-cancel cluster detection: window every cancel event, count
-    # how many other cancels are within 60 seconds.
-    from datetime import datetime as _dt
+    # Mass-cancel cluster detection (5+ cancels within 60s window).
+    # Uses the raw `created_at` datetime for accuracy.
     cancel_events = sorted(
-        [e for e in events if (e.get("event") or "").lower() in ("cancel", "cancelled", "canceled")],
-        key=lambda x: x.get("ts") or "",
+        [e for e in events if e["_category"] in ("cancel_failed", "naked")],
+        key=lambda x: x.get("created_at") or _dt.min.replace(tzinfo=timezone.utc),
     )
     clusters: List[Dict[str, Any]] = []
     i = 0
     while i < len(cancel_events):
         anchor = cancel_events[i]
-        try:
-            anchor_t = _dt.fromisoformat(anchor.get("ts", "").replace("Z", "+00:00"))
-        except Exception:
+        anchor_t = anchor.get("created_at")
+        if not hasattr(anchor_t, "timestamp"):
             i += 1
             continue
         window_evts = [anchor]
         j = i + 1
         while j < len(cancel_events):
-            try:
-                t_j = _dt.fromisoformat(cancel_events[j].get("ts", "").replace("Z", "+00:00"))
-            except Exception:
+            t_j = cancel_events[j].get("created_at")
+            if not hasattr(t_j, "timestamp"):
                 j += 1
                 continue
             if (t_j - anchor_t).total_seconds() <= 60:
@@ -1862,30 +1921,55 @@ def bracket_lifecycle_audit(
                 break
         if len(window_evts) >= 5:
             clusters.append({
-                "started_at": anchor.get("ts"),
+                "started_at": _iso(anchor.get("created_at")),
                 "window_seconds": 60,
                 "cancel_count": len(window_evts),
                 "symbols": sorted({e.get("symbol") for e in window_evts if e.get("symbol")}),
             })
-            i = j  # skip past this cluster
+            i = j
         else:
             i += 1
 
-    orphaned = [t for t in per_trade if t["orphaned_stop"]]
+    # Collection-health context — operator visibility into whether the
+    # writer is actually running. Total docs + most recent timestamp.
+    try:
+        total_in_collection = db["bracket_lifecycle_events"].estimated_document_count()
+    except Exception:
+        total_in_collection = None
+    latest_doc = None
+    try:
+        latest = list(
+            db["bracket_lifecycle_events"]
+              .find({}, {"_id": 0, "created_at": 1, "symbol": 1, "phase": 1})
+              .sort("created_at", -1).limit(1)
+        )
+        if latest:
+            latest_doc = {
+                "symbol": latest[0].get("symbol"),
+                "phase":  latest[0].get("phase"),
+                "created_at": _iso(latest[0].get("created_at")),
+            }
+    except Exception:
+        pass
 
     return {
         "success": True,
         "query": {"symbol": symbol, "date": date, "trade_id": trade_id, "limit": limit},
+        "schema_version": "v19.34.125",
         "total_events": len(events),
         "unique_trades": len(grouped),
+        "collection_total_docs": total_in_collection,
+        "collection_latest_event": latest_doc,
         "per_trade": sorted(per_trade, key=lambda r: -r["event_count"]),
         "mass_cancel_clusters": clusters,
-        "orphaned_stops": [{"trade_id": t["trade_id"], "symbol": t["symbol"],
-                            "last_event_at": t["last_event_at"]} for t in orphaned],
+        "naked_positions": naked_trades,
+        "orphaned_stops": orphaned,
         "summary": (
-            f"{len(events)} events across {len(grouped)} trades. "
+            f"{len(events)} events across {len(grouped)} trades for {date}. "
             f"{len(clusters)} mass-cancel cluster(s). "
-            f"{len(orphaned)} trade(s) with orphaned stops."
+            f"{len(naked_trades)} naked-position event(s). "
+            f"{len(orphaned)} trade(s) with orphaned stops. "
+            f"Collection holds {total_in_collection} total docs (7d TTL)."
         ),
     }
 

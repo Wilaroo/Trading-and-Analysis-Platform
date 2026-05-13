@@ -3956,6 +3956,7 @@ class TradingBotService:
         db = client[os.environ.get("DB_NAME", "tradecommand")]
 
         logger.info("[v123 kill-switch] Continuous monitor started (15s cadence)")
+        _hb_counter = 0  # v19.34.125 — periodic INFO heartbeat
 
         while self._running:
             try:
@@ -4009,6 +4010,18 @@ class TradingBotService:
                     logger.debug(
                         "[v123 kill-switch] pnl=$%.0f / limit=$%.0f (%d closed)",
                         total_pnl, effective_limit, snapshot["closed_count"],
+                    )
+
+                # v19.34.125 — periodic INFO heartbeat (~once every 4 min)
+                # so the operator can `grep "v123 kill-switch"` and confirm
+                # the background task is alive, even on a quiet PnL day.
+                _hb_counter += 1
+                if _hb_counter % 16 == 0:
+                    logger.info(
+                        "[v123 kill-switch] heartbeat: realized=$%.0f "
+                        "unrealized=$%.0f limit=$%.0f closed=%d (alive)",
+                        snapshot["realized"], snapshot["unrealized"],
+                        effective_limit, snapshot["closed_count"],
                     )
             except asyncio.CancelledError:
                 logger.info("[v123 kill-switch] monitor cancelled")
