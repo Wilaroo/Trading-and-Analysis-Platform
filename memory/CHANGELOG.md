@@ -3,6 +3,78 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.133) — Realized PnL forensic audit + Evaluate tile honesty
+
+### Operator-reported bug
+
+TWS account: realized=$-674.64 / unrealized=$+1,485.70 / TOTAL=$+811.06
+Our app:    realized=$-4,250.84 / unrealized=$+1,513.81 / TOTAL=$-2,737.03
+
+**Unrealized matches within $28** (acceptable streaming-quote lag).
+**Realized is off by $3,576** — that's the bleed.
+
+Per-position numbers are all within $10-30 of TWS (also acceptable).
+So the discrepancy is NOT in individual positions' computed PnL — it's
+in **closed trade rows being summed incorrectly** when computing
+"today's realized".
+
+### New endpoint: `/api/diagnostic/realized-pnl-audit`
+
+Forensic audit of every closed trade today. Surfaces:
+
+- **`by_exit_reason`**: total realized PnL grouped by close path. Lets
+  us see which path (operator-flatten / target-hit / phantom_close /
+  consolidator / reconciler) is contributing how much. If one path is
+  bleeding $3,576 alone, this is where it shows up.
+- **`duplicate_close_groups`**: same `(symbol, fill_time)` pair appearing
+  in `bot_trades` more than once with `status=closed`. The #1 hypothesis
+  for the $3,576 discrepancy — a close event being recorded twice (e.g.
+  IB execDetails + internal close path both writing the row).
+- **`suspicious_rows`**: any closed trade whose `exit_reason` matches
+  a known fake-PnL writer (consolidator / phantom / reconciled_excess /
+  naked_sweep / boot_zombie_sweep). These should ALL have PnL=0; if
+  one has PnL≠0, that's a leak.
+- **`paper_dropped`**: count of paper-mode trades excluded. Mismatched
+  executor mode in mongo would cause paper trades to bleed into the
+  realized counter (TWS doesn't count them, our app might).
+- **`clean_net_pnl_estimate`**: `gross_net - duplicate_impact -
+  suspicious_pnl` — the "should match TWS within a few dollars" number.
+
+### Operator runbook
+
+```bash
+curl -s "http://localhost:8001/api/diagnostic/realized-pnl-audit" | jq '{
+  verdict,
+  hints,
+  totals: {
+    gross_realized: .gross_realized_pnl_sum,
+    gross_net:      .gross_net_pnl_sum,
+    clean_estimate: .clean_net_pnl_estimate
+  },
+  by_reason: .by_exit_reason,
+  duplicates: .duplicate_close_groups,
+  suspicious: { count: .suspicious_rows_count, sum: .suspicious_pnl_sum }
+}'
+```
+
+Read the `verdict` field:
+- `clean`              → no smoking gun in mongo; bleed is somewhere else
+- `duplicate_closes`   → same trade closed twice; `duplicate_pnl_impact` is the bleed amount
+- `suspicious_close_paths` → consolidator/phantom/reconciler writing non-zero PnL
+
+### Evaluate tile honest sublabel
+
+`SentComV5View.jsx`:
+- New `evalSub` calculation: `${evalEmitted}/${perCycle} pass · ${passRate}% gate-rate`
+- Was: `"0% pass"` (gate-rate only)
+- Now: `"12/227 pass · 5% gate-rate"` — surfaces both the numerator and denominator
+
+Same pattern as v132's scan tile fix. Pipeline funnel now self-documents:
+- Scan: `227/cyc · 957/1500 lifetime · wave 4/8 ✓`
+- Evaluate: `12/227 pass · 5% gate-rate`
+
+
+
 ## 2026-02-12 (v19.34.132) — Honest "Scan" HUD sublabel
 
 Operator was reading the "Scan: 325 hits" tile as "we only scanned 325

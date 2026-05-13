@@ -1341,6 +1341,205 @@ def _count_tier_cache(tier_cache: Dict[str, str]) -> Dict[str, int]:
     return counts
 
 
+@router.get("/realized-pnl-audit")
+def realized_pnl_audit(
+    date: Optional[str] = None,
+    paper_filter: bool = True,
+):
+    """Forensic audit of today's realized PnL — explains discrepancies
+    between our app's "Realized" number and IB TWS's actual realized.
+
+    Returns:
+      • Per-trade row dump (every closed trade today)
+      • Breakdown by `exit_reason` / `close_reason` path → see which
+        path is contributing how much
+      • Duplicate-close detection (same symbol + same fill cluster
+        appearing twice — the #1 cause of inflated realized losses)
+      • Paper-mode contamination check
+      • Total summed (gross) vs total summed (excluding suspect rows)
+
+    v19.34.133: shipped after operator reported TWS realized=$-674
+    but our app shows $-4,250. Difference of $3,576 = the bleed.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    from collections import defaultdict
+
+    db = _get_db()
+    if not date:
+        date = _dt.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        day_start = _dt.fromisoformat(f"{date}T00:00:00").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return {"success": False, "error": f"invalid date: {date}"}
+    day_end = day_start + _td(days=1)
+    # Mongo stores closed_at as ISO string most of the time. Match both
+    # string and datetime ranges to be safe.
+    day_start_iso = day_start.isoformat()
+    day_end_iso = day_end.isoformat()
+
+    # 1) Pull every closed trade in window
+    q = {
+        "$and": [
+            {"status": {"$in": ["closed", "CLOSED"]}},
+            {"$or": [
+                {"closed_at": {"$gte": day_start, "$lt": day_end}},
+                {"closed_at": {"$gte": day_start_iso, "$lt": day_end_iso}},
+                {"exit_time": {"$gte": day_start, "$lt": day_end}},
+                {"exit_time": {"$gte": day_start_iso, "$lt": day_end_iso}},
+            ]},
+        ],
+    }
+    rows = list(db["bot_trades"].find(q, {"_id": 0}).limit(2000))
+
+    # 2) Helper to read either ISO string or datetime as ISO string
+    def _iso(v):
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+        return str(v) if v else ""
+
+    # 3) Per-trade summary projection
+    def _row(r):
+        return {
+            "trade_id": r.get("id") or r.get("trade_id"),
+            "symbol": r.get("symbol"),
+            "direction": r.get("direction"),
+            "shares": r.get("shares"),
+            "fill_price": r.get("fill_price"),
+            "exit_price": r.get("exit_price"),
+            "realized_pnl": r.get("realized_pnl"),
+            "net_pnl": r.get("net_pnl"),
+            "total_commissions": r.get("total_commissions"),
+            "exit_reason": r.get("exit_reason") or r.get("close_reason") or "",
+            "close_reason": r.get("close_reason") or "",
+            "entered_by": r.get("entered_by") or "",
+            "setup_type": r.get("setup_type") or "",
+            "executor_mode": r.get("executor_mode")
+                or r.get("execution_mode")
+                or r.get("mode"),
+            "is_paper": bool(
+                r.get("is_paper")
+                or "PAPER" in str(r.get("executor_mode", "")).upper()
+                or "SIM" in str(r.get("execution_mode", "")).upper()
+            ),
+            "fill_time": _iso(r.get("fill_time") or r.get("entry_time")),
+            "closed_at": _iso(r.get("closed_at") or r.get("exit_time")),
+            "exit_price_source": r.get("exit_price_source"),
+        }
+    projected = [_row(r) for r in rows]
+
+    # 4) Filter paper-mode rows (TWS doesn't count paper trades)
+    live_only = [r for r in projected if not r["is_paper"]] if paper_filter else projected
+    paper_dropped = len(projected) - len(live_only)
+
+    # 5) Breakdown by exit_reason
+    by_reason: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"count": 0, "realized_sum": 0.0, "net_sum": 0.0, "symbols": []}
+    )
+    for r in live_only:
+        key = r["exit_reason"] or r["close_reason"] or "<no_reason>"
+        b = by_reason[key]
+        b["count"] += 1
+        b["realized_sum"] += float(r["realized_pnl"] or 0)
+        b["net_sum"] += float(r["net_pnl"] or 0)
+        if len(b["symbols"]) < 8:
+            b["symbols"].append(r["symbol"])
+
+    breakdown_sorted = sorted(
+        [{"exit_reason": k, **v} for k, v in by_reason.items()],
+        key=lambda x: x["realized_sum"],
+    )
+
+    # 6) Duplicate-close detection — group by symbol + fill_time
+    by_fill: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    for r in live_only:
+        if r["symbol"] and r["fill_time"]:
+            by_fill[(r["symbol"], r["fill_time"])].append(r)
+    duplicate_groups = []
+    duplicate_pnl_impact = 0.0
+    for (sym, ft), group in by_fill.items():
+        if len(group) > 1:
+            # Keep first row as canonical, others are suspected dupes
+            dupe_realized_sum = sum(float(r["realized_pnl"] or 0) for r in group[1:])
+            dupe_net_sum = sum(float(r["net_pnl"] or 0) for r in group[1:])
+            duplicate_pnl_impact += dupe_net_sum or dupe_realized_sum
+            duplicate_groups.append({
+                "symbol": sym,
+                "fill_time": ft,
+                "row_count": len(group),
+                "trade_ids": [r["trade_id"] for r in group],
+                "realized_pnls": [r["realized_pnl"] for r in group],
+                "net_pnls": [r["net_pnl"] for r in group],
+                "exit_reasons": [r["exit_reason"] for r in group],
+                "suspected_dupe_pnl": dupe_net_sum or dupe_realized_sum,
+            })
+
+    # 7) Suspicious close reasons that look like fake-PnL writers
+    SUSPICIOUS = {
+        "consolidated_v19_34_42", "consolidated", "reconciled_excess",
+        "reconciled_excess_v19_34_15b", "phantom_close",
+        "naked_sweep_reissue", "bracket_reissue",
+        # cancellation / boot-time sweeps that should NEVER carry PnL
+        "boot_zombie_sweep", "boot_zombie_sweep_summary",
+    }
+    suspicious_rows = []
+    suspicious_realized_sum = 0.0
+    for r in live_only:
+        reason = (r["exit_reason"] or "") + "|" + (r["close_reason"] or "")
+        if any(s in reason for s in SUSPICIOUS):
+            pnl = float(r["net_pnl"] or r["realized_pnl"] or 0)
+            if abs(pnl) > 0.01:
+                suspicious_rows.append({**r, "_suspect_amount": pnl})
+                suspicious_realized_sum += pnl
+
+    # 8) Totals
+    gross_realized = sum(float(r["realized_pnl"] or 0) for r in live_only)
+    gross_net = sum(float(r["net_pnl"] or 0) for r in live_only)
+    clean_net = gross_net - duplicate_pnl_impact - suspicious_realized_sum
+
+    # 9) Verdict
+    verdict = "clean"
+    hints = []
+    if duplicate_groups:
+        verdict = "duplicate_closes"
+        hints.append(
+            f"{len(duplicate_groups)} symbol+fill-time pair(s) closed >1 times. "
+            f"Suspected duplicate PnL impact: ${duplicate_pnl_impact:.2f}"
+        )
+    if suspicious_rows:
+        if verdict == "clean":
+            verdict = "suspicious_close_paths"
+        hints.append(
+            f"{len(suspicious_rows)} row(s) with PnL written from suspicious close "
+            f"reasons (consolidator/phantom/reconciler/boot-sweep). "
+            f"Suspect PnL: ${suspicious_realized_sum:.2f}"
+        )
+    if paper_dropped > 0:
+        hints.append(
+            f"{paper_dropped} paper-mode row(s) excluded (set paper_filter=false "
+            f"to include them)."
+        )
+
+    return {
+        "success": True,
+        "date": date,
+        "rows_total": len(rows),
+        "rows_live_only": len(live_only),
+        "paper_dropped": paper_dropped,
+        "gross_realized_pnl_sum": round(gross_realized, 2),
+        "gross_net_pnl_sum": round(gross_net, 2),
+        "clean_net_pnl_estimate": round(clean_net, 2),
+        "duplicate_close_groups": duplicate_groups,
+        "duplicate_pnl_impact": round(duplicate_pnl_impact, 2),
+        "suspicious_rows_count": len(suspicious_rows),
+        "suspicious_pnl_sum": round(suspicious_realized_sum, 2),
+        "suspicious_rows_sample": suspicious_rows[:20],
+        "by_exit_reason": breakdown_sorted,
+        "verdict": verdict,
+        "hints": hints,
+        "rows": live_only[:100],  # cap for response size
+    }
+
+
 @router.get("/scanner-coverage")
 def scanner_coverage(hours: int = 6) -> Dict[str, Any]:
     """Surface the IB-subscription vs. universe-size gap for the operator.

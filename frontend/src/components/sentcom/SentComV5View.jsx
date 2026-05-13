@@ -422,7 +422,20 @@ export const SentComV5View = ({
           return `${perCycle}/cyc · ${lifetime}${denom} lifetime · wave ${wave}/${totalWaves} ${verdictMark}`;
         })()}
         evalCount={counts.eval}
-        evalSub={counts.eval_sub}
+        evalSub={(() => {
+          // v19.34.133 — extend honest funnel sublabel into Evaluate.
+          // Shows "alerts_in/passed → emitted" so the operator can
+          // see the funnel at a glance.
+          const s = scanCycleStats;
+          if (!s || !s.enhanced_scanner) return counts.eval_sub;
+          const enh = s.enhanced_scanner || {};
+          const perCycle = enh.symbols_scanned_last_cycle ?? 0;
+          const evalEmitted = counts.eval ?? 0;
+          const passRate = perCycle > 0
+            ? Math.round((evalEmitted / perCycle) * 100)
+            : 0;
+          return `${evalEmitted}/${perCycle} pass · ${passRate}% gate-rate`;
+        })()}
         orderCount={counts.order}
         orderSplit={counts.order_split}
         orderSub={counts.order_sub}
