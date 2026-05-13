@@ -27,6 +27,40 @@ Operator restarted after v19.34.124, ran the verification runbook, and reported 
 ---
 
 
+## 🟢 P2 — Session-color background tints on trade timestamps (saved 2026-02-13)
+
+Now that every operator-facing timestamp renders with a ` ET` suffix
+(v19.34.137), layer **session-context color tints** behind each rendered
+time so a quick visual scan instantly tells you which session the event
+occurred in:
+
+- `04:00 – 09:30 ET` → pre-market (blue tint, e.g. `bg-sky-500/8`)
+- `09:30 – 16:00 ET` → RTH (gold tint, e.g. `bg-amber-500/8`)
+- `16:00 – 20:00 ET` → after-hours (gray tint, e.g. `bg-zinc-500/12`)
+- `20:00 – 04:00 ET` → overnight (deep violet tint, e.g. `bg-violet-500/8`)
+
+### Scope
+- Primary site: `components/sentcom/v5/pipelineStageColumns.jsx`
+  (the audit / open-positions / drill-down row time column).
+- Secondary: `BracketHistoryPanel.jsx`, `UnifiedStreamV5.jsx` time column.
+- Reuse a tiny helper `sessionForET(date) → 'pre'|'rth'|'ah'|'on'` from
+  `utils/timeET.js` keyed off the same ET formatter we already use.
+
+### Why
+- Operator scanning the audit log for "did this fill happen in RTH or
+  AH?" gets the answer at a glance — no parsing of HH:MM required.
+- Solves a recurring forensic question without adding a new column.
+- 30-line CSS-only add; zero backend change; bundle impact ~< 200 B.
+
+### Acceptance
+- Helper in `utils/timeET.js`; one tailwind class lookup per time cell.
+- Pre-market / RTH / AH / overnight tints distinguishable on the dark
+  theme (4-stop palette, low-saturation so the time text stays readable).
+- Pure date-only labels stay un-tinted.
+
+---
+
+
 
 ## 🟢 P2 — Proactive teammate-voice notifications for cap downsizing (saved 2026-05-12)
 
