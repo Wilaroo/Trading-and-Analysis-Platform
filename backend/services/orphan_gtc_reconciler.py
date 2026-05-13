@@ -62,6 +62,18 @@ VERDICT_AWAITING_DATA = "awaiting_data"
 SAFE_TO_AUTO_CANCEL = frozenset({VERDICT_NAKED_NO_POSITION, VERDICT_ORPHAN_NO_TRADE})
 
 
+# v19.34.151 — distinct verdict for pending intraday entry orders
+# cancelled by the EOD sweep. Separate from `orphan_no_trade` so the
+# operator can tell the two cleanup paths apart in audit logs. Also
+# part of SAFE_TO_AUTO_CANCEL.
+VERDICT_EOD_INTRADAY_ENTRY = "eod_intraday_entry"
+SAFE_TO_AUTO_CANCEL = frozenset({
+    VERDICT_NAKED_NO_POSITION,
+    VERDICT_ORPHAN_NO_TRADE,
+    VERDICT_EOD_INTRADAY_ENTRY,
+})
+
+
 # Order statuses that count as "working" at IB (will fire on price trigger).
 WORKING_ORDER_STATUSES = frozenset({
     "submitted", "presubmitted", "pendingsubmit",
@@ -284,6 +296,121 @@ def _safe_float(v: Any) -> Optional[float]:
         return None
 
 
+def classify_intraday_entries_for_eod_sweep(
+    *,
+    ib_open_orders: List[Dict[str, Any]],
+    bot_trades: List[Dict[str, Any]],
+) -> List[OrderVerdict]:
+    """v19.34.151 — find pending DAY entry orders for intraday trades
+    that should be cancelled at EOD.
+
+    Distinct from `classify_open_orders` because:
+      • Targets DAY orders (auto-cancelled by exchange overnight, but
+        we want to cancel them BEFORE 4:00 PM so they don't trigger in
+        the last 5 minutes of session).
+      • Joins each order to the bot_trade that placed it (via
+        `entry_order_id`); only flags orders where the bot_trade's
+        `close_at_eod` is True. SWING / POSITION orders (close_at_eod
+        False) are intentionally left alive — they're meant to fill
+        overnight or next-session.
+      • Ignores stop / target legs — those are covered by
+        `_cancel_ib_bracket_orders` inside `close_trade` itself when
+        the parent position closes, and by the existing
+        `classify_open_orders` path for orphan GTC sweeps.
+
+    Returns OrderVerdict instances with verdict=VERDICT_EOD_INTRADAY_ENTRY
+    so the existing `cancel_orphan_gtc_orders` pipeline can process
+    them via the SAFE_TO_AUTO_CANCEL set.
+    """
+    # Index bot trades by entry_order_id ONLY — we don't want to match
+    # on stop/target IDs here (those are separate sweep targets).
+    trade_by_entry_oid: Dict[int, Dict[str, Any]] = {}
+    for t in bot_trades or []:
+        v = t.get("entry_order_id")
+        if v in (None, ""):
+            continue
+        try:
+            trade_by_entry_oid[int(v)] = t
+        except (TypeError, ValueError):
+            continue
+
+    out: List[OrderVerdict] = []
+    for o in ib_open_orders or []:
+        # Skip non-working orders defensively.
+        status_norm = _normalise_status(o.get("status"))
+        if status_norm and status_norm not in WORKING_ORDER_STATUSES:
+            continue
+
+        order_type = (o.get("order_type") or o.get("orderType") or "").upper()
+        tif = (o.get("time_in_force") or o.get("tif") or "").upper()
+
+        # Scope: pending LMT / STP / STP_LMT entries that haven't yet
+        # filled. MKT orders aren't normally pending (they fill on
+        # submission), but include them defensively. GTC orders are
+        # the orphan-bracket case — out of scope.
+        if tif and tif != "DAY":
+            continue
+        if order_type not in ("LMT", "STP", "STP_LMT", "MKT"):
+            continue
+
+        try:
+            oid = int(
+                o.get("ib_order_id") or o.get("order_id")
+                or o.get("orderId") or 0
+            )
+        except (TypeError, ValueError):
+            oid = 0
+        if oid == 0:
+            continue
+
+        matched = trade_by_entry_oid.get(oid)
+        if matched is None:
+            # Unmatched DAY entry. We intentionally don't auto-cancel
+            # these — could be a manual TWS order the operator placed.
+            # Operator can use the postmortem to spot them.
+            continue
+
+        # Skip if the matched trade is NOT flagged for EOD close
+        # (swing / position trades stay alive overnight).
+        if matched.get("close_at_eod") is not True:
+            continue
+
+        # Also skip if the matched trade has already filled (status
+        # OPEN means the parent entry succeeded — what's still
+        # pending must be a stop or target leg, handled elsewhere).
+        status = (matched.get("status") or "").lower()
+        if status in ("open", "partial", "closed", "cancelled"):
+            continue
+
+        try:
+            qty = int(abs(float(o.get("quantity") or 0)))
+        except (TypeError, ValueError):
+            qty = 0
+
+        out.append(OrderVerdict(
+            ib_order_id=oid,
+            perm_id=(int(o.get("perm_id") or o.get("permId") or 0) or None),
+            symbol=(o.get("symbol") or "").upper(),
+            action=_normalise_action(o.get("action")),
+            quantity=qty,
+            order_type=order_type,
+            limit_price=_safe_float(o.get("limit_price") or o.get("lmtPrice")),
+            stop_price=_safe_float(o.get("stop_price") or o.get("auxPrice")),
+            time_in_force=tif or "DAY",
+            status=o.get("status") or "",
+            verdict=VERDICT_EOD_INTRADAY_ENTRY,
+            reasons=[
+                f"EOD sweep: pending {order_type} entry for intraday "
+                f"trade {matched.get('id')} (setup={matched.get('setup_type')}, "
+                f"close_at_eod=True). Cancelled to prevent late-session fill."
+            ],
+            bot_trade_id=matched.get("id") or matched.get("trade_id"),
+            submitted_at=o.get("submitted_at"),
+        ))
+
+    return out
+
+
 # ─── orchestrator: pulls data and runs the classifier ───────────────────────
 
 
@@ -362,6 +489,7 @@ def _empty_summary() -> Dict[str, int]:
         VERDICT_NAKED_NO_POSITION: 0,
         VERDICT_ORPHAN_NO_TRADE: 0,
         VERDICT_MISMATCHED_SIZE: 0,
+        VERDICT_EOD_INTRADAY_ENTRY: 0,
     }
 
 

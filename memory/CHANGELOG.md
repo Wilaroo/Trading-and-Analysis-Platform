@@ -4,7 +4,96 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-02-13 (v19.34.150c) — Cold-start debounce + cadence-aware heartbeat + stuck-symbol surfacing
+## 2026-02-13 (v19.34.151) — EOD sweep hardening + intraday DAY-entry cancellation
+
+🔴 **Operator incident 2026-05-13**: EOD close at 3:55 PM ET "barely
+worked." User had to manually flatten all positions in TWS. Audit
+revealed two structural gaps in the EOD orchestrator.
+
+### Bugs fixed
+
+**Bug A (`position_manager.py:1236`)**: Post-close orphan sweep was
+gated by `if closed_count > 0:`. When zero positions actually closed
+in the EOD loop (because they all already closed via stops/targets
+earlier in the session, OR because every open trade was swing/position),
+the sweep never fired — leaving stale DAY LMT entries and naked GTC
+brackets alive at IB. Pending intraday LMTs could then fill in the
+final 5 minutes of the session with no time to manage.
+
+**Bug B**: The pre-fix sweep ONLY targeted orphan GTC brackets (via
+`classify_open_orders`). Pending DAY LMT **entry** orders for
+`close_at_eod=True` trades (scalps / intraday setups that haven't
+filled yet at 3:55 PM) were never in scope — exchange auto-cancel at
+4:00 PM is too late.
+
+**Bug C** (`trade_executor_service.py:1623`): Dead `try: pass /
+except: return` block in `_cancel_ib_bracket_orders` — leftover guard
+from a removed import. Removed.
+
+**Bug D** (`test_eod_closes_run_in_parallel_not_serial`): Previously
+flaky because the synchronous post-close sweep included `await
+asyncio.sleep(8)`. Fixed by making the sweep fire-and-forget via
+`asyncio.create_task`.
+
+### Fix
+
+- **`_run_eod_orphan_sweep` extracted** from `check_eod_close` and now
+  invoked **unconditionally** at EOD time (after every close-attempt
+  pass, plus the two early-return paths: zero open trades, all-swing).
+  Idempotent via `_eod_sweep_executed_today` flag (cleared each new
+  ET date). Honours the `AUTO_SWEEP_ORPHAN_GTC=false` kill-switch.
+- **New classifier** `classify_intraday_entries_for_eod_sweep` in
+  `orphan_gtc_reconciler.py`. Matches pending DAY LMT/STP/STP_LMT
+  entry orders to their `bot_trades` row via `entry_order_id` and
+  flags ONLY rows where `close_at_eod is True`. Swing / position
+  trades (`close_at_eod=False`) are explicitly preserved — they're
+  meant to fill overnight / next-session.
+- **New verdict** `VERDICT_EOD_INTRADAY_ENTRY` added to
+  `SAFE_TO_AUTO_CANCEL`. Cancellations route through the existing
+  `cancel_orphan_gtc_orders` infrastructure (no new IB call path).
+- **Sweep dedupes** intraday-entry verdicts against any orphan-GTC
+  verdicts by `ib_order_id` so no double-cancel.
+- **Persisted to Mongo** as `bot_events.eod_orphan_sweep` with a
+  `verdicts_summary` breakdown — surfaces in the new postmortem
+  endpoint and operator script.
+
+### Added — EOD Postmortem
+- **`GET /api/diagnostic/eod-postmortem?date=YYYY-MM-DD`** —
+  aggregates today's `eod_auto_close` event + close-phase
+  `trade_drops` + live IB open orders (joined to bot_trades for
+  `close_at_eod` / setup_type) + live IB positions + sweep outcome
+  + heuristic diagnosis text.
+- **`scripts/eod_postmortem.py`** — operator wrapper. Sections:
+  1. bot_events.eod_auto_close
+  2. close-phase trade_drops
+  3. IB orders still alive post-close
+  4. IB positions post-close (intraday-overnight = bug)
+  5. v19.34.90 EOD orphan sweep outcome
+  6. DIAGNOSIS heuristic root-cause guesses
+
+### Tests
+- **`test_eod_sweep_v19_34_151.py`** — 15 cases:
+  - Classifier: pending DAY LMT for intraday → flagged
+  - Classifier: swing / position trades NOT flagged
+  - Classifier: already-filled entries NOT flagged
+  - Classifier: unmatched manual orders NOT flagged
+  - Classifier: GTC orders NOT in intraday sweep
+  - Classifier: mixed 5-order suite filters correctly
+  - SAFE_TO_AUTO_CANCEL includes the new verdict
+  - End-to-end: sweep fires with zero open trades at EOD
+  - End-to-end: sweep fires with only swing trades at EOD
+  - End-to-end: sweep idempotent via `_eod_sweep_executed_today`
+  - End-to-end: flag resets on new day
+  - End-to-end: `AUTO_SWEEP_ORPHAN_GTC=false` kill-switch works
+  - End-to-end: orphan brackets + intraday entries combined and deduped
+  - G3 regression: dead `try: pass` removed from bracket cancel
+- **Existing EOD suite**: 42/42 still passing. The previously flaky
+  parallel-close test now passes consistently.
+
+**Total EOD suite: 57/57 passing.**
+
+
+
 
 Operator ran `diagnose_ib_pusher.py` post-v19.34.150b. Timeline showed
 classic cold-start: **🔴 RED at 2 pushes → 🟡 AMBER at 8 pushes → AMBER

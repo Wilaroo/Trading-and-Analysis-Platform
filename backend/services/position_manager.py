@@ -1077,6 +1077,10 @@ class PositionManager:
         open_count = len(bot._open_trades)
         if open_count == 0:
             bot._eod_close_executed_today = True
+            # v19.34.151 — still run the sweep even with no positions
+            # to close; stale DAY entries and orphan GTC brackets can
+            # exist independently of `_open_trades`. Fire-and-forget.
+            asyncio.create_task(self._run_eod_orphan_sweep(bot))
             return
 
         # Only close trades marked for EOD close (intraday/scalp/day trades)
@@ -1089,6 +1093,9 @@ class PositionManager:
         if not eod_trades:
             logger.info(f"🔔 EOD CHECK: {open_count} open trades, all are swing/position — no EOD close needed")
             bot._eod_close_executed_today = True
+            # v19.34.151 — same as above: sweep runs even when all open
+            # trades are swing/position. Fire-and-forget.
+            asyncio.create_task(self._run_eod_orphan_sweep(bot))
             return
 
         logger.info(
@@ -1227,94 +1234,206 @@ class PositionManager:
         else:
             logger.info(f"✅ EOD AUTO-CLOSE COMPLETE: Closed {closed_count} positions, Total P&L: ${total_pnl:+,.2f}")
 
-        # v19.34.90 — Immediate orphan sweep after EOD close. The
-        # background periodic auto-sweep runs every 30s; firing here
-        # closes the gap so post-EOD orphan brackets get cancelled
-        # within seconds rather than waiting for the next tick. Only
-        # runs if we actually closed at least one position (avoids
-        # spinning up the sweep machinery on no-op tick days).
-        if closed_count > 0:
+        # v19.34.151 — sweep runs unconditionally (not gated on
+        # closed_count) because stale DAY LMT entries and naked
+        # GTC brackets can exist EVEN when the EOD close path
+        # closed zero positions. The pre-fix `if closed_count > 0`
+        # guard left intraday LMT entries alive at 3:59 PM, which
+        # could fill in the final minute and force a manual TWS
+        # flatten (operator hit this 2026-05-13).
+        # Fired as a background task: it has an 8s pusher-refresh
+        # wait that shouldn't block the manage loop. Idempotent via
+        # `_eod_sweep_executed_today` so re-entry is safe.
+        asyncio.create_task(self._run_eod_orphan_sweep(bot))
+
+    async def _run_eod_orphan_sweep(self, bot: 'TradingBotService'):
+        """v19.34.151 — runs the orphan-order + pending-intraday-entry
+        sweep ONCE per trading day, regardless of whether any positions
+        actually closed in `check_eod_close`.
+
+        Covers two categories:
+          1. **Orphan GTC brackets** — protective legs whose underlying
+             position vanished (already handled pre-v19.34.151 via the
+             existing `audit_orphan_gtc_orders` flow; preserved here).
+          2. **Pending DAY LMT entries for intraday trades** (NEW) —
+             unfilled entry orders for setups flagged
+             `close_at_eod=True`. Pre-fix these would sit at IB until
+             4:00 PM and could fill in the final 5 minutes of session
+             with no time to manage. Swing / position trades
+             (`close_at_eod=False`) are EXPLICITLY EXCLUDED from the
+             sweep — they're meant to fill overnight / next-session.
+
+        Idempotent: once per UTC date via `_eod_sweep_executed_today`.
+        Failures are logged at WARNING, never raised — the manage loop
+        must stay alive.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        today_str = now_et.strftime("%Y-%m-%d")
+
+        # Per-day flag — initialise on first call (older bots persisted
+        # via `bot_persistence.py` may not have this attr yet).
+        if not hasattr(bot, "_eod_sweep_executed_today"):
+            bot._eod_sweep_executed_today = False
+            bot._last_eod_sweep_date = None
+
+        if getattr(bot, "_last_eod_sweep_date", None) != today_str:
+            bot._eod_sweep_executed_today = False
+            bot._last_eod_sweep_date = today_str
+
+        if bot._eod_sweep_executed_today:
+            return
+
+        # Honour the same kill-switch as the auto-sweep loop.
+        auto_sweep_enabled = os.environ.get(
+            "AUTO_SWEEP_ORPHAN_GTC", "true",
+        ).strip().lower() in ("1", "true", "yes", "on")
+        if not auto_sweep_enabled:
+            return
+
+        try:
+            # Give pusher ~8s to publish a fresh orders snapshot
+            # reflecting the closes we just fired (push interval = 10s
+            # + IB roundtrip).
+            await asyncio.sleep(8)
+
+            from services.orphan_gtc_reconciler import (
+                SAFE_TO_AUTO_CANCEL,
+                OrderVerdict,
+                audit_orphan_gtc_orders,
+                cancel_orphan_gtc_orders,
+                classify_intraday_entries_for_eod_sweep,
+                _fetch_ib_open_orders,
+                _fetch_bot_trades,
+            )
+
+            # Path A: existing orphan-GTC audit (naked brackets, etc.).
+            audit = await audit_orphan_gtc_orders(bot=bot, only_gtc=False)
+            safe_to_cancel: list = []
+            if audit.get("success"):
+                for raw in audit.get("verdicts") or []:
+                    if not isinstance(raw, dict):
+                        continue
+                    if raw.get("verdict") not in SAFE_TO_AUTO_CANCEL:
+                        continue
+                    try:
+                        safe_to_cancel.append(OrderVerdict(
+                            ib_order_id=int(raw.get("ib_order_id") or 0),
+                            perm_id=raw.get("perm_id"),
+                            symbol=raw.get("symbol") or "",
+                            action=raw.get("action") or "",
+                            quantity=int(raw.get("quantity") or 0),
+                            order_type=raw.get("order_type") or "",
+                            limit_price=raw.get("limit_price"),
+                            stop_price=raw.get("stop_price"),
+                            time_in_force=raw.get("time_in_force") or "",
+                            status=raw.get("status") or "",
+                            verdict=raw.get("verdict") or "",
+                            reasons=list(raw.get("reasons") or []),
+                            bot_trade_id=raw.get("bot_trade_id"),
+                            ib_position_size=raw.get("ib_position_size"),
+                            submitted_at=raw.get("submitted_at"),
+                        ))
+                    except Exception:
+                        continue
+
+            # Path B (v19.34.151): pending intraday DAY entry orders.
             try:
-                import os as _os_eod
-                auto_sweep_enabled = _os_eod.environ.get(
-                    "AUTO_SWEEP_ORPHAN_GTC", "true",
-                ).strip().lower() in ("1", "true", "yes", "on")
-                if auto_sweep_enabled:
-                    # Give pusher ~8s to publish a fresh position +
-                    # orders snapshot reflecting the closes we just
-                    # fired (push interval is 10s, plus IB roundtrip).
-                    await asyncio.sleep(8)
-                    from services.orphan_gtc_reconciler import (
-                        SAFE_TO_AUTO_CANCEL,
-                        OrderVerdict,
-                        audit_orphan_gtc_orders,
-                        cancel_orphan_gtc_orders,
-                    )
-                    audit = await audit_orphan_gtc_orders(bot=bot, only_gtc=False)
-                    if audit.get("success"):
-                        raw_verdicts = audit.get("verdicts") or []
-                        safe_to_cancel = []
-                        for raw in raw_verdicts:
-                            if not isinstance(raw, dict):
-                                continue
-                            if raw.get("verdict") not in SAFE_TO_AUTO_CANCEL:
-                                continue
-                            try:
-                                safe_to_cancel.append(OrderVerdict(
-                                    ib_order_id=int(raw.get("ib_order_id") or 0),
-                                    perm_id=raw.get("perm_id"),
-                                    symbol=raw.get("symbol") or "",
-                                    action=raw.get("action") or "",
-                                    quantity=int(raw.get("quantity") or 0),
-                                    order_type=raw.get("order_type") or "",
-                                    limit_price=raw.get("limit_price"),
-                                    stop_price=raw.get("stop_price"),
-                                    time_in_force=raw.get("time_in_force") or "",
-                                    status=raw.get("status") or "",
-                                    verdict=raw.get("verdict") or "",
-                                    reasons=list(raw.get("reasons") or []),
-                                    bot_trade_id=raw.get("bot_trade_id"),
-                                    ib_position_size=raw.get("ib_position_size"),
-                                    submitted_at=raw.get("submitted_at"),
-                                ))
-                            except Exception:
-                                continue
-                        if safe_to_cancel:
-                            logger.warning(
-                                "[v19.34.90 EOD-SWEEP] firing immediate sweep for %d "
-                                "orphan(s) after EOD close: %s",
-                                len(safe_to_cancel),
-                                [(v.symbol, v.ib_order_id, v.verdict)
-                                 for v in safe_to_cancel[:10]],
-                            )
-                            sweep = await cancel_orphan_gtc_orders(
-                                verdicts_to_cancel=safe_to_cancel,
-                            )
-                            n_ok = len(sweep.get("cancelled") or [])
-                            n_err = len(sweep.get("errors") or [])
-                            logger.warning(
-                                "[v19.34.90 EOD-SWEEP] queued=%d errors=%d",
-                                n_ok, n_err,
-                            )
-                            try:
-                                await bot._broadcast_event({
-                                    "type": "eod_orphan_sweep",
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                    "queued": n_ok,
-                                    "errors": n_err,
-                                    "details": sweep.get("cancelled") or [],
-                                })
-                            except Exception:
-                                pass
-                        else:
-                            logger.info(
-                                "[v19.34.90 EOD-SWEEP] no safe-to-cancel orphans "
-                                "found after EOD close — clean exit."
-                            )
-            except Exception as sweep_err:
-                logger.warning(
-                    "[v19.34.90 EOD-SWEEP] failed (non-fatal): %s", sweep_err,
+                ib_orders_for_eod, _src = await _fetch_ib_open_orders()
+                bot_trades_for_eod, _bt_src = _fetch_bot_trades(bot)
+                intraday_verdicts = classify_intraday_entries_for_eod_sweep(
+                    ib_open_orders=ib_orders_for_eod or [],
+                    bot_trades=bot_trades_for_eod or [],
                 )
+                if intraday_verdicts:
+                    logger.warning(
+                        "[v19.34.151 EOD-SWEEP] %d pending intraday entry "
+                        "order(s) flagged for cancel: %s",
+                        len(intraday_verdicts),
+                        [(v.symbol, v.ib_order_id) for v in intraday_verdicts[:10]],
+                    )
+                # Dedupe by ib_order_id — defensive against any path
+                # overlap with the GTC audit above.
+                existing_oids = {v.ib_order_id for v in safe_to_cancel}
+                for v in intraday_verdicts:
+                    if v.ib_order_id not in existing_oids:
+                        safe_to_cancel.append(v)
+                        existing_oids.add(v.ib_order_id)
+            except Exception as ie:
+                logger.warning(
+                    "[v19.34.151 EOD-SWEEP] intraday-entry classify failed "
+                    "(non-fatal): %s", ie,
+                )
+
+            if not safe_to_cancel:
+                logger.info(
+                    "[v19.34.151 EOD-SWEEP] no safe-to-cancel orders "
+                    "(orphan GTCs or pending intraday entries) — clean EOD."
+                )
+                bot._eod_sweep_executed_today = True
+                return
+
+            logger.warning(
+                "[v19.34.151 EOD-SWEEP] firing sweep for %d "
+                "order(s): %s",
+                len(safe_to_cancel),
+                [(v.symbol, v.ib_order_id, v.verdict)
+                 for v in safe_to_cancel[:10]],
+            )
+            sweep = await cancel_orphan_gtc_orders(
+                verdicts_to_cancel=safe_to_cancel,
+            )
+            n_ok = len(sweep.get("cancelled") or [])
+            n_err = len(sweep.get("errors") or [])
+            logger.warning(
+                "[v19.34.151 EOD-SWEEP] queued=%d errors=%d", n_ok, n_err,
+            )
+
+            # WS notify so V5 HUD can confirm sweep ran.
+            try:
+                await bot._broadcast_event({
+                    "type": "eod_orphan_sweep",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "queued": n_ok,
+                    "errors": n_err,
+                    "details": sweep.get("cancelled") or [],
+                })
+            except Exception:
+                pass
+
+            # Persist for the postmortem endpoint.
+            if bot._db:
+                try:
+                    await asyncio.to_thread(
+                        bot._db.bot_events.insert_one,
+                        {
+                            "event_type": "eod_orphan_sweep",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "date": today_str,
+                            "queued": n_ok,
+                            "errors": n_err,
+                            "details": sweep.get("cancelled") or [],
+                            "verdicts_summary": {
+                                v.verdict: sum(
+                                    1 for x in safe_to_cancel
+                                    if x.verdict == v.verdict
+                                )
+                                for v in safe_to_cancel
+                            },
+                        },
+                    )
+                except Exception:
+                    pass
+
+            bot._eod_sweep_executed_today = True
+        except Exception as sweep_err:
+            logger.warning(
+                "[v19.34.151 EOD-SWEEP] failed (non-fatal): %s", sweep_err,
+            )
 
     async def check_and_execute_scale_out(self, trade: 'BotTrade', bot: 'TradingBotService'):
         """

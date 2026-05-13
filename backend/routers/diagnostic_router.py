@@ -3924,3 +3924,286 @@ async def ib_pusher_position_health():
         "diagnosis": diagnosis,
         "health": health,
     }
+
+
+
+# ────────────────────────────────────────────────────────────────────
+# v19.34.151 — EOD POSTMORTEM
+# ────────────────────────────────────────────────────────────────────
+
+@router.get("/eod-postmortem")
+async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
+    """Pull today's EOD-close postmortem after a flatten failure.
+
+    Aggregates from Mongo + IB pusher cache + bot state into one
+    payload the operator can read top-to-bottom and immediately spot
+    where the EOD flow died.
+
+    Query params:
+      date — ISO YYYY-MM-DD in ET. Defaults to today (ET).
+
+    Sections:
+      1. eod_auto_close_event   — what `check_eod_close` recorded
+      2. close_phase_drops      — `trade_drops` with reason="eod_*" or
+                                  context.phase=="close" for the day
+      3. ib_open_orders_post_close — anything still pending at IB now,
+         joined to bot_trades to surface close_at_eod / setup_type
+      4. ib_open_positions_post_close — anything still on IB books,
+         joined to bot_trades to mark intraday vs swing
+      5. eod_orphan_sweep_event — v19.34.90 sweep outcome
+      6. diagnosis              — heuristic root-cause guesses
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    now_utc = datetime.now(timezone.utc)
+    now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
+    date_et = date or now_et.strftime("%Y-%m-%d")
+
+    db = _get_db()
+
+    # ── 1. eod_auto_close event ────────────────────────────────────
+    eod_event: Dict[str, Any] = {}
+    sweep_event: Dict[str, Any] = {}
+    if db is not None:
+        try:
+            row = await asyncio.to_thread(
+                db.bot_events.find_one,
+                {"event_type": "eod_auto_close", "date": date_et},
+                {"_id": 0},
+            )
+            eod_event = row or {}
+        except Exception as e:
+            eod_event = {"_error": str(e)}
+        try:
+            sweep_row = await asyncio.to_thread(
+                db.bot_events.find_one,
+                {"event_type": "eod_orphan_sweep", "date": date_et},
+                {"_id": 0},
+            )
+            sweep_event = sweep_row or {}
+        except Exception:
+            sweep_event = {}
+
+    # ── 2. close-phase trade_drops for the day ────────────────────
+    drops: List[Dict[str, Any]] = []
+    if db is not None:
+        try:
+            # Day window in UTC: ET 00:00 → 23:59 of date_et.
+            day_start_et = datetime.strptime(date_et, "%Y-%m-%d").replace(
+                tzinfo=ZoneInfo("America/New_York")
+            )
+            day_start = day_start_et.astimezone(timezone.utc).isoformat()
+            day_end = (
+                day_start_et.replace(hour=23, minute=59, second=59)
+                .astimezone(timezone.utc).isoformat()
+            )
+            cursor = await asyncio.to_thread(
+                lambda: list(db["trade_drops"].find(
+                    {
+                        "ts": {"$gte": day_start, "$lte": day_end},
+                        "$or": [
+                            {"context.phase": "close"},
+                            {"reason": {"$regex": "eod", "$options": "i"}},
+                        ],
+                    },
+                    {"_id": 0},
+                ).sort("ts", -1).limit(200))
+            )
+            drops = cursor
+        except Exception as e:
+            drops = [{"_error": str(e)}]
+
+    # ── 3+4. IB live state (orders + positions) + bot-trade join ──
+    bot_trades_idx: Dict[str, Dict[str, Any]] = {}
+    bot_trades_by_oid: Dict[int, Dict[str, Any]] = {}
+    if db is not None:
+        try:
+            # Pull today's OPEN trades (status OPEN/PARTIAL) so we can
+            # join IB orders/positions to setup_type + close_at_eod.
+            trades_cursor = await asyncio.to_thread(
+                lambda: list(db.bot_trades.find(
+                    {"status": {"$in": ["open", "partial", "OPEN", "PARTIAL"]}},
+                    {"_id": 0},
+                ))
+            )
+            for t in trades_cursor:
+                sym = (t.get("symbol") or "").upper()
+                if sym:
+                    bot_trades_idx[sym] = t
+                for k in ("entry_order_id", "stop_order_id", "target_order_id"):
+                    v = t.get(k)
+                    if v not in (None, ""):
+                        try:
+                            bot_trades_by_oid[int(v)] = t
+                        except (TypeError, ValueError):
+                            pass
+                for v in (t.get("target_order_ids") or []):
+                    try:
+                        bot_trades_by_oid[int(v)] = t
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+
+    # Pull live IB open orders via the orphan-reconciler helper (covers
+    # both IB-direct and pusher-relay tiers).
+    ib_open_orders_raw: List[Dict[str, Any]] = []
+    try:
+        from services.orphan_gtc_reconciler import (
+            _fetch_ib_open_orders, classify_open_orders,
+        )
+        ib_open_orders_raw, _src = await _fetch_ib_open_orders()
+        ib_open_orders_raw = ib_open_orders_raw or []
+    except Exception as e:
+        ib_open_orders_raw = []
+        logger.warning(f"eod-postmortem: open-orders fetch failed: {e}")
+
+    # Classify each order so we surface 'orphan' / 'naked' / 'tracked'.
+    ib_positions_raw = _ib_position_snapshot()
+    try:
+        bt_for_classify = list(bot_trades_idx.values())
+        verdicts = classify_open_orders(
+            ib_open_orders=ib_open_orders_raw,
+            ib_positions=ib_positions_raw,
+            bot_trades=bt_for_classify,
+            only_gtc=False,
+        )
+        verdicts_by_oid = {v.ib_order_id: v for v in verdicts}
+    except Exception:
+        verdicts_by_oid = {}
+
+    # Build the order rows.
+    ib_open_orders: List[Dict[str, Any]] = []
+    for o in ib_open_orders_raw:
+        try:
+            oid = int(
+                o.get("ib_order_id") or o.get("order_id")
+                or o.get("orderId") or 0
+            )
+        except (TypeError, ValueError):
+            oid = 0
+        v = verdicts_by_oid.get(oid)
+        matched = bot_trades_by_oid.get(oid)
+        ib_open_orders.append({
+            "symbol": (o.get("symbol") or "").upper(),
+            "action": o.get("action"),
+            "quantity": o.get("quantity"),
+            "order_type": o.get("order_type") or o.get("orderType"),
+            "limit_price": o.get("limit_price") or o.get("lmtPrice"),
+            "stop_price": o.get("stop_price") or o.get("auxPrice"),
+            "time_in_force": o.get("time_in_force") or o.get("tif"),
+            "status": o.get("status"),
+            "ib_order_id": oid,
+            "perm_id": o.get("perm_id") or o.get("permId"),
+            "verdict": v.verdict if v else None,
+            "matched_bot_trade_id": (matched or {}).get("id"),
+            "matched_setup_type": (matched or {}).get("setup_type"),
+            "matched_close_at_eod": (matched or {}).get("close_at_eod"),
+            "matched_timeframe": (matched or {}).get("timeframe"),
+        })
+
+    ib_open_positions: List[Dict[str, Any]] = []
+    for p in ib_positions_raw:
+        try:
+            qty = float(p.get("position") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        sym = (p.get("symbol") or "").upper()
+        trade = bot_trades_idx.get(sym) or {}
+        ib_open_positions.append({
+            "symbol": sym,
+            "position": qty,
+            "avg_cost": p.get("avgCost") or p.get("avg_cost"),
+            "market_price": p.get("marketPrice") or p.get("market_price"),
+            "unrealized_pnl": p.get("unrealizedPNL") or p.get("unrealized_pnl"),
+            "setup_type": trade.get("setup_type"),
+            "close_at_eod": trade.get("close_at_eod"),
+            "trade_type": trade.get("timeframe") or trade.get("trade_type"),
+            "bot_trade_id": trade.get("id"),
+        })
+
+    # ── 5. Diagnosis heuristics ────────────────────────────────────
+    diagnosis: List[str] = []
+    if not eod_event:
+        diagnosis.append(
+            "🔴 NO `eod_auto_close` event recorded today — the EOD "
+            "loop never executed, OR `check_eod_close` returned early "
+            "(check `_eod_close_enabled`, half-day env var, or whether "
+            "the scan loop was running at 3:55 PM ET)."
+        )
+    else:
+        n_closed = eod_event.get("positions_closed", 0)
+        n_failed = eod_event.get("positions_failed", 0)
+        if n_failed and n_failed > 0:
+            diagnosis.append(
+                f"🔴 EOD reported {n_failed}/{n_closed + n_failed} closes "
+                f"FAILED at IB. Failed symbols: "
+                f"{eod_event.get('failed_symbols')}. See section 2 for "
+                f"the specific rejection reasons."
+            )
+        elif n_closed == 0:
+            diagnosis.append(
+                "⚠ EOD ran but closed 0 positions. Likely either no "
+                "intraday positions were open OR every open trade was "
+                "swing/position (close_at_eod=False)."
+            )
+
+    # Any intraday position still alive after EOD = bug.
+    intraday_overnight = [
+        p for p in ib_open_positions
+        if abs(p["position"]) > 0 and p.get("close_at_eod") is True
+    ]
+    if intraday_overnight:
+        diagnosis.append(
+            f"🔴 {len(intraday_overnight)} INTRADAY position(s) held "
+            f"overnight despite close_at_eod=True: "
+            f"{[p['symbol'] for p in intraday_overnight]}. "
+            "Manual TWS flatten was required. Root cause is in this "
+            "list — cross-check the failed_symbols in section 1."
+        )
+
+    # Pending DAY LMT entries for intraday setups still alive — that's
+    # the v19.34.151 fix scope.
+    pending_intraday_entries = [
+        o for o in ib_open_orders
+        if (o.get("order_type") or "").upper() == "LMT"
+        and (o.get("time_in_force") or "").upper() == "DAY"
+        and o.get("matched_close_at_eod") is True
+    ]
+    if pending_intraday_entries:
+        diagnosis.append(
+            f"⚠ {len(pending_intraday_entries)} pending DAY LMT "
+            "entry order(s) for INTRADAY setups still alive post-EOD: "
+            f"{[o['symbol'] for o in pending_intraday_entries]}. "
+            "These should be cancelled by the EOD sweep (v19.34.151)."
+        )
+
+    if not sweep_event:
+        diagnosis.append(
+            "⚠ NO `eod_orphan_sweep` event today. Sweep is currently "
+            "gated by `closed_count > 0` (PRE-FIX). If no positions "
+            "closed at 3:55 PM, the sweep never ran — leaving stale "
+            "DAY entries + naked brackets alive."
+        )
+
+    if not diagnosis:
+        diagnosis.append("✅ EOD ran clean. No remediation needed.")
+
+    return {
+        "success": True,
+        "generated_at": now_utc.isoformat(),
+        "date_et": date_et,
+        "market_state": (
+            "closed" if now_et.hour >= 16 or now_et.hour < 4
+            else "open"
+        ),
+        "eod_auto_close_event": eod_event,
+        "eod_orphan_sweep_event": sweep_event,
+        "close_phase_drops": drops,
+        "ib_open_orders_post_close": ib_open_orders,
+        "ib_open_positions_post_close": ib_open_positions,
+        "diagnosis": diagnosis,
+    }

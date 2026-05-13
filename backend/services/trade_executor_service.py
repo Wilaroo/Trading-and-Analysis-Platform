@@ -1621,15 +1621,6 @@ class TradeExecutorService:
         Empty / non-numeric IDs are skipped silently (e.g.,
         `SIM-STOP-<uuid>` from simulated/paper modes).
         """
-        try:
-            pass
-        except Exception as e:
-            logger.warning(
-                f"v19.13: could not import IB cancel_order — skipping bracket "
-                f"cancellation for {trade.symbol}: {e}"
-            )
-            return
-
         # Collect IDs from all three slots, dedupe, filter to int-castable.
         candidates = []
         for raw in (
