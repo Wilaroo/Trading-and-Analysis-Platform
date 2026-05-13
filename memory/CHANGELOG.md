@@ -3,6 +3,60 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.129) — Naked-sweep rewired to pusher-relay 3-tier resolver
+
+**Operator-verified failure**: post-v127, naked-sweep returned
+`skipped_reason: 'ib_get_open_orders_failed:Not connected to IB'`
+even with IB Gateway fully up and the Windows pusher streaming to the
+DGX backend. Root cause: the v127 sweep tried to call
+`_ib_client.get_open_orders()` on the executor, but in the DGX
+deployment shape `_ib_client` is always None — the bot doesn't talk
+to IB directly. Orders flow:
+
+```
+Bot → order_queue → Windows IB Pusher (clientId=15) → IB Gateway
+                                ↓
+       _pushed_ib_data["orders"] ← pusher push (every 10s)
+```
+
+**Fix** (`services/trading_bot_service.py::_naked_position_sweep`):
+delegate the open-orders fetch to the existing
+`services.orphan_gtc_reconciler._fetch_ib_open_orders` helper, which
+already implements a 3-tier resolver:
+
+1. `ib_direct` (clientId=11, authoritative)
+2. `ib_service_relay` (routers.ib._ib_service, pusher-relay)
+3. `_pushed_ib_data["orders"]` (snapshot from Windows pusher every 10s)
+
+Tier 3 is the authoritative source on the DGX deployment shape. The
+sweep now reads from whichever tier responds first, normalizes
+`ib_order_id` / `perm_id` / `order_id` all into a `live_order_ids`
+set, and continues with the same naked-detection logic. Reported
+`source_tier` is included in the sweep result so the operator can
+verify which path served the request.
+
+### Tests
+
+11 cases in `tests/test_naked_position_sweep_v19_34_127.py`
+(rewritten to patch `_fetch_ib_open_orders` instead of mocking
+`_ib_client`). New case: `test_sweep_matches_perm_id_as_well_as_order_id`
+verifies pusher-snapshot identifiers match.
+
+### Operator verification (post-pull/restart)
+
+Wait 60s after restart, then:
+```bash
+grep "v127 naked-sweep" /tmp/backend.log | tail -3
+```
+Should now show:
+```
+[v127 naked-sweep] first sweep complete: {'checked': N, 'naked_found': 0, ..., 'source_tier': 'pusher_orders_snapshot'}
+```
+
+With IB Gateway up + pusher streaming, this confirms the safety net is fully active end-to-end.
+
+
+
 ## 2026-02-12 (v19.34.127) — Naked-position sweep + consolidator lifecycle audit trail
 
 **THE root-cause fix for the -$25k incident.** Yesterday's

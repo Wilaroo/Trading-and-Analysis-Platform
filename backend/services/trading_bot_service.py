@@ -4179,28 +4179,29 @@ class TradingBotService:
             result["skipped_reason"] = "no_trade_executor"
             return result
 
-        # Resolve IB connector — try common attribute names + the
-        # global pusher-routed service in routers.ib (used when the
-        # operator runs the Windows IB pusher; executor._ib_client
-        # stays None in that case).
-        ib_conn = (
-            getattr(executor, "_ib_client", None)
-            or getattr(executor, "_ib_service", None)
-            or getattr(executor, "ib_service", None)
-            or getattr(executor, "_ib_connector", None)
-        )
-        if ib_conn is None:
-            try:
-                from routers import ib as _ib_router
-                ib_conn = getattr(_ib_router, "_ib_service", None)
-            except Exception:
-                ib_conn = None
-        if ib_conn is None or not hasattr(ib_conn, "get_open_orders"):
-            result["skipped_reason"] = "no_ib_connector"
+        # Resolve open-orders source. v19.34.129: delegate to the
+        # existing 3-tier resolver (ib_direct → pusher-relay →
+        # `_pushed_ib_data["orders"]` snapshot from the Windows pusher).
+        # The DGX deployment shape is pusher-only — `_ib_client` on the
+        # executor stays None and the bot never has a direct IB
+        # connection. The pusher publishes its `openTrades()` snapshot
+        # to `_pushed_ib_data["orders"]` every 10s, which is the
+        # authoritative source for naked-detection in this setup.
+        try:
+            from services.orphan_gtc_reconciler import _fetch_ib_open_orders
+            ib_orders, source_info = await _fetch_ib_open_orders()
+        except Exception as e:
+            result["skipped_reason"] = f"open_orders_fetch_failed:{e}"
             return result
+        if ib_orders is None:
+            result["skipped_reason"] = (
+                f"open_orders_unavailable:{source_info.get('error') or 'no_source'}"
+            )
+            return result
+        result["source_tier"] = source_info.get("tier")
 
-        # Skip if executor is in non-LIVE mode (paper trading has no
-        # actual IB orders to query).
+        # Skip if executor is in non-LIVE mode (simulator/paper has no
+        # actual IB orders, though pusher-mode is also "LIVE").
         mode_str = (
             getattr(executor, "mode", None)
             or getattr(executor, "_mode", None)
@@ -4214,20 +4215,16 @@ class TradingBotService:
             result["skipped_reason"] = f"non_live_mode:{mode_str}"
             return result
 
-        # 1) Snapshot IB open orders → set of live order_ids.
-        try:
-            ib_orders = await ib_conn.get_open_orders()
-        except Exception as e:
-            result["skipped_reason"] = f"ib_get_open_orders_failed:{e}"
-            return result
-
+        # 1) Build set of live order_ids from the resolved snapshot.
+        #    `_fetch_ib_open_orders` normalizes to `ib_order_id` /
+        #    `perm_id`; pusher payload also exposes `order_id`. Index
+        #    on every available identifier so any of them matches.
         live_order_ids = set()
         for o in (ib_orders or []):
-            for k in ("order_id", "orderId", "id"):
+            for k in ("ib_order_id", "order_id", "orderId", "perm_id", "id"):
                 v = o.get(k) if isinstance(o, dict) else None
                 if v is not None:
                     live_order_ids.add(str(v))
-                    break
 
         # 2) Walk every open trade with shares > 0.
         from services.bracket_reissue_service import _persist_lifecycle_event

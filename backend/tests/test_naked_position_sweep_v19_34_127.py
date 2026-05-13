@@ -1,4 +1,4 @@
-"""v19.34.127 — Naked-position sweep + consolidator lifecycle event regression.
+"""v19.34.127 / .129 — Naked-position sweep regression.
 
 The actual root cause of the -$25k incident on 2026-05-12: IB
 mass-cancelled 100+ of our protective stops at 11:21 and 15:29
@@ -7,31 +7,20 @@ when WE initiate the change; IB-initiated cancellations had ZERO
 detection path. `bracket_lifecycle_events` for RJF/MTB/ARGX/UPS
 confirmed: 0 reissue events on the bleeding day.
 
-This test suite locks the v127 fix:
-  • `_naked_position_sweep` walks `_open_trades`, queries IB live
-    orders, detects any trade whose `stop_order_id` isn't in the live
-    order book, and emergency-reissues via `attach_oca_stop_target`.
-  • Every detection writes a `phase: "naked_sweep_reissue"` event to
-    `bracket_lifecycle_events` so the operator can audit IB-initiated
-    cancellations after the fact.
-  • Consolidator merge events now persist a
-    `phase: "consolidator_merge_reissue"` event for the same audit
-    trail.
-  • Sweep is safe in paper mode (skips silently), safe on broker
-    outage (skips with reason), and safe on per-trade crashes
-    (continues to next trade).
+v19.34.127: introduced `_naked_position_sweep` that walks
+`_open_trades`, queries IB open orders, detects naked positions, and
+emergency-reissues via `attach_oca_stop_target`.
+
+v19.34.129: rewired the open-orders source to `_fetch_ib_open_orders`
+(3-tier ib_direct → pusher-relay → `_pushed_ib_data["orders"]`) so
+the sweep works on the DGX pusher-only deployment shape.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-# ────────────────────────────────────────────────────────────────────
-# Helpers
-# ────────────────────────────────────────────────────────────────────
-
 def _make_trade(*, tid, symbol, shares, stop_order_id):
-    """Fixture for an open trade as the sweep would see it."""
     t = MagicMock()
     t.id = tid
     t.symbol = symbol
@@ -43,43 +32,49 @@ def _make_trade(*, tid, symbol, shares, stop_order_id):
     return t
 
 
-def _make_bot(*, executor, open_trades, live_mode=True):
-    """Fixture for a TradingBotService-like stub."""
+def _make_bot(*, executor, open_trades):
     from services.trading_bot_service import TradingBotService
     bot = TradingBotService.__new__(TradingBotService)
     bot._trade_executor = executor
     bot._open_trades = open_trades
-    bot._db = None  # _persist_lifecycle_event handles None DB cleanly
+    bot._db = None
     bot._save_trade = MagicMock(return_value=None)
     return bot
 
 
+def _make_executor(*, mode="LIVE", oca_result=None):
+    """Executor mock — no `_ib_client` needed since the sweep now
+    delegates to `_fetch_ib_open_orders`."""
+    executor = MagicMock()
+    executor.mode = mode
+    if oca_result is not None:
+        executor.attach_oca_stop_target = AsyncMock(return_value=oca_result)
+    return executor
+
+
+def _patch_fetch(ib_orders, source_tier="pusher_orders_snapshot"):
+    """Patch the 3-tier open-orders resolver to return `ib_orders`."""
+    return patch(
+        "services.orphan_gtc_reconciler._fetch_ib_open_orders",
+        new_callable=AsyncMock,
+        return_value=(ib_orders, {"tier": source_tier, "ok": True}),
+    )
+
+
 # ────────────────────────────────────────────────────────────────────
-# 1. Detection: trade with missing stop_order_id is flagged naked
+# 1. stop_order_id=None ⇒ naked ⇒ reissue + lifecycle event
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_detects_missing_stop_id():
-    """`stop_order_id=None` ⇒ naked ⇒ reissue + lifecycle event."""
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(return_value=[])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
-    executor.attach_oca_stop_target = AsyncMock(
-        return_value={
-            "success": True,
-            "stop_order_id": "STP-NEW-1",
-            "target_order_id": "TGT-NEW-1",
-            "oca_group": "OCA-NEW-1",
-        }
-    )
-
+    executor = _make_executor(oca_result={
+        "success": True, "stop_order_id": "STP-NEW-1",
+        "target_order_id": "TGT-NEW-1", "oca_group": "OCA-NEW-1",
+    })
     trade = _make_trade(tid="t1", symbol="RJF", shares=100, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    with patch(
+    with _patch_fetch([]), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ) as persist_mock:
@@ -92,7 +87,6 @@ async def test_sweep_detects_missing_stop_id():
     executor.attach_oca_stop_target.assert_awaited_once_with(trade)
     assert trade.stop_order_id == "STP-NEW-1"
 
-    # Verify lifecycle event was persisted with correct schema
     persist_mock.assert_awaited_once()
     ev = persist_mock.await_args.kwargs["event"]
     assert ev["phase"] == "naked_sweep_reissue"
@@ -103,33 +97,23 @@ async def test_sweep_detects_missing_stop_id():
 
 
 # ────────────────────────────────────────────────────────────────────
-# 2. Detection: stop_order_id present but NOT in IB live orders
+# 2. stop_id present but NOT in IB live orders ⇒ naked
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_detects_stop_id_missing_from_ib():
-    """The yesterday scenario: trade.stop_order_id is set on our side,
-    but IB cancelled it. Live order book doesn't contain it ⇒ naked."""
-    ib_conn = AsyncMock()
-    # IB returns OTHER live orders, but NOT the one we expect
-    ib_conn.get_open_orders = AsyncMock(return_value=[
-        {"order_id": "OTHER-1", "symbol": "AAPL"},
-        {"order_id": "OTHER-2", "symbol": "MSFT"},
-    ])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
-    executor.attach_oca_stop_target = AsyncMock(
-        return_value={"success": True, "stop_order_id": "STP-REISSUE",
-                      "oca_group": "OCA-NEW"}
-    )
-
+    executor = _make_executor(oca_result={
+        "success": True, "stop_order_id": "STP-REISSUE", "oca_group": "OCA-NEW",
+    })
     trade = _make_trade(tid="t-rjf", symbol="RJF", shares=200,
                         stop_order_id="STP-CANCELLED-BY-IB")
     bot = _make_bot(executor=executor, open_trades={"t-rjf": trade})
 
-    with patch(
+    # IB returns OTHER live orders, not the one we expect
+    with _patch_fetch([
+        {"ib_order_id": "OTHER-1", "symbol": "AAPL"},
+        {"ib_order_id": "OTHER-2", "symbol": "MSFT"},
+    ]), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ):
@@ -137,60 +121,48 @@ async def test_sweep_detects_stop_id_missing_from_ib():
 
     assert result["naked_found"] == 1
     assert result["reissued"] == 1
-    executor.attach_oca_stop_target.assert_awaited_once()
 
 
 # ────────────────────────────────────────────────────────────────────
-# 3. Non-naked: stop_order_id IS in live orders ⇒ no reissue
+# 3. stop IS in live orders ⇒ no reissue
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_no_reissue_when_stop_is_live():
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(return_value=[
-        {"order_id": "STP-LIVE-123", "symbol": "AAPL"},
-    ])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
+    executor = _make_executor()
     executor.attach_oca_stop_target = AsyncMock()
-
     trade = _make_trade(tid="t1", symbol="AAPL", shares=100,
                         stop_order_id="STP-LIVE-123")
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    result = await bot._naked_position_sweep()
+    with _patch_fetch([{"ib_order_id": "STP-LIVE-123", "symbol": "AAPL"}]):
+        result = await bot._naked_position_sweep()
 
     assert result["checked"] == 1
     assert result["naked_found"] == 0
-    assert result["reissued"] == 0
     executor.attach_oca_stop_target.assert_not_awaited()
 
 
 # ────────────────────────────────────────────────────────────────────
-# 4. Paper mode: sweep skipped silently (no IB queries)
+# 4. Non-LIVE executor mode ⇒ skipped silently
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_skipped_in_paper_mode():
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock()
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "PAPER"
-
+    executor = _make_executor(mode="SIMULATED")
+    executor.attach_oca_stop_target = AsyncMock()
     trade = _make_trade(tid="t1", symbol="AAPL", shares=100, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    result = await bot._naked_position_sweep()
-    assert result["skipped_reason"] == "non_live_mode:PAPER"
-    ib_conn.get_open_orders.assert_not_awaited()
+    with _patch_fetch([]):
+        result = await bot._naked_position_sweep()
+
+    assert result["skipped_reason"] == "non_live_mode:SIMULATED"
+    executor.attach_oca_stop_target.assert_not_awaited()
 
 
 # ────────────────────────────────────────────────────────────────────
-# 5. No executor: skipped gracefully
+# 5. No executor ⇒ skipped gracefully
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -201,51 +173,57 @@ async def test_sweep_skipped_when_no_executor():
 
 
 # ────────────────────────────────────────────────────────────────────
-# 6. IB get_open_orders raises: sweep returns clean error, no crash
+# 6. Open-orders fetch raises ⇒ clean skip with reason
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_sweep_handles_ib_outage():
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(
-        side_effect=ConnectionError("IB Gateway offline")
-    )
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
-
+async def test_sweep_handles_fetch_failure():
+    executor = _make_executor()
     trade = _make_trade(tid="t1", symbol="AAPL", shares=100, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    result = await bot._naked_position_sweep()
-    assert "ib_get_open_orders_failed" in result["skipped_reason"]
-    # Sweep didn't crash; next iteration will retry.
+    with patch(
+        "services.orphan_gtc_reconciler._fetch_ib_open_orders",
+        new_callable=AsyncMock,
+        side_effect=ConnectionError("IB Gateway offline"),
+    ):
+        result = await bot._naked_position_sweep()
+
+    assert "open_orders_fetch_failed" in result["skipped_reason"]
 
 
 # ────────────────────────────────────────────────────────────────────
-# 7. Reissue FAILS (broker rejects): event persisted with success=False
+# 7. Open-orders source returns None (no working tier)
+# ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sweep_skipped_when_no_source_available():
+    executor = _make_executor()
+    trade = _make_trade(tid="t1", symbol="AAPL", shares=100, stop_order_id=None)
+    bot = _make_bot(executor=executor, open_trades={"t1": trade})
+
+    with patch(
+        "services.orphan_gtc_reconciler._fetch_ib_open_orders",
+        new_callable=AsyncMock,
+        return_value=(None, {"tier": None, "error": "all_tiers_failed"}),
+    ):
+        result = await bot._naked_position_sweep()
+    assert "open_orders_unavailable" in result["skipped_reason"]
+
+
+# ────────────────────────────────────────────────────────────────────
+# 8. Reissue fails ⇒ event persisted with success=False
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_persists_event_on_reissue_failure():
-    """The catastrophic case — naked detected but broker rejects new
-    OCA. Lifecycle event MUST land with success=False so the operator
-    sees the still-naked position in /diagnostic/bracket-lifecycle."""
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(return_value=[])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
-    executor.attach_oca_stop_target = AsyncMock(
-        return_value={"success": False, "error": "IB rejected: order limit"}
-    )
-
+    executor = _make_executor(oca_result={
+        "success": False, "error": "IB rejected: order limit",
+    })
     trade = _make_trade(tid="t1", symbol="RJF", shares=200, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    with patch(
+    with _patch_fetch([]), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ) as persist_mock:
@@ -262,62 +240,66 @@ async def test_sweep_persists_event_on_reissue_failure():
 
 
 # ────────────────────────────────────────────────────────────────────
-# 8. Per-trade crash doesn't wedge the sweep
+# 9. Per-trade crash doesn't wedge the sweep
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_continues_after_per_trade_crash():
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(return_value=[])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
-    executor.attach_oca_stop_target = AsyncMock(
-        return_value={"success": True, "stop_order_id": "OK"}
-    )
-
-    # First trade raises when reading remaining_shares
+    executor = _make_executor(oca_result={
+        "success": True, "stop_order_id": "OK",
+    })
     bad_trade = MagicMock()
     bad_trade.id = "bad"
     type(bad_trade).remaining_shares = property(
-        lambda _self: (_ for _ in ()).throw(RuntimeError("simulated crash"))
+        lambda _self: (_ for _ in ()).throw(RuntimeError("simulated"))
     )
-
     good_trade = _make_trade(tid="good", symbol="GOOD", shares=50, stop_order_id=None)
-    bot = _make_bot(
-        executor=executor,
-        open_trades={"bad": bad_trade, "good": good_trade},
-    )
+    bot = _make_bot(executor=executor,
+                    open_trades={"bad": bad_trade, "good": good_trade})
 
-    with patch(
+    with _patch_fetch([]), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ):
         result = await bot._naked_position_sweep()
-
-    # Bad trade crashed, but good trade was processed.
     assert result["reissued"] == 1
 
 
 # ────────────────────────────────────────────────────────────────────
-# 9. Sweep ignores closed-out trades (remaining_shares == 0)
+# 10. Zero-share trades ignored
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_sweep_ignores_zero_share_trades():
-    ib_conn = AsyncMock()
-    ib_conn.get_open_orders = AsyncMock(return_value=[])
-
-    executor = MagicMock()
-    executor._ib_client = ib_conn
-    executor.mode = "LIVE"
+    executor = _make_executor()
     executor.attach_oca_stop_target = AsyncMock()
-
     closed_out = _make_trade(tid="c1", symbol="X", shares=0, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"c1": closed_out})
 
-    result = await bot._naked_position_sweep()
+    with _patch_fetch([]):
+        result = await bot._naked_position_sweep()
     assert result["checked"] == 0
+    assert result["naked_found"] == 0
+    executor.attach_oca_stop_target.assert_not_awaited()
+
+
+# ────────────────────────────────────────────────────────────────────
+# 11. Resolver matches on perm_id OR ib_order_id (pusher snapshot uses both)
+# ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sweep_matches_perm_id_as_well_as_order_id():
+    executor = _make_executor()
+    executor.attach_oca_stop_target = AsyncMock()
+    trade = _make_trade(tid="t1", symbol="AAPL", shares=100,
+                        stop_order_id="PERM-999")  # tracked as perm_id
+    bot = _make_bot(executor=executor, open_trades={"t1": trade})
+
+    with _patch_fetch([
+        {"ib_order_id": "12345", "perm_id": "PERM-999", "symbol": "AAPL"},
+    ]):
+        result = await bot._naked_position_sweep()
+
+    assert result["checked"] == 1
     assert result["naked_found"] == 0
     executor.attach_oca_stop_target.assert_not_awaited()
