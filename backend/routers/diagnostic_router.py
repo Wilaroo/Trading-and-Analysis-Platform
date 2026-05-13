@@ -4207,3 +4207,235 @@ async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
         "ib_open_positions_post_close": ib_open_positions,
         "diagnosis": diagnosis,
     }
+
+
+
+# ────────────────────────────────────────────────────────────────────
+# v19.34.152 — EOD PRE-CLOSE PREVIEW
+# ────────────────────────────────────────────────────────────────────
+
+@router.get("/eod-preview")
+async def eod_preview() -> Dict[str, Any]:
+    """Live preview of what the EOD sweep WILL do — designed to be
+    polled from the V5 status strip during the 3:30-4:00 PM window so
+    the operator can spot surprises BEFORE the sweep fires.
+
+    Surfaces four categories:
+      1. positions_to_close — intraday positions (close_at_eod=True)
+         in `bot._open_trades`. Will be flat-closed at 3:55 PM ET.
+      2. pending_entries_to_cancel — DAY LMT/STP entries tied to
+         intraday trades that haven't filled. Will be cancelled.
+      3. swing_positions_to_roll — swing/position trades that WILL
+         intentionally roll overnight (no action).
+      4. ib_vs_bot_disagreement — IB positions the bot doesn't have
+         in `_open_trades` AND aren't a known swing in `bot_trades`.
+         These WILL be missed by auto-close. RED-ALARM.
+
+    Window state:
+      • is_eod_window           — True between 15:30 and 16:00 ET
+      • minutes_to_eod_close    — count-down (negative after 3:55)
+      • minutes_to_market_close — count-down to 16:00
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    now_utc = datetime.now(timezone.utc)
+    now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
+
+    # Half-day env var (operator-flagged the morning of).
+    import os as _os
+    is_half_day = _os.environ.get(
+        "EOD_HALF_DAY_TODAY", ""
+    ).lower() in ("true", "1", "yes")
+    eod_hour, eod_minute, mc_hour = (
+        (12, 55, 13) if is_half_day else (15, 55, 16)
+    )
+
+    minutes_now = now_et.hour * 60 + now_et.minute
+    minutes_eod = eod_hour * 60 + eod_minute
+    minutes_mc = mc_hour * 60
+    is_eod_window = (
+        now_et.weekday() < 5
+        and (minutes_eod - 25) <= minutes_now < minutes_mc
+    )
+
+    db = _get_db()
+
+    # ── 1+2+3. Read the bot's in-memory open trades + tied orders ──
+    bot_open_trades_meta: List[Dict[str, Any]] = []
+    pending_entries: List[Dict[str, Any]] = []
+    try:
+        from services.trading_bot_service import get_trading_bot_service
+        bot = get_trading_bot_service()
+    except Exception:
+        bot = None
+
+    bot_open_symbols: set = set()
+    intraday_to_close: List[Dict[str, Any]] = []
+    swing_to_roll: List[Dict[str, Any]] = []
+    if bot is not None:
+        for t in (bot._open_trades or {}).values():
+            sym = (getattr(t, "symbol", "") or "").upper()
+            if not sym:
+                continue
+            bot_open_symbols.add(sym)
+            row = {
+                "symbol": sym,
+                "trade_id": getattr(t, "id", None),
+                "shares": getattr(t, "remaining_shares", None) or getattr(t, "shares", None),
+                "direction": getattr(getattr(t, "direction", None), "value", None),
+                "setup_type": getattr(t, "setup_type", None),
+                "timeframe": getattr(getattr(t, "timeframe", None), "value", None),
+                "close_at_eod": getattr(t, "close_at_eod", True),
+                "entry_price": getattr(t, "entry_price", None),
+                "unrealized_pnl": getattr(t, "unrealized_pnl", None),
+            }
+            bot_open_trades_meta.append(row)
+            if row["close_at_eod"]:
+                intraday_to_close.append(row)
+            else:
+                swing_to_roll.append(row)
+
+    # ── 2. Pending intraday DAY entries (uses the new classifier) ──
+    try:
+        from services.orphan_gtc_reconciler import (
+            classify_intraday_entries_for_eod_sweep,
+            _fetch_ib_open_orders,
+            _fetch_bot_trades,
+        )
+        ib_orders, _src = await _fetch_ib_open_orders()
+        bot_trades_rows, _bt_src = _fetch_bot_trades(bot)
+        intraday_verdicts = classify_intraday_entries_for_eod_sweep(
+            ib_open_orders=ib_orders or [],
+            bot_trades=bot_trades_rows or [],
+        )
+        for v in intraday_verdicts:
+            pending_entries.append({
+                "symbol": v.symbol,
+                "ib_order_id": v.ib_order_id,
+                "action": v.action,
+                "quantity": v.quantity,
+                "order_type": v.order_type,
+                "limit_price": v.limit_price,
+                "stop_price": v.stop_price,
+                "matched_bot_trade_id": v.bot_trade_id,
+            })
+    except Exception as e:
+        logger.warning(f"eod-preview: intraday entry classify failed: {e}")
+
+    # ── 4. IB-vs-bot disagreement (the 2026-05-13 incident pattern) ─
+    disagreement: List[Dict[str, Any]] = []
+    try:
+        ib_positions = [
+            p for p in (_ib_position_snapshot() or [])
+            if isinstance(p, dict) and abs(float(p.get("position") or 0)) > 0
+        ]
+        # Pull swing rows by symbol from Mongo.
+        ib_symbols_unknown = []
+        for p in ib_positions:
+            sym = (p.get("symbol") or "").upper()
+            if sym and sym not in bot_open_symbols:
+                ib_symbols_unknown.append({
+                    "symbol": sym,
+                    "qty": float(p.get("position") or 0),
+                    "avg_cost": p.get("avgCost") or p.get("avg_cost"),
+                    "market_price": p.get("marketPrice") or p.get("market_price"),
+                })
+
+        swing_known: set = set()
+        if ib_symbols_unknown and db is not None:
+            try:
+                cursor = await asyncio.to_thread(
+                    lambda: list(db.bot_trades.find(
+                        {
+                            "symbol": {"$in": [u["symbol"] for u in ib_symbols_unknown]},
+                            "status": {"$in": ["open", "partial", "OPEN", "PARTIAL"]},
+                            "close_at_eod": False,
+                        },
+                        {"_id": 0, "symbol": 1, "id": 1, "setup_type": 1,
+                         "timeframe": 1},
+                    ))
+                )
+                swing_known = {(r.get("symbol") or "").upper() for r in cursor}
+                # Add known swings to the roll list for visibility.
+                swing_rows_by_sym = {(r["symbol"] or "").upper(): r for r in cursor}
+                for u in ib_symbols_unknown:
+                    if u["symbol"] in swing_known:
+                        r = swing_rows_by_sym[u["symbol"]]
+                        swing_to_roll.append({
+                            "symbol": u["symbol"],
+                            "qty": u["qty"],
+                            "trade_id": r.get("id"),
+                            "setup_type": r.get("setup_type"),
+                            "timeframe": r.get("timeframe"),
+                            "close_at_eod": False,
+                            "source": "ib_only_known_swing",
+                        })
+            except Exception as e:
+                logger.debug(f"eod-preview: swing lookup failed: {e}")
+
+        for u in ib_symbols_unknown:
+            if u["symbol"] not in swing_known:
+                disagreement.append(u)
+    except Exception as e:
+        logger.warning(f"eod-preview: disagreement check failed: {e}")
+
+    # ── Diagnosis text ────────────────────────────────────────────
+    summary = {
+        "positions_to_close": len(intraday_to_close),
+        "pending_entries_to_cancel": len(pending_entries),
+        "swing_positions_to_roll": len(swing_to_roll),
+        "ib_vs_bot_disagreement": len(disagreement),
+    }
+
+    if disagreement:
+        health = "red"
+    elif pending_entries or intraday_to_close:
+        health = "amber"
+    else:
+        health = "green"
+
+    notes: List[str] = []
+    if disagreement:
+        notes.append(
+            f"🚨 {len(disagreement)} IB position(s) NOT tracked by bot "
+            "— will MISS auto-close. Adopt or flatten before 3:55 PM."
+        )
+    if pending_entries:
+        notes.append(
+            f"⚠ {len(pending_entries)} pending intraday entry order(s) "
+            "will be cancelled by the EOD sweep."
+        )
+    if intraday_to_close:
+        notes.append(
+            f"ℹ {len(intraday_to_close)} intraday position(s) will be "
+            f"market-closed at {eod_hour:02d}:{eod_minute:02d} ET."
+        )
+    if swing_to_roll:
+        notes.append(
+            f"ℹ {len(swing_to_roll)} swing/position trade(s) will roll "
+            "overnight (intentional)."
+        )
+    if not notes:
+        notes.append("✅ Nothing to do at EOD.")
+
+    return {
+        "success": True,
+        "generated_at": now_utc.isoformat(),
+        "et_clock": now_et.strftime("%H:%M:%S"),
+        "is_half_day": is_half_day,
+        "is_eod_window": is_eod_window,
+        "minutes_to_eod_close": minutes_eod - minutes_now,
+        "minutes_to_market_close": minutes_mc - minutes_now,
+        "eod_hour_et": eod_hour,
+        "eod_minute_et": eod_minute,
+        "health": health,
+        "summary": summary,
+        "positions_to_close": intraday_to_close,
+        "pending_entries_to_cancel": pending_entries,
+        "swing_positions_to_roll": swing_to_roll,
+        "ib_vs_bot_disagreement": disagreement,
+        "notes": notes,
+    }

@@ -48,6 +48,8 @@ import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { ScannerCoverageAuditPanel } from './v5/ScannerCoverageAuditPanel';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
+import { EodPreviewBanner } from './v5/EodPreviewBanner';
+import { CostBasisSyncTile } from './v5/CostBasisSyncTile';
 // v19.30.11 (2026-05-01) — high-priority system alerts (pusher dead 30s+,
 // mongo down, etc.) with explicit operator action guidance. Goes ABOVE
 // PusherDeadBanner because it's broader (covers all critical subsystems
@@ -392,6 +394,13 @@ export const SentComV5View = ({
           it impossible to miss. Silent when fresh / after-hours. */}
       <PusherDeadBanner />
 
+      {/* v19.34.152 — EOD Pre-Close Preview. Auto-appears at 3:30 PM ET
+          showing what will close, what will cancel, what will roll
+          overnight, AND any IB-vs-bot disagreements (positions IB has
+          that the bot lost track of — exactly the 2026-05-13 incident).
+          Click X to dismiss for the day (RED state always overrides). */}
+      <EodPreviewBanner />
+
       {/* Awaiting-quotes pill — z-58, shown while the bot is waiting for IB quotes */}
       <AwaitingQuotesPillV5 safety={safety} />
 
@@ -562,6 +571,9 @@ export const SentComV5View = ({
         </PanelErrorBoundary>
         <PanelErrorBoundary label="portfolio-health" compact>
           <PortfolioHealthPill />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="cost-basis-sync" compact>
+          <CostBasisSyncTile />
         </PanelErrorBoundary>
         <PanelErrorBoundary label="strategy-mix" compact>
           <StrategyMixCard />

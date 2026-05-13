@@ -1029,6 +1029,14 @@ class PositionManager:
         if now_et.weekday() >= 5:
             return
 
+        # v19.34.152 — check for position-memory disagreements on
+        # every manage tick during market hours. The alarm dedupes
+        # per-day-per-symbol so the stream isn't flooded.
+        try:
+            await self.check_position_memory_disagreement(bot)
+        except Exception as mem_err:
+            logger.debug(f"v19.34.152 disagreement check failed: {mem_err}")
+
         # P1 #5 — half-trading-day detection. Operator sets
         # `EOD_HALF_DAY_TODAY=true` in env on the morning of half-days
         # (Black Friday, Christmas Eve, day after Thanksgiving). Default
@@ -1077,6 +1085,17 @@ class PositionManager:
         open_count = len(bot._open_trades)
         if open_count == 0:
             bot._eod_close_executed_today = True
+            # v19.34.152 — persist the event even on this early-return
+            # path so postmortem can distinguish "loop didn't run" from
+            # "loop ran but bot's _open_trades was empty" (exactly the
+            # 2026-05-13 incident pattern).
+            await self._persist_eod_event(
+                bot, today_str, now_et,
+                closed=0, failed=[], total_pnl=0.0,
+                is_half_day=is_half_day,
+                early_exit_reason="open_trades_empty",
+                ib_position_count=len(self._ib_position_snapshot_safe()),
+            )
             # v19.34.151 — still run the sweep even with no positions
             # to close; stale DAY entries and orphan GTC brackets can
             # exist independently of `_open_trades`. Fire-and-forget.
@@ -1093,6 +1112,14 @@ class PositionManager:
         if not eod_trades:
             logger.info(f"🔔 EOD CHECK: {open_count} open trades, all are swing/position — no EOD close needed")
             bot._eod_close_executed_today = True
+            # v19.34.152 — persist event on the all-swing path too.
+            await self._persist_eod_event(
+                bot, today_str, now_et,
+                closed=0, failed=[], total_pnl=0.0,
+                is_half_day=is_half_day,
+                early_exit_reason="all_swing_or_position",
+                ib_position_count=len(self._ib_position_snapshot_safe()),
+            )
             # v19.34.151 — same as above: sweep runs even when all open
             # trades are swing/position. Fire-and-forget.
             asyncio.create_task(self._run_eod_orphan_sweep(bot))
@@ -1226,6 +1253,9 @@ class PositionManager:
                 "total_pnl": total_pnl,
                 "is_half_day": is_half_day,
                 "close_time_et": now_et.strftime("%H:%M:%S"),
+                # v19.34.152 — symmetric with the early-return paths.
+                "early_exit_reason": None,
+                "ib_position_count": len(self._ib_position_snapshot_safe()),
             }
             await asyncio.to_thread(bot._db.bot_events.insert_one, eod_event)
 
@@ -1245,6 +1275,178 @@ class PositionManager:
         # wait that shouldn't block the manage loop. Idempotent via
         # `_eod_sweep_executed_today` so re-entry is safe.
         asyncio.create_task(self._run_eod_orphan_sweep(bot))
+
+    def _ib_position_snapshot_safe(self):
+        """v19.34.152 — defensive read of IB live positions list.
+        Returns [] on any failure. Used by the EOD-event recorder and
+        the position-memory disagreement alarm."""
+        try:
+            from routers.ib import _pushed_ib_data
+            return [
+                p for p in (_pushed_ib_data.get("positions") or [])
+                if isinstance(p, dict) and abs(float(p.get("position") or 0)) > 0
+            ]
+        except Exception:
+            return []
+
+    async def _persist_eod_event(
+        self, bot: 'TradingBotService', today_str: str, now_et,
+        *, closed: int, failed: list, total_pnl: float,
+        is_half_day: bool, early_exit_reason,
+        ib_position_count: int,
+    ):
+        """v19.34.152 — single helper for inserting the
+        `bot_events.eod_auto_close` row. Used by both the main close
+        path AND the early-return paths so postmortem ALWAYS finds an
+        event for the day."""
+        if not bot._db:
+            return
+        try:
+            await asyncio.to_thread(
+                bot._db.bot_events.insert_one,
+                {
+                    "event_type": "eod_auto_close",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "date": today_str,
+                    "positions_closed": closed,
+                    "positions_failed": len(failed),
+                    "failed_symbols": failed,
+                    "total_pnl": total_pnl,
+                    "is_half_day": is_half_day,
+                    "close_time_et": now_et.strftime("%H:%M:%S"),
+                    "early_exit_reason": early_exit_reason,
+                    "ib_position_count": ib_position_count,
+                },
+            )
+        except Exception as e:
+            logger.warning(f"v19.34.152: failed to persist eod event: {e}")
+
+    async def check_position_memory_disagreement(self, bot: 'TradingBotService'):
+        """v19.34.152 — fires when IB has open positions the bot's
+        `_open_trades` dict doesn't know about. This was the 2026-05-13
+        incident root cause: bot's memory wiped (restart, persistence
+        glitch, etc.) → EOD logic saw `_open_trades` empty → returned
+        early → 14 IB positions held overnight.
+
+        Algorithm:
+          1. Snapshot live IB positions (abs(qty) > 0).
+          2. For each, look it up in `bot._open_trades` by symbol.
+          3. If absent, check `bot_trades` Mongo for a recent
+             OPEN/PARTIAL row with `close_at_eod=False` — that's a
+             legitimately-untracked SWING position (the bot might have
+             dumped the in-memory cache but the DB row exists).
+          4. Otherwise, this symbol is a TRUE disagreement → alarm.
+
+        Dedup by date+symbol: each disagreement alarms ONCE per day
+        per symbol so we don't spam the stream on every manage tick.
+        """
+        if not hasattr(bot, "_position_memory_alarmed"):
+            bot._position_memory_alarmed = {}
+
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+        ib_positions = self._ib_position_snapshot_safe()
+        if not ib_positions:
+            return
+
+        # Index bot in-memory open trades by symbol.
+        bot_symbols = {
+            (getattr(t, "symbol", "") or "").upper()
+            for t in bot._open_trades.values()
+        }
+
+        # Pull bot_trades rows with status OPEN/PARTIAL for symbols
+        # we don't have in memory — could be swing trades the bot is
+        # legitimately holding without an in-memory entry.
+        unknown = []
+        for p in ib_positions:
+            sym = (p.get("symbol") or "").upper()
+            if not sym or sym in bot_symbols:
+                continue
+            try:
+                qty = float(p.get("position") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            unknown.append({"symbol": sym, "qty": qty})
+
+        if not unknown:
+            return
+
+        # Cross-check Mongo for swing rows on those symbols.
+        swing_known: set = set()
+        if bot._db:
+            try:
+                cursor = await asyncio.to_thread(
+                    lambda: list(bot._db.bot_trades.find(
+                        {
+                            "symbol": {"$in": [u["symbol"] for u in unknown]},
+                            "status": {"$in": ["open", "partial", "OPEN", "PARTIAL"]},
+                            "close_at_eod": False,
+                        },
+                        {"_id": 0, "symbol": 1, "close_at_eod": 1},
+                    ))
+                )
+                swing_known = {(r.get("symbol") or "").upper() for r in cursor}
+            except Exception as e:
+                logger.debug(f"v19.34.152: bot_trades swing lookup failed: {e}")
+
+        true_disagreements = [u for u in unknown if u["symbol"] not in swing_known]
+        if not true_disagreements:
+            return
+
+        # Per-day dedup so the alarm doesn't spam the stream.
+        today_alarmed = bot._position_memory_alarmed.get(today_str, set())
+        new_symbols = [
+            u for u in true_disagreements if u["symbol"] not in today_alarmed
+        ]
+        if not new_symbols:
+            return
+
+        for u in new_symbols:
+            today_alarmed.add(u["symbol"])
+        bot._position_memory_alarmed[today_str] = today_alarmed
+
+        # Clean old day-entries to bound memory.
+        for old_date in list(bot._position_memory_alarmed.keys()):
+            if old_date != today_str:
+                bot._position_memory_alarmed.pop(old_date, None)
+
+        logger.error(
+            "🚨 [v19.34.152] POSITION-MEMORY DISAGREEMENT: %d IB position(s) "
+            "NOT in bot._open_trades and NOT a known swing/position trade. "
+            "These will NOT auto-close at EOD. Symbols: %s",
+            len(new_symbols),
+            [(u["symbol"], u["qty"]) for u in new_symbols],
+        )
+
+        # Stream alarm — CRITICAL severity always (auto-close miss).
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "alarm",
+                "event": "position_memory_disagreement",
+                "symbol": new_symbols[0]["symbol"] if len(new_symbols) == 1 else None,
+                "text": (
+                    f"🚨 [CRITICAL] IB has {len(new_symbols)} position(s) the "
+                    f"bot doesn't know about: "
+                    f"{', '.join(u['symbol'] for u in new_symbols[:5])}"
+                    f"{'…' if len(new_symbols) > 5 else ''}. "
+                    "EOD AUTO-CLOSE WILL MISS THESE. Adopt via "
+                    "POST /api/trading-bot/adopt-ib-positions OR "
+                    "manually flatten in TWS before close."
+                ),
+                "metadata": {
+                    "symbols": [u["symbol"] for u in new_symbols],
+                    "qtys": {u["symbol"]: u["qty"] for u in new_symbols},
+                    "severity": "CRITICAL",
+                },
+            })
+        except Exception as alarm_err:
+            logger.warning(f"v19.34.152 alarm emit failed: {alarm_err}")
 
     async def _run_eod_orphan_sweep(self, bot: 'TradingBotService'):
         """v19.34.151 — runs the orphan-order + pending-intraday-entry

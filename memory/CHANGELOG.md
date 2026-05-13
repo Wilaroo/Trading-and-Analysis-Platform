@@ -4,7 +4,70 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-02-13 (v19.34.151) — EOD sweep hardening + intraday DAY-entry cancellation
+## 2026-02-13 (v19.34.152) — Position-memory disagreement alarm + Pre-Close Preview banner + Cost-Basis Sync tile
+
+Post-v19.34.151, operator ran the new postmortem and discovered the
+**deeper** root cause of tonight's EOD: `bot._open_trades` was EMPTY
+at 3:55 PM despite IB holding 14 live positions. The bot had lost its
+in-memory open-trades cache (likely a mid-session restart) and the
+`bot_trades` collection had no matching OPEN/PARTIAL rows. EOD logic
+hit the `open_count == 0` early-return path and exited silently —
+no event written, no auto-close attempt. Operator had to manually
+flatten in TWS.
+
+### Backend — P0 hardening
+- **`check_position_memory_disagreement`** runs every manage-loop
+  tick during market hours (5s budget shared with the EOD check). It
+  cross-references the IB live-position snapshot against
+  `bot._open_trades`. For any IB symbol the bot doesn't track in
+  memory, it consults `bot_trades` for an OPEN/PARTIAL row with
+  `close_at_eod=False` (a legitimately untracked swing). Anything
+  else fires a **CRITICAL** stream alarm with all affected symbols.
+  De-duplicated per-day-per-symbol so the stream isn't flooded.
+- **EOD event ALWAYS persisted**, even on early-return paths
+  (`open_count == 0`, `all_swing_or_position`). New
+  `_persist_eod_event` helper inserts a row with
+  `early_exit_reason` ∈ {None, "open_trades_empty",
+  "all_swing_or_position"} and `ib_position_count` so postmortem can
+  prove the loop executed.
+- **`_ib_position_snapshot_safe`** central helper for reading live
+  IB positions (auto-excludes zero-qty ghost rows).
+
+### Backend — P1 EOD preview
+- **`GET /api/diagnostic/eod-preview`** — live snapshot of what the
+  EOD sweep WILL do. Surfaces four categories with full per-symbol
+  rows: `positions_to_close`, `pending_entries_to_cancel`,
+  `swing_positions_to_roll`, `ib_vs_bot_disagreement`. Pre-computed
+  `health` enum (green/amber/red) plus per-symbol drill-downs.
+  Window awareness: `is_eod_window`, `minutes_to_eod_close`,
+  `minutes_to_market_close`, half-day support.
+
+### Frontend (V5)
+- **`<EodPreviewBanner />`** mounted at root. Hidden outside the
+  EOD window (3:30-4:00 PM ET). Inside the window:
+  - GREEN: "✅ EOD PRE-CLOSE PREVIEW · close at 3:55 ET" with counts
+  - AMBER: positions/entries-to-cancel counts shown
+  - RED: 🚨 UNTRACKED-AT-IB badge + per-symbol detail row
+  - Dismiss button (X) — only suppresses GREEN/AMBER. RED state
+    always overrides dismiss so untracked positions can't be hidden.
+  - Auto-resets dismiss at midnight ET.
+- **`<CostBasisSyncTile />`** in status strip. Runs `dry_run=true`
+  audit every 60s → shows `COST-BASIS OK` (green) or `N DRIFT` (amber)
+  with the worst-drift symbol. `[SYNC NOW]` button fires the real
+  sync; toast confirms how many trades were updated.
+- New shared hook `useEodPreview.js` — adaptive polling
+  (30s outside window, 10s inside).
+
+### Tests
+- **`test_position_memory_disagreement_v19_34_152.py`** — 9 cases
+  (alarm fires / suppresses swing trades / dedup per-day / event
+  persisted on all early-return paths / DB-failure tolerant /
+  ghost-row filtering).
+- **EOD suite total: 90/90 passing** (15 v19.34.151 + 9 v19.34.152
+  + 42 existing EOD + 24 pusher-health).
+
+
+
 
 🔴 **Operator incident 2026-05-13**: EOD close at 3:55 PM ET "barely
 worked." User had to manually flatten all positions in TWS. Audit
