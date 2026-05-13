@@ -3,6 +3,52 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🟢 P2 — Audit `partial_close_detected` info line (saved 2026-02-13, post v19.34.145)
+
+After v19.34.145 fixed the false-positive KMB / ONON `QTY_MAGNITUDE_MISMATCH`,
+operator asked: "can we tell from the audit at a glance whether a row is a
+scaled-out winner vs phantom shares?" Yes — and it should be a *positive*
+signal in the audit response (not an alarm).
+
+### Scope
+For every bot row where `shares != remaining_shares` (i.e. a partial close
+has already fired), surface a soft info field in the audit row:
+
+```json
+{
+  "verdict": "OK",
+  "partial_close_detected": {
+    "original_shares": 144,
+    "remaining_shares": 55,
+    "closed_shares": 89,
+    "pct_remaining": 38.2
+  }
+}
+```
+
+And add a non-alarm action line that summarises the session's peel activity:
+"5 position(s) have partial scale-outs already fired this session: KMB
+(89/144 closed), ONON (176/235 closed), …".
+
+### Implementation hint
+Read `r.get("shares")` AND `r.get("remaining_shares")` in
+`routers/diagnostic_router.py::position_pnl_audit` (the audit endpoint
+already has both — see the bot-row branch). When they differ, attach
+the `partial_close_detected` block to the corresponding row in
+`rows[]`. Tests: extend
+`tests/test_position_pnl_audit_v19_34_142.py::TestPartialCloseQtyResolution`
+with a `test_partial_close_detected_attached_when_shares_differ` case.
+
+### Why P2 and not P0/P1
+The actual bug (false NAKED alarm + overstated PnL) is fixed in v19.34.145.
+This is a UX polish that makes the audit *easier to read* but doesn't
+change behavior. Pick it up when V6 UI work calls for a "partial
+scale-out" badge or chip — likely the same diff.
+
+---
+
+
+
 ## 🟢 NEXT — Root-cause the KMB fragment double-book (saved 2026-02-13, post v19.34.143)
 
 `v19.34.142e` now surfaces `ledger_fragments[]` on every magnitude
