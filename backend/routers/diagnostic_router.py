@@ -2801,6 +2801,48 @@ def _resolve_ib_unrealized(
     return 0.0, "unknown_no_mark"
 
 
+
+def _partial_close_block(bt: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """v19.34.146 — attach `partial_close_detected` when the bot row's
+    original `shares` differs from `remaining_shares`. INFO-level
+    metadata only — NOT an alarm. Lets the operator distinguish a
+    scaled-out winner from a phantom-share bug at a glance."""
+    if not bt:
+        return {}
+    orig = bt.get("shares")
+    remain = bt.get("remaining_shares")
+    if orig is None or remain is None:
+        return {}
+    if orig <= 0 or remain >= orig or remain < 0:
+        return {}
+    closed = orig - remain
+    return {
+        "partial_close_detected": {
+            "original_shares": orig,
+            "remaining_shares": remain,
+            "closed_shares": closed,
+            "pct_remaining": round(remain / orig * 100.0, 1),
+        }
+    }
+
+
+def _quote_age_block(bt: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """v19.34.146 — surface quote freshness on bot rows. `quote_age_s`
+    is seconds since the L1 quote feeding `current_price` last
+    updated. When SIVR-style stale-price drift appears, this lets
+    the audit answer "is the L1 quote 240s old?" without a second
+    request."""
+    if not bt:
+        return {}
+    out: Dict[str, Any] = {}
+    if bt.get("quote_age_s") is not None:
+        out["quote_age_s"] = bt.get("quote_age_s")
+    if bt.get("quote_state"):
+        out["quote_state"] = bt.get("quote_state")
+    return out
+
+
+
 @router.get("/position-pnl-audit")
 async def position_pnl_audit(
     drift_abs_threshold: float = 20.0,
@@ -2926,6 +2968,26 @@ async def position_pnl_audit(
             ),
             "pnl_source": r.get("pnl_source"),
             "source": r.get("source"),
+            # 2026-02-13 (v19.34.146) — surface original vs remaining
+            # shares so the audit row can attach a
+            # `partial_close_detected` block when they differ. Lets
+            # the operator distinguish "scaled-out winner" from
+            # "phantom shares" at a glance.
+            "shares": (
+                int(abs(float(r.get("shares") or 0)))
+                if r.get("shares") is not None else None
+            ),
+            "remaining_shares": (
+                int(abs(float(r.get("remaining_shares") or 0)))
+                if r.get("remaining_shares") is not None else None
+            ),
+            # 2026-02-13 (v19.34.146) — quote-age passthrough for the
+            # SIVR-style stale-price investigation. sentcom_service
+            # already populates `quote_age_s` + `quote_state` from
+            # `quote_meta_by_symbol`; we just hand them through so
+            # the audit shows "ah, this drift's quote is 240s old".
+            "quote_age_s": r.get("quote_age_s"),
+            "quote_state": r.get("quote_state"),
         }
 
     # 3) Build the diff.
@@ -3055,6 +3117,8 @@ async def position_pnl_audit(
                 "ledger_fragment_count": len([
                     f for f in ledger_fragments if "error" not in f
                 ]),
+                **_partial_close_block(bt),
+                **_quote_age_block(bt),
             }
             rows.append(row)
             bucket.setdefault("qty_magnitude_mismatch", 0)
@@ -3092,6 +3156,8 @@ async def position_pnl_audit(
             "ib_pnl_source": ib.get("ib_pnl_source"),
             "bot_source": bt.get("source"),
             "verdict": verdict,
+            **_partial_close_block(bt),
+            **_quote_age_block(bt),
         })
 
     # 4) Actions.
@@ -3153,6 +3219,90 @@ async def position_pnl_audit(
                 "(see IB_PUSHER_L1_AUTO_TOP_N) or updatePortfolio() "
                 "hasn't refreshed yet."
             )
+        # 2026-02-13 (v19.34.146) — bucket DRIFT rows by pnl_source so
+        # the operator sees the cluster. If all 7 drifts are
+        # `trade_current_price_stale`, the manage tick is lagging; if
+        # they're scattered, it's noise. Emit only when there are
+        # multiple drifts to avoid action spam.
+        drift_rows = [r for r in rows
+                      if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT")]
+        if len(drift_rows) >= 2:
+            src_buckets: Dict[str, int] = {}
+            for r in drift_rows:
+                k = r.get("pnl_source") or "unknown"
+                src_buckets[k] = src_buckets.get(k, 0) + 1
+            sorted_buckets = sorted(
+                src_buckets.items(), key=lambda kv: -kv[1]
+            )
+            top_src, top_count = sorted_buckets[0]
+            breakdown_str = ", ".join(
+                f"{src}={n}" for src, n in sorted_buckets
+            )
+            if top_count >= max(2, int(0.6 * len(drift_rows))):
+                # Dominant cluster — actionable.
+                hint = {
+                    "trade_current_price_stale": (
+                        "the bot's `current_price` is from "
+                        "position_manager.update_open_positions and is "
+                        "lagging the IB pusher. Restart the manage "
+                        "loop or check IB pusher L1 subscription "
+                        "(IB_PUSHER_L1_AUTO_TOP_N) for affected symbols."
+                    ),
+                    "quote_close": (
+                        "live `last` is missing; rows are valued off "
+                        "prior close. Pusher may not be streaming L1 "
+                        "for these symbols — verify PusherRotation."
+                    ),
+                    "entry_price_fallback": (
+                        "no live mark AND no manage-tick update — "
+                        "PnL is pinned to entry. Investigate why these "
+                        "symbols never received a fresh quote."
+                    ),
+                    "ib_unrealized": (
+                        "IB pusher unrealized snapshot is the source — "
+                        "drift indicates bot's manage-tick computation "
+                        "has gone stale (most likely avg_cost drift)."
+                    ),
+                    "unknown_no_mark": (
+                        "no mark from any fallback — pusher entirely "
+                        "offline for these symbols. Restart IB Gateway "
+                        "connection or check pusher logs."
+                    ),
+                }.get(top_src, "investigate the cluster.")
+                actions.append(
+                    f"ℹ {len(drift_rows)} drift row(s) cluster on "
+                    f"pnl_source={top_src!r} ({top_count}/{len(drift_rows)}) — "
+                    f"{hint} Breakdown: {breakdown_str}."
+                )
+            else:
+                # Scattered — informational only.
+                actions.append(
+                    f"ℹ {len(drift_rows)} drift row(s) span "
+                    f"multiple pnl_source buckets ({breakdown_str}) — "
+                    "no dominant cause; likely noise from manage-tick "
+                    "timing rather than a systemic issue."
+                )
+    # 2026-02-13 (v19.34.146) — partial-close info line. When N rows
+    # carry a `partial_close_detected` block, surface a friendly
+    # summary so the operator can mentally tag "scaled-out winner"
+    # vs phantom-share at audit-glance time.
+    partial_rows = [r for r in rows if r.get("partial_close_detected")]
+    if partial_rows:
+        details = []
+        for r in partial_rows[:5]:
+            pc = r["partial_close_detected"]
+            details.append(
+                f"{r['symbol']} ({pc['closed_shares']}/"
+                f"{pc['original_shares']} closed, "
+                f"{pc['pct_remaining']}% remaining)"
+            )
+        actions.append(
+            f"ℹ {len(partial_rows)} position(s) have partial scale-outs "
+            f"already fired this session: {', '.join(details)}"
+            + (f" (+ {len(partial_rows) - 5} more)"
+               if len(partial_rows) > 5 else "")
+            + ". These are scaled-out winners — NOT phantom shares."
+        )
     if not actions:
         actions.append("All positions agree with IB within thresholds.")
 
@@ -3168,6 +3318,27 @@ async def position_pnl_audit(
             "the IB Gateway connection or check the pusher log if "
             "this persists."
         )
+
+    # 2026-02-13 (v19.34.146) — pnl_source breakdown across ALL rows
+    # for the operator's at-a-glance "where is drift coming from"
+    # diagnostic. Counts every row's `pnl_source`, plus a separate
+    # bucket scoped to drift rows only.
+    pnl_source_breakdown_all: Dict[str, int] = {}
+    pnl_source_breakdown_drift: Dict[str, int] = {}
+    partial_close_count = 0
+    stale_quote_count = 0
+    for r in rows:
+        src = r.get("pnl_source") or "unknown"
+        pnl_source_breakdown_all[src] = pnl_source_breakdown_all.get(src, 0) + 1
+        if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT"):
+            pnl_source_breakdown_drift[src] = (
+                pnl_source_breakdown_drift.get(src, 0) + 1
+            )
+        if r.get("partial_close_detected"):
+            partial_close_count += 1
+        qa = r.get("quote_age_s")
+        if isinstance(qa, (int, float)) and qa >= 120:
+            stale_quote_count += 1
 
     return {
         "success": True,
@@ -3188,6 +3359,18 @@ async def position_pnl_audit(
                 "bot_unrealized": round(total_bot_pnl, 2),
                 "delta": round(total_ib_pnl - total_bot_pnl, 2),
             },
+            # v19.34.146 — pnl_source clustering for D-style drift
+            # investigation. `*_all` covers every row; `*_drift` only
+            # counts DRIFT_ABS/DRIFT_PCT.
+            "pnl_source_breakdown_all": pnl_source_breakdown_all,
+            "pnl_source_breakdown_drift": pnl_source_breakdown_drift,
+            # v19.34.146 — partial-close awareness. Rows where the
+            # bot has already scaled out — operator can tell these
+            # apart from genuine drift at a glance.
+            "partial_close_count": partial_close_count,
+            # v19.34.146 — count of rows with stale quotes (≥120s old).
+            # Helps the SIVR-style PusherRotation investigation.
+            "stale_quote_count": stale_quote_count,
         },
         "actions": actions,
     }

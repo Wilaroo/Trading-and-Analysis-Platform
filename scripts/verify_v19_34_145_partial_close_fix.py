@@ -99,6 +99,19 @@ def main() -> int:
     print(f"  phantom_in_bot     : {summary.get('phantom_in_bot')}")
     print(f"  qty_sign_mismatch  : {summary.get('qty_sign_mismatch')}")
     print(f"  qty_magnitude      : {summary.get('qty_magnitude_mismatch', 0)}")
+    # v19.34.146 — additional context that helps explain residual drift.
+    pc = summary.get("partial_close_count", 0)
+    if pc:
+        print(f"  partial_closes     : {pc}  (scaled-out winners; ✅ benign)")
+    sq = summary.get("stale_quote_count", 0)
+    if sq:
+        print(f"  stale_quote_rows   : {sq}  (quote_age_s ≥ 120 — investigate PusherRotation)")
+    src_drift = summary.get("pnl_source_breakdown_drift") or {}
+    if src_drift:
+        breakdown = ", ".join(f"{k}={v}" for k, v in
+                              sorted(src_drift.items(),
+                                     key=lambda kv: -kv[1]))
+        print(f"  drift_by_source    : {breakdown}")
     totals = summary.get("totals") or {}
     print(f"  ib_total           : ${totals.get('ib_unrealized'):>10}")
     print(f"  bot_total          : ${totals.get('bot_unrealized'):>10}")

@@ -3,6 +3,68 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.146) — Audit UX: partial-close info, drift clustering, quote-age passthrough
+
+Operator approved the ROADMAP enhancement after v19.34.145 confirmed
+KMB/ONON dropped out of magnitude-mismatch on live audit. Shipped
+three non-behavioral UX additions to `/api/diagnostic/position-pnl-audit`
+that turn the existing diagnostic plumbing into self-explaining output.
+
+### A. `partial_close_detected` block on rows
+When a bot row carries `shares != remaining_shares` (i.e. a partial
+scale-out has fired), the audit row now includes:
+```json
+"partial_close_detected": {
+  "original_shares": 144,
+  "remaining_shares": 55,
+  "closed_shares": 89,
+  "pct_remaining": 38.2
+}
+```
+Summary aggregate: `summary.partial_close_count`. Action line:
+`ℹ N position(s) have partial scale-outs already fired this session:
+KMB (89/144 closed, 38.2% remaining), ONON (176/235 closed, …).
+These are scaled-out winners — NOT phantom shares.`
+
+### B. `pnl_source_breakdown_drift` clustering
+Drift rows (`DRIFT_ABS` / `DRIFT_PCT`) are now bucketed by
+`pnl_source`. When ≥60% of drift rows share a single source
+(e.g. 5/7 are `trade_current_price_stale`), the audit emits a
+source-specific remediation hint:
+
+| Dominant source | Action line hint |
+| --- | --- |
+| `trade_current_price_stale` | Manage tick is lagging — restart manage loop / check IB_PUSHER_L1_AUTO_TOP_N. |
+| `quote_close` | L1 `last` missing; PusherRotation verification needed. |
+| `entry_price_fallback` | No live mark AND no manage-tick update for these symbols. |
+| `ib_unrealized` | Bot's manage-tick computation drifted vs IB (avg_cost drift likely). |
+| `unknown_no_mark` | Pusher entirely offline for these symbols. |
+
+When scattered (no source dominates), emits a lower-severity
+"likely noise" line instead. Summary also exposes
+`pnl_source_breakdown_all` for full visibility across OK rows too.
+
+### C. `quote_age_s` / `quote_state` passthrough on bot rows
+`sentcom_service.get_our_positions()` already populates these from
+`quote_meta_by_symbol` (v19.34.2) for both bot AND orphan branches.
+The audit endpoint now hands them through. New summary field
+`stale_quote_count` counts rows with `quote_age_s >= 120` (the
+SIVR-style stale-price investigation becomes "look at
+`stale_quote_count`" rather than a per-row hunt).
+
+### Tests
+`tests/test_audit_ux_enhancements_v19_34_146.py` — 12 new cases
+across three groups: partial-close (attached when shares differ,
+not when matching, not when remaining_shares missing, summary
+count, action-line content), pnl_source clustering (dominant
+cluster, scattered, summary breakdowns, single-drift suppression),
+quote-age passthrough (row-level + threshold count + missing
+gracefully).
+
+**84/84 cumulative in-scope tests pass.**
+
+
+
 ## 2026-02-13 (v19.34.145) — Live PnL math: use `remaining_shares`, not `shares`
 
 Root-cause from operator's live KMB audit (2026-05-13):
