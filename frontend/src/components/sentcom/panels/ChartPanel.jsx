@@ -970,7 +970,7 @@ export const ChartPanel = ({
           </span>
           {lastUpdated && !loading && (
             <span className="text-[12px] text-zinc-600 truncate">
-              · updated {fmtET12Sec(lastUpdated)} ET
+              · updated {fmtET12Sec(lastUpdated)}
             </span>
           )}
           {/* v19.33 — Connection mode pip. `connected` (cyan) = WS-pushed

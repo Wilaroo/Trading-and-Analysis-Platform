@@ -272,7 +272,7 @@ const MLFeatureAuditPanel = ({ defaultSymbol = '' }) => {
                 {data.generated_at && (
                   <span className="text-zinc-700">
                     {' · '}
-                    {new Date(data.generated_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}
+                    {new Date(data.generated_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }) + ' ET'}
                   </span>
                 )}
               </div>

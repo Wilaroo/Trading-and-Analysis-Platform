@@ -68,7 +68,7 @@ const CreditBudgetModal = ({ isOpen, onClose, creditBudget }) => {
 
   const formatTime = (isoString) => {
     const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) + ' ET';
   };
 
   // Calculate days remaining in month
@@ -627,7 +627,7 @@ const SystemStatusPopover = ({
           {wsLastUpdate && (
             <div className="px-4 py-2 border-t border-white/5 text-[12px] text-zinc-500 flex items-center gap-1.5">
               <Clock className="w-3 h-3" />
-              Last quote: {new Date(wsLastUpdate).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}
+              Last quote: {new Date(wsLastUpdate).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }) + ' ET'}
             </div>
           )}
         </div>

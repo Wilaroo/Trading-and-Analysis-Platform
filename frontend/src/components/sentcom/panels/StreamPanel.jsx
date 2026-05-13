@@ -77,7 +77,7 @@ export const StreamPanel = ({ messages, loading }) => {
                       <ClickableTicker symbol={msg.symbol} variant="badge" />
                     )}
                     <span className="text-[12px] text-zinc-600">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' })}
+                      {new Date(msg.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) + ' ET'}
                     </span>
                   </div>
                   <p className="text-sm text-zinc-300 leading-relaxed">{msg.content}</p>

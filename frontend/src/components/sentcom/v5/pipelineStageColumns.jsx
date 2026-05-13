@@ -33,7 +33,7 @@ export const formatTime = (iso) => {
     return d.toLocaleTimeString('en-US', {
       timeZone: 'America/New_York',
       hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    }) + ' ET';
   } catch {
     return '—';
   }

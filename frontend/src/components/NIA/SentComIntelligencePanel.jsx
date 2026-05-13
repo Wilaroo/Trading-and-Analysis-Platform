@@ -99,7 +99,7 @@ const DecisionRow = memo(({ decision }) => {
   const style = DECISION_ICONS[decision.decision] || DECISION_ICONS.SKIP;
   const Icon = style.icon;
   const ts = decision.timestamp ? new Date(decision.timestamp) : null;
-  const timeStr = ts ? ts.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) : '';
+  const timeStr = ts ? ts.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) + ' ET' : '';
 
   return (
     <div className="flex items-start gap-2 py-2 border-b border-white/5 last:border-0" data-testid={`decision-row-${decision.symbol}`}>

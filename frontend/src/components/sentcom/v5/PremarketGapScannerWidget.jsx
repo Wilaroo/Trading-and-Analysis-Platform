@@ -93,7 +93,7 @@ const PremarketGapScannerWidget = ({
         <div className="flex items-center gap-2">
           {generatedAt && (
             <span className="v5-mono text-[12px] text-zinc-600 hidden sm:inline">
-              {new Date(generatedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}
+              {new Date(generatedAt).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }) + ' ET'}
             </span>
           )}
           <button

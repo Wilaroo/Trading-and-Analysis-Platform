@@ -799,9 +799,10 @@ const fmtTime = (iso) => {
   try {
     const d = new Date(iso);
     return d.toLocaleString('en-US', {
+      timeZone: 'America/New_York',
       month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    }) + ' ET';
   } catch { return '—'; }
 };
 
@@ -1169,8 +1170,9 @@ const fmtForensicsTime = (iso) => {
   try {
     const d = new Date(iso);
     return d.toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York',
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    });
+    }) + ' ET';
   } catch { return '—'; }
 };
 
@@ -1496,9 +1498,10 @@ const fmtShadowTime = (iso) => {
   try {
     const d = new Date(iso);
     return d.toLocaleString('en-US', {
+      timeZone: 'America/New_York',
       month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    }) + ' ET';
   } catch { return '—'; }
 };
 

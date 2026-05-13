@@ -25,7 +25,7 @@ const _normalize = (input) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
-/** "9:30 AM" / "1:55 PM" — 12-hour clock without seconds. */
+/** "9:30 AM ET" / "1:55 PM ET" — 12-hour clock without seconds. */
 export const fmtET12 = (input) => {
   const d = _normalize(input);
   if (!d) return '—';
@@ -34,10 +34,10 @@ export const fmtET12 = (input) => {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-  });
+  }) + ' ET';
 };
 
-/** "9:30:42 AM" — with seconds (for "last update XX" style labels). */
+/** "9:30:42 AM ET" — with seconds (for "last update XX" style labels). */
 export const fmtET12Sec = (input) => {
   const d = _normalize(input);
   if (!d) return '—';
@@ -47,10 +47,10 @@ export const fmtET12Sec = (input) => {
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
-  });
+  }) + ' ET';
 };
 
-/** "Feb 19, 2026 9:30 AM" — full datetime in ET. */
+/** "Feb 19, 2026 9:30 AM ET" — full datetime in ET. */
 export const fmtET12Date = (input) => {
   const d = _normalize(input);
   if (!d) return '—';
@@ -62,10 +62,10 @@ export const fmtET12Date = (input) => {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-  });
+  }) + ' ET';
 };
 
-/** "Mon Feb 19, 9:30 AM" — short variant for cards/tooltips. */
+/** "Mon Feb 19, 9:30 AM ET" — short variant for cards/tooltips. */
 export const fmtET12Short = (input) => {
   const d = _normalize(input);
   if (!d) return '—';
@@ -77,7 +77,7 @@ export const fmtET12Short = (input) => {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-  });
+  }) + ' ET';
 };
 
 /**
@@ -105,7 +105,16 @@ export const chartTickMarkFormatterET = (time, tickMarkType) => {
     if (!d) return '—';
     return d.toLocaleDateString('en-US', { timeZone: ET_TZ, month: 'short', day: 'numeric' });
   }
-  return fmtET12(time);
+  // Axis tick marks: no " ET" suffix — clutters the x-axis. The chart
+  // panel header already states the timezone.
+  const d = _normalize(time);
+  if (!d) return '—';
+  return d.toLocaleTimeString('en-US', {
+    timeZone: ET_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 };
 
 /**

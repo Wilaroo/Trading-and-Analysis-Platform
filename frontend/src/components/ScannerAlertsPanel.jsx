@@ -172,7 +172,7 @@ const ScannerAlertsPanel = ({ alerts, setups, alertsLoading, setupsLoading, ibCo
                   </div>
                   {alert.timestamp && (
                     <span className="text-[11px] text-zinc-600 flex-shrink-0">
-                      {new Date(alert.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}
+                      {new Date(alert.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) + ' ET'}
                     </span>
                   )}
                 </div>

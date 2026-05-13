@@ -67,7 +67,7 @@ const TERMINAL_JOB_STATUSES = new Set(['completed', 'failed', 'cancelled', 'erro
 const formatPct = (v) => (v == null || Number.isNaN(Number(v))) ? '—' : `${(Number(v) * 100).toFixed(1)}%`;
 const formatTime = (iso) => {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' }); }
+  try { return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' }) + ' ET'; }
   catch { return '—'; }
 };
 

@@ -47,7 +47,7 @@ const CpuReliefBadge = ({ pollMs = 15_000 }) => {
   const Icon = active ? Zap : ZapOff;
   const tooltip = active
     ? `Relief ON · ${state.deferred_count || 0} calls deferred${
-        state.until ? ` · auto-off ${new Date(state.until).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}` : ''
+        state.until ? ` · auto-off ${new Date(state.until).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })} ET` : ''
       }`
     : 'CPU relief off — click to enable';
 

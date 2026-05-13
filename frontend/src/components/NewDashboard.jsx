@@ -146,7 +146,7 @@ const DashboardHeader = ({
           {/* Time */}
           <div className="text-right pl-2 border-l border-white/10">
             <div className="font-mono text-sm text-zinc-300">
-              {new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: true })}
+              {new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: true }) + ' ET'}
             </div>
           </div>
         </div>

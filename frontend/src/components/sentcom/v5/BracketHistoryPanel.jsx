@@ -40,7 +40,7 @@ const phaseChip = (phase, success) => {
 const fmtTime = (iso) => {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false });
+    return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET';
   } catch {
     return iso;
   }

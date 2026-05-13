@@ -145,7 +145,7 @@ export const AIInsightsDashboard = ({ onClose }) => {
                         )}
                       </div>
                       <span className="text-xs text-zinc-500">
-                        {new Date(decision.timestamp).toLocaleString('en-US', { timeZone: 'America/New_York' })}
+                        {new Date(decision.timestamp).toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET'}
                       </span>
                     </div>
                     

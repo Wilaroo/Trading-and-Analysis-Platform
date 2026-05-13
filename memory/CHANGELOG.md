@@ -3,6 +3,69 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.137) — Universal " ET" suffix on every timestamp
+
+Follow-up to v19.34.136. Now that every Date formatter renders in ET,
+appended a subtle ` ET` suffix to every user-facing timestamp so the
+timezone is unambiguous at a glance — no more wondering "is this UTC?"
+or "is this my browser local?".
+
+### Strategy
+- **Centralised helpers** updated once (output flows everywhere):
+  - `utils/timeET.js` → `fmtET12`, `fmtET12Sec`, `fmtET12Date`, `fmtET12Short`
+    now return their value with ` ET` appended.
+  - `chartTickMarkFormatterET` does **not** get the suffix (would clutter
+    every x-axis label; the chart panel header already states the TZ).
+  - `chartCrosshairFormatterET` keeps the suffix — single floating label.
+  - `components/sentcom/utils/time.js::formatFullTime` — appends ` ET`.
+  - `components/sentcom/v5/pipelineStageColumns.jsx::formatTime` (V5 trade
+    rows, the original confusion point) — appends ` ET`.
+  - `components/sentcom/v5/UnifiedStreamV5.jsx::formatTimestamp` — appends ` ET`.
+  - `components/sentcom/v5/BracketHistoryPanel.jsx::fmtTime` — appends ` ET`.
+  - `components/sentcom/v5/RejectionHeatmap.jsx::fmtTime` — appends ` ET`.
+  - `components/sentcom/panels/ModelHealthScorecard.jsx::formatTime` — appends ` ET`.
+  - `components/layout/HeaderBar.jsx::formatLocalTime` — appends ` ET`.
+  - `components/ConversationPanel.jsx` (`formatTime`) — appends ` ET`.
+  - `components/ChatBubbleOverlay.jsx` (`formatTime`) — appends ` ET`.
+  - `pages/DiagnosticsPage.jsx::fmtTime`, `fmtForensicsTime`, and the
+    Shadow Decisions `fmtTime` — all append ` ET`.
+
+- **Inline JSX/template calls** patched at ~20 sites where the formatter
+  was not behind a helper. Now read `… + ' ET'` or `${…} ET`. Files:
+  `NIA/ValidationSummaryCard`, `NIA/ServerHealthWidget`,
+  `NIA/SentComIntelligencePanel`, `NIA/TrainingPipelinePanel`,
+  `NIA/ModelScorecard`, `DashboardPage`, `TradeOpportunitiesPage` (×3),
+  `TradeJournalPage`, `AlertsPage` (×2), `BriefMeModal`,
+  `ScannerAlertsPanel`, `NewDashboard`, `BotPerformanceChart` (hover only),
+  `TradeSignals`, `TickerTape`, `TickerDetailModal`,
+  `EnhancedTickerModal` (×2), `SystemStatusBar`,
+  `PriceAlertNotification`, `ConnectivityCheck`, `CpuReliefBadge`,
+  `OpenPositionsV5`, `PremarketGapScannerWidget`, `MLFeatureAuditPanel`,
+  `AIInsightsDashboard`, `StreamPanel`.
+
+### Anti-collisions handled
+- `ChartPanel.jsx::isRthEt` uses `toLocaleString` purely to **parse** ET
+  hours/minutes for internal RTH checks — left untouched (appending ` ET`
+  would break the `new Date(...)` round-trip).
+- `BriefingsV5.jsx::nowET` (24h string used for `split(':')` math) — left
+  untouched for the same reason.
+- `ChartPanel.jsx` line `· updated {fmtET12Sec(lastUpdated)} ET` had a
+  manual ` ET` suffix that became a duplicate after the helper change —
+  removed.
+- Pure date-only labels (`toLocaleDateString()`) left without ` ET`
+  suffix since there is no time-of-day ambiguity.
+
+### Build
+```
+cd /app/frontend && yarn build
+```
+Successful in 21.86s. Bundle: `542.14 kB` gz (+141 B over v19.34.136).
+Built bundle now contains **50** `America/New_York` literals and the
+inline `+ ' ET'` suffixes plus all centralised helper outputs. Every
+user-facing timestamp now reads e.g. `9:42:31 AM ET` or
+`Feb 13, 9:42:31 AM ET`.
+
+
 ## 2026-02-13 (v19.34.136) — Frontend timezone sweep (ET enforcement)
 
 User reported the same trades displaying with different timestamps in the

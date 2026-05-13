@@ -265,7 +265,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                     {ann.time && (
                       <span className="text-[13px] text-zinc-500 ml-auto flex items-center gap-1">
                         <Clock className="w-2.5 h-2.5" />
-                        {new Date(ann.time).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(ann.time).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) + ' ET'}
                       </span>
                     )}
                     <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${isActive ? 'rotate-180' : ''}`} />

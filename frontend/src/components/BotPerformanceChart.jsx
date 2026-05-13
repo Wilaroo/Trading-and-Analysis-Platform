@@ -359,7 +359,7 @@ const CustomEquityChart = ({ data, width = 800, height = 200 }) => {
             fill="#6B7280"
             fontSize="10"
           >
-            {new Date(hoveredPoint.time * 1000).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}
+            {new Date(hoveredPoint.time * 1000).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false }) + ' ET'}
           </text>
         </g>
       )}

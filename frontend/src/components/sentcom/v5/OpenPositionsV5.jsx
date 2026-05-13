@@ -349,7 +349,7 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
                   </div>
                   {position.prior_verdicts.slice(0, 3).map((v, i) => (
                     <div key={i} className="font-mono text-[13px] text-zinc-400">
-                      {v.timestamp ? new Date(v.timestamp).toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12: false}) + ' · ' : ''}
+                      {v.timestamp ? new Date(v.timestamp).toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour12: false}) + ' ET · ' : ''}
                       <span className="uppercase font-bold text-rose-300">REJECT</span>
                       {v.reason_code && <> · {v.reason_code}</>}
                       {v.rr_ratio != null && (

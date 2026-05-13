@@ -22,7 +22,7 @@ export const formatRelativeTime = (timestamp) => {
   return time.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' });
 };
 
-// Format timestamp to full time (e.g., "2:05:36 PM")
+// Format timestamp to full time (e.g., "2:05:36 PM ET")
 export const formatFullTime = (timestamp) => {
   if (!timestamp) return '';
   const time = new Date(timestamp);
@@ -32,5 +32,5 @@ export const formatFullTime = (timestamp) => {
     minute: '2-digit',
     second: '2-digit',
     hour12: true,
-  });
+  }) + ' ET';
 };
