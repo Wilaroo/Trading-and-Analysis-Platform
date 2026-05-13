@@ -46,8 +46,12 @@ the bot doesn't blindspot any popular operator-watched cohort:
   C. CRYPTO / FINTECH HIGH-BETA (8) — COIN, MSTR, HOOD, SOFI, PLTR,
      MARA, RIOT, CLSK
   D. EV / MOBILITY (5) — TSLA (A), RIVN, LCID, NIO, CHPT
-  E. STRUCTURAL HIGH-VOL ETFs (10) — SPY, QQQ, IWM, DIA, VIX,
+  E. STRUCTURAL HIGH-VOL ETFs (10) — SPY, QQQ, IWM, DIA, VIXY,
      XLK, XLE, XLF, TLT, GLD
+     (`VIX` itself is an index, not a tradable equity — IB can't
+     return a security definition for the bare ticker. `VIXY`, the
+     ProShares VIX Short-Term Futures ETF, is the tradable proxy
+     we want streaming and scanned. Substituted 2026-02-13.)
   F. RECENT-CYCLE STANDOUTS (10) — RBLX, AFRM, U, DDOG, NET, SNOW,
      SHOP, ABNB, UBER, DASH
 
@@ -82,7 +86,7 @@ MEGA_CAP_WATCHLIST: List[str] = sorted({
     # EV / mobility
     "CHPT", "LCID", "NIO", "RIVN",
     # Structural high-volume ETFs
-    "DIA", "GLD", "IWM", "QQQ", "SPY", "TLT", "VIX", "XLE", "XLF", "XLK",
+    "DIA", "GLD", "IWM", "QQQ", "SPY", "TLT", "VIXY", "XLE", "XLF", "XLK",
     # Recent-cycle standouts
     "ABNB", "AFRM", "DASH", "DDOG", "NET", "RBLX", "SHOP", "SNOW", "U",
     "UBER",
@@ -112,7 +116,7 @@ def get_categories() -> dict:
         "crypto_fintech": ["COIN", "MSTR", "HOOD", "SOFI", "PLTR",
                            "MARA", "RIOT", "CLSK"],
         "ev_mobility": ["RIVN", "LCID", "NIO", "CHPT"],
-        "structural_etfs": ["SPY", "QQQ", "IWM", "DIA", "VIX", "XLK",
+        "structural_etfs": ["SPY", "QQQ", "IWM", "DIA", "VIXY", "XLK",
                             "XLE", "XLF", "TLT", "GLD"],
         "recent_standouts": ["RBLX", "AFRM", "U", "DDOG", "NET", "SNOW",
                              "SHOP", "ABNB", "UBER", "DASH"],

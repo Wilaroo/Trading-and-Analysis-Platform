@@ -238,6 +238,78 @@ def test_mark_unqualifiable_promotes_after_threshold_strikes():
     assert "FOO" not in su.get_universe(db, "intraday")
 
 
+# ---- v19.34.140: Mega-cap immunity + tier-aware threshold -----------
+
+def test_mega_cap_names_are_immune_to_unqualifiable_promotion():
+    """A symbol on the MEGA_CAP_WATCHLIST must NEVER be promoted to
+    unqualifiable, regardless of how many strikes accumulate. The
+    failure_count still increments (diagnostic value) but the flag
+    stays false."""
+    from services import symbol_universe as su
+    db = _DB([{"symbol": "TSLA", "avg_dollar_volume": 19_543_680_878}])
+
+    # Hammer it well past any reasonable threshold.
+    for _ in range(20):
+        r = su.mark_unqualifiable(db, "TSLA", reason="No security definition")
+        assert r["unqualifiable"] is False, (
+            "Mega-cap TSLA must NEVER get promoted to unqualifiable"
+        )
+        assert r["promoted_now"] is False
+        assert r["protected_by"] == "mega_cap_immunity"
+
+    # Failure count still tracked for diagnostics.
+    assert r["failure_count"] == 20
+    # And TSLA still in the universe.
+    assert "TSLA" in su.get_universe(db, "intraday")
+
+
+def test_high_adv_protection_requires_more_strikes():
+    """A name with `avg_dollar_volume >= $1B` requires
+    `HIGH_ADV_STRIKE_MULTIPLIER × base_threshold` strikes to promote,
+    not just the bare threshold."""
+    from services import symbol_universe as su
+    # Use a $2B-ADV name that is NOT in mega-cap (so immunity doesn't
+    # mask the high-ADV protection). Pick a synthetic ticker.
+    db = _DB([{"symbol": "ZZBIG", "avg_dollar_volume": 2_000_000_000}])
+
+    base = su.UNQUALIFIABLE_FAILURE_THRESHOLD
+    effective = base * su.HIGH_ADV_STRIKE_MULTIPLIER
+
+    # Strikes below the effective threshold must NOT promote.
+    for i in range(1, effective):
+        r = su.mark_unqualifiable(db, "ZZBIG", reason="No security definition")
+        assert r["failure_count"] == i
+        assert r["unqualifiable"] is False, (
+            f"high-ADV ZZBIG should survive strike {i}/{effective}"
+        )
+        assert r.get("protected_by") == "high_adv"
+
+    # The crossing strike DOES promote.
+    r_cross = su.mark_unqualifiable(db, "ZZBIG", reason="No security definition")
+    assert r_cross["failure_count"] == effective
+    assert r_cross["unqualifiable"] is True
+    assert r_cross["promoted_now"] is True
+
+
+def test_low_adv_name_still_promotes_at_base_threshold():
+    """A name with avg_dollar_volume below $1B follows the regular
+    `UNQUALIFIABLE_FAILURE_THRESHOLD` — high-ADV protection only kicks
+    in at the explicit threshold so we still aggressively prune
+    genuinely-bad symbols."""
+    from services import symbol_universe as su
+    db = _DB([{"symbol": "ZZSMALL", "avg_dollar_volume": 5_000_000}])
+    threshold = su.UNQUALIFIABLE_FAILURE_THRESHOLD
+
+    for i in range(1, threshold):
+        r = su.mark_unqualifiable(db, "ZZSMALL", reason="No security definition")
+        assert r["unqualifiable"] is False
+
+    r_cross = su.mark_unqualifiable(db, "ZZSMALL", reason="No security definition")
+    assert r_cross["unqualifiable"] is True
+    assert r_cross["promoted_now"] is True
+
+
+
 def test_mark_unqualifiable_upserts_unknown_symbol():
     from services import symbol_universe as su
     db = _DB([])

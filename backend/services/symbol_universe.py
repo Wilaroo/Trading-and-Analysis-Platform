@@ -113,6 +113,26 @@ TIER_TIMEFRAMES: Dict[str, List[str]] = {
 # like timeouts/disconnects.
 UNQUALIFIABLE_FAILURE_THRESHOLD = 1
 
+# 2026-02-13 (v19.34.140) — Tier-aware unqualifiable protection.
+# After the 2026-05-12 overnight-backfill burst nuked 47/50 mega-cap
+# names (TSLA, NVDA, MSFT, AAPL, AMZN, META, AVGO, MU, SNDK, …) on
+# transient "No security definition" errors, the 1-strike threshold
+# is too aggressive for any name we KNOW exists. Two layers of defense:
+#
+#   1. MEGA_CAP IMMUNITY  — names in `data.mega_cap_watchlist` are
+#      NEVER promoted regardless of strike count. Any IB error on
+#      those names is by definition transient; we hardcoded the
+#      list precisely because we know the symbols exist.
+#
+#   2. HIGH-ADV PROTECTION — any name in `symbol_adv_cache` with
+#      `avg_dollar_volume >= HIGH_ADV_PROTECTION_THRESHOLD` requires
+#      `HIGH_ADV_STRIKE_MULTIPLIER × base_threshold` strikes before
+#      promotion. A $1B+ name that fires multiple errors in a row
+#      is still much more likely to be a transient IB issue than
+#      a genuinely missing symbol.
+HIGH_ADV_PROTECTION_THRESHOLD = 1_000_000_000   # $1B/day
+HIGH_ADV_STRIKE_MULTIPLIER = 5
+
 # Match-all sentinel for callers that want every tier in one query.
 ALL_TIERS = ("intraday", "swing", "investment")
 
@@ -410,7 +430,21 @@ def mark_unqualifiable(
     reason: str = "No security definition found",
 ) -> Dict[str, Any]:
     """Increment failure_count and promote to `unqualifiable=true` once
-    it crosses `UNQUALIFIABLE_FAILURE_THRESHOLD`.
+    it crosses `UNQUALIFIABLE_FAILURE_THRESHOLD` — with two layers of
+    protection (v19.34.140):
+
+      1. MEGA-CAP IMMUNITY — names in `data.mega_cap_watchlist` are
+         NEVER promoted. We hardcoded that list because we know the
+         names exist; any IB error on them is by definition transient.
+         Failure count is still incremented for diagnostics, but the
+         flag is not set.
+
+      2. HIGH-ADV PROTECTION — names with `avg_dollar_volume >= $1B`
+         require `HIGH_ADV_STRIKE_MULTIPLIER ×` the base threshold
+         (so 5 strikes instead of 1). A multi-billion-dollar name
+         firing repeated "No security definition" errors is far more
+         likely to be a transient IB issue than a genuinely missing
+         symbol.
 
     Idempotent — safe to call repeatedly. Returns the updated doc state
     so the caller can log / surface to UI.
@@ -438,13 +472,51 @@ def mark_unqualifiable(
 
     doc = adv.find_one(
         {"symbol": sym},
-        {"_id": 0, "unqualifiable_failure_count": 1, "unqualifiable": 1},
+        {"_id": 0, "unqualifiable_failure_count": 1, "unqualifiable": 1,
+         "avg_dollar_volume": 1},
     ) or {}
     count = doc.get("unqualifiable_failure_count", 0)
     already = bool(doc.get("unqualifiable"))
+    adv_value = float(doc.get("avg_dollar_volume") or 0.0)
+
+    # ---- Layer 1: mega-cap immunity (v19.34.140) -----------------------
+    # Imported lazily to avoid a circular import between symbol_universe
+    # (services) and mega_cap_watchlist (data).
+    try:
+        from data.mega_cap_watchlist import MEGA_CAP_WATCHLIST as _MEGA
+        _mega_set = set(_MEGA)
+    except Exception:
+        _mega_set = set()
+
+    if sym in _mega_set:
+        if not already:
+            logger.warning(
+                f"🛡️ {sym} would have been promoted to unqualifiable after "
+                f"{count} failures (reason={reason!r}) — BLOCKED by mega-cap "
+                "immunity. The symbol is on the hardcoded MEGA_CAP_WATCHLIST; "
+                "any IB error is transient by definition."
+            )
+        return {
+            "success": True,
+            "symbol": sym,
+            "failure_count": count,
+            "unqualifiable": False,
+            "promoted_now": False,
+            "protected_by": "mega_cap_immunity",
+        }
+
+    # ---- Layer 2: tier-aware threshold (v19.34.140) --------------------
+    # Higher bar for high-ADV names — a $1B+ name firing repeated errors
+    # is more likely to be a transient IB glitch than a real missing symbol.
+    effective_threshold = UNQUALIFIABLE_FAILURE_THRESHOLD
+    high_adv = adv_value >= HIGH_ADV_PROTECTION_THRESHOLD
+    if high_adv:
+        effective_threshold = (
+            UNQUALIFIABLE_FAILURE_THRESHOLD * HIGH_ADV_STRIKE_MULTIPLIER
+        )
 
     promoted = False
-    if not already and count >= UNQUALIFIABLE_FAILURE_THRESHOLD:
+    if not already and count >= effective_threshold:
         adv.update_one(
             {"symbol": sym},
             {"$set": {
@@ -456,7 +528,14 @@ def mark_unqualifiable(
         promoted = True
         logger.warning(
             f"Symbol {sym} promoted to unqualifiable after {count} failures "
-            f"(reason={reason!r})"
+            f"(threshold={effective_threshold}, high_adv={high_adv}, "
+            f"reason={reason!r})"
+        )
+    elif not already and high_adv:
+        logger.info(
+            f"{sym} survived strike #{count} via high-ADV protection "
+            f"(${adv_value/1e9:.1f}B ADV >= $1B, needs "
+            f"{effective_threshold} strikes for promotion)."
         )
 
     return {
@@ -465,6 +544,8 @@ def mark_unqualifiable(
         "failure_count": count,
         "unqualifiable": already or promoted,
         "promoted_now": promoted,
+        "effective_threshold": effective_threshold,
+        "protected_by": "high_adv" if (high_adv and not promoted) else None,
     }
 
 

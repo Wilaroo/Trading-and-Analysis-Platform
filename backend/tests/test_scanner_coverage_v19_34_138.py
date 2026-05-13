@@ -155,8 +155,15 @@ class TestMegaCapWatchlistContent:
 
     def test_must_have_structural_etfs(self):
         from data.mega_cap_watchlist import MEGA_CAP_WATCHLIST
-        for sym in ("SPY", "QQQ", "IWM", "DIA", "VIX"):
+        # VIXY is the tradable ETF proxy. VIX itself is an index — IB
+        # cannot return a security definition for the bare ticker, so
+        # it was removed in v19.34.140.
+        for sym in ("SPY", "QQQ", "IWM", "DIA", "VIXY"):
             assert sym in MEGA_CAP_WATCHLIST
+        assert "VIX" not in MEGA_CAP_WATCHLIST, (
+            "VIX (the index) must NOT be in the mega-cap pin — IB can't "
+            "qualify the bare ticker. Use VIXY (tradable proxy) instead."
+        )
 
     def test_get_mega_cap_returns_fresh_copy(self):
         from data.mega_cap_watchlist import (

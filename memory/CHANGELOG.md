@@ -3,6 +3,62 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.140) — Mega-cap immunity + tier-aware unqualifiable threshold
+
+The 2026-05-12 04:42 UTC overnight-backfill burst nuked **47 of 50**
+mega-cap names (TSLA, NVDA, AMD, MSFT, AAPL, AMZN, META, AVGO, MU,
+SNDK, SMCI, PLTR, COIN, MSTR, ARM, …) with transient "No security
+definition" errors. Operator-side rescue worked, but the same incident
+will recur on the next bad backfill burst unless we harden the
+promotion logic.
+
+### A. Mega-cap immunity (`services/symbol_universe.py::mark_unqualifiable`)
+Names on `MEGA_CAP_WATCHLIST` are now **NEVER** promoted to
+`unqualifiable=true`, regardless of strike count. Failure count is
+still incremented for diagnostic visibility, but the flag never
+flips. The response includes `protected_by: "mega_cap_immunity"`
+so the caller can see the protection fired. Rationale: we hardcoded
+the list precisely because we know the names exist; any IB error
+on them is by definition transient.
+
+### B. Tier-aware threshold
+Any name in `symbol_adv_cache` with
+`avg_dollar_volume >= HIGH_ADV_PROTECTION_THRESHOLD ($1B)` now
+requires `HIGH_ADV_STRIKE_MULTIPLIER (5) × base_threshold` strikes
+before promotion. With the current 1-strike base, a $1B+ name needs
+5 strikes — far more likely to survive a single transient IB burst.
+Response includes `protected_by: "high_adv"` while the protection
+is active; the effective threshold is reported in `effective_threshold`
+for transparency.
+
+### C. VIX → VIXY substitution
+VIX is an index, not a tradable equity — IB cannot return a security
+definition for the bare ticker, which is why it `cleared: false`
+during the v19.34.139 rescue. Removed `VIX` from `MEGA_CAP_WATCHLIST`
+and added `VIXY` (ProShares VIX Short-Term Futures ETF) — the
+tradable proxy. Category breakdown and curation rationale updated.
+Existing structural-ETF test updated to assert `VIXY` in,
+`VIX` explicitly out.
+
+### Tests
+3 new pytest cases in `tests/test_universe_canonical.py`:
+- `test_mega_cap_names_are_immune_to_unqualifiable_promotion` —
+  hammers TSLA with 20 strikes; flag stays false, `protected_by`
+  reports immunity.
+- `test_high_adv_protection_requires_more_strikes` — synthetic
+  $2B name promotes only on strike `(5 × base_threshold)`,
+  reports `protected_by: "high_adv"` until then.
+- `test_low_adv_name_still_promotes_at_base_threshold` — confirms
+  we still aggressively prune genuinely-bad low-ADV symbols at the
+  base threshold (no regression in the original aggressive-prune
+  behavior the 1-strike threshold was designed for).
+
+Full suite: **57 pytest cases pass** (3 new + 54 prior). Backend
+restart picks up the new logic automatically — no migration needed,
+and the existing `unqualifiable=true` flags in the DB are unchanged
+(operator already rescued the v19.34.139 batch).
+
+
 ## 2026-02-13 (v19.34.139) — Self-curating Watchlist + V5 Coverage Audit Panel
 
 Three improvements stacked on the v19.34.138 mega-cap pin:
