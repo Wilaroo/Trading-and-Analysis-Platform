@@ -32,6 +32,10 @@ import QuoteFreshnessChip from './QuoteFreshnessChip';
 import OpenPositionsLegend from './OpenPositionsLegend';
 // v19.34.11 (2026-05-06) — bracket lifecycle history panel.
 import BracketHistoryPanel from './BracketHistoryPanel';
+// v19.34.154 (2026-02-13) — P2 scale-out tiles: shows
+// original/closed/remaining + per-target partial PnL when a winner
+// has scaled out. Renders nothing for un-scaled positions.
+import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -169,7 +173,11 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
   const trailLine = modelTrailLine(position);
 
   const reasoning = Array.isArray(position.reasoning) ? position.reasoning : [];
-  const scaleOut = position.scale_out_state || {};
+  // v19.34.154 — Backend dataclass field is `scale_out_config`, not
+  // `scale_out_state` (latent rename mismatch that hid the entire
+  // scale-out UI for months). Read both for forward-compat with any
+  // future renames, but the canonical name is now config.
+  const scaleOut = position.scale_out_config || position.scale_out_state || {};
   const trail = position.trailing_stop_state || {};
   const targets = Array.isArray(position.target_prices) && position.target_prices.length > 0
     ? position.target_prices
@@ -287,6 +295,11 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
               ⚠ CONFLICT
             </span>
           )}
+          {/* v19.34.154 — Scale-out progress badge. Always-visible chip
+              that surfaces partial-exit progress in the compact view
+              so the operator sees "this winner is half-out" without
+              expanding. Renders nothing for un-scaled positions. */}
+          <ScaleOutBadge position={position} />
         </div>
         <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
           {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
@@ -451,15 +464,12 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             </div>
           )}
 
-          {/* Scale-out targets hit */}
-          {scaleOut.enabled && Array.isArray(scaleOut.targets_hit) && scaleOut.targets_hit.length > 0 && (
-            <div
-              className="text-[14px] text-emerald-400/80"
-              data-testid={`open-position-scaleout-${position.symbol}`}
-            >
-              Scale-out: {scaleOut.targets_hit.length} target(s) hit
-            </div>
-          )}
+          {/* v19.34.154 — Rich scale-out details (original/closed/
+              remaining + progress bar + per-target rows with partial
+              PnL). Replaces the prior single-line "Scale-out: N
+              target(s) hit" summary. Component returns null when no
+              partial exits have fired. */}
+          <ScaleOutDetails position={position} />
 
           {/* Plan / exit rule */}
           {position.exit_rule && (

@@ -4,7 +4,40 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-02-13 (v19.34.153) — First-tick orphan-bracket reaper + reverse-position CRITICAL alarm
+## 2026-02-13 (v19.34.154) — P2: Scale-out tiles for winners
+
+Operator request: surface the existing `original_shares / remaining_shares /
+partial_exits` backend data in V5 trade tiles so they can see at a
+glance which winners have scaled out and by how much.
+
+### Latent bug fixed
+- V5 trade tiles read `position.scale_out_state` for months but the
+  backend dataclass field is `scale_out_config`. The entire scale-out
+  UI block (`Scale-out: N target(s) hit`) was effectively dead. Now
+  reads from `scale_out_config` (with `scale_out_state` fallback for
+  forward-compat).
+
+### Added
+- **`<ScaleOutBadge />`** — always-visible chip in the compact
+  position header. Renders nothing for un-scaled positions; for
+  scaled winners shows `T2 · 50%R` with tooltip detailing every
+  partial exit (target idx, shares sold, fill price, partial PnL,
+  cumulative realised). Color: emerald if realised partials net
+  positive, amber otherwise.
+- **`<ScaleOutDetails />`** — expanded-panel section replacing the
+  old single-line summary. Shows:
+  - 3-up `Original / Closed (N · pct%) / Remaining (N · pct%)` grid
+  - Progress bar (% of original still held)
+  - Per-target rows: `T1   50sh @ $99.50  +$25`
+  - Cumulative realised PnL header
+
+### Tests
+Pure presentational components — no backend changes. Manual smoke
+test via build + lint; full visual verification on DGX with live
+trade data.
+
+
+
 
 🔴 **Incident:** Operator ran the v19.34.152 forensics script after
 manually flattening at 3:57 PM ET in TWS. Discovery: **all 10
