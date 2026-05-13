@@ -3,6 +3,68 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.131) — Scanner coverage diagnostic (the 325-cap question)
+
+Operator question: HUD shows scanner only ever scans 325 symbols when the
+universe is 1000+. Bug or by design?
+
+### Architecture clarification (no bug yet — design verification)
+
+The scanner is **tiered + waved**, NOT scan-all-every-cycle:
+
+```
+Tier 1: Watchlist + recently-viewed              (~50-80, every cycle)
+Tier 2: Top-200 most-liquid intraday (≥$50M ADV) (~200,    every cycle)
+Tier 3: Rotating waves through swing universe    (200/wave, 1 wave/cycle)
+        Full coverage of ~1500 swing-tier symbols in 12-15 cycles (~3-4 min)
+```
+
+So 325/cycle = 80 T1 + 200 T2 + 200 T3 − dedup. Expected by design IF wave
+rotation is healthy. The unanswered question pre-v131: is rotation actually
+visiting new symbols every cycle, or stuck at wave 0 forever?
+
+### New endpoint: `/api/diagnostic/scan-cycle-stats`
+
+Surfaces:
+- Wave-rotation state (current_wave, total_waves, ETA to full coverage)
+- Last-cycle scan count
+- **Lifetime-unique-symbols-scanned-since-restart** (the smoking gun: if
+  this stays at 325 after 5+ minutes, rotation is broken; if it grows to
+  match the universe, design is working)
+- Tier breakdown of canonical universe (intraday/swing/investment counts)
+- Per-tier ADV thresholds
+- Health verdict: `healthy` / `wave_rotation_stuck` / `coverage_lag` /
+  `warming_up` / `scanner_idle_or_stale`
+
+### Instrumentation
+
+- `enhanced_scanner._scanned_symbols_lifetime: set` accumulates every
+  symbol passed through `_get_symbols_for_cycle()` and is reported
+  via the new endpoint
+- `_scanned_symbols_session_started: datetime` stamps when tracking
+  began so the operator can correlate against scan_count
+
+### Operator runbook (post-pull/restart)
+
+```bash
+# Wait 5-10 minutes after RTH open, then:
+curl -s "$BACKEND_URL/api/diagnostic/scan-cycle-stats" | jq '{
+  verdict, hint,
+  per_cycle: .enhanced_scanner.symbols_scanned_last_cycle,
+  lifetime:  .enhanced_scanner.lifetime_unique_symbols_scanned,
+  universe:  .universe.qualified_total,
+  wave_progress: "\(.wave_scanner.current_wave)/\(.wave_scanner.total_waves)",
+  eta_to_full_coverage: .wave_scanner.full_coverage_eta_seconds
+}'
+```
+
+If `lifetime` grows to ~`universe.qualified_total` within 12-15 cycles
+→ working as designed (325/cycle is rotation, not a cap).
+
+If `lifetime` plateaus at ~325 after multiple cycles → rotation bug.
+
+
+
 ## 2026-02-12 (v19.34.130) — PnL coverage gap audit (3 close paths leaking)
 
 **Pre-market audit** uncovered 3 close paths bypassing

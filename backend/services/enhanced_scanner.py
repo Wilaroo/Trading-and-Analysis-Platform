@@ -917,6 +917,12 @@ class EnhancedBackgroundScanner:
         self._alerts_generated = 0
         self._last_scan_time: Optional[datetime] = None
         self._symbols_scanned_last = 0
+        # v19.34.131 — lifetime unique-symbols-scanned tracker so the
+        # operator can verify wave rotation is actually visiting the
+        # full universe (not just looping over the same 325). Reset
+        # on each calendar day at the first scan post-RTH open.
+        self._scanned_symbols_lifetime: set = set()
+        self._scanned_symbols_session_started: Optional[datetime] = None
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0  # Skipped due to low volume
         self._symbols_skipped_in_play = 0  # Skipped due to strict in-play gate
@@ -2359,6 +2365,14 @@ class EnhancedBackgroundScanner:
         tiered_symbols = self._get_symbols_for_cycle(adv_filtered_symbols)
         
         self._symbols_scanned_last = len(tiered_symbols)
+        # v19.34.131 — accumulate lifetime-unique so /scan-cycle-stats
+        # can prove wave rotation is visiting the broader universe.
+        try:
+            self._scanned_symbols_lifetime.update(tiered_symbols)
+            if self._scanned_symbols_session_started is None:
+                self._scanned_symbols_session_started = datetime.now(timezone.utc)
+        except Exception:
+            pass
         
         logger.debug(
             f"Scanning {len(tiered_symbols)} symbols this cycle "

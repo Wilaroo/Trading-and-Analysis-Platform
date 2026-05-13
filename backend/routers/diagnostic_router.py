@@ -1165,6 +1165,182 @@ async def account_snapshot() -> Dict[str, Any]:
 # ===========================================================================
 # /api/diagnostic/scanner-coverage — why is RS-laggard dominating scans?
 # ===========================================================================
+@router.get("/scan-cycle-stats")
+def scan_cycle_stats() -> Dict[str, Any]:
+    """Per-cycle scan coverage health — answers "are we really scanning
+    the full universe or stuck on the same 325 symbols every cycle?"
+
+    Returns:
+      • Wave-rotation state: current wave, total waves, wave_size, ETA to
+        full-universe coverage
+      • Last-cycle count (`symbols_scanned_last`)
+      • Lifetime-unique-symbols-since-restart (proves rotation is visiting
+        new symbols, not looping the same set)
+      • Tier breakdown of the canonical universe
+      • Per-tier minimum ADV thresholds (so operator can debug why a
+        symbol they expect is "tier:investment" not "tier:intraday")
+
+    v19.34.131: shipped after operator reported HUD showing only 325
+    symbols scanned. Hypothesis: working as designed (T1+T2+T3 wave =
+    ~325/cycle, universe rotated over 12-15 cycles), but no way to
+    prove rotation health pre-v131.
+    """
+    out: Dict[str, Any] = {"success": True, "ts": datetime.now(timezone.utc).isoformat()}
+
+    # 1) Enhanced scanner live state
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        sc = get_enhanced_scanner()
+        lifetime = getattr(sc, "_scanned_symbols_lifetime", set()) or set()
+        started_at = getattr(sc, "_scanned_symbols_session_started", None)
+        out["enhanced_scanner"] = {
+            "scan_count": int(getattr(sc, "_scan_count", 0) or 0),
+            "running": bool(getattr(sc, "_running", False)),
+            "symbols_scanned_last_cycle": int(getattr(sc, "_symbols_scanned_last", 0) or 0),
+            "symbols_skipped_adv": int(getattr(sc, "_symbols_skipped_adv", 0) or 0),
+            "symbols_skipped_rvol": int(getattr(sc, "_symbols_skipped_rvol", 0) or 0),
+            "lifetime_unique_symbols_scanned": len(lifetime),
+            "lifetime_tracking_started_at": (
+                started_at.isoformat() if started_at else None
+            ),
+            "scan_interval_seconds": float(getattr(sc, "_scan_interval", 0) or 0),
+            "swing_scan_frequency": int(getattr(sc, "_swing_scan_frequency", 0) or 0),
+            "tier_thresholds": {
+                "intraday_min_adv":   int(getattr(sc, "_min_adv_intraday", 0) or 0),
+                "swing_min_adv":      int(getattr(sc, "_min_adv_general", 0) or 0),
+                "investment_min_adv": int(getattr(sc, "_min_adv_investment", 0) or 0),
+            },
+            "adv_cache_size": len(getattr(sc, "_adv_cache", {}) or {}),
+            "known_liquid_symbols_count": len(getattr(sc, "_known_liquid_symbols", set()) or set()),
+            "tier_cache_counts": _count_tier_cache(getattr(sc, "_tier_cache", {})),
+        }
+    except Exception as e:
+        out["enhanced_scanner_error"] = f"{type(e).__name__}: {e}"
+
+    # 2) Wave scanner state (rotation health)
+    try:
+        from services.wave_scanner import get_wave_scanner
+        ws = get_wave_scanner()
+        stats = ws.get_stats()
+        config = ws.get_scan_config()
+        tier3_total = stats.get("tier3_roster_size", 0) or 0
+        wave_size = config.get("wave_size", 200) or 200
+        current_wave = stats.get("current_wave", 0) or 0
+        total_waves = max(1, (tier3_total + wave_size - 1) // wave_size)
+        scan_interval = float(
+            (out.get("enhanced_scanner") or {}).get("scan_interval_seconds")
+            or 15.0
+        )
+        # ETA to next-completion (waves remaining × scan_interval).
+        waves_remaining = (total_waves - current_wave) % total_waves
+        if waves_remaining == 0 and current_wave != 0:
+            eta_seconds = total_waves * scan_interval
+        else:
+            eta_seconds = max(0, waves_remaining) * scan_interval
+        out["wave_scanner"] = {
+            "wave_size": wave_size,
+            "tier2_pool_size": stats.get("tier2_pool_size", 0),
+            "tier3_roster_size": tier3_total,
+            "current_wave": current_wave,
+            "total_waves": total_waves,
+            "wave_progress_pct": round(current_wave / total_waves * 100, 1) if total_waves else 0,
+            "tier3_scanned_so_far": min((current_wave + 1) * wave_size, tier3_total),
+            "scan_interval_seconds": scan_interval,
+            "full_coverage_eta_seconds": eta_seconds,
+            "last_full_scan_complete_at": stats.get("last_full_scan"),
+            "watchlist_count": stats.get("watchlist_count", 0),
+        }
+    except Exception as e:
+        out["wave_scanner_error"] = f"{type(e).__name__}: {e}"
+
+    # 3) Universe size from DB (ground truth)
+    try:
+        db = _get_db()
+        if db is not None:
+            t = out.get("enhanced_scanner", {}).get("tier_thresholds", {})
+            intraday_min = t.get("intraday_min_adv", 50_000_000)
+            swing_min    = t.get("swing_min_adv",    10_000_000)
+            invest_min   = t.get("investment_min_adv", 2_000_000)
+            cnt_intraday = db["symbol_adv_cache"].count_documents({
+                "avg_dollar_volume": {"$gte": intraday_min},
+                "unqualifiable": {"$ne": True},
+            })
+            cnt_swing = db["symbol_adv_cache"].count_documents({
+                "avg_dollar_volume": {"$gte": swing_min},
+                "unqualifiable": {"$ne": True},
+            })
+            cnt_invest = db["symbol_adv_cache"].count_documents({
+                "avg_dollar_volume": {"$gte": invest_min},
+                "unqualifiable": {"$ne": True},
+            })
+            cnt_total = db["symbol_adv_cache"].count_documents({})
+            out["universe"] = {
+                "intraday_tier_count":   cnt_intraday,
+                "swing_tier_count":      cnt_swing - cnt_intraday,
+                "investment_tier_count": cnt_invest - cnt_swing,
+                "qualified_total":       cnt_invest,
+                "all_in_cache_total":    cnt_total,
+                "below_min_count":       cnt_total - cnt_invest,
+            }
+    except Exception as e:
+        out["universe_error"] = f"{type(e).__name__}: {e}"
+
+    # 4) Health verdict
+    enh = out.get("enhanced_scanner", {}) or {}
+    ws = out.get("wave_scanner", {}) or {}
+    uni = out.get("universe", {}) or {}
+    last = enh.get("symbols_scanned_last_cycle", 0) or 0
+    lifetime = enh.get("lifetime_unique_symbols_scanned", 0) or 0
+    qualified = uni.get("qualified_total", 0) or 0
+    current_wave = ws.get("current_wave", 0) or 0
+    total_waves = ws.get("total_waves", 1) or 1
+
+    verdict = "unknown"
+    hint = None
+    if last <= 0:
+        verdict = "scanner_idle_or_stale"
+        hint = "Scanner reported 0 in its last cycle. Bot may be paused or pre-RTH."
+    elif total_waves > 1 and current_wave == 0 and enh.get("scan_count", 0) > total_waves:
+        verdict = "wave_rotation_stuck"
+        hint = (
+            f"Scan count is {enh.get('scan_count')} but wave is still at 0/{total_waves}. "
+            f"Tier 3 isn't advancing — rotation broken."
+        )
+    elif qualified > 0 and lifetime < qualified * 0.5 and enh.get("scan_count", 0) > total_waves * 1.5:
+        verdict = "coverage_lag"
+        hint = (
+            f"Scanned {lifetime} unique symbols since restart but universe has "
+            f"{qualified} qualified. Expected ~{qualified} after "
+            f"{total_waves * ws.get('scan_interval_seconds', 15):.0f}s. "
+            f"Possible cause: ADV cache misses (fail-closed)."
+        )
+    elif qualified > 0 and lifetime >= qualified * 0.9:
+        verdict = "healthy"
+        hint = (
+            f"Rotation healthy — {lifetime}/{qualified} unique symbols visited. "
+            f"Per-cycle count of {last} is the wave_size + tier1/2 (working as designed)."
+        )
+    else:
+        verdict = "warming_up"
+        hint = (
+            f"Scanner is in mid-rotation: {lifetime}/{qualified} unique symbols visited, "
+            f"wave {current_wave}/{total_waves}. Re-run in "
+            f"{ws.get('full_coverage_eta_seconds', 0):.0f}s for full picture."
+        )
+    out["verdict"] = verdict
+    out["hint"] = hint
+    return out
+
+
+def _count_tier_cache(tier_cache: Dict[str, str]) -> Dict[str, int]:
+    """Bucket _tier_cache by classification for the diagnostic response."""
+    counts = {"intraday": 0, "swing": 0, "investment": 0}
+    for tier in (tier_cache or {}).values():
+        if tier in counts:
+            counts[tier] += 1
+    return counts
+
+
 @router.get("/scanner-coverage")
 def scanner_coverage(hours: int = 6) -> Dict[str, Any]:
     """Surface the IB-subscription vs. universe-size gap for the operator.
