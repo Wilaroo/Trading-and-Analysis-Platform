@@ -3833,11 +3833,30 @@ async def ib_pusher_position_health():
             "`unrealizedPNL=0`. Likely a per-symbol subscription "
             "issue, NOT a global callback failure. Affected symbols below."
         )
-    if pushes_per_min is not None and pushes_per_min < 5:
+    # v19.34.150c — Calibrated against the real pusher cadence.
+    # `ib_data_pusher.py::push_interval = 10.0s` → 6 pushes/min baseline.
+    # Under backoff it can slow to 30s/push = 2/min.
+    #   <2/min   → stalled (warn)
+    #   <4/min   → degraded but tolerable (no warn, just below baseline)
+    # Cold-start guard: don't fire heartbeat warning during the first
+    # ~5 pushes (~50s) — the deque hasn't filled yet so the rate is
+    # mathematically forced to be low.
+    PUSHER_BASELINE_PER_MIN = 6      # matches push_interval=10.0s
+    PUSHER_STALLED_PER_MIN = 2       # backoff cap = 30s/push → 2/min
+    COLD_START_PUSH_THRESHOLD = 5
+
+    cold_start = (
+        _push_count_total is not None
+        and _push_count_total < COLD_START_PUSH_THRESHOLD
+    )
+
+    if (pushes_per_min is not None
+            and pushes_per_min < PUSHER_STALLED_PER_MIN
+            and not cold_start):
         diagnosis.append(
             f"⚠ Pusher heartbeat is slow: only {pushes_per_min} "
-            "pushes in the last minute. Expected >30. Pusher may be "
-            "in collection mode or fully dead."
+            f"pushes in the last minute. Expected ≥{PUSHER_BASELINE_PER_MIN} "
+            f"(push_interval=10s). Pusher may be backing off or stalled."
         )
     if age_seconds is not None and age_seconds > 60:
         diagnosis.append(
@@ -3849,26 +3868,42 @@ async def ib_pusher_position_health():
             "expected fields are present and non-zero."
         )
 
-    # v19.34.150b — Pre-computed `health` enum so the V5 UI pill
+    # v19.34.150c — Pre-computed `health` enum so the V5 UI pill
     # doesn't have to re-implement the heuristic. Mapping mirrors the
     # color tokens used elsewhere:
-    #   green  → all live positions fully populated, heartbeat OK
-    #   amber  → partial / market-price-only / slow heartbeat
-    #   red    → account-updates dead, avg-cost dead, or stale push
-    #   unknown→ no pushes ever / pusher_connected False
+    #   green   → all live positions fully populated, heartbeat OK
+    #   amber   → partial / market-price-only / slow heartbeat
+    #   red     → account-updates dead, avg-cost dead, or stale push
+    #   unknown → no pushes ever / pusher_connected False / cold-start
+    #
+    # COLD-START DEBOUNCE: the first ~5 pushes (~50s) the pusher hasn't
+    # had time for IB Gateway to deliver the first `updatePortfolio()`
+    # callback batch. Don't classify a cold pusher as RED — too
+    # noisy. Stay `unknown` until enough pushes have accumulated.
     if not connected or total == 0:
+        health = "unknown"
+    elif cold_start:
         health = "unknown"
     elif suspect_account_updates_dead or suspect_avg_cost_dead or (
         age_seconds is not None and age_seconds > 60
     ):
         health = "red"
     elif suspect_partial or suspect_market_price_only or (
-        pushes_per_min is not None and pushes_per_min < 5
-        and _push_count_total > 5  # don't flag fresh sessions
+        pushes_per_min is not None
+        and pushes_per_min < PUSHER_STALLED_PER_MIN
     ):
         health = "amber"
     else:
         health = "green"
+
+    # v19.34.150c — Surface stuck symbols (live positions with
+    # `unrealizedPNL == 0`) directly in the response so the UI / script
+    # doesn't have to grep the per_symbol drilldown to find them.
+    stuck_symbols = [
+        r["symbol"] for r in per_symbol
+        if not r.get("is_ghost")
+        and (r.get("unrealizedPNL") in (0, 0.0, None))
+    ]
 
     return {
         "success": True,
@@ -3877,10 +3912,13 @@ async def ib_pusher_position_health():
         "last_update": last_update,
         "age_seconds": age_seconds,
         "pushes_per_minute_recent": pushes_per_min,
+        "pushes_per_minute_expected": PUSHER_BASELINE_PER_MIN,
         "total_pushes_since_start": _push_count_total,
+        "cold_start": cold_start,
         "total_positions": total,
         "live_position_count": live_total,
         "ghost_zero_position_count": ghost_zero_position_count,
+        "stuck_symbols": stuck_symbols,
         "field_stats": field_stats,
         "per_symbol": per_symbol,
         "diagnosis": diagnosis,

@@ -122,7 +122,8 @@ async def test_market_price_only_dead(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_slow_pusher_heartbeat_warning(monkeypatch):
-    """<5 pushes in last 60s triggers heartbeat warning."""
+    """<2 pushes in last 60s triggers heartbeat warning (calibrated to
+    push_interval=10s baseline of 6/min)."""
     import time
     positions = [
         {"symbol": "X", "position": 100, "avgCost": 50.0,
@@ -130,7 +131,7 @@ async def test_slow_pusher_heartbeat_warning(monkeypatch):
     ]
     _patch_pusher(
         monkeypatch, positions=positions,
-        recent_ts=[time.time() - 30] * 2,  # only 2 pushes in last 60s
+        recent_ts=[time.time() - 30],  # only 1 push in last 60s
     )
     from routers.diagnostic_router import ib_pusher_position_health
     resp = await ib_pusher_position_health()
@@ -425,3 +426,129 @@ async def test_health_enum_unknown_when_disconnected(monkeypatch):
     from routers.diagnostic_router import ib_pusher_position_health
     resp = await ib_pusher_position_health()
     assert resp["health"] == "unknown"
+
+
+# ────────────────────────────────────────────────────────────────────
+# 4. v19.34.150c — Cold-start debouncing + cadence-aware heartbeat
+#                  + stuck_symbols surfacing
+# ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_cold_start_holds_health_unknown(monkeypatch):
+    """First ~5 pushes after pusher restart should NOT be classified RED.
+    With only 2 total pushes since boot, even an all-zeros payload is
+    'too early to tell' — IB Gateway hasn't delivered the first
+    updatePortfolio() batch yet.
+    """
+    import time
+    positions = [
+        {"symbol": f"S{i}", "position": 100, "avgCost": 50.0,
+         "marketPrice": 0, "unrealizedPNL": 0}
+        for i in range(21)
+    ]
+    _patch_pusher(
+        monkeypatch, positions=positions,
+        recent_ts=[time.time()] * 2,
+        push_count=2,  # cold start
+    )
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["cold_start"] is True
+    assert resp["health"] == "unknown"
+    # Heartbeat warning must NOT fire while cold-starting
+    joined = " | ".join(resp["diagnosis"])
+    assert "heartbeat is slow" not in joined.lower()
+
+
+@pytest.mark.asyncio
+async def test_after_warmup_account_updates_dead_still_red(monkeypatch):
+    """Cold-start guard must NOT mask a genuine reqAccountUpdates failure.
+    With 50 total pushes, the pusher has been running long enough that
+    all-zeros marketPrice/unrealizedPNL IS a real callback death.
+    """
+    import time
+    positions = [
+        {"symbol": f"S{i}", "position": 100, "avgCost": 50.0,
+         "marketPrice": 0, "unrealizedPNL": 0}
+        for i in range(21)
+    ]
+    _patch_pusher(
+        monkeypatch, positions=positions,
+        recent_ts=[time.time()] * 6,
+        push_count=50,
+    )
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["cold_start"] is False
+    assert resp["health"] == "red"
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_threshold_recalibrated_to_pusher_cadence(monkeypatch):
+    """ib_data_pusher.push_interval=10s → 6/min baseline.
+    A reading of 5/min is normal (not a warning).
+    A reading of 1/min IS a warning.
+    """
+    import time
+    positions = [
+        {"symbol": "X", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+    ]
+
+    # 5 pushes/min — within tolerance. No warning.
+    _patch_pusher(
+        monkeypatch, positions=positions,
+        recent_ts=[time.time() - i for i in range(5)],
+        push_count=50,
+    )
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    joined = " | ".join(resp["diagnosis"]).lower()
+    assert "heartbeat is slow" not in joined
+
+    # 1 push/min — clearly stalled. Warning fires.
+    _patch_pusher(
+        monkeypatch, positions=positions,
+        recent_ts=[time.time()],
+        push_count=50,
+    )
+    resp = await ib_pusher_position_health()
+    joined = " | ".join(resp["diagnosis"]).lower()
+    assert "heartbeat is slow" in joined
+    assert "push_interval=10s" in joined  # cadence transparency
+
+
+@pytest.mark.asyncio
+async def test_stuck_symbols_surfaced(monkeypatch):
+    """Live positions with unrealizedPNL=0 are listed in `stuck_symbols`."""
+    import time
+    positions = [
+        {"symbol": "AAPL", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+        {"symbol": "TSLA", "position": 50, "avgCost": 200.0,
+         "marketPrice": 0, "unrealizedPNL": 0},  # stuck
+        {"symbol": "GHOST", "position": 0, "avgCost": 0,
+         "marketPrice": 10.0, "unrealizedPNL": 0},  # ghost, NOT stuck
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 6, push_count=50)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["stuck_symbols"] == ["TSLA"]
+    assert "GHOST" not in resp["stuck_symbols"]
+
+
+@pytest.mark.asyncio
+async def test_pushes_per_minute_expected_in_response(monkeypatch):
+    """Response surfaces the expected baseline so UI can render
+    `recent / expected` without hardcoding."""
+    import time
+    positions = [
+        {"symbol": "X", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 6, push_count=50)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["pushes_per_minute_expected"] == 6

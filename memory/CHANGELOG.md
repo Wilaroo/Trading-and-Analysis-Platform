@@ -4,6 +4,44 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-13 (v19.34.150c) — Cold-start debounce + cadence-aware heartbeat + stuck-symbol surfacing
+
+Operator ran `diagnose_ib_pusher.py` post-v19.34.150b. Timeline showed
+classic cold-start: **🔴 RED at 2 pushes → 🟡 AMBER at 8 pushes → AMBER
+at 13 pushes with 1 stuck symbol**. The pusher was healing exactly as
+designed but the diagnostic was firing alarm during the warm-up
+window. Also confirmed the heartbeat threshold (>30/min) was wildly
+wrong: `ib_data_pusher.py::push_interval = 10.0s` = **6/min baseline**.
+
+### Fix (`routers/diagnostic_router.py::ib_pusher_position_health`)
+- **Cold-start debounce**: `health = "unknown"` while
+  `total_pushes_since_start < 5`. Heartbeat warning suppressed
+  during the same window. Prevents false RED at pusher boot.
+- **Cadence-aware heartbeat**: threshold recalibrated to match
+  `push_interval=10s`. New constants:
+  `PUSHER_BASELINE_PER_MIN=6`, `PUSHER_STALLED_PER_MIN=2`.
+  Warning now reads "Expected ≥6 (push_interval=10s)".
+- **`stuck_symbols`** field — explicit list of live positions with
+  `unrealizedPNL == 0` (ghost rows excluded). UI/script can highlight
+  the exact symbols missing IB market-data subscription instead of
+  forcing the operator to grep the per-symbol drilldown.
+- **`pushes_per_minute_expected`** and **`cold_start`** surfaced in
+  the response.
+
+### Frontend (`PortfolioHealthPill`)
+- Tooltip now shows "⏳ Cold-start — pusher warming up" when applicable.
+- Inline `N stuck` badge appears beside the live/ghost counts when
+  any symbols have `unrealizedPNL=0`. Hover reveals the symbol list.
+
+### Tests
+5 new pytest cases (`test_cold_start_holds_health_unknown`,
+`test_after_warmup_account_updates_dead_still_red`,
+`test_heartbeat_threshold_recalibrated_to_pusher_cadence`,
+`test_stuck_symbols_surfaced`, `test_pushes_per_minute_expected_in_response`).
+Old `test_slow_pusher_heartbeat_warning` recalibrated to <2/min.
+**Total suite: 24/24 passing.**
+
+
 ## 2026-02-13 (v19.34.150b) — Ghost-row filter + Portfolio Health Pill
 
 Operator ran `diagnose_ib_pusher.py` on DGX after v19.34.150 shipped.

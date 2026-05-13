@@ -46,11 +46,15 @@ export const PortfolioHealthPill = () => {
 
   const live = data.live_position_count ?? 0;
   const ghost = data.ghost_zero_position_count ?? 0;
+  const stuck = Array.isArray(data.stuck_symbols) ? data.stuck_symbols : [];
+  const coldStart = !!data.cold_start;
   const diagnosis = Array.isArray(data.diagnosis) ? data.diagnosis : [];
 
   // Build a compact hover tooltip with the diagnosis lines + counts.
   const tooltip = [
     `Live: ${live}  Ghost (closed intraday): ${ghost}`,
+    coldStart ? '⏳ Cold-start — pusher warming up' : null,
+    stuck.length > 0 ? `Stuck symbols (unrealizedPNL=0): ${stuck.join(', ')}` : null,
     diagnosis.length > 0 ? '── diagnosis ──' : null,
     ...diagnosis,
   ].filter(Boolean).join('\n');
@@ -82,6 +86,18 @@ export const PortfolioHealthPill = () => {
               title="Zero-quantity IB Gateway snapshot artifacts (closed intraday). Reset on next session."
             >
               {ghost} 👻
+            </span>
+          </>
+        )}
+        {stuck.length > 0 && (
+          <>
+            <span className="text-zinc-700"> · </span>
+            <span
+              data-testid="portfolio-health-stuck-count"
+              className="text-amber-300 font-bold"
+              title={`Symbols with unrealizedPNL=0: ${stuck.join(', ')}`}
+            >
+              {stuck.length} stuck
             </span>
           </>
         )}

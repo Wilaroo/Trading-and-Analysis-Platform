@@ -71,8 +71,13 @@ def main() -> int:
     print(f"  pusher_connected    : {resp.get('pusher_connected')}")
     print(f"  last_update         : {resp.get('last_update')}")
     print(f"  age_seconds         : {resp.get('age_seconds')}")
-    print(f"  pushes/min (recent) : {resp.get('pushes_per_minute_recent')}")
+    print(
+        f"  pushes/min (recent) : {resp.get('pushes_per_minute_recent')}"
+        f"   (expected ≥{resp.get('pushes_per_minute_expected', '?')})"
+    )
     print(f"  total pushes (sess) : {resp.get('total_pushes_since_start')}")
+    if resp.get("cold_start"):
+        print("  ⏳ COLD-START — health held at 'unknown' until pusher warms up")
     print(f"  total positions     : {resp.get('total_positions')}")
     print(
         f"  live positions      : {resp.get('live_position_count')}"
@@ -113,6 +118,20 @@ def main() -> int:
     print("=" * 70)
     for d in diagnosis:
         print(f"  {d}")
+
+    stuck = resp.get("stuck_symbols") or []
+    if stuck:
+        print()
+        print("=" * 70)
+        print(f"Stuck symbols ({len(stuck)} live position(s) with unrealizedPNL=0)")
+        print("=" * 70)
+        for s in stuck:
+            print(f"  • {s}")
+        print(
+            "  Hint: these symbols are missing IB market-data "
+            "subscription. Check `reqMktData()` registration on "
+            "the Windows pusher for each one."
+        )
 
     if args.show_symbols:
         print()
