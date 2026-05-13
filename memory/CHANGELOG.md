@@ -4,7 +4,76 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-02-13 (v19.34.152) — Position-memory disagreement alarm + Pre-Close Preview banner + Cost-Basis Sync tile
+## 2026-02-13 (v19.34.153) — First-tick orphan-bracket reaper + reverse-position CRITICAL alarm
+
+🔴 **Incident:** Operator ran the v19.34.152 forensics script after
+manually flattening at 3:57 PM ET in TWS. Discovery: **all 10
+positions held at IB overnight were DIRECTION-OPPOSITE from the
+bot's entries.** Every trade closed at 3:59 PM ET with
+`close_reason=wrong_direction_phantom_swept_v19_29`. Cause: when
+the operator manually flattened via MKT, IB's OCA bracket links
+(stop↔target) were NOT broken (OCA cross-cancels stop↔target only,
+not stop↔manual-MKT). The orphan brackets then FIRED in the
+3:57-3:58 PM window, creating reverse positions for all 10 symbols
+that rolled overnight.
+
+The existing `operator_flatten_suppression` (v19.34.72) was useless
+here because its 2-tick gate (≥30s) is wider than the orphan
+brackets' fire window. In the 30s between detection and
+confirmation, the brackets had already triggered.
+
+### Backend fixes
+
+**P0 — First-tick bracket reaper**
+- New `PositionReconciler._cancel_orders_for_symbol_v153` cancels
+  every IB order tied to a symbol BEFORE the 2-tick gate, on the
+  FIRST tick that detects `bot_trade.status=OPEN` + `IB.position=0`.
+- Pulls candidate IDs from FOUR sources per trade:
+    1. `entry_order_id` (defensive — usually filled but cancel any
+       stale unfilled remnant)
+    2. `stop_order_id` (the primary culprit)
+    3. `target_order_id` / `target_order_ids` (same risk)
+    4. Safety-net scan via `_fetch_ib_open_orders` filtered by symbol
+       (catches working orders placed via non-standard paths).
+- Cancels fire in parallel via `asyncio.gather`. Errors per-order
+  are non-fatal — go into the `errors` list. The reaper itself
+  NEVER raises.
+- Idempotent: filled / already-cancelled orders no-op.
+- Emits a `first_tick_bracket_reaper_v19_34_153` stream event with
+  cancellation counts so the V5 UI can surface it.
+
+**P0 — Reverse-position CRITICAL alarm upgrade**
+- `phantom_share_sweeper_v19_29` now emits a CRITICAL alarm (was
+  WARNING) when a reverse position is detected at IB. New text
+  explicitly calls out the likely orphan-bracket cause and points
+  the operator at `POST /api/trading-bot/flatten-symbol` for
+  remediation.
+
+### Frontend (V5)
+- **`<BracketReaperPill />`** in status strip. Three states:
+  - 🟢 `BRACKETS OK` — no reaper or reverse events today
+  - 🟡 `N REAPED` — first-tick reaper engaged N times (safety net
+    working; no reverse positions created)
+  - 🔴 `🚨 N REVERSE AT IB` — reverse positions detected. The
+    safety net failed or fired too late — operator action required.
+- Polls `/api/sentcom/stream/history` filtered by the two relevant
+  event types every 30s.
+
+### Tests
+- **`test_first_tick_bracket_reaper_v19_34_153.py`** — 8 cases:
+  - Collects entry/stop/target IDs from tracked trades
+  - Handles `target_order_ids` (list) for scaled-out trades
+  - Safety-net catches untracked orders for the symbol
+  - Safety-net does NOT touch other symbols' orders
+  - Skips zero/None/non-numeric IDs (SIM-* paper-mode IDs)
+  - Individual cancel failure is non-fatal (errors list)
+  - Handles empty-bot_trade case gracefully
+  - Emits the stream event (only when cancellations actually fired)
+  - Does NOT emit when nothing to cancel
+- **All EOD + bracket-reaper suites: 55/55 passing.**
+
+
+
 
 Post-v19.34.151, operator ran the new postmortem and discovered the
 **deeper** root cause of tonight's EOD: `bot._open_trades` was EMPTY

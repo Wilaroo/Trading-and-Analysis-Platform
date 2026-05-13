@@ -232,16 +232,27 @@ class PositionManager:
                                 pass
                             try:
                                 from services.sentcom_service import emit_stream_event
+                                # v19.34.153 — Upgrade to CRITICAL with
+                                # a clear remediation directive. The
+                                # 2026-05-13 incident: 10 of these
+                                # alarms fired in one minute when
+                                # orphan brackets created reverse
+                                # positions. The pre-fix WARNING-level
+                                # alarm was too quiet for an event
+                                # this severe.
                                 await emit_stream_event({
-                                    "kind": "warning",
+                                    "kind": "alarm",
                                     "event": "wrong_direction_phantom_swept",
                                     "symbol": _trade.symbol,
                                     "text": (
-                                        f"⚠️ Wrong-direction phantom swept: "
-                                        f"{_trade.symbol} tracked {_dir.upper()} "
+                                        f"🚨 [CRITICAL] REVERSE POSITION at IB: "
+                                        f"{_trade.symbol} bot tracked {_dir.upper()} "
                                         f"but IB has {opp.upper()} {int(ib_qty_opp_dir)}sh. "
-                                        f"Bot's record closed (no IB action) — "
-                                        f"v19.29 critical fix."
+                                        "Likely cause: orphan bracket fired after "
+                                        "external close. Bot record closed — "
+                                        "IB position is STILL HELD and will roll "
+                                        "overnight unless you flatten manually OR "
+                                        "via POST /api/trading-bot/flatten-symbol."
                                     ),
                                     "metadata": {
                                         "trade_id": _trade.id,
@@ -249,6 +260,8 @@ class PositionManager:
                                         "ib_direction": opp,
                                         "ib_qty": ib_qty_opp_dir,
                                         "reason": "wrong_direction_phantom",
+                                        "severity": "CRITICAL",
+                                        "remediation": "flatten_symbol",
                                     },
                                 })
                             except Exception:

@@ -2000,6 +2000,29 @@ class PositionReconciler:
                         _bot_trade_ids = {
                             getattr(t, "id", None) for t in bot_trades_by_sym[sym]
                         }
+                        # v19.34.153 (P0) — FIRST-TICK BRACKET REAPER.
+                        # The 2-tick gate below prevents premature
+                        # `bot_trade.status=closed` decisions, but it
+                        # leaves a 30s window in which orphan OCA
+                        # brackets at IB can FIRE and create REVERSE
+                        # positions (incident 2026-05-13). Cancel
+                        # them IMMEDIATELY on first detection. This
+                        # is idempotent: if the brackets already
+                        # filled or were cancelled, `cancel_order`
+                        # silently no-ops. Errors are non-fatal.
+                        try:
+                            await self._cancel_orders_for_symbol_v153(
+                                sym=sym,
+                                bot_trades=bot_trades_by_sym[sym],
+                                drift_kind="zero",
+                            )
+                        except Exception as cancel_err:
+                            logger.warning(
+                                f"[v19.34.153 BRACKET-REAPER] {sym} "
+                                f"first-tick cancel failed (non-fatal): "
+                                f"{cancel_err}"
+                            )
+
                         _confirmed, _conf_reason = (
                             self._confirm_external_close_two_tick(
                                 symbol=sym,
@@ -2267,6 +2290,165 @@ class PositionReconciler:
             "unreliable",
             f"pusher_direct_disagree:pusher={pusher_q}_direct={direct_q}",
         )
+
+    async def _cancel_orders_for_symbol_v153(
+        self, *, sym: str, bot_trades: List, drift_kind: str,
+    ) -> Dict[str, Any]:
+        """v19.34.153 — first-tick orphan-bracket reaper for the
+        2026-05-13 incident pattern: operator flattens in TWS, OCA
+        brackets stay alive because the manual MKT close is outside
+        the OCA group, then those orphan brackets FIRE and create
+        REVERSE positions at IB.
+
+        Strategy: as soon as the reconciler sees `bot_trade.status=
+        OPEN` + `IB.position=0`, cancel EVERY ib_order_id tied to
+        this symbol's tracked trades BEFORE the 2-tick confirmation
+        gate. The 30s gap was wide enough to lose 10 positions to
+        bracket-fired reversals.
+
+        We pull order IDs from three sources per trade:
+          1. `entry_order_id` — usually filled, but cancel
+             defensively in case it's a stale unfilled GTC.
+          2. `stop_order_id`  — the primary culprit; this is what
+             fires after manual flatten.
+          3. `target_order_id` / `target_order_ids` — same risk.
+
+        Plus a safety net: ALL currently-open IB orders for the
+        symbol (via `_fetch_ib_open_orders` filtered by symbol).
+        This catches any working order whose ID isn't on the
+        bot_trade (e.g., bracket children placed via a non-standard
+        path).
+
+        Returns: {cancelled: [ids], errors: [{id, error}],
+                  source_counts: {...}}
+        """
+        out = {
+            "cancelled": [],
+            "errors": [],
+            "source_counts": {
+                "tracked_entry": 0,
+                "tracked_stop": 0,
+                "tracked_target": 0,
+                "open_orders_safety_net": 0,
+            },
+        }
+
+        # 1+2+3. Collect IDs from bot_trades.
+        candidate_ids: Dict[int, str] = {}  # id → source-label
+        for t in bot_trades or []:
+            for attr, label in (
+                ("entry_order_id", "tracked_entry"),
+                ("stop_order_id", "tracked_stop"),
+                ("target_order_id", "tracked_target"),
+            ):
+                v = getattr(t, attr, None)
+                if v in (None, ""):
+                    continue
+                try:
+                    oid = int(v)
+                    if oid > 0 and oid not in candidate_ids:
+                        candidate_ids[oid] = label
+                        out["source_counts"][label] += 1
+                except (TypeError, ValueError):
+                    pass
+            for v in (getattr(t, "target_order_ids", None) or []):
+                try:
+                    oid = int(v)
+                    if oid > 0 and oid not in candidate_ids:
+                        candidate_ids[oid] = "tracked_target"
+                        out["source_counts"]["tracked_target"] += 1
+                except (TypeError, ValueError):
+                    pass
+
+        # 4. Safety net: pull all live IB orders for this symbol.
+        try:
+            from services.orphan_gtc_reconciler import _fetch_ib_open_orders
+            all_orders, _src = await _fetch_ib_open_orders()
+            for o in all_orders or []:
+                osym = (o.get("symbol") or "").upper()
+                if osym != sym.upper():
+                    continue
+                try:
+                    oid = int(
+                        o.get("ib_order_id") or o.get("order_id")
+                        or o.get("orderId") or 0
+                    )
+                except (TypeError, ValueError):
+                    oid = 0
+                if oid > 0 and oid not in candidate_ids:
+                    candidate_ids[oid] = "open_orders_safety_net"
+                    out["source_counts"]["open_orders_safety_net"] += 1
+        except Exception as e:
+            logger.debug(
+                f"[v19.34.153] safety-net order fetch failed for "
+                f"{sym}: {e}"
+            )
+
+        if not candidate_ids:
+            logger.info(
+                f"[v19.34.153] {sym} ({drift_kind}-drift): no IB "
+                "order IDs to cancel — likely all bracket legs "
+                "already filled or expired."
+            )
+            return out
+
+        logger.warning(
+            f"[v19.34.153 BRACKET-REAPER] {sym} ({drift_kind}-drift) "
+            f"firing IMMEDIATE cancel on {len(candidate_ids)} "
+            f"order(s) (counts={out['source_counts']}). Aim: prevent "
+            "bracket-fired reverse position before the 2-tick gate."
+        )
+
+        # Fire cancels in parallel — speed matters here.
+        try:
+            from routers.ib import _ib_service
+        except Exception:
+            _ib_service = None
+
+        async def _cancel_one(oid: int):
+            try:
+                if _ib_service is None:
+                    raise RuntimeError("ib_service unavailable")
+                ok = await _ib_service.cancel_order(oid)
+                if ok:
+                    out["cancelled"].append(oid)
+                else:
+                    out["errors"].append({
+                        "id": oid, "error": "cancel returned False",
+                    })
+            except Exception as e:
+                out["errors"].append({
+                    "id": oid, "error": f"{type(e).__name__}: {e}",
+                })
+
+        await asyncio.gather(
+            *[_cancel_one(oid) for oid in candidate_ids],
+            return_exceptions=False,
+        )
+
+        # Stream-emit so V5 can show the safety net engaging.
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "warning",
+                "event": "first_tick_bracket_reaper_v19_34_153",
+                "symbol": sym,
+                "text": (
+                    f"🛡️ {sym} ({drift_kind}-drift): cancelled "
+                    f"{len(out['cancelled'])} IB order(s) on first "
+                    "tick of external-close detection. Prevents "
+                    "orphan-bracket reverse positions."
+                ),
+                "metadata": {
+                    "cancelled_count": len(out["cancelled"]),
+                    "error_count": len(out["errors"]),
+                    "source_counts": out["source_counts"],
+                },
+            })
+        except Exception:
+            pass
+
+        return out
 
     async def _close_drift_trades_zero(self, bot, sym, trades) -> None:
         """Case 3: IB has 0; close every bot_trade for this symbol.

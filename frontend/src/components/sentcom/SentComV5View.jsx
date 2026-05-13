@@ -50,6 +50,7 @@ import { ScannerCoverageAuditPanel } from './v5/ScannerCoverageAuditPanel';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { EodPreviewBanner } from './v5/EodPreviewBanner';
 import { CostBasisSyncTile } from './v5/CostBasisSyncTile';
+import { BracketReaperPill } from './v5/BracketReaperPill';
 // v19.30.11 (2026-05-01) — high-priority system alerts (pusher dead 30s+,
 // mongo down, etc.) with explicit operator action guidance. Goes ABOVE
 // PusherDeadBanner because it's broader (covers all critical subsystems
@@ -574,6 +575,9 @@ export const SentComV5View = ({
         </PanelErrorBoundary>
         <PanelErrorBoundary label="cost-basis-sync" compact>
           <CostBasisSyncTile />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="bracket-reaper" compact>
+          <BracketReaperPill />
         </PanelErrorBoundary>
         <PanelErrorBoundary label="strategy-mix" compact>
           <StrategyMixCard />
