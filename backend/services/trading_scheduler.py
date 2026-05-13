@@ -38,6 +38,10 @@ class ScheduledTaskResult:
     duration_seconds: float
     result_summary: str
     error: str = ""
+    # v19.34.148 — optional task-specific payload (e.g. entry-price
+    # sync's per-symbol synced list). `_log_task_result` serializes
+    # via `asdict()` which preserves dict values; readers can ignore.
+    metadata: Optional[Dict] = None
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -246,6 +250,27 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 9. v19.34.148 — Entry-Price ↔ IB.avgCost Sync
+            #    Daily 16:35 ET (Mon-Fri, post-close). Snaps every open
+            #    BotTrade's `entry_price` to IB's live `avgCost` so the
+            #    audit endpoint stops flagging stale-entry drift driven
+            #    by commissions / borrow fees / ETF distributions.
+            #    Runs 5 min AFTER gate calibration so the heavy daily
+            #    analysis pipeline isn't competing for the executor's
+            #    IB session at the same time.
+            self._scheduler.add_job(
+                _wrap_async(self._run_entry_price_sync),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=16,
+                    minute=35,
+                    timezone='US/Eastern'
+                ),
+                id='entry_price_sync',
+                name='Nightly Entry-Price ↔ IB.avgCost Sync',
+                replace_existing=True
+            )
+
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -256,6 +281,7 @@ class TradingScheduler:
             logger.info("  - Learning Sync: 5:00 PM ET (Mon-Fri)")
             logger.info("  - IB Collection Resume: 2:15 AM ET (Daily)")
             logger.info("  - Gate Calibration: 4:30 PM ET (Mon-Fri)")
+            logger.info("  - Entry-Price Sync: 4:35 PM ET (Mon-Fri)")
             
         except ImportError:
             logger.warning("APScheduler not installed. Scheduler disabled.")
@@ -670,6 +696,97 @@ class TradingScheduler:
             result.completed_at = end_time.isoformat()
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
+
+
+    async def _run_entry_price_sync(self):
+        """v19.34.148 — nightly snap of `entry_price` ← IB.avgCost.
+
+        Idempotent. Touches only the `entry_price` / `fill_price`
+        fields on open BotTrades whose IB.avgCost diverges by
+        more than 1¢/sh. Persists each sync to `bot_trades` and
+        logs the result row into `scheduled_task_results` (via
+        `_log_task_result`) so the V5 status pill can surface
+        "last sync: 4:35 PM, 9 syncs, +$57 PnL correction" without
+        a second query."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="entry_price_sync",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled entry-price sync...")
+            from services.entry_price_sync import (
+                sync_entry_prices_to_ib_avg_cost,
+            )
+            # Pull the live bot via the singleton accessor — same
+            # path the manual POST endpoint uses.
+            try:
+                from services.trading_bot_service import (
+                    get_trading_bot_service,
+                )
+                bot = get_trading_bot_service()
+            except Exception as e:
+                result.result_summary = f"Bot unavailable: {e}"
+                logger.error(result.result_summary)
+                return
+
+            report = await sync_entry_prices_to_ib_avg_cost(
+                bot, dry_run=False
+            )
+            if not report.get("success"):
+                result.result_summary = (
+                    f"Sync skipped: {report.get('reason') or 'unknown'}"
+                )
+                # Treat "no IB snapshot" as a soft success — nothing
+                # to do, not a failure mode.
+                result.success = True
+                logger.info(result.result_summary)
+                return
+
+            n_synced = len(report.get("synced") or [])
+            correction = report.get("total_implied_pnl_correction", 0)
+            result.success = True
+            result.result_summary = (
+                f"{n_synced} sync(s), "
+                f"${correction} total implied PnL correction"
+            )
+            # Stash compact details inside the task result for the
+            # UI to render without a second endpoint call.
+            result.metadata = {
+                "synced_count": n_synced,
+                "total_correction": correction,
+                "candidates": report.get("candidates"),
+                "skipped_within_tol": len(
+                    report.get("skipped_within_tol") or []
+                ),
+                "skipped_no_ib_data": len(
+                    report.get("skipped_no_ib_data") or []
+                ),
+                "persisted_to_db": report.get("persisted_to_db"),
+                "top_synced": [
+                    {"symbol": s["symbol"],
+                     "delta_per_share": s["delta_per_share"],
+                     "implied_pnl_correction": s["implied_pnl_correction"]}
+                    for s in (report.get("synced") or [])[:5]
+                ],
+            }
+            logger.info(
+                f"Entry-price sync done: {result.result_summary}"
+            )
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Entry-price sync failed: {e}"
+            logger.error(f"Entry-price sync failed: {e}", exc_info=True)
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
 
             
     async def _run_weekly_revalidation(self):

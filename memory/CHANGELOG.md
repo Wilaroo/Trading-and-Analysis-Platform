@@ -3,6 +3,106 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.148) — Entry-price ↔ IB.avgCost sync (manual + nightly cron)
+
+Operator's 2026-05-13 17:41 UTC live audit showed 9/10 drift rows
+explained ≥60% by avg_cost mismatch:
+
+  | symbol | bot.entry | ib.avgCost | Δ/sh   | cause                  |
+  |--------|-----------|------------|--------|------------------------|
+  | ICLN   | $21.96    | $21.975    | $0.015 | commission             |
+  | CW     | $744.29   | $746.13    | $1.84  | multi-fill slippage    |
+  | ITT    | $204.68   | $204.97    | $0.29  | SHORT borrow accrual   |
+  | DKS    | $216.25   | $216.88    | $0.629 | SHORT borrow accrual   |
+  | DG     | $101.10   | $101.103   | $0.003 | rounding (sub-tol)     |
+
+Root cause: the bot stores raw initial-fill price at entry time and
+never updates it. IB's `avgCost` keeps incrementing with commissions,
+borrow fees (shorts!), multi-level fills, and corp-action / ETF-
+distribution adjustments. Trades still close at the right price, but
+the V5 PnL display and the audit endpoint flag accumulating noise.
+
+### Service: `services/entry_price_sync.py`
+`sync_entry_prices_to_ib_avg_cost(bot, *, tolerance_per_share=0.01,
+dry_run=False, symbols=None)` — walks `_open_trades`, reads
+`_pushed_ib_data["positions"][*].avgCost`, snaps each trade's
+`entry_price` AND `fill_price` to IB's number (kept in lockstep so
+sentcom_service and trade_executor read the same value).
+
+Sub-tolerance gate (default 1¢/sh) skips noise. Zombies (`remaining_shares==0`)
+are skipped. Direction-aware: emits a signed `implied_pnl_correction`
+per row (LONG: positive ib.avgCost gap → negative correction;
+SHORT: positive gap → positive correction since the larger cost
+basis means a larger short profit).
+
+Persistence: every applied sync writes to `bot_trades` with audit
+columns `entry_price_pre_sync`, `entry_price_synced_at`,
+`entry_price_sync_source = "ib_avg_cost"`. Persist failures don't
+block other syncs; they roll up into `persist_errors[]`.
+
+### Endpoint: `POST /api/trading-bot/sync-entry-prices`
+```json
+{
+  "dry_run": false,
+  "symbols": ["ICLN", "CW"],
+  "tolerance_per_share": 0.01
+}
+```
+Returns the full report (`synced[]`, `skipped_within_tol[]`,
+`skipped_no_ib_data[]`, `persisted_to_db`, `persist_errors[]`,
+`total_implied_pnl_correction`). Safe to call mid-session — touches
+only the cached entry/fill_price, never share counts or brackets.
+Idempotent on repeat calls (a fresh run against unchanged
+ib.avgCost is a no-op below the tolerance gate).
+
+### Nightly cron: `_run_entry_price_sync` in `TradingScheduler`
+Daily Mon–Fri at **16:35 ET** (5 min after gate calibration, post-close).
+Idempotent heal so borrow-fee accrual on shorts gets caught nightly
+instead of accumulating for days. Result row lands in
+`scheduled_task_results` with `metadata.top_synced[]` so the V5
+status pill can render "last sync: 4:35 PM ET, 9 syncs, +$57 PnL
+correction" without a second endpoint call.
+
+`ScheduledTaskResult` gained an optional `metadata: Optional[Dict]`
+field for the per-task payload; backwards-compatible (existing tasks
+just leave it `None`).
+
+### Operator script: `scripts/sync_entry_prices.py`
+Wraps the endpoint. Flags: `--dry-run`, `--symbols`, `--tolerance`,
+`--json`. Prints per-trade old→new prices and the net PnL correction.
+
+### Tests
+`tests/test_entry_price_sync_v19_34_148.py` — 10 cases covering:
+ICLN+CW+ITT happy path (long+short mix, direction-aware correction
+signs, persistence assertions), sub-tolerance skip, custom
+tolerance widening, dry-run no-mutation, zombie skip, symbol filter,
+empty IB snapshot returns failure with reason, symbol-not-in-IB
+goes to skipped_no_data, broken zero entry_price skipped, DB
+persist failure on one row doesn't block others.
+
+**112/112 cumulative in-scope tests pass.**
+
+### Operator usage
+```bash
+# Preview the next sync (no state changes):
+python3 scripts/sync_entry_prices.py --dry-run
+
+# Apply (touches in-memory ledger AND persists to bot_trades):
+python3 scripts/sync_entry_prices.py
+
+# Verify the audit cleared:
+python3 scripts/verify_v19_34_145_partial_close_fix.py
+# → expect avg_cost_drift_rows = 0 and ICLN / CW dropped from top drift offenders
+```
+
+### Why this doesn't deserve to be P0
+The bot still **closes at the right price** — IB enforces the real
+basis, the bot's stop/target orders fire against IB's view of the
+position. The drift is purely a display / audit-report artifact.
+v19.34.148 cleans it up so the audit stops crying wolf.
+
+
+
 ## 2026-02-13 (v19.34.147) — ICLN-style avg_cost drift detection
 
 Operator's 2026-05-13 17:34 UTC live audit revealed **ICLN drift $145.31 (180%)

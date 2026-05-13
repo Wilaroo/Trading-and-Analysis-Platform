@@ -1721,6 +1721,62 @@ async def reconcile_share_drift_endpoint(
         return {"success": False, "error": str(e)}
 
 
+# ─── v19.34.148 — Entry-price → IB avg_cost sync ────────────────────
+@router.post("/sync-entry-prices")
+async def sync_entry_prices_endpoint(
+    payload: Optional[Dict[str, Any]] = None,
+):
+    """Snap every open BotTrade's `entry_price` to IB's live `avgCost`.
+
+    Fixes the ICLN / CW / ITT / DKS / DG class of audit drift where
+    the bot stores the raw initial-fill price while IB's `avgCost`
+    keeps incrementing with commissions, borrow fees, multi-level
+    fills, and corp-action / ETF-distribution adjustments.
+
+    Body (all optional):
+      {
+        "dry_run": false,                    // detect-only mode
+        "symbols": ["ICLN", "CW"],           // filter to specific symbols
+        "tolerance_per_share": 0.01          // skip noise ≤ this/sh
+      }
+
+    Returns a structured report listing every synced / skipped trade
+    and the total implied PnL correction (signed: positive means the
+    bot was over-stating unrealized; negative means under-stating).
+
+    Safe to call mid-session — touches only the cached entry_price,
+    never `shares`/`remaining_shares`/`stop_order_id`/`target_*`.
+    Idempotent on repeat calls (a fresh sync against unchanged IB
+    avgCost is a no-op below the tolerance gate).
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    payload = payload or {}
+    dry_run = bool(payload.get("dry_run", False))
+    symbols = payload.get("symbols") or None
+    if symbols is not None and not isinstance(symbols, list):
+        raise HTTPException(400, "`symbols` must be a list of strings")
+    tol = payload.get("tolerance_per_share")
+    try:
+        tol_f = float(tol) if tol is not None else 0.01
+    except (TypeError, ValueError):
+        tol_f = 0.01
+    if tol_f < 0:
+        tol_f = 0.01
+
+    try:
+        from services.entry_price_sync import sync_entry_prices_to_ib_avg_cost
+        return await sync_entry_prices_to_ib_avg_cost(
+            _trading_bot,
+            tolerance_per_share=tol_f,
+            dry_run=dry_run,
+            symbols=symbols,
+        )
+    except Exception as e:
+        logger.error(f"sync-entry-prices error: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 # ─── v19.34.55 — Drift-guard stats for UI status pill ───────────────
 @router.get("/drift-guard-stats")
 async def drift_guard_stats():
