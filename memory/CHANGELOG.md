@@ -3,6 +3,82 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.145) — Live PnL math: use `remaining_shares`, not `shares`
+
+Root-cause from operator's live KMB audit (2026-05-13):
+
+```
+KMB: ib_qty=55, bot_qty=144, qty_delta=89 → QTY_MAGNITUDE_MISMATCH
+  Fragment c4568412: shares=144, remaining=55, setup=squeeze,
+  entered_by=bot_fired, stop_id=2309ef1f
+```
+
+Diagnosis: the ledger was CORRECT. Bot fired a 144-share KMB
+squeeze entry → target-1 hit peeled 89 → 55 remain (matches IB).
+But `sentcom_service.get_our_positions()` was reading the ORIGINAL
+`trade.shares` (= 144) and:
+
+1. Computing live PnL as `(current - entry) * 144` — overstating
+   unrealized by 2.6× (KMB showed +137.5 truth vs +360 computed)
+2. Reporting `"shares": 144` to the audit endpoint, which then
+   classified the row as `QTY_MAGNITUDE_MISMATCH` and fired a
+   false NAKED-position alarm
+
+This was the source of the audit's $777.25 delta and the false
+KMB/ONON alarms — NO real ledger drift; the bot would have closed
+correctly for the 55/59 share remaining counts on stop fire.
+
+### Fix
+- **`services/sentcom_service.py::get_our_positions`** — bot-row
+  PnL math now uses `live_shares = remaining_shares` (falls back
+  to `shares` for legacy rows without partial-fill tracking).
+  `market_value` and `cost_basis` likewise use `live_shares`. The
+  output payload's `"shares"` field still carries the original
+  entry size for V5 UI display compatibility, and
+  `"remaining_shares"` already carried the live count.
+- **`routers/diagnostic_router.py::position_pnl_audit`** —
+  `raw_qty = r.get("remaining_shares")` (with `shares` fallback)
+  so `bot_qty` reflects the LIVE held position, not the original
+  entry size. KMB / ONON now correctly classify as `OK` instead
+  of false `QTY_MAGNITUDE_MISMATCH`.
+
+### Why both layers needed the fix
+Without the service-layer fix, the V5 panel still showed the
+overstated PnL. Without the audit fix, the diagnostic still
+fired a NAKED alarm. Each fix on its own would have left half
+the bug visible to the operator.
+
+### Tests
+- `tests/test_partial_close_pnl_v19_34_145.py` — 13 cases including
+  KMB / ONON exact scenarios, parametrized truth table,
+  legacy-row fallback, zero-remaining edge, contract check that
+  production code keeps `live_shares` / `remaining_shares` in
+  the PnL math.
+- `tests/test_position_pnl_audit_v19_34_142.py::TestPartialCloseQtyResolution`
+  — 4 new cases: KMB/ONON no false-positive, no NAKED warning in
+  actions, legacy-row fallback path, genuine magnitude drift still
+  fires when `remaining_shares` actually disagrees with IB.
+
+Total: 17 new test cases. **83/83 in-scope tests pass cumulatively.**
+
+### Remaining audit signals from the same run
+The audit also surfaced (correctly, now that the false KMB/ONON
+alarms are gone):
+- **SIVR Δ $442.98 @ 47.6% drift** — `pnl_source =
+  trade_current_price_stale`. The bot's `current_price` from
+  `position_manager.update_open_positions` is lagging vs IB. Next
+  manage-tick fires it should converge. If it persists across 2+
+  manage ticks, investigate why SIVR isn't getting refreshed
+  (likely L1 quote not subscribed via PusherRotation).
+- **1/17 positions with `unrealizedPNL=0` in pusher cache** — the
+  pre-existing `updatePortfolio()` lag warning; the audit fell
+  back to L1 quote per the v19.34.142b path.
+
+Neither blocks the operator; both are documented for the next
+session's first audit run.
+
+
+
 ## 2026-02-13 (v19.34.143b) — Operator tooling: bracket-status endpoint + forensic scripts
 
 The v19.34.142e `ledger_fragments[]` payload is only emitted on

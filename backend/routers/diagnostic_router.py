@@ -2895,8 +2895,17 @@ async def position_pnl_audit(
         # in the audit would appear with mirrored qty, confusing the
         # operator even though the dollar PnL is correctly signed
         # downstream.
+        # 2026-02-13 (v19.34.145) — Prefer `remaining_shares` over
+        # `shares` for the LIVE held qty. After a partial scale-out,
+        # `shares` still equals the original entry size (e.g. KMB
+        # squeeze 144 → 55 after target hit) while `remaining_shares`
+        # correctly tracks the held qty. Reading `shares` first made
+        # KMB / ONON look like QTY_MAGNITUDE_MISMATCH when the ledger
+        # was actually intact.
         raw_qty = float(
-            r.get("shares") or r.get("remaining_shares") or 0
+            r.get("remaining_shares")
+            if r.get("remaining_shares") is not None
+            else (r.get("shares") or 0)
         )
         direction = (r.get("direction") or "").lower()
         side = (r.get("side") or "").upper()

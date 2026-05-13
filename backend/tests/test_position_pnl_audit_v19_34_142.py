@@ -361,6 +361,174 @@ class TestQtySignReconstruction:
         assert "OPPOSITE direction" in joined or "qty_sign" in joined.lower()
 
 
+class TestPartialCloseQtyResolution:
+    """v19.34.145 — KMB / ONON regression. After a partial scale-out,
+    the bot's `shares` field still equals the ORIGINAL entry size
+    (e.g. KMB squeeze entered 144 long, scaled out 89 at target 1 →
+    `shares=144, remaining_shares=55`). IB legitimately holds 55.
+
+    Pre-v19.34.145 the audit read `shares` first, classified this as
+    QTY_MAGNITUDE_MISMATCH, and fired a NAKED-position alarm. In
+    reality the ledger was correct: a close order would correctly
+    fire for `remaining_shares=55`, NOT the stale 144.
+
+    Post-v19.34.145 the audit prefers `remaining_shares` so the row
+    classifies as OK (or DRIFT_* on real PnL drift) and the false
+    NAKED alarm is gone."""
+
+    @pytest.fixture
+    def patched_kmb_partial(self, monkeypatch):
+        import sys
+        # IB matches `remaining_shares` (55) but NOT `shares` (144).
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                {"symbol": "KMB", "position": 55,
+                 "avgCost": 135.00, "marketPrice": 137.50,
+                 "unrealizedPNL": 137.5},
+                # ONON: bot entered 235, scaled out 176 → remaining=59
+                {"symbol": "ONON", "position": 59,
+                 "avgCost": 38.0, "marketPrice": 39.0,
+                 "unrealizedPNL": 59.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    # KMB: original 144, partial-closed to remaining 55
+                    {"symbol": "KMB",
+                     "shares": 144, "remaining_shares": 55,
+                     "direction": "long", "pnl": 137.5,
+                     "pnl_source": "quote_last", "source": "bot"},
+                    # ONON: original 235, partial-closed to remaining 59
+                    {"symbol": "ONON",
+                     "shares": 235, "remaining_shares": 59,
+                     "direction": "long", "pnl": 59.0,
+                     "pnl_source": "quote_last", "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+        return None
+
+    @pytest.mark.asyncio
+    async def test_partial_close_kmb_classifies_as_ok(self, patched_kmb_partial):
+        """KMB with shares=144 + remaining_shares=55 must align with
+        IB's 55 — verdict OK, NOT QTY_MAGNITUDE_MISMATCH."""
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["KMB"]["bot_qty"] == 55
+        assert by_sym["KMB"]["ib_qty"] == 55
+        assert by_sym["KMB"]["verdict"] == "OK"
+        assert by_sym["ONON"]["bot_qty"] == 59
+        assert by_sym["ONON"]["verdict"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_partial_close_no_false_magnitude_mismatch(
+        self, patched_kmb_partial
+    ):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        # No magnitude mismatch buckets fired.
+        assert resp["summary"].get("qty_magnitude_mismatch", 0) == 0
+        # No NAKED-position warning in actions either.
+        joined = " | ".join(resp["actions"])
+        assert "MAGNITUDE" not in joined.upper()
+        assert "naked" not in joined.lower()
+
+    @pytest.mark.asyncio
+    async def test_legacy_row_without_remaining_shares_falls_back_to_shares(
+        self, monkeypatch
+    ):
+        """For legacy rows (pre-partial-tracking) that emit `shares`
+        but no `remaining_shares`, the audit must still classify
+        them correctly using `shares`."""
+        import sys
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                {"symbol": "LEGACY", "position": 100,
+                 "avgCost": 50.0, "marketPrice": 51.0,
+                 "unrealizedPNL": 100.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    # No `remaining_shares` key at all.
+                    {"symbol": "LEGACY", "shares": 100,
+                     "direction": "long", "pnl": 100.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["LEGACY"]["bot_qty"] == 100
+        assert by_sym["LEGACY"]["verdict"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_genuine_magnitude_mismatch_still_detected(
+        self, monkeypatch
+    ):
+        """Sanity: a REAL drift (remaining_shares disagrees with IB)
+        must still classify as QTY_MAGNITUDE_MISMATCH. The fix is
+        about reading the right field, NOT silencing legitimate
+        alerts."""
+        import sys
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                {"symbol": "REAL_BUG", "position": 55,
+                 "avgCost": 100.0, "marketPrice": 101.0,
+                 "unrealizedPNL": 55.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    # remaining_shares ALSO drifts — a real bug.
+                    {"symbol": "REAL_BUG", "shares": 144,
+                     "remaining_shares": 144,
+                     "direction": "long", "pnl": 144.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["REAL_BUG"]["verdict"] == "QTY_MAGNITUDE_MISMATCH"
+        assert by_sym["REAL_BUG"]["bot_qty"] == 144
+        assert by_sym["REAL_BUG"]["ib_qty"] == 55
+
+
+
+
 class TestQtyMagnitudeMismatch:
     """v19.34.142d — KMB phantom-share crisis. The bot's `_open_trades`
     ledger said it owned 144 KMB shares while IB only had 55. If the

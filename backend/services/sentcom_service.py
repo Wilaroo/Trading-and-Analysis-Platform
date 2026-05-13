@@ -2226,18 +2226,42 @@ class SentComService:
                             # is missing a real mark.
                             pnl_source = "entry_price_fallback"
                         shares = trade.get("shares") or trade.get("quantity", 0) or 0
+                        # 2026-02-13 (v19.34.145) — KMB/ONON post-mortem.
+                        # After a partial scale-out / target hit, the
+                        # bot's `shares` field still equals the ORIGINAL
+                        # entry size (e.g. 144 for KMB) while
+                        # `remaining_shares` correctly reflects the live
+                        # held qty (55 to match IB). Pre-v19.34.145, PnL
+                        # was `(current - entry) * shares` — so KMB's
+                        # unrealized was computed against 144 shares
+                        # instead of the 55 actually held, producing
+                        # the $777.25 audit delta on a 17-position
+                        # account. Switch the live-PnL math to
+                        # `remaining_shares` (falls back to `shares`
+                        # for legacy rows that never tracked partials).
+                        live_shares = (
+                            trade.get("remaining_shares")
+                            if trade.get("remaining_shares") is not None
+                            else shares
+                        )
+                        try:
+                            live_shares = abs(int(live_shares))
+                        except (TypeError, ValueError):
+                            live_shares = int(abs(shares or 0))
                         direction = trade.get("direction", "long")
-                        
-                        # Calculate P&L based on direction
+
+                        # Calculate P&L based on direction — use the
+                        # LIVE share count (remaining_shares), not the
+                        # original entry size.
                         if direction == "short":
-                            pnl = (entry - current) * shares if entry and current else 0
+                            pnl = (entry - current) * live_shares if entry and current else 0
                             pnl_pct = ((entry - current) / entry * 100) if entry else 0
                         else:
-                            pnl = (current - entry) * shares if entry and current else 0
+                            pnl = (current - entry) * live_shares if entry and current else 0
                             pnl_pct = ((current - entry) / entry * 100) if entry else 0
-                        
-                        market_value = abs(shares * current) if current else 0
-                        cost_basis = abs(shares * entry) if entry else 0
+
+                        market_value = abs(live_shares * current) if current else 0
+                        cost_basis = abs(live_shares * entry) if entry else 0
                         
                         # Today's intraday change from IB quotes
                         quote = ib_quotes.get(symbol, {})
