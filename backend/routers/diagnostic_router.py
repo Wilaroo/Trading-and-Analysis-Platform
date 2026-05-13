@@ -1647,3 +1647,106 @@ def dlq_purge(
         "bar_size": bar_size,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ── v19.34.122 (Feb 2026) — Setup win-rate breakdown ─────────────────────
+#
+# Companion to scripts/setup_winrate_breakdown_v19_34_121.py — exposes the
+# same aggregation via HTTP so the operator can curl it from any shell
+# without worrying about Python interpreter / venv / pymongo install state
+# on the DGX. Also feeds the next-iteration UI panel.
+#
+# Direction-suffixes are normalized (`mean_reversion_long` and
+# `mean_reversion_short` aggregate into `mean_reversion`) because the
+# operator's decision lever is per-SETUP (enable/disable in
+# `_enabled_setups`), not per-direction-cell.
+
+@router.get("/setup-winrate-breakdown")
+def setup_winrate_breakdown(
+    days: int = 30,
+    min_samples: int = 3,
+):
+    """Aggregate `alert_outcomes` by setup_type and surface the bleeders.
+
+    Query:
+      • days        — lookback window (default 30)
+      • min_samples — hide setups with fewer than N closed alerts (default 3)
+
+    Returns rows sorted by net_pnl ascending (worst first) with a verdict:
+        🔴 KILL   — WR < 25% with n ≥ 5
+        🟡 review — WR < 35% AND net < 0
+        🟢 keep   — WR ≥ 55% AND net > 0
+        ⚪ neutral — anything else
+    """
+    from collections import defaultdict
+    from datetime import timedelta
+
+    db = _get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cursor = db["alert_outcomes"].find(
+        {"closed_at": {"$gte": cutoff}},
+        {
+            "_id": 0, "setup_type": 1, "direction": 1, "outcome": 1,
+            "pnl": 1, "r_multiple": 1, "trade_grade": 1, "closed_at": 1,
+        },
+    )
+
+    buckets: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    total_rows = 0
+    for row in cursor:
+        st = (row.get("setup_type") or "<missing>").lower()
+        for suffix in ("_long", "_short", "_confirmed"):
+            if st.endswith(suffix):
+                st = st[: -len(suffix)]
+                break
+        buckets[st].append(row)
+        total_rows += 1
+
+    rows: List[Dict[str, Any]] = []
+    for setup, items in buckets.items():
+        n = len(items)
+        if n < min_samples:
+            continue
+        wins   = sum(1 for r in items if (r.get("pnl") or 0) > 0)
+        losses = sum(1 for r in items if (r.get("pnl") or 0) < 0)
+        wr     = wins / n if n else 0.0
+        net    = sum(float(r.get("pnl") or 0) for r in items)
+        r_mults = [float(r.get("r_multiple") or 0) for r in items if r.get("r_multiple") is not None]
+        avg_r  = (sum(r_mults) / len(r_mults)) if r_mults else 0.0
+        if wr < 0.25 and n >= 5:
+            verdict = "kill"
+        elif wr < 0.35 and net < 0:
+            verdict = "review"
+        elif wr >= 0.55 and net > 0:
+            verdict = "keep"
+        else:
+            verdict = "neutral"
+        rows.append({
+            "setup_type": setup, "n": n, "wins": wins, "losses": losses,
+            "win_rate": round(wr, 3),
+            "avg_r_multiple": round(avg_r, 3),
+            "net_pnl": round(net, 2),
+            "verdict": verdict,
+        })
+
+    rows.sort(key=lambda r: r["net_pnl"])
+
+    kill_list = [r["setup_type"] for r in rows if r["verdict"] == "kill"]
+    review_list = [r["setup_type"] for r in rows if r["verdict"] == "review"]
+
+    return {
+        "success": True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "window_days": days,
+        "min_samples": min_samples,
+        "total_alerts": total_rows,
+        "rows": rows,
+        "kill_candidates": kill_list,
+        "review_candidates": review_list,
+        "summary": (
+            f"{len(kill_list)} setup(s) to KILL · "
+            f"{len(review_list)} to REVIEW · "
+            f"{len(rows)} setups with ≥{min_samples} samples over {days}d"
+        ),
+    }
+
