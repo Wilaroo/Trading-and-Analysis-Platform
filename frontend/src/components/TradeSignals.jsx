@@ -187,7 +187,7 @@ const TradeSignals = ({ onSignalSelect, isExpanded = false, onToggleExpand }) =>
                   <span className="text-xs font-mono text-zinc-300">${signal.price.toFixed(2)}</span>
                 )}
                 <span className="text-[12px] text-zinc-600">
-                  {signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  {signal.timestamp ? new Date(signal.timestamp).toLocaleTimeString([], { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) : ''}
                 </span>
               </div>
             </div>

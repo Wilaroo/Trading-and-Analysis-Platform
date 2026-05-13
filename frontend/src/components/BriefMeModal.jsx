@@ -102,7 +102,7 @@ const BriefMeModal = ({ isOpen, onClose }) => {
                   <h2 className="text-lg font-bold">Market Briefing</h2>
                   <p className="text-xs text-zinc-400">
                     {briefData?.generated_at 
-                      ? `Generated ${new Date(briefData.generated_at).toLocaleTimeString()}`
+                      ? `Generated ${new Date(briefData.generated_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: true })}`
                       : 'Generating...'}
                   </p>
                 </div>

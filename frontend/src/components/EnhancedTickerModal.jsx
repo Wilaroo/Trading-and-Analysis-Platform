@@ -226,7 +226,7 @@ const BotTakeCard = ({ trade, symbol }) => {
   
   if (!trade) return null;
   
-  const timestamp = trade.entry_time ? new Date(trade.entry_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const timestamp = trade.entry_time ? new Date(trade.entry_time).toLocaleTimeString([], { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' }) : null;
   const hasStopWarnings = stopAnalysis?.recommendations?.some(r => r.severity === 'warning' || r.severity === 'critical');
   
   // Calculate R:R
@@ -1148,7 +1148,7 @@ const EnhancedTickerModal = ({
                                 <div className="flex items-center gap-3 mt-2 text-[12px] text-zinc-500">
                                   <span className="flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
-                                    {item.timestamp ? new Date(item.timestamp).toLocaleString() : '--'}
+                                    {item.timestamp ? new Date(item.timestamp).toLocaleString('en-US', { timeZone: 'America/New_York' }) : '--'}
                                   </span>
                                   <span>{item.source || 'News'}</span>
                                   {item.url && (

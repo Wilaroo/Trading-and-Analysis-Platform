@@ -95,7 +95,7 @@ export const TickerTape = ({ indices = [], isConnected, lastUpdate }) => {
           {/* Time */}
           <div className="w-px h-5 bg-zinc-700 mx-2" />
           <span className="text-zinc-400 text-xs font-mono whitespace-nowrap">
-            {lastUpdate ? lastUpdate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
+            {lastUpdate ? lastUpdate.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--:--:--'}
           </span>
         </div>
       </div>

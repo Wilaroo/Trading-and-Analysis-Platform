@@ -127,6 +127,7 @@ const AlertCard = ({ alert, onDismiss, onSelect }) => {
     if (!isoString) return '';
     const date = new Date(isoString);
     return date.toLocaleTimeString('en-US', { 
+      timeZone: 'America/New_York',
       hour: '2-digit', 
       minute: '2-digit', 
       second: '2-digit',

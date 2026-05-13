@@ -42,7 +42,7 @@ export const PriceAlertNotification = ({ alerts, onDismiss, audioEnabled, setAud
                   </div>
                   <p className="text-xs text-zinc-400">{alert.message}</p>
                   <p className="text-xs text-zinc-500 mt-1">
-                    ${alert.price?.toFixed(2)} • {new Date(alert.timestamp).toLocaleTimeString()}
+                    ${alert.price?.toFixed(2)} • {new Date(alert.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                   </p>
                 </div>
               </div>

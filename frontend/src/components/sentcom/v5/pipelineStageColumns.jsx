@@ -31,6 +31,7 @@ export const formatTime = (iso) => {
   try {
     const d = new Date(iso);
     return d.toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York',
       hour: '2-digit', minute: '2-digit', hour12: false,
     });
   } catch {

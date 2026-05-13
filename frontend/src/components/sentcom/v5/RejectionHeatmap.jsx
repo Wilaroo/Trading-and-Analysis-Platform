@@ -24,7 +24,7 @@ const heatColor = (count, max) => {
 
 const fmtTime = (iso) => {
   if (!iso) return '—';
-  try { return new Date(iso).toLocaleString('en-US', { hour12: false }); }
+  try { return new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false }); }
   catch { return iso; }
 };
 

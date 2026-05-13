@@ -137,7 +137,7 @@ const CustomEquityChart = ({ data, width = 800, height = 200 }) => {
       const date = new Date(point.time * 1000);
       labels.push({
         x: scaleX(point.time),
-        label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        label: date.toLocaleTimeString([], { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' })
       });
     }
     
@@ -359,7 +359,7 @@ const CustomEquityChart = ({ data, width = 800, height = 200 }) => {
             fill="#6B7280"
             fontSize="10"
           >
-            {new Date(hoveredPoint.time * 1000).toLocaleTimeString()}
+            {new Date(hoveredPoint.time * 1000).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })}
           </text>
         </g>
       )}

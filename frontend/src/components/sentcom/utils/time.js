@@ -19,7 +19,7 @@ export const formatRelativeTime = (timestamp) => {
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
 
-  return time.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return time.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' });
 };
 
 // Format timestamp to full time (e.g., "2:05:36 PM")
@@ -27,6 +27,7 @@ export const formatFullTime = (timestamp) => {
   if (!timestamp) return '';
   const time = new Date(timestamp);
   return time.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',

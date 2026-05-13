@@ -29,7 +29,7 @@ const formatRelativeTime = (timestamp) => {
   if (diffSecs < 60) return `${diffSecs}s ago`;
   if (diffMins < 60) return `${diffMins}m ago`;
   
-  return time.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return time.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
 };
 
 // Typing Indicator Component

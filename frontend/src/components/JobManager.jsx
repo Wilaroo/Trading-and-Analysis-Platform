@@ -428,6 +428,7 @@ const JobManager = ({ compact = false }) => {
   const formatDate = (dateStr) => {
     if (!dateStr) return 'N/A';
     return new Date(dateStr).toLocaleString('en-US', {
+      timeZone: 'America/New_York',
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

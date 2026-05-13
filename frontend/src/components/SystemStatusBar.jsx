@@ -154,7 +154,7 @@ const SystemStatusBar = ({ compact = false }) => {
             
             {/* Footer */}
             <div className="px-4 py-2 border-t border-zinc-700/50 text-xs text-zinc-500">
-              Last checked: {new Date().toLocaleTimeString()}
+              Last checked: {new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </div>
           </motion.div>
         )}

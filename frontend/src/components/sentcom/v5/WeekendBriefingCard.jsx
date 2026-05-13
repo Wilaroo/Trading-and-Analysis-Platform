@@ -31,7 +31,7 @@ const fmtDate = (iso) => {
   if (!iso) return '—';
   try {
     const d = new Date(iso);
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    return d.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
   } catch { return iso; }
 };
 
@@ -473,7 +473,7 @@ export const WeekendBriefingCard = ({ onSymbolClick }) => {
   const sources = briefing?.sources || {};
   const generatedAtLabel = generatedAt
     ? new Date(generatedAt).toLocaleString('en-US',
-        { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : null;
 
   return (

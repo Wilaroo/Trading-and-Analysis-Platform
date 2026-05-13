@@ -248,7 +248,7 @@ export const ConnectivityCheck = () => {
                   <div className="text-sm font-bold text-white tracking-tight">V5 Connectivity Check</div>
                   <div className="text-[12px] text-zinc-500">
                     {lastRun
-                      ? `Last run ${lastRun.toLocaleTimeString()} · ${counts.ok} ok · ${counts.warn} warn · ${counts.fail} fail`
+                      ? `Last run ${lastRun.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false })} · ${counts.ok} ok · ${counts.warn} warn · ${counts.fail} fail`
                       : 'Running initial pass…'}
                   </div>
                 </div>
