@@ -3935,9 +3935,19 @@ class TradingBotService:
     async def _kill_switch_monitor_loop(self):
         """Continuous daily-loss enforcement — runs every 15s."""
         import os
+        # v19.34.126 — use print() not logger.info() so heartbeats appear
+        # in /tmp/backend.log. server.py has no logging.basicConfig() so
+        # logger.info() output from service modules is silently dropped.
+        # See server.py:1511 for the historical note on this gotcha.
+        print("[v123 kill-switch] task launched, importing motor...", flush=True)
         try:
             import motor.motor_asyncio
         except ImportError:
+            print(
+                "[v123 kill-switch] motor not available — continuous "
+                "monitor DISABLED",
+                flush=True,
+            )
             logger.warning(
                 "[v123 kill-switch] motor not available — continuous "
                 "monitor disabled"
@@ -3946,6 +3956,11 @@ class TradingBotService:
 
         mongo_url = os.environ.get("MONGO_URL")
         if not mongo_url:
+            print(
+                "[v123 kill-switch] MONGO_URL not set — continuous "
+                "monitor DISABLED",
+                flush=True,
+            )
             logger.warning(
                 "[v123 kill-switch] MONGO_URL not set — continuous "
                 "monitor disabled"
@@ -3955,6 +3970,10 @@ class TradingBotService:
         client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
         db = client[os.environ.get("DB_NAME", "tradecommand")]
 
+        print(
+            "[v123 kill-switch] Continuous monitor started (15s cadence)",
+            flush=True,
+        )
         logger.info("[v123 kill-switch] Continuous monitor started (15s cadence)")
         _hb_counter = 0  # v19.34.125 — periodic INFO heartbeat
 
@@ -3991,6 +4010,9 @@ class TradingBotService:
                         f"= ${total_pnl:,.0f} ≤ -${effective_limit:,.0f} "
                         f"(over {snapshot['closed_count']} closed trades)"
                     )
+                    # v19.34.126 — print() for log visibility (logger.error
+                    # also fires but may be filtered by stderr handler config).
+                    print(f"[v123 kill-switch] TRIPPED — {reason}", flush=True)
                     logger.error("[v123 kill-switch] TRIPPED — %s", reason)
                     if sg is not None:
                         try:
@@ -4012,17 +4034,19 @@ class TradingBotService:
                         total_pnl, effective_limit, snapshot["closed_count"],
                     )
 
-                # v19.34.125 — periodic INFO heartbeat (~once every 4 min)
+                # v19.34.125/126 — periodic heartbeat (~once every 4 min)
                 # so the operator can `grep "v123 kill-switch"` and confirm
                 # the background task is alive, even on a quiet PnL day.
+                # Uses print() because server.py has no logging.basicConfig().
                 _hb_counter += 1
                 if _hb_counter % 16 == 0:
-                    logger.info(
-                        "[v123 kill-switch] heartbeat: realized=$%.0f "
-                        "unrealized=$%.0f limit=$%.0f closed=%d (alive)",
-                        snapshot["realized"], snapshot["unrealized"],
-                        effective_limit, snapshot["closed_count"],
+                    msg = (
+                        f"[v123 kill-switch] heartbeat: realized=${snapshot['realized']:.0f} "
+                        f"unrealized=${snapshot['unrealized']:.0f} "
+                        f"limit=${effective_limit:.0f} closed={snapshot['closed_count']} (alive)"
                     )
+                    print(msg, flush=True)
+                    logger.info(msg)
             except asyncio.CancelledError:
                 logger.info("[v123 kill-switch] monitor cancelled")
                 return

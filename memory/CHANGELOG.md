@@ -3,6 +3,53 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.126) — Kill-switch monitor log visibility fix
+
+After v19.34.125 ship, operator verified the endpoint fix but reported
+`grep "v123 kill-switch" /tmp/backend.log` still returned **zero matches**
+— including the supposed startup line. Investigation:
+
+The bot WAS running in autonomous mode (`/api/trading-bot/status` confirmed
+`mode=autonomous, running=true`) and scan-loop print() output appeared in
+the log. But every `logger.info()` and `logger.warning()` call from inside
+`services/trading_bot_service.py` was silently dropped — including the
+existing `"🤖 Trading bot started in AUTONOMOUS mode"` line.
+
+**Root cause**: `backend/server.py` has NO `logging.basicConfig()` call.
+With uvicorn's default config, the root logger's INFO/WARNING output
+from non-uvicorn modules goes nowhere. server.py:1511 already has a
+comment from a prior agent acknowledging this:
+`# v19.34.25b: use print() not logger — \`logger\` is not bound at this`
+
+**Fix** (`services/trading_bot_service.py::_kill_switch_monitor_loop`):
+- Convert startup line, motor/MONGO_URL warnings, periodic heartbeat,
+  and the TRIPPED line from `logger.*()` to `print(..., flush=True)`.
+  `logger.*()` calls retained as well, so if logging is properly
+  configured in the future they still fire.
+- Added a `print("[v123 kill-switch] task launched, importing motor...")`
+  BEFORE the motor import so we have proof the task was scheduled even
+  if it early-returns due to missing dependencies.
+
+### Operator verification (post-pull/restart)
+
+```bash
+# Immediately after restart — should see the launch line
+grep "v123 kill-switch" /tmp/backend.log | head -3
+
+# After 4+ minutes — should see at least one heartbeat
+grep "v123 kill-switch.*heartbeat" /tmp/backend.log | tail -3
+```
+
+### Defer: full logging.basicConfig migration
+
+Recommended P2 follow-up: add a proper `logging.basicConfig(level=INFO,
+format=..., handlers=[FileHandler('/tmp/backend.log')])` at the top of
+server.py so ALL module-level loggers route to disk. Out of scope here
+because it risks doubling-up uvicorn's own log output and needs careful
+filter config. Tracked in ROADMAP.
+
+
+
 ## 2026-02-12 (v19.34.125) — Bracket-lifecycle diagnostic schema fix + kill-switch heartbeat
 
 Operator-reported issue: after v19.34.124 ship, every `/api/diagnostic/bracket-lifecycle`
