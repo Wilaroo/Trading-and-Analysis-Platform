@@ -3,6 +3,49 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.142c) — Audit: signed qty reconstruction + sign-mismatch verdict
+
+Live DGX run with the v19.34.142b patch showed `bot_qty: 492` on
+CHWY while IB had `ib_qty: -492` — same magnitude, opposite sign.
+Cause: the bot's `get_our_positions()` returns `shares` as an
+UNSIGNED magnitude, with direction tracked separately on the
+`direction` / `side` field. The audit was just reading `shares`,
+which made every short look mirrored.
+
+### Fix
+Audit endpoint now reconstructs **signed qty** from
+`direction`/`side`:
+```python
+signed_qty = -abs(shares) if direction in ("short","sell") else abs(shares)
+```
+Result: `bot_qty` and `ib_qty` line up by sign for every position
+that actually agrees, and we can DETECT real direction bugs.
+
+### NEW verdict — `QTY_SIGN_MISMATCH`
+When signed-qty signs disagree (bot says LONG what IB shows as
+SHORT or vice versa), the row is classified `QTY_SIGN_MISMATCH`
+**before** the PnL comparison — because at that point the PnL
+math can't be trusted. A new action surfaces:
+
+> 🔴 N symbol(s) have OPPOSITE direction between bot and IB:
+> [...]. The bot thinks it's LONG what IB shows as SHORT (or
+> vice versa). PnL math is untrustworthy until reconciled —
+> investigate immediately.
+
+Tracked in `summary.qty_sign_mismatch` for the V5 audit chip.
+
+### Tests
+2 new pytest cases in `tests/test_position_pnl_audit_v19_34_142.py`:
+- `test_sign_reconstructed_matches_dont_false_flag` — sign-aware
+  matches must NOT trigger QTY_SIGN_MISMATCH.
+- `test_real_sign_mismatch_surfaces_as_qty_sign_mismatch` — genuine
+  bot↔IB direction disagreement is surfaced + reported.
+
+Plus existing mocks updated to carry `direction` (mirrors the
+real `get_our_positions()` schema). Full suite: **13/13 audit
+tests pass**, **75 cumulative** across v19.34.138-142.
+
+
 ## 2026-02-13 (v19.34.142b) — Audit endpoint: IB-side fallback parity
 
 Live DGX audit run revealed a deeper issue: the IB pusher's

@@ -2887,8 +2887,25 @@ async def position_pnl_audit(
         sym = (r.get("symbol") or "").upper()
         if not sym:
             continue
+        # 2026-02-13 (v19.34.142c) — Reconstruct SIGNED qty so it
+        # aligns with IB's signed position. The bot's `shares` field
+        # is unsigned (direction tracked separately on
+        # `direction`/`side`), but IB stores positions as signed
+        # qty (negative = short). Without this, every short position
+        # in the audit would appear with mirrored qty, confusing the
+        # operator even though the dollar PnL is correctly signed
+        # downstream.
+        raw_qty = float(
+            r.get("shares") or r.get("remaining_shares") or 0
+        )
+        direction = (r.get("direction") or "").lower()
+        side = (r.get("side") or "").upper()
+        if direction in ("short", "sell") or side == "SELL":
+            signed_qty = -abs(raw_qty)
+        else:
+            signed_qty = abs(raw_qty)
         bot_by_symbol[sym] = {
-            "qty": float(r.get("shares") or r.get("remaining_shares") or 0),
+            "qty": signed_qty,
             # The V5 panel field is `pnl` (set at sentcom_service line
             # ~2246 for bot rows and ~2591 for IB-orphan rows). The
             # `unrealized_pnl` key is a v19.34.142 fallback that wasn't
@@ -2905,7 +2922,8 @@ async def position_pnl_audit(
     # 3) Build the diff.
     rows: List[Dict[str, Any]] = []
     bucket = {"ok": 0, "drift_abs": 0, "drift_pct": 0,
-              "missing_in_bot": 0, "phantom_in_bot": 0}
+              "missing_in_bot": 0, "phantom_in_bot": 0,
+              "qty_sign_mismatch": 0}
     total_ib_pnl = 0.0
     total_bot_pnl = 0.0
 
@@ -2934,6 +2952,31 @@ async def position_pnl_audit(
                 "verdict": "PHANTOM_IN_BOT",
             })
             bucket["phantom_in_bot"] += 1
+            total_bot_pnl += bt["unrealized"]
+            continue
+        # 2026-02-13 (v19.34.142c) — Detect qty sign / magnitude mismatch
+        # BEFORE looking at PnL. If sides disagree (bot says LONG, IB says
+        # SHORT) or magnitudes drift by >0.5 shares, that's a separate
+        # data-integrity bug — the per-position PnL can't be trusted
+        # until the qty side is reconciled.
+        if abs(ib["qty"]) > 0.5 and abs(bt["qty"]) > 0.5 and (
+            (ib["qty"] > 0) != (bt["qty"] > 0)
+        ):
+            rows.append({
+                "symbol": sym,
+                "ib_qty": ib["qty"], "bot_qty": bt["qty"],
+                "ib_unrealized": round(ib["unrealized"], 2),
+                "bot_unrealized": round(bt["unrealized"], 2),
+                "delta_abs": abs(ib["unrealized"] - bt["unrealized"]),
+                "delta_pct": 100.0,
+                "pnl_source": bt.get("pnl_source"),
+                "ib_pnl_source": ib.get("ib_pnl_source"),
+                "bot_source": bt.get("source"),
+                "verdict": "QTY_SIGN_MISMATCH",
+            })
+            bucket.setdefault("qty_sign_mismatch", 0)
+            bucket["qty_sign_mismatch"] += 1
+            total_ib_pnl += ib["unrealized"]
             total_bot_pnl += bt["unrealized"]
             continue
         # Both sides have it — compare.
@@ -2981,6 +3024,15 @@ async def position_pnl_audit(
             f"{bucket['phantom_in_bot']} symbol(s) tracked by the bot but "
             "absent from IB. Likely a stale `_open_trades` entry; run "
             "the share-drift auto-sweep or restart the bot worker."
+        )
+    if bucket.get("qty_sign_mismatch", 0):
+        offenders = [r["symbol"] for r in rows
+                     if r["verdict"] == "QTY_SIGN_MISMATCH"]
+        actions.append(
+            f"🔴 {len(offenders)} symbol(s) have OPPOSITE direction "
+            f"between bot and IB: {offenders[:5]}. The bot thinks it's "
+            "LONG what IB shows as SHORT (or vice versa). PnL math is "
+            "untrustworthy until reconciled — investigate immediately."
         )
     if bucket["drift_abs"] or bucket["drift_pct"]:
         worst = max(rows, key=lambda r: r.get("delta_abs") or 0,

@@ -201,21 +201,21 @@ class TestPositionPnLAuditEndpoint:
         class _FakeSvc:
             async def get_our_positions(self):
                 return [
-                    # TSLA — clean match.
-                    {"symbol": "TSLA", "shares": 100,
+                    # TSLA — clean match (long 100).
+                    {"symbol": "TSLA", "shares": 100, "direction": "long",
                      "pnl": 1000.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # TE — bot still showing $0 even after orphan fix
-                    # somehow (simulate worst-case for the audit).
-                    {"symbol": "TE", "shares": -7204,
+                    # somehow (simulate worst-case for the audit). Short.
+                    {"symbol": "TE", "shares": 7204, "direction": "short",
                      "pnl": 0.0,
                      "pnl_source": "unknown_no_mark", "source": "ib"},
-                    # NVDA — minor drift ($30).
-                    {"symbol": "NVDA", "shares": 50,
+                    # NVDA — minor drift ($30). Long.
+                    {"symbol": "NVDA", "shares": 50, "direction": "long",
                      "pnl": 220.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # PHANTOM_IN_BOT — bot tracks but IB doesn't have it.
-                    {"symbol": "ZOMBIE", "shares": 1000,
+                    {"symbol": "ZOMBIE", "shares": 1000, "direction": "long",
                      "pnl": -50.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # CW is absent here → MISSING_IN_BOT scenario.
@@ -282,6 +282,83 @@ class TestPositionPnLAuditEndpoint:
         by_sym = {r["symbol"]: r for r in resp["rows"]}
         assert by_sym["TE"]["verdict"] == "OK"
         assert by_sym["NVDA"]["verdict"] == "OK"
+
+
+class TestQtySignReconstruction:
+    """v19.34.142c — the bot's `shares` field is unsigned; the audit
+    must reconstruct signed qty from `direction`/`side` so it aligns
+    with IB. When signs ACTUALLY disagree (post-reconstruction), it's
+    a real data-integrity bug and must surface as QTY_SIGN_MISMATCH."""
+
+    @pytest.fixture
+    def patched_signs(self, monkeypatch):
+        import sys
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                # IB is SHORT 100 shares; bot tracks 100 as short.
+                # After sign-reconstruction these must agree.
+                {"symbol": "MATCH_SHORT", "position": -100,
+                 "avgCost": 50.0, "marketPrice": 49.0,
+                 "unrealizedPNL": 100.0},
+                # IB is LONG 100; bot tracks 100 as long. Matches.
+                {"symbol": "MATCH_LONG", "position": 100,
+                 "avgCost": 50.0, "marketPrice": 51.0,
+                 "unrealizedPNL": 100.0},
+                # IB is SHORT 200; bot tracks 200 as LONG → real bug.
+                {"symbol": "REAL_BUG", "position": -200,
+                 "avgCost": 10.0, "marketPrice": 11.0,
+                 "unrealizedPNL": -200.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    {"symbol": "MATCH_SHORT", "shares": 100,
+                     "direction": "short", "pnl": 100.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                    {"symbol": "MATCH_LONG", "shares": 100,
+                     "direction": "long", "pnl": 100.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                    # Bot says LONG, IB says SHORT.
+                    {"symbol": "REAL_BUG", "shares": 200,
+                     "direction": "long", "pnl": 200.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+        return None
+
+    @pytest.mark.asyncio
+    async def test_sign_reconstructed_matches_dont_false_flag(
+        self, patched_signs
+    ):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["MATCH_SHORT"]["bot_qty"] == -100
+        assert by_sym["MATCH_SHORT"]["verdict"] == "OK"
+        assert by_sym["MATCH_LONG"]["bot_qty"] == 100
+        assert by_sym["MATCH_LONG"]["verdict"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_real_sign_mismatch_surfaces_as_qty_sign_mismatch(
+        self, patched_signs
+    ):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["REAL_BUG"]["verdict"] == "QTY_SIGN_MISMATCH"
+        assert resp["summary"]["qty_sign_mismatch"] == 1
+        joined = " | ".join(resp["actions"])
+        assert "OPPOSITE direction" in joined or "qty_sign" in joined.lower()
 
 
 class TestPusherStalenessFallback:
