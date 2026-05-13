@@ -393,7 +393,15 @@ async def get_bot_status():
         except Exception as e:
             logger.debug(f"trade_executor.get_account_info failed: {e}")
     
-    if not account or not (account.get("equity") or account.get("portfolio_value")):
+    if not account or not (
+        account.get("equity")
+        or account.get("portfolio_value")
+    ) or account.get("buying_power") in (None, 0, 0.0):
+        # 2026-02-13 (v19.34.141) — Also fall through when buying_power
+        # is missing/zero. Pre-fix this branch only fired when equity
+        # was absent, so an executor returning `{"equity": 222939}`
+        # (no `buying_power`) silently left BuyingPower at `$—` on
+        # the HUD even though IB had it populated at $384k.
         try:
             from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
             ib_account = (_pushed_ib_data or {}).get("account") or {}
@@ -427,7 +435,14 @@ async def get_bot_status():
                     ib_account, "AvailableFunds", buying_power
                 )
                 if net_liq and net_liq > 0:
-                    account = {
+                    # 2026-02-13 (v19.34.141) — MERGE (not replace) so that
+                    # a partial executor account (e.g. equity-only) keeps
+                    # whatever fields it provided while still gaining
+                    # buying_power/cash/available_funds from IB. Pre-fix
+                    # we wholesale-replaced, which actually worked in the
+                    # original "executor empty" case but masked the new
+                    # "executor partial" failure mode.
+                    ib_fields = {
                         "equity": float(net_liq),
                         "portfolio_value": float(net_liq),
                         "buying_power": float(buying_power),
@@ -437,6 +452,16 @@ async def get_bot_status():
                         "source": "ib_pushed",
                         "connected": is_pusher_connected(),
                     }
+                    # Prefer executor fields if they were non-empty/non-zero;
+                    # otherwise fall back to IB. Equity is the only one
+                    # we let the executor override unconditionally (matches
+                    # the pre-fix behaviour where executor-equity won when
+                    # present).
+                    merged = dict(ib_fields)
+                    for k, v in (account or {}).items():
+                        if v not in (None, 0, 0.0, ""):
+                            merged[k] = v
+                    account = merged
         except Exception as e:
             logger.debug(f"IB pushed account fallback failed: {e}")
     

@@ -429,20 +429,40 @@ async def get_positions():
         positions = await service.get_our_positions()
 
         # ── Closed trades today (v19.31.7) ────────────────────────
-        # Anchor the day on US/Eastern open (close enough for the
-        # operator's intent: "trades the bot closed during today's
-        # RTH session"). Worker time is UTC; subtract 4-5h depending
-        # on DST. Use a permissive 16h-ago window so a Sunday-evening
-        # check still catches Friday's last close in case the operator
-        # is reviewing.
+        # 2026-02-13 (v19.34.141) — Anchor "today" at midnight America/New_York
+        # via zoneinfo. Pre-fix:
+        #   today_start_et = now_utc.replace(hour=0) - timedelta(hours=4)
+        # was OFF BY 8-9 HOURS — `now_utc.replace(hour=0)` is today's UTC
+        # midnight, then subtracting 4h lands at *yesterday* 20:00 UTC =
+        # yesterday 3-4 PM ET. Result: every close that fired during
+        # yesterday's RTH or after-hours session was summed into today's
+        # realized PnL. On a portfolio of "DAY 2" overnight survivors,
+        # that bleeds the entire prior session's close-out PnL into
+        # today's number. Operator-reported: app showed −$4,378.49 vs IB's
+        # −$442.54 (a $3,936 ghost loss) — exact match for "yesterday's
+        # full afternoon of closes included".
         from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        try:
+            from zoneinfo import ZoneInfo  # py 3.9+
+            _ET = ZoneInfo("America/New_York")
+        except Exception:
+            _ET = None
         from server import db as _db
         now_utc = _dt.now(_tz.utc)
-        # 09:30 ET == 13:30 UTC (during DST) / 14:30 UTC (winter).
-        # Pick the lower bound at "midnight ET ≈ 04:00 UTC" so we
-        # cover the whole trading day plus pre-market.
-        today_start_et = now_utc.replace(hour=0, minute=0, second=0,
-                                         microsecond=0) - _td(hours=4)
+        if _ET is not None:
+            now_et = now_utc.astimezone(_ET)
+            today_midnight_et = now_et.replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            today_start_et = today_midnight_et.astimezone(_tz.utc)
+        else:
+            # Defensive fallback (no zoneinfo): convert today's UTC midnight
+            # forward by ET's offset (4h DST / 5h winter). Conservative —
+            # assume DST so we don't accidentally include the prior session.
+            today_start_et = (
+                now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+                + _td(hours=4)
+            )
         cutoff_iso = today_start_et.isoformat()
 
         closed_today_raw = []
@@ -470,6 +490,17 @@ async def get_positions():
         # close-specific extras. Skip `_id` is already excluded above.
         closed_today = []
         total_realized_pnl = 0.0
+        # 2026-02-13 (v19.34.141) — Dedup closed trades before summing.
+        # The orphan reconciler, consolidator merge, and OCA-ext race
+        # paths can each produce a SECOND `closed` row for the same
+        # fill cluster — same symbol, same fill_time / fill_price /
+        # exit_price / shares — and the prior implementation summed
+        # both, inflating realized losses. Apply the exact same dedup
+        # key the /api/diagnostic/realized-pnl-audit endpoint uses so
+        # the displayed total and the audit total stay in lock-step.
+        _seen_keys: set = set()
+        _dropped_dupe_count = 0
+        _dropped_dupe_pnl = 0.0
         # v19.34.1 (2026-05-04) — pusher account fallback so legacy
         # closed_today rows that pre-date v19.31.13 trade_type stamping
         # still chip PAPER/LIVE on the UI.
@@ -486,6 +517,23 @@ async def get_positions():
             pass
         for t in closed_today_raw:
             realized = float(t.get("realized_pnl") or t.get("net_pnl") or t.get("pnl") or 0)
+
+            # Dedup key — match the audit endpoint logic.
+            ft = t.get("fill_time") or t.get("entry_time")
+            if ft:
+                # ISO-coerce for stable comparisons across str / datetime rows.
+                if hasattr(ft, "isoformat"):
+                    ft = ft.isoformat()
+                _key = ("ft", t.get("symbol"), str(ft))
+            else:
+                _key = ("sig", t.get("symbol"), t.get("fill_price"),
+                        t.get("shares"), t.get("exit_price"))
+            if _key in _seen_keys:
+                _dropped_dupe_count += 1
+                _dropped_dupe_pnl += realized
+                continue
+            _seen_keys.add(_key)
+
             total_realized_pnl += realized
             row_trade_type = t.get("trade_type")
             if not row_trade_type or row_trade_type == "unknown":
@@ -542,6 +590,10 @@ async def get_positions():
             "closed_today_count": len(closed_today),
             "wins_today": wins_today,
             "losses_today": losses_today,
+            # v19.34.141 — dedup diagnostics so the operator can see
+            # whether realized was inflated by duplicate close rows.
+            "dropped_duplicate_closes": _dropped_dupe_count,
+            "dropped_duplicate_pnl": round(_dropped_dupe_pnl, 2),
         }
     except Exception as e:
         logger.error(f"Error getting positions: {e}")

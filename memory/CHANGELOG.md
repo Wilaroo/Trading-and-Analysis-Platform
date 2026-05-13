@@ -3,6 +3,76 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.141) — PnL display fixes: realized window + dedup + buying power
+
+Operator reported app showed **Realized −$4,378.49 / Unrealized +$153.16 /
+Buying Power `$—`** while IB ground-truth had **Realized −$442.54 /
+Unrealized +$232.88 / Buying Power $384,272.82**. Equity matched
+exactly ($222,939.43). Three orthogonal bugs identified and fixed:
+
+### Bug #1 — Realized PnL date window off by 8–9 hours (the $3,936 ghost)
+`routers/sentcom.py:444-446` used:
+```python
+today_start_et = now_utc.replace(hour=0) - timedelta(hours=4)
+```
+For `now_utc = 2026-02-13 15:31`, this evaluated to `2026-02-12 20:00 UTC`
+= **yesterday 3-4 PM ET** — middle of yesterday's RTH session. Every
+close fired during yesterday afternoon + after-hours was summed into
+"today's realized". On a portfolio of "DAY 2" overnight survivors,
+yesterday's close-out PnL was substantial, fully accounting for the
+$3,936 gap.
+
+Fix: zoneinfo-anchored ET midnight via
+`now_utc.astimezone(ZoneInfo("America/New_York"))` →
+`.replace(hour=0).astimezone(utc)`. DST-safe; will never drift again.
+Defensive fallback to `+ timedelta(hours=4)` (DST) if `zoneinfo`
+isn't available.
+
+### Bug #2 — Duplicate-close rows double-counted
+Same file summed `realized_pnl` for every closed row without dedup.
+Orphan reconciler, consolidator merge, and OCA-ext race paths each
+produce a second `closed` row for the same fill cluster; pre-fix
+both got summed.
+
+Fix: applied the same dedup key the
+`/api/diagnostic/realized-pnl-audit` endpoint uses — `(symbol, fill_time)`
+with fallback to `(symbol, fill_price, shares, exit_price)`. First row
+wins; subsequent matches are dropped from the sum. Response now exposes
+`dropped_duplicate_closes` count and `dropped_duplicate_pnl` so the
+operator can see at a glance how many phantom closes were silenced.
+
+### Bug #3 — Buying Power `$—` when executor returns partial data
+`routers/trading_bot.py:396` only fell through to the IB account
+fallback when `account.get("equity")` was empty. An executor that
+returned `{"equity": 222939}` (no buying_power) bypassed the IB
+fallback entirely, so `buying_power` never got populated and the
+HUD rendered `$—`.
+
+Fix:
+- Fallback condition now also fires when `buying_power` is missing/0.
+- When IB data is available, **merge** (not replace) into the executor
+  account — executor wins on any non-empty field, IB fills the gaps.
+  Result: equity from executor (or IB) + buying_power/cash/available_funds
+  from IB whenever the executor didn't supply them.
+
+### Bug #4 (reconciled-orphan $0 PnL) — DEFERRED
+Will be addressed in a follow-up that touches the reconciler path
+(higher-risk surface). The 5 auto-healed positions still display $0
+PnL on the V5 Open Positions panel until that fix ships.
+
+### Tests
+NEW `tests/test_pnl_display_fixes_v19_34_141.py` — 5 cases:
+- Yesterday afternoon close excluded from today's realized.
+- Duplicate close on same fill summed once.
+- Two genuinely-distinct closes both count (no false-positive dedup).
+- Buying-power merge: IB fills the gap when executor returns equity-only.
+- Falsy executor values (0 / "") don't clobber IB values.
+
+Full suite: **62 pytest cases pass** (5 new + 57 prior). Backend
+hot-reloads — no migration; the new HUD numbers will update on the
+next `/api/sentcom/positions` poll.
+
+
 ## 2026-02-13 (v19.34.140) — Mega-cap immunity + tier-aware unqualifiable threshold
 
 The 2026-05-12 04:42 UTC overnight-backfill burst nuked **47 of 50**
