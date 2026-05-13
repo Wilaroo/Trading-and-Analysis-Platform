@@ -4058,7 +4058,20 @@ class TradingBotService:
                 # traceable.
                 if _hb_counter % 4 == 0:
                     try:
-                        await self._naked_position_sweep()
+                        sweep_result = await self._naked_position_sweep()
+                        # v19.34.128 — proof-of-life: print the FIRST sweep's
+                        # outcome regardless of mode so the operator can
+                        # verify the loop is wired up. In paper mode this
+                        # surfaces `skipped_reason=non_live_mode:PAPER` so
+                        # the user knows the sweep is alive but inactive.
+                        # After the first, only print on activity (already
+                        # handled inside _naked_position_sweep).
+                        if _hb_counter == 4:
+                            print(
+                                f"[v127 naked-sweep] first sweep complete: "
+                                f"{sweep_result}",
+                                flush=True,
+                            )
                     except Exception as _sweep_err:
                         print(
                             f"[v127 naked-sweep] iteration crashed: {_sweep_err}",
