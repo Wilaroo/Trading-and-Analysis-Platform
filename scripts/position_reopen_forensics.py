@@ -47,13 +47,21 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     p.add_argument("--since", default=None,
                    help="HH:MM ET cutoff (default 15:30)")
+    p.add_argument("--symbols", default=None,
+                   help="comma-separated symbols to force-analyze "
+                        "(use when pusher cache is empty after-hours)")
     p.add_argument("--json", action="store_true", help="raw JSON")
     args = p.parse_args()
 
-    qs = f"?since_et={urllib.parse.quote(args.since)}" if args.since else ""
+    q = {}
+    if args.since:
+        q["since_et"] = args.since
+    if args.symbols:
+        q["symbols"] = args.symbols
+    qs = ("?" + urllib.parse.urlencode(q)) if q else ""
     url = f"{_backend()}/api/diagnostic/position-reopen-forensics{qs}"
     try:
-        with urllib.request.urlopen(url, timeout=15) as r:
+        with urllib.request.urlopen(url, timeout=30) as r:
             resp = json.loads(r.read().decode("utf-8"))
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -66,10 +74,11 @@ def main() -> int:
     print("=" * 78)
     print("Position-Reopen Forensics")
     print("=" * 78)
-    print(f"  generated_at : {resp.get('generated_at')}")
-    print(f"  cutoff_et    : {resp.get('cutoff_et')}")
+    print(f"  generated_at  : {resp.get('generated_at')}")
+    print(f"  cutoff_et     : {resp.get('cutoff_et')}")
+    print(f"  symbol_source : {resp.get('symbol_source')}")
     s = resp.get("summary") or {}
-    print(f"  summary      : "
+    print(f"  summary       : "
           f"REOPENED={s.get('REOPENED_BY_BOT', 0)} "
           f"ADOPTED={s.get('ADOPTED_FROM_IB', 0)} "
           f"BEFORE={s.get('STRATEGY_ENTRY_BEFORE_CUTOFF', 0)} "

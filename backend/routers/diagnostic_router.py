@@ -4448,6 +4448,7 @@ async def eod_preview() -> Dict[str, Any]:
 @router.get("/position-reopen-forensics")
 async def position_reopen_forensics(
     since_et: Optional[str] = None,
+    symbols: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Per-symbol verdict: was each currently-held IB position
     REOPENED by the bot via a fresh entry, or ADOPTED from existing
@@ -4458,13 +4459,20 @@ async def position_reopen_forensics(
     Query params:
       since_et — HH:MM ET (default today's 15:30). Anything entered or
                  reconciled AFTER this cutoff is flagged "recent".
+      symbols  — comma-separated list to force-analyze, e.g.
+                 `?symbols=RJF,ITT,STZ`. Useful when the pusher cache
+                 has been cleared (post-restart, after-hours) so the
+                 default IB-position-snapshot path returns empty.
 
-    For each non-zero IB position:
+    For each symbol (sourced from pusher cache OR `symbols` param OR
+    Mongo bot_trades fallback):
       • status               : OPEN / CLOSED / ADOPTED / UNKNOWN
       • verdict              : REOPENED_BY_BOT / ADOPTED_FROM_IB /
                                STRATEGY_ENTRY_BEFORE_CUTOFF / NO_BOT_RECORD
       • last_bot_trade       : most-recent bot_trades row (executed_at,
                                entered_by, setup_type, status)
+      • all_today_trades     : every bot_trades row for the symbol
+                               from today (chronological)
       • most_recent_fill_age : seconds since `executed_at`
       • is_reconciled        : `entered_by` starts with `reconciled_*`
       • is_recent_entry      : `executed_at` > since_et
@@ -4492,10 +4500,52 @@ async def position_reopen_forensics(
     cutoff_utc = cutoff_et.astimezone(timezone.utc)
 
     db = _get_db()
-    ib_positions = [
-        p for p in (_ib_position_snapshot() or [])
-        if isinstance(p, dict) and abs(float(p.get("position") or 0)) > 0
-    ]
+
+    # v19.34.152b — Three-tier symbol source:
+    #   1. Explicit `symbols=` query param (operator override; survives
+    #      pusher cache being cleared by backend restart).
+    #   2. IB pusher cache (default; reflects live broker state).
+    #   3. Mongo `bot_trades` rows with OPEN/PARTIAL status (last
+    #      resort for after-hours forensics when pusher is silent).
+    symbols_seed: List[Dict[str, Any]] = []
+    symbol_source = "pusher_cache"
+    if symbols:
+        symbol_source = "operator_explicit"
+        for s in symbols.split(","):
+            s_norm = s.strip().upper()
+            if s_norm:
+                symbols_seed.append({"symbol": s_norm, "position": None})
+    else:
+        ib_positions = [
+            p for p in (_ib_position_snapshot() or [])
+            if isinstance(p, dict) and abs(float(p.get("position") or 0)) > 0
+        ]
+        if ib_positions:
+            symbols_seed = ib_positions
+        elif db is not None:
+            # Pusher cache empty (post-restart, after-hours) —
+            # fall back to bot_trades for any symbol with an
+            # OPEN/PARTIAL row in the last 24h.
+            symbol_source = "mongo_fallback"
+            try:
+                cursor = await asyncio.to_thread(
+                    lambda: list(db.bot_trades.find(
+                        {"status": {"$in": [
+                            "open", "partial", "OPEN", "PARTIAL"
+                        ]}},
+                        {"_id": 0, "symbol": 1},
+                    ))
+                )
+                seen: set = set()
+                for r in cursor:
+                    s = (r.get("symbol") or "").upper()
+                    if s and s not in seen:
+                        seen.add(s)
+                        symbols_seed.append({"symbol": s, "position": None})
+            except Exception as e:
+                logger.warning(
+                    f"position-reopen-forensics mongo fallback failed: {e}"
+                )
 
     rows: List[Dict[str, Any]] = []
     summary = {
@@ -4505,12 +4555,12 @@ async def position_reopen_forensics(
         "NO_BOT_RECORD": 0,
     }
 
-    for p in ib_positions:
+    for p in symbols_seed:
         sym = (p.get("symbol") or "").upper()
         if not sym:
             continue
         try:
-            qty = float(p.get("position") or 0)
+            qty = float(p.get("position") or 0) if p.get("position") is not None else 0.0
         except (TypeError, ValueError):
             qty = 0.0
 
@@ -4644,6 +4694,7 @@ async def position_reopen_forensics(
         "success": True,
         "generated_at": now_utc.isoformat(),
         "cutoff_et": cutoff_et.isoformat(),
+        "symbol_source": symbol_source,
         "summary": summary,
         "rows": rows,
         "diagnosis": diagnosis,
