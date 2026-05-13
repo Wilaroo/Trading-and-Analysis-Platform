@@ -4439,3 +4439,189 @@ async def eod_preview() -> Dict[str, Any]:
         "ib_vs_bot_disagreement": disagreement,
         "notes": notes,
     }
+
+
+# ────────────────────────────────────────────────────────────────────
+# v19.34.152b — POSITION REOPEN FORENSICS
+# ────────────────────────────────────────────────────────────────────
+
+@router.get("/position-reopen-forensics")
+async def position_reopen_forensics(
+    since_et: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-symbol verdict: was each currently-held IB position
+    REOPENED by the bot via a fresh entry, or ADOPTED from existing
+    IB state by the reconciler? Designed for after-the-fact incident
+    forensics like 2026-05-13 (operator manually flattened ~3:57 PM,
+    saw the same 10 positions on IB at close, wanted to know which).
+
+    Query params:
+      since_et — HH:MM ET (default today's 15:30). Anything entered or
+                 reconciled AFTER this cutoff is flagged "recent".
+
+    For each non-zero IB position:
+      • status               : OPEN / CLOSED / ADOPTED / UNKNOWN
+      • verdict              : REOPENED_BY_BOT / ADOPTED_FROM_IB /
+                               STRATEGY_ENTRY_BEFORE_CUTOFF / NO_BOT_RECORD
+      • last_bot_trade       : most-recent bot_trades row (executed_at,
+                               entered_by, setup_type, status)
+      • most_recent_fill_age : seconds since `executed_at`
+      • is_reconciled        : `entered_by` starts with `reconciled_*`
+      • is_recent_entry      : `executed_at` > since_et
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo
+
+    now_utc = datetime.now(timezone.utc)
+    now_et = now_utc.astimezone(ZoneInfo("America/New_York"))
+
+    # Parse cutoff (default 15:30 ET today).
+    cutoff_et = None
+    try:
+        if since_et:
+            hh, mm = map(int, since_et.split(":"))
+        else:
+            hh, mm = 15, 30
+        cutoff_et = now_et.replace(
+            hour=hh, minute=mm, second=0, microsecond=0,
+        )
+    except Exception:
+        cutoff_et = now_et.replace(hour=15, minute=30, second=0, microsecond=0)
+    cutoff_utc = cutoff_et.astimezone(timezone.utc)
+
+    db = _get_db()
+    ib_positions = [
+        p for p in (_ib_position_snapshot() or [])
+        if isinstance(p, dict) and abs(float(p.get("position") or 0)) > 0
+    ]
+
+    rows: List[Dict[str, Any]] = []
+    summary = {
+        "REOPENED_BY_BOT": 0,
+        "ADOPTED_FROM_IB": 0,
+        "STRATEGY_ENTRY_BEFORE_CUTOFF": 0,
+        "NO_BOT_RECORD": 0,
+    }
+
+    for p in ib_positions:
+        sym = (p.get("symbol") or "").upper()
+        if not sym:
+            continue
+        try:
+            qty = float(p.get("position") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+
+        last_trade = None
+        if db is not None:
+            try:
+                # Latest bot_trade row for this symbol — regardless of status,
+                # we want the most recent execution timestamp.
+                last_trade = await asyncio.to_thread(
+                    lambda: db.bot_trades.find_one(
+                        {"symbol": sym},
+                        {"_id": 0, "id": 1, "symbol": 1, "status": 1,
+                         "executed_at": 1, "closed_at": 1, "entered_by": 1,
+                         "setup_type": 1, "close_at_eod": 1, "shares": 1,
+                         "remaining_shares": 1, "direction": 1,
+                         "entry_price": 1, "exit_price": 1, "close_reason": 1,
+                         "timeframe": 1},
+                        sort=[("executed_at", -1)],
+                    )
+                )
+            except Exception as e:
+                last_trade = {"_error": str(e)}
+
+        entered_by = (last_trade or {}).get("entered_by") or ""
+        is_reconciled = entered_by.startswith("reconciled_")
+        executed_at = (last_trade or {}).get("executed_at")
+        is_recent_entry = False
+        most_recent_fill_age = None
+        if executed_at:
+            try:
+                dt = datetime.fromisoformat(
+                    str(executed_at).replace("Z", "+00:00")
+                )
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                most_recent_fill_age = int((now_utc - dt).total_seconds())
+                is_recent_entry = dt >= cutoff_utc
+            except Exception:
+                pass
+
+        # Verdict logic.
+        if last_trade is None or last_trade.get("_error"):
+            verdict = "NO_BOT_RECORD"
+        elif is_recent_entry and not is_reconciled:
+            verdict = "REOPENED_BY_BOT"
+        elif is_recent_entry and is_reconciled:
+            verdict = "ADOPTED_FROM_IB"
+        elif is_reconciled:
+            verdict = "ADOPTED_FROM_IB"
+        else:
+            verdict = "STRATEGY_ENTRY_BEFORE_CUTOFF"
+
+        summary[verdict] = summary.get(verdict, 0) + 1
+
+        rows.append({
+            "symbol": sym,
+            "ib_qty": qty,
+            "ib_avg_cost": p.get("avgCost") or p.get("avg_cost"),
+            "ib_market_price": p.get("marketPrice") or p.get("market_price"),
+            "ib_unrealized_pnl": p.get("unrealizedPNL") or p.get("unrealized_pnl"),
+            "verdict": verdict,
+            "is_reconciled": is_reconciled,
+            "is_recent_entry": is_recent_entry,
+            "most_recent_fill_age_seconds": most_recent_fill_age,
+            "last_bot_trade": last_trade,
+        })
+
+    # Sort: most-recent fills first, so the "did the bot just reopen?" symbols
+    # rise to the top of the operator's printout.
+    rows.sort(
+        key=lambda r: r["most_recent_fill_age_seconds"]
+        if r["most_recent_fill_age_seconds"] is not None else 10**9
+    )
+
+    # Human-readable diagnosis.
+    diagnosis: List[str] = []
+    if summary["REOPENED_BY_BOT"] > 0:
+        sym_list = [r["symbol"] for r in rows if r["verdict"] == "REOPENED_BY_BOT"]
+        diagnosis.append(
+            f"🚨 {summary['REOPENED_BY_BOT']} symbol(s) appear to have been "
+            f"REOPENED by the bot after the cutoff ({since_et or '15:30'} ET): "
+            f"{sym_list}. Cross-check `entered_by` + `setup_type` to confirm "
+            "it's a strategy entry (not a reconciler artifact)."
+        )
+    if summary["ADOPTED_FROM_IB"] > 0:
+        diagnosis.append(
+            f"ℹ {summary['ADOPTED_FROM_IB']} symbol(s) were ADOPTED by the "
+            "reconciler from existing IB state (entered_by starts with "
+            "`reconciled_*`). The bot did NOT initiate a fresh trade — it "
+            "absorbed the position that was already on IB's books."
+        )
+    if summary["STRATEGY_ENTRY_BEFORE_CUTOFF"] > 0:
+        diagnosis.append(
+            f"✅ {summary['STRATEGY_ENTRY_BEFORE_CUTOFF']} symbol(s) entered "
+            f"via strategy BEFORE the cutoff — these are normal trades."
+        )
+    if summary["NO_BOT_RECORD"] > 0:
+        sym_list = [r["symbol"] for r in rows if r["verdict"] == "NO_BOT_RECORD"]
+        diagnosis.append(
+            f"⚠ {summary['NO_BOT_RECORD']} symbol(s) have NO bot_trade record "
+            f"despite a live IB position: {sym_list}. These are pure orphans "
+            "(manual TWS / external broker activity)."
+        )
+    if not rows:
+        diagnosis.append("No live IB positions to analyze.")
+
+    return {
+        "success": True,
+        "generated_at": now_utc.isoformat(),
+        "cutoff_et": cutoff_et.isoformat(),
+        "summary": summary,
+        "rows": rows,
+        "diagnosis": diagnosis,
+    }
