@@ -64,16 +64,24 @@ def main() -> int:
     print("IB Pusher Position Payload Health")
     print("=" * 70)
     print(f"  generated_at        : {resp.get('generated_at')}")
+    health = resp.get("health") or "unknown"
+    health_emoji = {"green": "🟢", "amber": "🟡", "red": "🔴",
+                    "unknown": "⚪"}.get(health, "⚪")
+    print(f"  health              : {health_emoji} {health.upper()}")
     print(f"  pusher_connected    : {resp.get('pusher_connected')}")
     print(f"  last_update         : {resp.get('last_update')}")
     print(f"  age_seconds         : {resp.get('age_seconds')}")
     print(f"  pushes/min (recent) : {resp.get('pushes_per_minute_recent')}")
     print(f"  total pushes (sess) : {resp.get('total_pushes_since_start')}")
     print(f"  total positions     : {resp.get('total_positions')}")
+    print(
+        f"  live positions      : {resp.get('live_position_count')}"
+        f"   (ghost zero-qty: {resp.get('ghost_zero_position_count')})"
+    )
 
     print()
     print("=" * 70)
-    print("Per-field health (across all pushed positions)")
+    print("Per-field health (LIVE positions only — ghosts excluded)")
     print("=" * 70)
     field_stats = resp.get("field_stats") or {}
     print(
@@ -112,8 +120,9 @@ def main() -> int:
         print("Per-symbol drill-down")
         print("=" * 70)
         for r in resp.get("per_symbol") or []:
+            tag = " 👻" if r.get("is_ghost") else ""
             print(
-                f"  {r['symbol']:<6} pos={r.get('position'):<6} "
+                f"  {r['symbol']:<6}{tag} pos={r.get('position'):<6} "
                 f"avgCost={r.get('avgCost')} "
                 f"marketPrice={r.get('marketPrice')} "
                 f"unrPNL={r.get('unrealizedPNL')}"

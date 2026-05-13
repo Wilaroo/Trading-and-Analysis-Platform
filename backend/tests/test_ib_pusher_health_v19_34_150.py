@@ -99,7 +99,7 @@ async def test_partial_unrealized_missing(monkeypatch):
     from routers.diagnostic_router import ib_pusher_position_health
     resp = await ib_pusher_position_health()
     joined = " | ".join(resp["diagnosis"])
-    assert "2/4 positions have `unrealizedPNL=0`" in joined
+    assert "2/4 live positions have `unrealizedPNL=0`" in joined
     assert "per-symbol subscription" in joined.lower()
 
 
@@ -283,3 +283,145 @@ async def test_non_numeric_field_treated_as_missing(monkeypatch):
     assert fs["avgCost"]["missing_count"] == 1
     assert fs["marketPrice"]["missing_count"] == 1
     assert fs["unrealizedPNL"]["zero_count"] == 1
+
+
+
+# ────────────────────────────────────────────────────────────────────
+# 3. v19.34.150b — Ghost (position==0) row filtering & health enum
+# ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_zero_position_ghost_excluded_from_field_stats(monkeypatch):
+    """IB Gateway leaves position=0 ghost records after intraday closes.
+    They have a live marketPrice but all PnL fields are 0. Field stats
+    must compute presence_pct against LIVE positions only, not ghosts.
+    """
+    import time
+    positions = [
+        # 4 real live positions — fully populated
+        {"symbol": "A", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+        {"symbol": "B", "position": -50, "avgCost": 30.0,
+         "marketPrice": 29.0, "unrealizedPNL": 50.0},
+        {"symbol": "C", "position": 200, "avgCost": 20.0,
+         "marketPrice": 21.0, "unrealizedPNL": 200.0},
+        {"symbol": "D", "position": 75, "avgCost": 100.0,
+         "marketPrice": 101.0, "unrealizedPNL": 75.0},
+        # 2 ghosts — closed intraday, IB still streaming the quote
+        {"symbol": "GHOST1", "position": 0, "avgCost": 0,
+         "marketPrice": 12.5, "marketValue": 0, "unrealizedPNL": 0},
+        {"symbol": "GHOST2", "position": 0, "avgCost": 0,
+         "marketPrice": 55.0, "marketValue": 0, "unrealizedPNL": 0},
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+
+    assert resp["total_positions"] == 6
+    assert resp["live_position_count"] == 4
+    assert resp["ghost_zero_position_count"] == 2
+
+    fs = resp["field_stats"]
+    assert fs["unrealizedPNL"]["non_zero_count"] == 4
+    assert fs["unrealizedPNL"]["zero_count"] == 0
+    assert fs["unrealizedPNL"]["presence_pct"] == 100.0
+    assert fs["marketPrice"]["non_zero_count"] == 4
+    assert fs["marketPrice"]["presence_pct"] == 100.0
+
+    joined = " | ".join(resp["diagnosis"])
+    assert "reqAccountUpdates" not in joined or "DEAD" not in joined
+
+
+@pytest.mark.asyncio
+async def test_ghost_rows_tagged_in_per_symbol(monkeypatch):
+    """per_symbol still surfaces ghosts (for visibility) but flags them."""
+    import time
+    positions = [
+        {"symbol": "LIVE", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+        {"symbol": "GHOST", "position": 0, "avgCost": 0,
+         "marketPrice": 25.0, "unrealizedPNL": 0},
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    rows = {r["symbol"]: r for r in resp["per_symbol"]}
+    assert rows["LIVE"]["is_ghost"] is False
+    assert rows["GHOST"]["is_ghost"] is True
+
+
+@pytest.mark.asyncio
+async def test_all_ghost_no_live_distinct_diagnosis(monkeypatch):
+    """Pusher has records but zero are live → distinct, not "callback dead"."""
+    import time
+    positions = [
+        {"symbol": "G1", "position": 0, "avgCost": 0,
+         "marketPrice": 10.0, "unrealizedPNL": 0},
+        {"symbol": "G2", "position": 0, "avgCost": 0,
+         "marketPrice": 20.0, "unrealizedPNL": 0},
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["live_position_count"] == 0
+    assert resp["ghost_zero_position_count"] == 2
+    joined = " | ".join(resp["diagnosis"]).lower()
+    assert "ghost" in joined or "no live" in joined
+    assert "reqaccountupdates" not in joined
+
+
+@pytest.mark.asyncio
+async def test_health_enum_green(monkeypatch):
+    import time
+    positions = [
+        {"symbol": f"S{i}", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0}
+        for i in range(5)
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["health"] == "green"
+
+
+@pytest.mark.asyncio
+async def test_health_enum_red_when_account_updates_dead(monkeypatch):
+    import time
+    positions = [
+        {"symbol": f"S{i}", "position": 100, "avgCost": 50.0,
+         "marketPrice": 0, "unrealizedPNL": 0}
+        for i in range(5)
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["health"] == "red"
+
+
+@pytest.mark.asyncio
+async def test_health_enum_amber_on_partial(monkeypatch):
+    import time
+    positions = [
+        {"symbol": "GOOD", "position": 100, "avgCost": 50.0,
+         "marketPrice": 51.0, "unrealizedPNL": 100.0},
+        {"symbol": "BAD", "position": 50, "avgCost": 30.0,
+         "marketPrice": 0, "unrealizedPNL": 0},
+    ]
+    _patch_pusher(monkeypatch, positions=positions,
+                  recent_ts=[time.time()] * 60)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["health"] == "amber"
+
+
+@pytest.mark.asyncio
+async def test_health_enum_unknown_when_disconnected(monkeypatch):
+    _patch_pusher(monkeypatch, positions=[], connected=False)
+    from routers.diagnostic_router import ib_pusher_position_health
+    resp = await ib_pusher_position_health()
+    assert resp["health"] == "unknown"

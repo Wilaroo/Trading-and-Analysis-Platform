@@ -4,7 +4,49 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-02-13 (v19.34.150) — IB Pusher Portfolio-Health Diagnostic
+## 2026-02-13 (v19.34.150b) — Ghost-row filter + Portfolio Health Pill
+
+Operator ran `diagnose_ib_pusher.py` on DGX after v19.34.150 shipped.
+Pusher was **healthy** — `pusher_connected=True`, `marketPrice` 100%
+present, `unrealizedPNL` 84% present. The "21/21 unrealizedPNL=0"
+audit warning was a transient state during a reconnect.
+
+What it surfaced: 4/25 records had `position=0` — they're IB Gateway
+**zero-quantity ghost rows** left over after intraday closes
+(IB keeps streaming the quote until daily reset). Counting them in
+field-stat aggregates falsely depressed `presence_pct` and re-fired
+the partial-failure heuristic. They were also bloating the
+position-PnL audit's pusher_unrealized_missing counter.
+
+### Fix (`routers/diagnostic_router.py::ib_pusher_position_health`)
+- Skip `position == 0` rows when aggregating field_stats.
+- Tag ghosts with `is_ghost: True` in `per_symbol` (still surfaced
+  for visibility, but visually distinct).
+- New response fields: `live_position_count`, `ghost_zero_position_count`.
+- Heuristics now compare against `live_total`, not the raw count.
+- Pre-computed `health` enum (`green` / `amber` / `red` / `unknown`)
+  so the V5 UI doesn't re-implement the classifier.
+- New diagnosis: "No live positions — pusher has N zero-quantity
+  ghost rows only" (distinct from full callback death).
+
+### Added — V5 status strip
+- `frontend/src/hooks/usePortfolioHealth.js` — shared 30s poller for
+  the new diagnostic endpoint.
+- `frontend/src/components/sentcom/v5/PortfolioHealthPill.jsx` — compact
+  always-visible pill next to `<PusherHeartbeatTile />`. Color-coded
+  by `health` enum; hover reveals full diagnosis list + ghost count.
+  Catches the next pusher-quality outage at a glance, no SSH needed.
+- `scripts/diagnose_ib_pusher.py` now prints `health`, `live`, and
+  `ghost` counts, and marks 👻 ghosts in `--show-symbols` drill-down.
+
+### Tests
+7 new pytest cases (`test_zero_position_ghost_excluded_from_field_stats`,
+`test_ghost_rows_tagged_in_per_symbol`, `test_all_ghost_no_live_distinct_diagnosis`,
+`test_health_enum_green/red/amber/unknown_when_disconnected`).
+**Total suite: 19/19 passing.**
+
+
+
 
 Operator observed audit warning: `21/21 IB position(s) had
 unrealizedPNL=0 in the pusher cache` — meaning `updatePortfolio()`

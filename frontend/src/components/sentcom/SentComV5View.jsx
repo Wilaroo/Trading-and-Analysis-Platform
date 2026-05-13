@@ -39,6 +39,7 @@ import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5, IbLiveChipV5, ScannerPausedBannerV5 } from './v5/SafetyV5';
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
+import { PortfolioHealthPill } from './v5/PortfolioHealthPill';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
 import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
@@ -558,6 +559,9 @@ export const SentComV5View = ({
         </PanelErrorBoundary>
         <PanelErrorBoundary label="pusher-heartbeat" compact>
           <PusherHeartbeatTile />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="portfolio-health" compact>
+          <PortfolioHealthPill />
         </PanelErrorBoundary>
         <PanelErrorBoundary label="strategy-mix" compact>
           <StrategyMixCard />

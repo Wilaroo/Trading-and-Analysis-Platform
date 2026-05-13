@@ -3699,11 +3699,39 @@ async def ib_pusher_position_health():
 
     per_symbol: List[Dict[str, Any]] = []
     total = len(positions)
+
+    # v19.34.150b (2026-02-13) — IB Gateway leaves zero-quantity ghost
+    # records in `reqPositions()` after intraday closes (until daily
+    # reset). They carry a live `marketPrice` (IB keeps streaming the
+    # quote) but all PnL fields are 0 because there's nothing held.
+    # Including them in field_stats falsely depresses presence_pct
+    # and re-triggers the "all zeros" partial-failure heuristic.
+    # Strategy: tag them as `is_ghost: True` in per_symbol for
+    # visibility, but exclude from the field aggregates and the
+    # heuristic total. Surface a separate `ghost_zero_position_count`.
+    ghost_zero_position_count = 0
+    live_total = 0
     for p in positions:
         if not isinstance(p, dict):
             continue
         sym = p.get("symbol", "?")
-        row = {"symbol": sym}
+        try:
+            pos_qty = float(p.get("position") or 0)
+        except (TypeError, ValueError):
+            pos_qty = 0.0
+        is_ghost = abs(pos_qty) < 0.0001
+        row = {"symbol": sym, "is_ghost": is_ghost}
+        if is_ghost:
+            ghost_zero_position_count += 1
+            for f in INTEREST_FIELDS:
+                v = p.get(f)
+                try:
+                    row[f] = float(v) if v not in (None, "") else None
+                except (TypeError, ValueError):
+                    row[f] = v
+            per_symbol.append(row)
+            continue
+        live_total += 1
         for f in INTEREST_FIELDS:
             v = p.get(f)
             if v is None or v == "":
@@ -3727,42 +3755,50 @@ async def ib_pusher_position_health():
             row[f] = vf
         per_symbol.append(row)
 
-    # Compute presence %.
+    # Compute presence % against LIVE positions only (ghosts excluded).
     for f, stats in field_stats.items():
         stats["presence_pct"] = round(
-            (stats["non_zero_count"] / total * 100.0) if total > 0 else 0.0, 1
+            (stats["non_zero_count"] / live_total * 100.0) if live_total > 0 else 0.0, 1
         )
 
     # Diagnose. The heuristic mirrors common IB Gateway failure modes.
     diagnosis: List[str] = []
 
-    # Special case: pusher has NEVER pushed any positions. This is a
-    # distinct condition from "pusher is unhealthy" — emit it first so
-    # downstream heartbeat warnings don't drown it out.
-    if total == 0:
-        diagnosis.append(
-            "Pusher has NEVER pushed positions (or the snapshot was "
-            "reset by a recent backend restart and the pusher hasn't "
-            "reconnected yet)."
-        )
+    # Special case: pusher has NEVER pushed any LIVE positions. Ghost
+    # records alone don't count — if all rows are zero-quantity, the
+    # operator effectively has no open positions. This is a distinct
+    # condition from "pusher is unhealthy".
+    if live_total == 0:
+        if total == 0:
+            diagnosis.append(
+                "Pusher has NEVER pushed positions (or the snapshot was "
+                "reset by a recent backend restart and the pusher hasn't "
+                "reconnected yet)."
+            )
+        else:
+            diagnosis.append(
+                f"No live positions — pusher has {total} zero-quantity "
+                "ghost rows only (IB Gateway hasn't cleared closed "
+                "trades from the snapshot; resets on next session)."
+            )
 
     suspect_account_updates_dead = (
-        total > 0
+        live_total > 0
         and field_stats["unrealizedPNL"]["non_zero_count"] == 0
         and field_stats["marketPrice"]["non_zero_count"] == 0
     )
     suspect_market_price_only = (
-        total > 0
+        live_total > 0
         and field_stats["unrealizedPNL"]["non_zero_count"] == 0
         and field_stats["marketPrice"]["non_zero_count"] > 0
     )
     suspect_avg_cost_dead = (
-        total > 0
+        live_total > 0
         and field_stats["avgCost"]["non_zero_count"] == 0
     )
     suspect_partial = (
-        total > 0
-        and 0 < field_stats["unrealizedPNL"]["non_zero_count"] < total
+        live_total > 0
+        and 0 < field_stats["unrealizedPNL"]["non_zero_count"] < live_total
     )
 
     if suspect_account_updates_dead:
@@ -3791,11 +3827,11 @@ async def ib_pusher_position_health():
             "AFTER the gateway has been connected for ≥10s."
         )
     if suspect_partial:
-        n_missing = total - field_stats["unrealizedPNL"]["non_zero_count"]
+        n_missing = live_total - field_stats["unrealizedPNL"]["non_zero_count"]
         diagnosis.append(
-            f"🟡 {n_missing}/{total} positions have `unrealizedPNL=0`. "
-            "Likely a per-symbol subscription issue, NOT a global "
-            "callback failure. Affected symbols below."
+            f"🟡 {n_missing}/{live_total} live positions have "
+            "`unrealizedPNL=0`. Likely a per-symbol subscription "
+            "issue, NOT a global callback failure. Affected symbols below."
         )
     if pushes_per_min is not None and pushes_per_min < 5:
         diagnosis.append(
@@ -3813,6 +3849,27 @@ async def ib_pusher_position_health():
             "expected fields are present and non-zero."
         )
 
+    # v19.34.150b — Pre-computed `health` enum so the V5 UI pill
+    # doesn't have to re-implement the heuristic. Mapping mirrors the
+    # color tokens used elsewhere:
+    #   green  → all live positions fully populated, heartbeat OK
+    #   amber  → partial / market-price-only / slow heartbeat
+    #   red    → account-updates dead, avg-cost dead, or stale push
+    #   unknown→ no pushes ever / pusher_connected False
+    if not connected or total == 0:
+        health = "unknown"
+    elif suspect_account_updates_dead or suspect_avg_cost_dead or (
+        age_seconds is not None and age_seconds > 60
+    ):
+        health = "red"
+    elif suspect_partial or suspect_market_price_only or (
+        pushes_per_min is not None and pushes_per_min < 5
+        and _push_count_total > 5  # don't flag fresh sessions
+    ):
+        health = "amber"
+    else:
+        health = "green"
+
     return {
         "success": True,
         "generated_at": now.isoformat(),
@@ -3822,7 +3879,10 @@ async def ib_pusher_position_health():
         "pushes_per_minute_recent": pushes_per_min,
         "total_pushes_since_start": _push_count_total,
         "total_positions": total,
+        "live_position_count": live_total,
+        "ghost_zero_position_count": ghost_zero_position_count,
         "field_stats": field_stats,
         "per_symbol": per_symbol,
         "diagnosis": diagnosis,
+        "health": health,
     }
