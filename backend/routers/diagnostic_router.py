@@ -1449,29 +1449,39 @@ def realized_pnl_audit(
         key=lambda x: x["realized_sum"],
     )
 
-    # 6) Duplicate-close detection — group by symbol + fill_time
+    # 6) Duplicate-close detection — group by symbol + fill_signature.
+    # v19.34.134 — fill_time is often empty in older rows. Fall back to
+    # (symbol, fill_price, shares, exit_price) as the dedup key so the
+    # AJG/FLEX every-5-min duplicate pattern surfaces correctly.
     by_fill: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
     for r in live_only:
-        if r["symbol"] and r["fill_time"]:
-            by_fill[(r["symbol"], r["fill_time"])].append(r)
+        if not r["symbol"]:
+            continue
+        if r["fill_time"]:
+            key = ("ft", r["symbol"], r["fill_time"])
+        else:
+            key = ("sig", r["symbol"], r["fill_price"], r["shares"], r["exit_price"])
+        by_fill[key].append(r)
     duplicate_groups = []
     duplicate_pnl_impact = 0.0
-    for (sym, ft), group in by_fill.items():
-        if len(group) > 1:
-            # Keep first row as canonical, others are suspected dupes
-            dupe_realized_sum = sum(float(r["realized_pnl"] or 0) for r in group[1:])
-            dupe_net_sum = sum(float(r["net_pnl"] or 0) for r in group[1:])
-            duplicate_pnl_impact += dupe_net_sum or dupe_realized_sum
-            duplicate_groups.append({
-                "symbol": sym,
-                "fill_time": ft,
-                "row_count": len(group),
-                "trade_ids": [r["trade_id"] for r in group],
-                "realized_pnls": [r["realized_pnl"] for r in group],
-                "net_pnls": [r["net_pnl"] for r in group],
-                "exit_reasons": [r["exit_reason"] for r in group],
-                "suspected_dupe_pnl": dupe_net_sum or dupe_realized_sum,
-            })
+    for (key, group) in [(k, g) for k, g in by_fill.items() if len(g) > 1]:
+        # Sort by closed_at so the EARLIEST close is treated as canonical
+        group = sorted(group, key=lambda r: r["closed_at"] or "")
+        dupe_realized_sum = sum(float(r["realized_pnl"] or 0) for r in group[1:])
+        dupe_net_sum = sum(float(r["net_pnl"] or 0) for r in group[1:])
+        duplicate_pnl_impact += dupe_net_sum or dupe_realized_sum
+        duplicate_groups.append({
+            "key": list(key),
+            "symbol": group[0]["symbol"],
+            "row_count": len(group),
+            "first_closed_at": group[0]["closed_at"],
+            "last_closed_at":  group[-1]["closed_at"],
+            "trade_ids": [r["trade_id"] for r in group],
+            "realized_pnls": [r["realized_pnl"] for r in group],
+            "net_pnls": [r["net_pnl"] for r in group],
+            "exit_reasons": list({r["exit_reason"] for r in group}),
+            "suspected_dupe_pnl": round(dupe_net_sum or dupe_realized_sum, 2),
+        })
 
     # 7) Suspicious close reasons that look like fake-PnL writers
     SUSPICIOUS = {

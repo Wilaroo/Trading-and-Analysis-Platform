@@ -1023,6 +1023,47 @@ class PositionReconciler:
                         })
                         continue
 
+                    # v19.34.134 — recently-closed-symbol cooldown.
+                    # FIXES the AJG/FLEX duplicate-close bug (2026-05-13):
+                    # IB carries a position the bot didn't open → reconciler
+                    # adopts it → manage loop immediately fires `stop_loss`
+                    # close because price is already below the default
+                    # 2% stop → close_trade writes a `bot_trades` row but
+                    # the IB position survives (orphan-attach failed, or
+                    # the local close doesn't sell at IB). 5 min later
+                    # this reconciler sees the IB position again →
+                    # re-adopts → re-closes → fresh fake -$80 / -$694
+                    # `realized_pnl` row. Compounded over 7 hours = $3.5k+
+                    # of phantom realized loss vs TWS.
+                    #
+                    # Fix: after ANY close_trade fires for a symbol, bot
+                    # stamps `bot._recently_closed_symbols[sym] = ts` with
+                    # a 30-min TTL. We skip re-adoption inside that window
+                    # so the IB position is left for the operator to
+                    # manually clear (or for the next reconcile pass once
+                    # IB confirms it's gone).
+                    rcs = getattr(bot, "_recently_closed_symbols", None) or {}
+                    closed_at = rcs.get(sym)
+                    if closed_at is not None:
+                        try:
+                            age_s = (datetime.now(timezone.utc) - closed_at).total_seconds()
+                        except Exception:
+                            age_s = None
+                        if age_s is not None and 0 <= age_s < 1800:
+                            report["skipped"].append({
+                                "symbol": sym,
+                                "reason": "recently_closed_cooldown",
+                                "cooldown_remaining_s": round(1800 - age_s, 0),
+                                "closed_at": closed_at.isoformat(),
+                            })
+                            logger.info(
+                                "[v19.34.134 RECONCILE] %s skipped — closed %.0fs ago, "
+                                "%.0fs remaining in 30-min cooldown. Prevents the "
+                                "AJG/FLEX duplicate-close loop.",
+                                sym, age_s, 1800 - age_s,
+                            )
+                            continue
+
                     ib_pos = ib_pos_map.get(sym)
                     if not ib_pos:
                         report["skipped"].append({

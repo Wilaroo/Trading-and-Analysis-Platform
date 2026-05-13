@@ -1896,6 +1896,29 @@ class PositionManager:
             del bot._open_trades[trade_id]
             bot._closed_trades.append(trade)
 
+            # v19.34.134 — stamp recently-closed-symbol cooldown.
+            # Reconciler reads this to skip re-adopting symbols closed
+            # within 30 min. Fixes the AJG/FLEX duplicate-close loop:
+            # IB carries a position the bot didn't open → reconciler
+            # adopts it → manage loop fires `stop_loss` close → IB
+            # position survives → 5 min later reconciler re-adopts →
+            # re-closes → fresh fake -$80 / -$694 row each cycle.
+            try:
+                rcs = getattr(bot, "_recently_closed_symbols", None)
+                if rcs is None:
+                    bot._recently_closed_symbols = {}
+                    rcs = bot._recently_closed_symbols
+                rcs[trade.symbol] = datetime.now(timezone.utc)
+                # Lazy cleanup: prune entries older than 1h
+                stale = [
+                    k for k, v in rcs.items()
+                    if (datetime.now(timezone.utc) - v).total_seconds() > 3600
+                ]
+                for k in stale:
+                    rcs.pop(k, None)
+            except Exception as _rcs_err:
+                logger.debug(f"[v134] recently_closed_symbols stamp failed: {_rcs_err}")
+
             # v19.34.130 — Feed alert_outcomes for grading + learning loop.
             # This close path (operator-flatten / EOD-close / stop hit)
             # computes net_pnl inline via _apply_commission but pre-v130
