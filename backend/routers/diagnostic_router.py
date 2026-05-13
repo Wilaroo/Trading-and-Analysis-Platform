@@ -2979,6 +2979,42 @@ async def position_pnl_audit(
             total_ib_pnl += ib["unrealized"]
             total_bot_pnl += bt["unrealized"]
             continue
+        # 2026-02-13 (v19.34.142d) — QTY_MAGNITUDE_MISMATCH. Detect when
+        # bot and IB agree on direction but disagree on share COUNT.
+        # Example from live audit: bot tracked KMB=144 shares while IB
+        # held 55 — that's 89 phantom shares the bot would have tried
+        # to close on a stop, overshooting IB and creating an UNMANAGED
+        # SHORT position. This is the same root cause that triggered
+        # the "unmanaged shares" incident from the handoff.
+        ib_mag = abs(ib["qty"])
+        bt_mag = abs(bt["qty"])
+        qty_delta = abs(ib_mag - bt_mag)
+        # Tolerance: 1 share OR 1% of IB qty, whichever is larger
+        # (lets us ignore micro-fractional-share artifacts but still
+        # catch real drift).
+        qty_tolerance = max(1.0, ib_mag * 0.01)
+        if qty_delta > qty_tolerance:
+            rows.append({
+                "symbol": sym,
+                "ib_qty": ib["qty"], "bot_qty": bt["qty"],
+                "qty_delta": round(qty_delta, 2),
+                "ib_unrealized": round(ib["unrealized"], 2),
+                "bot_unrealized": round(bt["unrealized"], 2),
+                "delta_abs": abs(ib["unrealized"] - bt["unrealized"]),
+                "delta_pct": (
+                    abs(ib["unrealized"] - bt["unrealized"])
+                    / max(abs(ib["unrealized"]), 1.0) * 100.0
+                ),
+                "pnl_source": bt.get("pnl_source"),
+                "ib_pnl_source": ib.get("ib_pnl_source"),
+                "bot_source": bt.get("source"),
+                "verdict": "QTY_MAGNITUDE_MISMATCH",
+            })
+            bucket.setdefault("qty_magnitude_mismatch", 0)
+            bucket["qty_magnitude_mismatch"] += 1
+            total_ib_pnl += ib["unrealized"]
+            total_bot_pnl += bt["unrealized"]
+            continue
         # Both sides have it — compare.
         ib_pnl = ib["unrealized"]
         bot_pnl = bt["unrealized"]
