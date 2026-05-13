@@ -3,6 +3,72 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.147) — ICLN-style avg_cost drift detection
+
+Operator's 2026-05-13 17:34 UTC live audit revealed **ICLN drift $145.31 (180%)
+on `pnl_source=quote_last`** — exactly the case the v19.34.146 hint
+called out ("delta cluster exceeds ~$100 per row → investigate avg_cost").
+Built the diagnostic surface so the operator doesn't need a second tool.
+
+### Per-row additions
+Every audit row whose bot has an `entry_price` AND IB has an `avgCost`
+now carries:
+```json
+{
+  "bot_entry_price": 28.50,
+  "ib_avg_cost":     28.95,
+  "avg_cost_drift_per_share": 0.45,
+  "avg_cost_drift_explains_pct": 96.7   // % of delta_abs explained
+}
+```
+Attached unconditionally when both prices are present (useful even at
+zero-drift as a "costs agree" confirmation).
+
+### Action line + summary
+- New action line (fires when ≥1 drift row's PnL gap is ≥60%
+  attributable to avg_cost mismatch):
+  > 🟡 N drift row(s) explained ≥60% by avg_cost mismatch. Worst:
+  > ICLN — bot.entry=$28.50, ib.avg_cost=$28.95, Δ=$0.45/sh
+  > (96.7% of $145.31 PnL gap). Likely cause: commissions / borrow
+  > fee / ETF distribution / corp-action adjustment not propagated
+  > to bot ledger. Run `POST /api/trading-bot/reconcile-share-drift`
+  > with the `recompute_cost_basis` flag (or manually reconcile via
+  > TWS Account Window).
+- New summary aggregate: `summary.avg_cost_drift_rows`.
+
+### Why this matters
+The v19.34.146 quote_last clustering hint correctly identified ICLN
+as "delta > $100, investigate avg_cost" — but the operator would have
+had to manually open the V5 row, copy `entry_price`, then open TWS
+Account Window for `avgCost`, then subtract. v19.34.147 collapses that
+loop to "open the audit, read ICLN's row". Same diagnostic, zero extra
+tooling.
+
+### Code-path placement
+Post-processing now runs BEFORE the actions builder (was after in
+v19.34.146, which silently disabled the new action line). Cross-row
+aggregates — `pnl_source_breakdown_*`, `partial_close_count`,
+`stale_quote_count`, `avg_cost_drift_rows`, and the per-row
+`avg_cost_drift_explains_pct` field — are all computed in one pass
+right after row construction, so subsequent action logic reads
+fully-derived rows.
+
+### Tests
+`tests/test_audit_ux_enhancements_v19_34_146.py::TestAvgCostDriftDetection`
+— 6 new cases: ICLN happy path, zero-drift clean match, timing-skew
+non-trigger, summary count, action-line content (mentions ICLN +
+likely-cause + remediation), missing entry_price graceful degrade.
+
+### Verification script
+`scripts/verify_v19_34_145_partial_close_fix.py` now prints a
+"Top drift offenders" section: top 5 drift rows by Δ$, each tagged
+with `[avg_cost drift X/sh explains N%]` when the avg_cost block
+indicates a structural cause.
+
+**70/70 cumulative in-scope tests pass.**
+
+
+
 ## 2026-02-13 (v19.34.146) — Audit UX: partial-close info, drift clustering, quote-age passthrough
 
 Operator approved the ROADMAP enhancement after v19.34.145 confirmed

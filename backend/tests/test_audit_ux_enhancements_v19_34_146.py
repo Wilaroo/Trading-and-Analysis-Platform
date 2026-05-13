@@ -308,6 +308,7 @@ class TestPnLSourceBreakdown:
 # 3. quote-age passthrough (C)
 # ────────────────────────────────────────────────────────────────────
 
+
 class TestQuoteAgePassthrough:
 
     @pytest.mark.asyncio
@@ -345,19 +346,18 @@ class TestQuoteAgePassthrough:
             {"symbol": "A", "shares": 100, "remaining_shares": 100,
              "direction": "long", "pnl": 0.0,
              "pnl_source": "quote_last", "source": "bot",
-             "quote_age_s": 30},   # fresh
+             "quote_age_s": 30},
             {"symbol": "B", "shares": 100, "remaining_shares": 100,
              "direction": "long", "pnl": 0.0,
              "pnl_source": "quote_last", "source": "bot",
-             "quote_age_s": 150},  # stale
+             "quote_age_s": 150},
             {"symbol": "C", "shares": 100, "remaining_shares": 100,
              "direction": "long", "pnl": 0.0,
              "pnl_source": "quote_last", "source": "bot",
-             "quote_age_s": 600},  # very stale
+             "quote_age_s": 600},
         ])
         from routers.diagnostic_router import position_pnl_audit
         resp = await position_pnl_audit()
-        # 2 rows ≥ 120s.
         assert resp["summary"]["stale_quote_count"] == 2
 
     @pytest.mark.asyncio
@@ -377,3 +377,143 @@ class TestQuoteAgePassthrough:
         row = resp["rows"][0]
         assert "quote_age_s" not in row
         assert resp["summary"]["stale_quote_count"] == 0
+
+
+# ────────────────────────────────────────────────────────────────────
+# 4. avg_cost drift (v19.34.147)
+# ────────────────────────────────────────────────────────────────────
+
+class TestAvgCostDriftDetection:
+    """v19.34.147 — when a drift row's PnL gap is mostly explained by
+    bot.entry_price diverging from ib.avgCost (commissions, borrow
+    fees, ETF distributions, corp actions), the audit must surface
+    that diagnosis inline instead of just reporting the PnL gap."""
+
+    @pytest.mark.asyncio
+    async def test_icln_avg_cost_drift_explains_most_of_pnl_gap(
+        self, monkeypatch
+    ):
+        """Live ICLN scenario: bot's entry_price = $28.50 but IB's
+        avgCost = $28.95 (after ETF distribution adjustment).
+        100 shares * $0.45/sh = $45 PnL gap from avg_cost alone."""
+        _patch(monkeypatch, [
+            {"symbol": "ICLN", "position": 100, "avgCost": 28.95,
+             "marketPrice": 29.00, "unrealizedPNL": 5.0},
+        ], [
+            {"symbol": "ICLN", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 50.0,
+             "entry_price": 28.50,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        row = resp["rows"][0]
+        assert row["verdict"] in ("DRIFT_ABS", "DRIFT_PCT")
+        assert row["bot_entry_price"] == pytest.approx(28.50, abs=0.01)
+        assert row["ib_avg_cost"] == pytest.approx(28.95, abs=0.01)
+        assert row["avg_cost_drift_per_share"] == pytest.approx(0.45, abs=0.01)
+        assert row.get("avg_cost_drift_explains_pct", 0) >= 99.0
+
+    @pytest.mark.asyncio
+    async def test_clean_match_zero_avg_cost_drift(self, monkeypatch):
+        """When bot.entry_price == ib.avgCost, no
+        avg_cost_drift_explains_pct field is attached."""
+        _patch(monkeypatch, [
+            {"symbol": "OK", "position": 100, "avgCost": 100.0,
+             "marketPrice": 101.0, "unrealizedPNL": 100.0},
+        ], [
+            {"symbol": "OK", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 100.0,
+             "entry_price": 100.0,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        row = resp["rows"][0]
+        assert row.get("avg_cost_drift_per_share", 0) == 0
+        assert "avg_cost_drift_explains_pct" not in row
+
+    @pytest.mark.asyncio
+    async def test_timing_skew_does_not_fire_avg_cost_action(
+        self, monkeypatch
+    ):
+        """KMB-style timing skew: bot.entry == ib.avgCost — the
+        avg_cost action line must NOT fire."""
+        _patch(monkeypatch, [
+            {"symbol": "KMB", "position": 100, "avgCost": 135.0,
+             "marketPrice": 137.5, "unrealizedPNL": 250.0},
+        ], [
+            {"symbol": "KMB", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 245.0,
+             "entry_price": 135.0,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        joined = " | ".join(resp["actions"])
+        assert "avg_cost mismatch" not in joined.lower()
+
+    @pytest.mark.asyncio
+    async def test_summary_avg_cost_drift_rows_count(self, monkeypatch):
+        _patch(monkeypatch, [
+            {"symbol": "ICLN", "position": 100, "avgCost": 28.95,
+             "marketPrice": 29.00, "unrealizedPNL": 5.0},
+            {"symbol": "EWZ", "position": 50, "avgCost": 30.40,
+             "marketPrice": 30.50, "unrealizedPNL": 5.0},
+            {"symbol": "CLEAN", "position": 100, "avgCost": 50.0,
+             "marketPrice": 50.50, "unrealizedPNL": 50.0},
+        ], [
+            {"symbol": "ICLN", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 50.0, "entry_price": 28.50,
+             "pnl_source": "quote_last", "source": "bot"},
+            {"symbol": "EWZ", "shares": 50, "remaining_shares": 50,
+             "direction": "long", "pnl": 30.0, "entry_price": 30.00,
+             "pnl_source": "quote_last", "source": "bot"},
+            {"symbol": "CLEAN", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 50.0, "entry_price": 50.0,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        assert resp["summary"]["avg_cost_drift_rows"] == 2
+
+    @pytest.mark.asyncio
+    async def test_action_line_names_worst_offender(self, monkeypatch):
+        _patch(monkeypatch, [
+            {"symbol": "ICLN", "position": 100, "avgCost": 28.95,
+             "marketPrice": 29.00, "unrealizedPNL": 5.0},
+        ], [
+            {"symbol": "ICLN", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 50.0,
+             "entry_price": 28.50,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        joined = " | ".join(resp["actions"])
+        assert "ICLN" in joined
+        assert "avg_cost" in joined.lower()
+        assert ("commission" in joined.lower()
+                or "etf distribution" in joined.lower()
+                or "corp-action" in joined.lower())
+        assert ("reconcile-share-drift" in joined.lower()
+                or "tws" in joined.lower())
+
+    @pytest.mark.asyncio
+    async def test_missing_entry_price_skips_block(self, monkeypatch):
+        """Legacy bot row without entry_price must not crash; block
+        is simply absent."""
+        _patch(monkeypatch, [
+            {"symbol": "LEG", "position": 100, "avgCost": 50.0,
+             "marketPrice": 51.0, "unrealizedPNL": 100.0},
+        ], [
+            {"symbol": "LEG", "shares": 100, "remaining_shares": 100,
+             "direction": "long", "pnl": 100.0,
+             "pnl_source": "quote_last", "source": "bot"},
+        ])
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        row = resp["rows"][0]
+        assert "avg_cost_drift_per_share" not in row
+        assert "bot_entry_price" not in row
+

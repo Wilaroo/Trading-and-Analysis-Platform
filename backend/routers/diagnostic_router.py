@@ -2842,6 +2842,49 @@ def _quote_age_block(bt: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
+def _avg_cost_drift_block(
+    bt: Optional[Dict[str, Any]],
+    ib: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """v19.34.147 — when a drift row's cause is suspected to be
+    `avg_cost` mismatch (commissions, borrow, ETF distribution),
+    surface the per-share gap so the operator can verify without
+    a second tool. Always attaches when both prices are present.
+
+    Output:
+      {
+        "bot_entry_price": 28.50,
+        "ib_avg_cost":     28.95,
+        "avg_cost_drift_per_share": 0.45,
+        "avg_cost_drift_explains_pct": 86.2  # % of total PnL delta
+      }
+    The `_explains_pct` is computed against the row's `delta_abs`
+    (PnL gap). If it's near 100%, the entire drift is avg_cost
+    drift, not quote-timing skew."""
+    if not bt or not ib:
+        return {}
+    bot_entry = bt.get("entry_price")
+    ib_avg = ib.get("avg_cost")
+    if bot_entry is None or ib_avg is None:
+        return {}
+    try:
+        bot_entry = float(bot_entry)
+        ib_avg = float(ib_avg)
+    except (TypeError, ValueError):
+        return {}
+    if bot_entry <= 0 or ib_avg <= 0:
+        return {}
+    per_share = abs(ib_avg - bot_entry)
+    # Always attach the comparison (useful even when it's near zero
+    # as confirmation that the costs DO agree). Caller decides
+    # whether to flag.
+    return {
+        "bot_entry_price": round(bot_entry, 4),
+        "ib_avg_cost": round(ib_avg, 4),
+        "avg_cost_drift_per_share": round(per_share, 4),
+    }
+
+
 
 @router.get("/position-pnl-audit")
 async def position_pnl_audit(
@@ -2988,6 +3031,17 @@ async def position_pnl_audit(
             # the audit shows "ah, this drift's quote is 240s old".
             "quote_age_s": r.get("quote_age_s"),
             "quote_state": r.get("quote_state"),
+            # 2026-02-13 (v19.34.147) — entry vs avg_cost passthrough
+            # for the ICLN-style "drift cluster exceeds $100" path.
+            # When bot.entry_price diverges from IB.avgCost beyond a
+            # few cents, the bot's PnL math anchors on a stale cost
+            # basis (commissions / borrow / ETF distribution not
+            # propagated). Surface both so the audit row can compute
+            # an avg_cost_drift_per_share number.
+            "entry_price": (
+                float(r.get("entry_price"))
+                if r.get("entry_price") is not None else None
+            ),
         }
 
     # 3) Build the diff.
@@ -3158,7 +3212,43 @@ async def position_pnl_audit(
             "verdict": verdict,
             **_partial_close_block(bt),
             **_quote_age_block(bt),
+            **_avg_cost_drift_block(bt, ib),
         })
+
+    # 2026-02-13 (v19.34.146/147) — post-process rows to compute
+    # cross-row aggregates BEFORE building the actions list (actions
+    # reference these fields). Keeps the contract: every action_line
+    # decision reads from `rows` after all derived fields are in.
+    pnl_source_breakdown_all: Dict[str, int] = {}
+    pnl_source_breakdown_drift: Dict[str, int] = {}
+    partial_close_count = 0
+    stale_quote_count = 0
+    avg_cost_drift_rows = 0
+    for r in rows:
+        src = r.get("pnl_source") or "unknown"
+        pnl_source_breakdown_all[src] = pnl_source_breakdown_all.get(src, 0) + 1
+        if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT"):
+            pnl_source_breakdown_drift[src] = (
+                pnl_source_breakdown_drift.get(src, 0) + 1
+            )
+        if r.get("partial_close_detected"):
+            partial_close_count += 1
+        qa = r.get("quote_age_s")
+        if isinstance(qa, (int, float)) and qa >= 120:
+            stale_quote_count += 1
+        per_share = r.get("avg_cost_drift_per_share") or 0
+        qty = abs(r.get("ib_qty") or 0) or abs(r.get("bot_qty") or 0)
+        if per_share > 0.01 and qty > 0:
+            implied_pnl_delta = per_share * qty
+            delta_abs = r.get("delta_abs") or 0
+            if delta_abs > 0:
+                r["avg_cost_drift_explains_pct"] = round(
+                    min(100.0, implied_pnl_delta / delta_abs * 100.0), 1
+                )
+            else:
+                r["avg_cost_drift_explains_pct"] = 0.0
+            if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT"):
+                avg_cost_drift_rows += 1
 
     # 4) Actions.
     actions: List[str] = []
@@ -3294,6 +3384,35 @@ async def position_pnl_audit(
                     "no dominant cause; likely noise from manage-tick "
                     "timing rather than a systemic issue."
                 )
+    # 2026-02-13 (v19.34.147) — avg_cost drift action line. When a
+    # drift row's PnL gap is mostly (≥60%) explained by a per-share
+    # avg_cost mismatch, surface the worst offender + its likely
+    # cause (commissions / ETF distribution / corp-action gap).
+    avg_cost_offenders = [
+        r for r in rows
+        if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT")
+        and (r.get("avg_cost_drift_explains_pct") or 0) >= 60.0
+    ]
+    if avg_cost_offenders:
+        worst_avg = max(
+            avg_cost_offenders,
+            key=lambda r: r.get("avg_cost_drift_per_share") or 0,
+        )
+        actions.append(
+            f"🟡 {len(avg_cost_offenders)} drift row(s) "
+            f"explained ≥60% by avg_cost mismatch. Worst: "
+            f"{worst_avg['symbol']} — "
+            f"bot.entry=${worst_avg.get('bot_entry_price')}, "
+            f"ib.avg_cost=${worst_avg.get('ib_avg_cost')}, "
+            f"Δ=${worst_avg.get('avg_cost_drift_per_share')}/sh "
+            f"({worst_avg.get('avg_cost_drift_explains_pct')}% of "
+            f"${worst_avg.get('delta_abs')} PnL gap). Likely cause: "
+            f"commissions / borrow fee / ETF distribution / "
+            f"corp-action adjustment not propagated to bot ledger. "
+            f"Run `POST /api/trading-bot/reconcile-share-drift` "
+            f"with the `recompute_cost_basis` flag (or manually "
+            f"reconcile via TWS Account Window)."
+        )
     # 2026-02-13 (v19.34.146) — partial-close info line. When N rows
     # carry a `partial_close_detected` block, surface a friendly
     # summary so the operator can mentally tag "scaled-out winner"
@@ -3331,26 +3450,9 @@ async def position_pnl_audit(
             "this persists."
         )
 
-    # 2026-02-13 (v19.34.146) — pnl_source breakdown across ALL rows
-    # for the operator's at-a-glance "where is drift coming from"
-    # diagnostic. Counts every row's `pnl_source`, plus a separate
-    # bucket scoped to drift rows only.
-    pnl_source_breakdown_all: Dict[str, int] = {}
-    pnl_source_breakdown_drift: Dict[str, int] = {}
-    partial_close_count = 0
-    stale_quote_count = 0
-    for r in rows:
-        src = r.get("pnl_source") or "unknown"
-        pnl_source_breakdown_all[src] = pnl_source_breakdown_all.get(src, 0) + 1
-        if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT"):
-            pnl_source_breakdown_drift[src] = (
-                pnl_source_breakdown_drift.get(src, 0) + 1
-            )
-        if r.get("partial_close_detected"):
-            partial_close_count += 1
-        qa = r.get("quote_age_s")
-        if isinstance(qa, (int, float)) and qa >= 120:
-            stale_quote_count += 1
+    # v19.34.146 — drift-cluster + partial-close action lines are
+    # appended further up; the summary aggregates already computed
+    # above flow through to the response payload unchanged.
 
     return {
         "success": True,
@@ -3383,6 +3485,12 @@ async def position_pnl_audit(
             # v19.34.146 — count of rows with stale quotes (≥120s old).
             # Helps the SIVR-style PusherRotation investigation.
             "stale_quote_count": stale_quote_count,
+            # v19.34.147 — count of DRIFT rows whose `bot.entry_price`
+            # diverges from `ib.avgCost` by more than 1¢ per share.
+            # Useful for diagnosing ICLN-style "drift exceeds $100"
+            # cases where the cause is commission / ETF distribution
+            # / corp-action propagation rather than quote-timing skew.
+            "avg_cost_drift_rows": avg_cost_drift_rows,
         },
         "actions": actions,
     }

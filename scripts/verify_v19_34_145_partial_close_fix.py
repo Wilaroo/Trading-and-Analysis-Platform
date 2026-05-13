@@ -106,6 +106,9 @@ def main() -> int:
     sq = summary.get("stale_quote_count", 0)
     if sq:
         print(f"  stale_quote_rows   : {sq}  (quote_age_s ≥ 120 — investigate PusherRotation)")
+    ac = summary.get("avg_cost_drift_rows", 0)
+    if ac:
+        print(f"  avg_cost_drift_rows: {ac}  (bot.entry_price ≠ ib.avgCost by >1¢/sh)")
     src_drift = summary.get("pnl_source_breakdown_drift") or {}
     if src_drift:
         breakdown = ", ".join(f"{k}={v}" for k, v in
@@ -127,6 +130,42 @@ def main() -> int:
         for a in actions:
             # Wrap long lines at ~80 char width for legibility.
             print(f"  • {a}")
+
+    # v19.34.147 — top drift offenders with avg_cost diagnostic. Lets
+    # the operator see at a glance which rows are PnL-noise vs
+    # commission/ETF/corp-action drift.
+    drift_rows = [r for r in rows
+                  if r.get("verdict") in ("DRIFT_ABS", "DRIFT_PCT")]
+    if drift_rows:
+        print()
+        print("=" * 60)
+        print(f"Top drift offenders ({len(drift_rows)} drift row(s))")
+        print("=" * 60)
+        ordered = sorted(drift_rows,
+                         key=lambda r: -(r.get("delta_abs") or 0))
+        for r in ordered[:5]:
+            explains = r.get("avg_cost_drift_explains_pct")
+            tag = ""
+            if explains is not None and explains >= 60:
+                tag = (
+                    f" [avg_cost drift "
+                    f"{r.get('avg_cost_drift_per_share')}/sh "
+                    f"explains {explains}%]"
+                )
+            elif explains is not None and explains > 0:
+                tag = f" [avg_cost partial {explains}%]"
+            print(
+                f"  {r['symbol']:<6} Δ${r['delta_abs']:<7} "
+                f"({r['delta_pct']:.1f}%) "
+                f"bot_qty={r.get('bot_qty')} ib_qty={r.get('ib_qty')} "
+                f"src={r.get('pnl_source')}"
+                f"{tag}"
+            )
+            if r.get("bot_entry_price") and r.get("ib_avg_cost"):
+                print(
+                    f"         entry=${r['bot_entry_price']} "
+                    f"avg_cost=${r['ib_avg_cost']}"
+                )
 
     print()
     print("=" * 60)
