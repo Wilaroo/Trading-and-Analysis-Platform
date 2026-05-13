@@ -413,7 +413,11 @@ class PositionConsolidator:
                 s.remaining_shares = 0
                 # PnL=0 because canonical absorbs ALL the open exposure;
                 # the unrealized loss/gain remains on canonical's books.
+                # v19.34.130 — explicitly zero net_pnl too. Pre-v130 only
+                # realized_pnl was zeroed, leaving stale net_pnl from prior
+                # writes to leak into the kill-switch's realized sum.
                 s.realized_pnl = 0.0
+                s.net_pnl = 0.0
                 s.unrealized_pnl = 0.0
                 s.close_reason = "consolidated_v19_34_42"
                 s.closed_at = now_iso
@@ -458,6 +462,7 @@ class PositionConsolidator:
                                 "status": "closed",
                                 "remaining_shares": 0,
                                 "realized_pnl": 0.0,
+                                "net_pnl": 0.0,
                                 "unrealized_pnl": 0.0,
                                 "close_reason": "consolidated_v19_34_42",
                                 "closed_at": s.closed_at,

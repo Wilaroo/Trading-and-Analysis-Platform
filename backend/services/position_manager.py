@@ -1896,6 +1896,25 @@ class PositionManager:
             del bot._open_trades[trade_id]
             bot._closed_trades.append(trade)
 
+            # v19.34.130 — Feed alert_outcomes for grading + learning loop.
+            # This close path (operator-flatten / EOD-close / stop hit)
+            # computes net_pnl inline via _apply_commission but pre-v130
+            # skipped the alert_outcomes write. Result: setup-winrate-
+            # breakdown never saw these closes. Fire-and-forget.
+            try:
+                from services.pnl_compute import _record_alert_outcome_bestEffort
+                _record_alert_outcome_bestEffort(
+                    trade,
+                    reason,
+                    {"realized_pnl": float(getattr(trade, "realized_pnl", 0) or 0),
+                     "net_pnl":      float(getattr(trade, "net_pnl",      0) or 0),
+                     "shares":       int(getattr(trade, "shares", 0) or 0)},
+                    float(getattr(trade, "exit_price", 0) or 0),
+                    "executor_close_v19_34_130",
+                )
+            except Exception as _ao_err:
+                logger.debug(f"[v130] alert_outcomes write skipped: {_ao_err}")
+
             # 2026-04-30 v19.13 — release internal stop-manager state
             # for this trade id (small mem-leak fix; was accumulating
             # closed-trade ids in `_last_resnap_at` indefinitely).

@@ -651,25 +651,23 @@ class PositionReconciler:
 
             trade = bot._open_trades[trade_id]
 
-            # Move to closed trades
+            # v19.34.130 — Use apply_close_pnl for: commission subtraction
+            # (pre-v130 net_pnl stayed at 0 on phantom closes), alert_outcomes
+            # write (learning loop signal), and exit_price_source audit.
+            # Inline PnL math removed — single source of truth via pnl_compute.
+            from services.pnl_compute import apply_close_pnl
+            phantom_exit_price = (
+                trade.current_price if (trade.current_price and trade.current_price > 0)
+                else trade.fill_price
+            )
+            apply_close_pnl(
+                trade,
+                reason=f"phantom_close:{reason}",
+                exit_price=phantom_exit_price,
+            )
             trade.status = TradeStatus.CLOSED
             trade.exit_time = datetime.now(timezone.utc)
             trade.exit_reason = reason
-
-            # We don't know the actual exit price, use current price if available or fill price
-            if trade.current_price and trade.current_price > 0:
-                trade.exit_price = trade.current_price
-            else:
-                trade.exit_price = trade.fill_price  # Assume breakeven if no price
-
-            # Calculate final P&L
-            if trade.direction == TradeDirection.LONG:
-                trade.realized_pnl = (trade.exit_price - trade.fill_price) * trade.remaining_shares
-            else:
-                trade.realized_pnl = (trade.fill_price - trade.exit_price) * trade.remaining_shares
-
-            trade.unrealized_pnl = 0
-            trade.remaining_shares = 0
 
             # Move from open to closed
             del bot._open_trades[trade_id]
@@ -682,15 +680,18 @@ class PositionReconciler:
                 "exit_price": trade.exit_price,
                 "exit_reason": trade.exit_reason,
                 "realized_pnl": trade.realized_pnl,
+                "net_pnl": trade.net_pnl,
                 "unrealized_pnl": 0,
-                "remaining_shares": 0
+                "remaining_shares": 0,
+                "closed_at": trade.closed_at,
+                "close_reason": trade.close_reason,
             }
             await asyncio.to_thread(
                 bot._db.bot_trades.update_one,
                 {"id": trade_id}, {"$set": update_doc}
             )
 
-            logger.info(f"Closed phantom trade {trade.symbol} ({trade_id}): reason={reason}, P&L=${trade.realized_pnl:.2f}")
+            logger.info(f"Closed phantom trade {trade.symbol} ({trade_id}): reason={reason}, P&L=${trade.realized_pnl:.2f} (net=${trade.net_pnl:.2f})")
 
             return {
                 "success": True,

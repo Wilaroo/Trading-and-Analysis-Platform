@@ -3,6 +3,75 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.130) — PnL coverage gap audit (3 close paths leaking)
+
+**Pre-market audit** uncovered 3 close paths bypassing
+`pnl_compute.apply_close_pnl`, each leaking something:
+
+### Leak #1 — `position_manager.close_trade` (operator-flatten / EOD-close / stop hit)
+- Computed `net_pnl` correctly inline via `_apply_commission`
+- ❌ **Skipped `alert_outcomes` write** → setup-winrate-breakdown never
+  saw operator/EOD closes → learning loop missed signal
+- **Fix**: After existing inline math, call
+  `_record_alert_outcome_bestEffort` with the trade's current
+  `realized_pnl` / `net_pnl` / `shares` / `exit_price`. Fire-and-forget.
+
+### Leak #2 — `position_reconciler.close_phantom_position`
+- Inline PnL math with **NO commission subtraction** → `net_pnl`
+  stayed at 0 forever
+- ❌ No `alert_outcomes` write
+- ❌ No `exit_price_source` audit breadcrumb
+- **Fix**: Replaced inline math with `apply_close_pnl(trade,
+  reason=f"phantom_close:{reason}", exit_price=current_or_fill)`.
+  Single source of truth. Mongo `$set` now also includes `net_pnl`
+  and `close_reason`.
+
+### Leak #3 — `position_consolidator` sibling close on merge
+- Sibling `realized_pnl` zeroed correctly
+- ❌ `net_pnl` NEVER zeroed → if a sibling had a stale net_pnl from
+  a prior partial close, it leaked into the kill-switch's
+  daily-realized sum after merge
+- **Fix**: Explicitly `s.net_pnl = 0.0` (both in-memory and in the
+  mongo-direct fallback `$set`).
+
+### Tests
+
+`tests/test_pnl_coverage_gaps_v19_34_130.py` — 3 cases:
+- `close_trade` block fires `_record_alert_outcome_bestEffort`
+- `apply_close_pnl` correctly subtracts commissions on phantom path
+- Consolidator zeros both `realized_pnl` AND `net_pnl` on siblings
+
+48 regression tests pass across pnl_compute, consolidator, lifecycle,
+naked-sweep, bracket-lifecycle, runaway-prevention suites.
+
+### Why this matters
+
+Pre-v130, the daily PnL kill-switch could under-report total realized
+loss on days with phantom closes or consolidations, because some
+close paths wrote stale or zero `net_pnl` into bot_trades. The same
+gap also meant the v124 setup-winrate-breakdown endpoint missed
+sliced trade outcomes. After v130, all 3 close paths produce
+schema-consistent rows in `bot_trades` and `alert_outcomes` — single
+source of truth.
+
+### Sub-finding: Timezone audit
+
+Spot-check across services/* and routers/*:
+- ✅ Trading-hour gates use `America/New_York` consistently
+  (market_state, opportunity_evaluator, circuit_breaker, setup_grading,
+  trade_context)
+- ✅ DB writes use `datetime.now(timezone.utc).isoformat()`
+- ⚠️ 2× `datetime.utcnow()` in `routers/scoring.py:108, 141` —
+  deprecated, returns naive datetime. Only used in API response
+  timestamps, non-critical. Tracked in P2.
+- ⚠️ 118× `datetime.now()` (no tz) across non-critical paths —
+  logging, id-gen, monotonic-timeout-loops. None in trade-state
+  decisions.
+
+No timezone bugs blocking market open.
+
+
+
 ## 2026-02-12 (v19.34.129) — Naked-sweep rewired to pusher-relay 3-tier resolver
 
 **Operator-verified failure**: post-v127, naked-sweep returned
