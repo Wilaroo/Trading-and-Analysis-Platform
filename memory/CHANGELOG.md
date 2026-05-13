@@ -3,6 +3,46 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.132) — Honest "Scan" HUD sublabel
+
+Operator was reading the "Scan: 325 hits" tile as "we only scanned 325
+symbols". Actually that big number is **scanner alerts today**, not
+symbols-scanned-per-cycle. The previous sublabel ("15m · 1000 symbols")
+reinforced the confusion by saying "1000 symbols" without explaining it
+was the universe size, not the scan count.
+
+### Fix
+
+`SentComV5View.jsx`:
+- Added 20s poll of `/api/diagnostic/scan-cycle-stats` → state
+  `scanCycleStats`
+- Overrode `scanSub` prop to render the real numbers:
+
+  Before: `15m · 1000 symbols`
+  After:  `227/cyc · 957/1500 lifetime · wave 4/8 ✓`
+
+  Where:
+  - `227/cyc`      → symbols scanned in the **last cycle** (the actual answer to "how many am I scanning right now?")
+  - `957/1500 lifetime` → unique symbols visited since restart / total qualified universe (the rotation-coverage proof)
+  - `wave 4/8`     → current Tier-3 wave position (rotation health)
+  - `✓` / `~` / `!` / `✕` → verdict marker (healthy / warming_up / coverage_lag / rotation_stuck)
+
+Falls back to the legacy timeframe label if `/scan-cycle-stats`
+is unavailable (e.g., during boot or backend down).
+
+### Why this fixes the recurring "why only 325?!" question
+
+The big number on the Scan tile is still alerts-today (it's a useful
+operator number). But the sub-line now shows what the operator actually
+wanted to see: real-time coverage health. Looking at the sub-line, they
+can verify at-a-glance:
+
+- `lifetime` ≈ `qualified_total` ⇒ rotation visiting full universe ✓
+- `wave X/8` advancing every minute ⇒ Tier-3 rotation is alive ✓
+- Verdict mark ⇒ no need to curl /scan-cycle-stats anymore
+
+
+
 ## 2026-02-12 (v19.34.131) — Scanner coverage diagnostic (the 325-cap question)
 
 Operator question: HUD shows scanner only ever scans 325 symbols when the

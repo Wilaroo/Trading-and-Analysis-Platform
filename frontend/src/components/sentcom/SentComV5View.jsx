@@ -16,7 +16,7 @@
  * All V5 components live in `./v5/`. Existing panels are left untouched so
  * the `?v4=1` escape hatch keeps working. Zero backend changes.
  */
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
 
 import { ChartPanel } from './panels/ChartPanel';
 import { ChatInput } from './panels/ChatInput';
@@ -271,6 +271,34 @@ export const SentComV5View = ({
     );
   }, [focusedSymbol, selectedPosition, positions]);
 
+  // v19.34.132 — Honest "Scan" tile sublabel. Pre-v132 the sublabel
+  // showed bar-size/timeframe and the operator misread the big number
+  // ("325 hits") as "symbols scanned this cycle". It's actually
+  // scanner-alerts-today. This poll surfaces the real coverage stats
+  // from /api/diagnostic/scan-cycle-stats so the sub-line is honest:
+  //   "234/cyc · 957/1500 lifetime · wave 4/8 healthy"
+  const [scanCycleStats, setScanCycleStats] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const API = process.env.REACT_APP_BACKEND_URL;
+    if (!API) return undefined;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API}/api/diagnostic/scan-cycle-stats`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!cancelled) setScanCycleStats(j);
+      } catch (_e) {
+        /* network blips ignored — next tick retries */
+      }
+    };
+    tick();
+    const id = setInterval(tick, 20000);  // 20s — matches scan cadence + 1
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   const counts = derivePipelineCounts({
     status,
     setups,
@@ -368,7 +396,31 @@ export const SentComV5View = ({
       {/* 1. Top-bar Pipeline HUD */}
       <PipelineHUDV5
         scanCount={counts.scan}
-        scanSub={counts.scan_sub}
+        scanSub={(() => {
+          // v19.34.132 — honest sublabel pulled from
+          // /api/diagnostic/scan-cycle-stats. Falls back to legacy
+          // (timeframe/universe) when the diagnostic is unavailable.
+          const s = scanCycleStats;
+          if (!s || !s.enhanced_scanner) return counts.scan_sub;
+          const enh = s.enhanced_scanner || {};
+          const uni = s.universe || {};
+          const ws  = s.wave_scanner || {};
+          const perCycle = enh.symbols_scanned_last_cycle ?? 0;
+          const lifetime = enh.lifetime_unique_symbols_scanned ?? 0;
+          const qualified = uni.qualified_total ?? null;
+          const wave = ws.current_wave ?? 0;
+          const totalWaves = ws.total_waves ?? 1;
+          const verdict = s.verdict || 'unknown';
+          const verdictMark = (
+            verdict === 'healthy'        ? '✓' :
+            verdict === 'warming_up'     ? '~' :
+            verdict === 'coverage_lag'   ? '!' :
+            verdict === 'wave_rotation_stuck' ? '✕' :
+            '·'
+          );
+          const denom = qualified ? `/${qualified}` : '';
+          return `${perCycle}/cyc · ${lifetime}${denom} lifetime · wave ${wave}/${totalWaves} ${verdictMark}`;
+        })()}
         evalCount={counts.eval}
         evalSub={counts.eval_sub}
         orderCount={counts.order}
