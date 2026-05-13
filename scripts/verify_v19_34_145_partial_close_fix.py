@@ -117,6 +117,17 @@ def main() -> int:
     print(f"  bot_total          : ${totals.get('bot_unrealized'):>10}")
     print(f"  delta              : ${totals.get('delta'):>10}")
 
+    # v19.34.146 — surface every action line so the operator sees the
+    # source-specific remediation hint inline.
+    if actions:
+        print()
+        print("=" * 60)
+        print("Audit actions")
+        print("=" * 60)
+        for a in actions:
+            # Wrap long lines at ~80 char width for legibility.
+            print(f"  • {a}")
+
     print()
     print("=" * 60)
     print(f"Watched symbols ({', '.join(sorted(watch))})")

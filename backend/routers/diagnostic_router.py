@@ -3248,6 +3248,18 @@ async def position_pnl_audit(
                         "loop or check IB pusher L1 subscription "
                         "(IB_PUSHER_L1_AUTO_TOP_N) for affected symbols."
                     ),
+                    "quote_last": (
+                        "bot is using LIVE L1 `last` from the pusher — "
+                        "quote feed is healthy. The drift here is "
+                        "timing skew between bot's quote_last and IB's "
+                        "updatePortfolio().marketPrice (different price "
+                        "feeds tick at slightly different cadence). "
+                        "Normal noise UNLESS the delta cluster exceeds "
+                        "~$100 per row; in that case investigate whether "
+                        "the bot's avg_cost has drifted from IB's "
+                        "avgCost (commissions / borrow / corp-action "
+                        "adjustments not propagated to the bot ledger)."
+                    ),
                     "quote_close": (
                         "live `last` is missing; rows are valued off "
                         "prior close. Pusher may not be streaming L1 "

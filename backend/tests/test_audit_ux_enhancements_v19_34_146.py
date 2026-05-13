@@ -273,6 +273,37 @@ class TestPnLSourceBreakdown:
         assert "cluster" not in joined.lower()
 
 
+    @pytest.mark.asyncio
+    async def test_quote_last_cluster_explains_timing_skew(self, monkeypatch):
+        """v19.34.146 follow-up: when all drift rows cluster on
+        `quote_last`, the hint must call it "timing skew between bot
+        quote_last and IB marketPrice" rather than the generic
+        "investigate the cluster". This matches the operator's live
+        DGX audit where 10/10 drifts shared quote_last."""
+        ib_pos, bot_rows = [], []
+        for i in range(10):
+            sym = f"Q{i:02d}"
+            ib_pos.append({
+                "symbol": sym, "position": 100, "avgCost": 100.0,
+                "marketPrice": 102.0, "unrealizedPNL": 200.0,
+            })
+            bot_rows.append({
+                "symbol": sym, "shares": 100, "remaining_shares": 100,
+                "direction": "long", "pnl": 100.0,
+                "pnl_source": "quote_last", "source": "bot",
+            })
+        _patch(monkeypatch, ib_pos, bot_rows)
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        joined = " | ".join(resp["actions"])
+        assert "quote_last" in joined
+        assert ("timing skew" in joined.lower()
+                or "different price feeds" in joined.lower())
+        # The remediation note explicitly says "normal noise" unless
+        # delta > $100 per row.
+        assert "normal noise" in joined.lower() or "100" in joined
+
+
 # ────────────────────────────────────────────────────────────────────
 # 3. quote-age passthrough (C)
 # ────────────────────────────────────────────────────────────────────
