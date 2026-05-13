@@ -3,6 +3,106 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.123) — PnL Accuracy + Continuous Kill-Switch + RJF Runaway Killer
+
+Three structural fixes for the Feb 2026 -$25k incident. Each was top
+of the post-mortem list (#0, #1, #2 from v19.34.121 session).
+
+### #0 — PnL accuracy on EVERY close path (the bombshell fix)
+
+Pre-v123 only `position_manager.close_trade()` computed `realized_pnl`/
+`net_pnl` on close. The other 5 close paths silently set
+`status=CLOSED` and `exit_price` without computing PnL. Result:
+~90% of closed `bot_trades` had `net_pnl: 0 / null`. Every downstream
+consumer (`_daily_stats`, kill-switch, grading, learning loop, Closed
+Today panel) read this stale zero.
+
+**New module `services/pnl_compute.py`** — single source of truth:
+- `compute_close_pnl(...)` pure-math helper (direction-aware,
+  commission-aware, deterministic rounding)
+- `apply_close_pnl(trade, reason, exit_price=None)` write-back helper
+  that resolves exit_price via a best-effort fallback chain:
+  `explicit → existing exit_price → current_price → fill_price`
+  and stamps all close-time fields (realized_pnl, net_pnl, exit_price,
+  unrealized_pnl=0, remaining_shares=0, closed_at, close_reason,
+  _exit_price_source audit breadcrumb).
+
+**Wired into 5 silent close paths:**
+1. `position_manager.close_trade` phantom-recovery branch (v19.34.27)
+2. `position_manager._sweep_wrong_direction_phantom` (v19.29)
+3. `position_reconciler._zombie_cleanup` (v19.34.19)
+4. `position_reconciler._mark_shrunk_to_zero` (v19.34.20b)
+5. `position_reconciler._mark_operator_external_flatten` (v19.34.72)
+
+**13 regression tests** in `test_pnl_compute_coverage_v19_34_123.py`
+covering long/short × winner/loser × explicit/fallback exit price ×
+commission math × today's actual RJF -$243.80 short scenario.
+
+### #1 — Continuous real-time kill-switch monitor
+
+Pre-v123 daily-loss enforcement was entirely synchronous with the
+`_scan_loop` (checked once per scan iteration against the cached
+`_daily_stats.net_pnl`). When scanner paused, check never ran.
+Today's $5k cap "passed" through a $25k loss because (a) scanner
+paused at 11:21, AND (b) `_daily_stats.net_pnl` was the bogus number.
+
+**New task `TradingBotService._kill_switch_monitor_loop`** starts
+alongside `_scan_loop` and runs every 15s INDEPENDENT of scan
+cadence. New helper `_compute_realtime_daily_pnl(db)` reads
+realized PnL directly from `bot_trades` (today's UTC window, LIVE
+only, PAPER excluded) + unrealized from `_open_trades` cache.
+Trips on the LOWER of `risk_params.max_daily_loss` and
+`safety_config.max_daily_loss_usd` (so a hot-patch to either cap
+is immediately enforced).
+
+On trip: calls `safety_guardrails.trip_kill_switch()` AND flips
+`bot._mode = BotMode.PAUSED` so scan-loop stops firing new entries
+even if operator un-trips the kill-switch separately.
+
+### #2 — Per-(symbol, direction) open-exposure cap (setup-type-agnostic)
+
+Today's RJF runaway: 28 SHORT entries in 76 min between $150-152.
+Existing `(symbol, setup_type)` cooldown was bypassed because the
+classifier cycled through 6+ setup_types on the same level — each
+opened its own fresh cooldown bucket.
+
+**v123 cap runs FIRST in `evaluate_opportunity()`** (right after
+EOD gate, before any expensive computation). Asks the simplest
+question: is there an existing open canonical for
+`(alert.symbol, alert.direction)` in `bot._open_trades`? If yes,
+refuse the new entry regardless of setup_type. Logs a
+`symbol_direction_open_cap_v123` rejection with the existing
+canonical's id/setup/shares for audit.
+
+**Operator override**: `risk_params.allow_multiple_entries_per_symbol_dir`
+(default `False`). Flip to `True` to re-enable additive scaling
+behavior. Safer post-incident default = block.
+
+### Tests
+
+189/189 passing across:
+- `test_pnl_compute_coverage_v19_34_123.py` (13 cases)
+- `test_runaway_prevention_v19_34_123.py` (6 cases — symbol-direction
+  cap + realtime PnL monitor)
+- Pre-existing v118/v119/v120 regressions (170 cases) all green
+
+### Operational notes for the operator
+
+The continuous kill-switch monitor activates ONLY when `MONGO_URL`
+env var is set. On the DGX (where it's set) it boots automatically
+with the bot. In the preview pod (no MONGO_URL) it logs a one-line
+"continuous monitor disabled" warning and the rest of the bot
+proceeds normally — no failure mode.
+
+After git pull + supervisorctl restart backend, the operator can
+confirm the monitor is live via:
+```
+journalctl -u backend | grep "v123 kill-switch"
+```
+expected: `[v123 kill-switch] Continuous monitor started (15s cadence)`.
+
+
+
 ## 2026-02-12 (v19.34.121) — Live Post-Mortem + Setup Win-Rate Analytics
 
 Operator's WR 7% / 9W-112L / −$25,045 day post-mortem. Forensic walk

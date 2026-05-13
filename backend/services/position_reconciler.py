@@ -1710,9 +1710,18 @@ class PositionReconciler:
                         # Close out the zombie bot_trades (audit trail).
                         zombies_closed = []
                         for zt in zombies:
+                            # v19.34.123 — compute realized PnL before
+                            # marking the zombie closed. Pre-v123 zombies
+                            # were marked closed with realized_pnl=0
+                            # regardless of how much they'd actually
+                            # moved. Best-effort exit via current_price.
+                            from services.pnl_compute import apply_close_pnl
+                            apply_close_pnl(
+                                zt,
+                                reason="zombie_cleanup_v19_34_19",
+                                exit_price=getattr(zt, "current_price", None),
+                            )
                             zt.status = TradeStatus.CLOSED
-                            zt.close_reason = "zombie_cleanup_v19_34_19"
-                            zt.closed_at = datetime.now(timezone.utc).isoformat()
                             zt.notes = (zt.notes or "") + (
                                 " [v19.34.19: zombie cleanup, IB qty reclaimed via "
                                 f"new bracketed slice {new_trade_id}]"
@@ -2246,11 +2255,20 @@ class PositionReconciler:
         trade_ids: List[str] = []
         for t in trades:
             try:
+                # v19.34.123 — Compute realized PnL using current_price
+                # as best-effort exit (operator closed at TWS; we don't
+                # know the actual fill price without an IB execution
+                # lookup. Future enhancement: query ib_direct executions
+                # by symbol+timestamp to upgrade `exit_price_source`
+                # from `current_price` to `ib_execution`).
+                from services.pnl_compute import apply_close_pnl
+                apply_close_pnl(
+                    t,
+                    reason="operator_external_flatten",
+                    exit_price=getattr(t, "current_price", None),
+                    now_iso=now_iso,
+                )
                 t.status = TradeStatus.CLOSED
-                t.closed_at = now_iso
-                t.close_reason = "operator_external_flatten"
-                if hasattr(t, "remaining_shares"):
-                    t.remaining_shares = 0
                 t.notes = (t.notes or "") + (
                     " [v19.34.72: IB qty=0 confirmed across two ticks; "
                     "bot did not initiate close → tagged as operator/external "
@@ -2365,10 +2383,22 @@ class PositionReconciler:
             # v19.34.20b — close fully-peeled slices to prevent zombie creation.
             if new == 0 and old > 0:
                 try:
+                    # v19.34.123 — Compute realized PnL on the fully-peeled
+                    # slice using current_price as best-effort exit. Pre-v123
+                    # `unrealized_pnl=0` was the only write, leaving the
+                    # actual realized loss/gain at $0 in bot_trades.
+                    from services.pnl_compute import apply_close_pnl
+                    # The slice had `old` shares that just peeled to zero —
+                    # but t.shares (the original sizing) may differ; pass
+                    # `old` as the close size via the override mechanism.
+                    t._close_shares_override = old
+                    apply_close_pnl(
+                        t,
+                        reason="shrunk_to_zero_v19_34_20b",
+                        exit_price=getattr(t, "current_price", None),
+                        now_iso=now_iso_close,
+                    )
                     t.status = _TS_close.CLOSED
-                    t.closed_at = now_iso_close
-                    t.close_reason = "shrunk_to_zero_v19_34_20b"
-                    t.unrealized_pnl = 0
                     fully_peeled.append(t)
                 except Exception as _close_err:
                     logger.warning(

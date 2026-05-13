@@ -36,6 +36,67 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+            # ── v19.34.123 — Per-(symbol, direction) open-exposure cap ────
+            # Setup-type-AGNOSTIC. The Feb 2026 incident showed the bot
+            # firing 28 separate RJF SHORT entries in 76 minutes because
+            # the existing `(symbol, setup_type)` cooldown lets the
+            # classifier cycle through 6+ setup_types on the same level
+            # — each fresh bucket bypasses the others. This guard runs
+            # FIRST and asks the simplest question: is there an existing
+            # open canonical for this (symbol, direction)? If yes,
+            # refuse the new entry regardless of setup_type.
+            #
+            # The "canonical" concept maps to ANY open trade in
+            # `bot._open_trades` matching (symbol, direction). The
+            # consolidator merges siblings into canonicals; this guard
+            # ensures we don't even create the siblings in the first
+            # place.
+            #
+            # Operator override: set `risk_params.allow_multiple_entries_per_symbol_dir`
+            # to True to disable this guard (default False, the safe
+            # post-incident behavior).
+            allow_multi = bool(getattr(
+                bot.risk_params, "allow_multiple_entries_per_symbol_dir", False,
+            ))
+            if not allow_multi:
+                try:
+                    existing_canonical = None
+                    for _t in (bot._open_trades or {}).values():
+                        _t_sym = (getattr(_t, "symbol", "") or "").upper()
+                        _t_dir = getattr(_t, "direction", None)
+                        _t_dir_v = getattr(_t_dir, "value", str(_t_dir) if _t_dir else "long").lower()
+                        if _t_sym == (symbol or "").upper() and _t_dir_v == direction_str.lower():
+                            existing_canonical = _t
+                            break
+                    if existing_canonical is not None:
+                        _tid = getattr(existing_canonical, "id", "?")
+                        logger.warning(
+                            "🛑 [v19.34.123 sym-dir-cap] Refusing %s %s entry — "
+                            "open canonical %s already exists for (%s, %s). "
+                            "Setup_type=%s. Set allow_multiple_entries_per_symbol_dir=True to override.",
+                            symbol, setup_type, _tid, symbol, direction_str, setup_type,
+                        )
+                        try:
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type,
+                                direction=direction_str,
+                                reason_code="symbol_direction_open_cap_v123",
+                                context={
+                                    "open_canonical_id": _tid,
+                                    "open_canonical_setup": getattr(existing_canonical, "setup_type", None),
+                                    "open_canonical_shares": getattr(existing_canonical, "shares", None),
+                                    "policy": "v19.34.123_setup_agnostic_cap",
+                                },
+                            )
+                        except Exception:
+                            pass
+                        return None
+                except Exception as _cap_err:
+                    logger.error(
+                        "[v19.34.123 sym-dir-cap] guard crashed (allowing entry "
+                        "as fail-open): %s", _cap_err,
+                    )
+
             # ── v19.29 (2026-05-01) — EOD no-new-entries gate ────────
             # Operator caught LITE 12sh @ $902.77 entered at 3:59pm
             # 2026-05-01 with OCA bracket auto-cancelled at 4:00pm,

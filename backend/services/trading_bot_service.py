@@ -464,6 +464,14 @@ class RiskParameters:
     max_position_pct: float = 50.0           # Maximum % of capital per position (user requested 50%)
     max_notional_per_trade: float = 100000.0  # Hard absolute notional ceiling per trade ($) — belt-and-braces vs `max_position_pct` (which floats with equity). 0 = disabled. (added 2026-04-30 v19.4)
     max_open_positions: int = 10             # Maximum concurrent positions (unlimited = high number)
+    # ── v19.34.123 (Feb 2026) ───────────────────────────────────
+    # When False (default), the opportunity_evaluator refuses any
+    # new entry on a (symbol, direction) that already has an open
+    # canonical — setup_type-agnostic. Kills the Feb 2026 RJF
+    # runaway pattern (28 SHORT entries in 76 min via classifier
+    # cycling 6+ setup_types to bypass per-setup cooldowns).
+    # Operator can flip to True to re-enable additive scaling.
+    allow_multiple_entries_per_symbol_dir: bool = False
     # 2026-05-01 v19.21 — Operator picked 1.7 as the global floor after the
     # HOOD gap_fade R:R 2.05 < 2.5 reject taught us that 2.5 is too strict
     # for mean-reversion plays with bounded targets. See `setup_min_rr`
@@ -2002,6 +2010,21 @@ class TradingBotService:
         self._running = True
         self._mode = BotMode.AUTONOMOUS if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
+        # v19.34.123 — Continuous real-time kill-switch monitor.
+        # Reads realized PnL directly from `bot_trades` (post-v123 with
+        # full PnL coverage on every close path) PLUS live unrealized
+        # PnL from `_open_trades`. Runs every 15s independent of the
+        # scan loop so the daily-loss cap fires REGARDLESS of whether
+        # the bot is actively trying to enter trades.
+        #
+        # Pre-v123 the only daily-loss check ran inside `_scan_loop`
+        # against `_daily_stats.net_pnl` — when the scanner paused (or
+        # was rate-limited), the cap was effectively defeated. Feb 2026
+        # operator lost $25k while the $5k cap "passed" because the
+        # check never ran on the actual broker PnL.
+        self._kill_switch_task = asyncio.create_task(
+            self._kill_switch_monitor_loop()
+        )
         logger.info(f"🤖 Trading bot started in {self._mode.value} mode")
         logger.info(f"📊 Trading hours: {self.risk_params.trading_start_hour}:{self.risk_params.trading_start_minute:02d} - {self.risk_params.trading_end_hour}:{self.risk_params.trading_end_minute:02d} ET")
         logger.info(f"💰 Max position: {self.risk_params.max_position_pct}% of account, Max daily loss: {self.risk_params.max_daily_loss_pct}%")
@@ -3885,6 +3908,169 @@ class TradingBotService:
     def get_daily_stats(self) -> Dict:
         """Get daily trading statistics"""
         return asdict(self._daily_stats)
+
+    # ── v19.34.123 (Feb 2026) — Continuous real-time kill-switch monitor ──
+    #
+    # Pre-v123 daily-loss enforcement was entirely synchronous with the
+    # scan loop:
+    #   - `_scan_loop` checked `self._daily_stats.net_pnl <= -max_daily_loss`
+    #     ONCE per iteration (scan cadence ~1-3s).
+    #   - `_daily_stats.net_pnl` was a stale cached value that missed
+    #     every close path except `bot.close_trade()`.
+    # Feb 2026 incident: bot took $25k of losses while the $5k cap "passed"
+    # because (a) most closes were OCA-ext / operator-flatten / consolidator
+    # paths that didn't update `_daily_stats.net_pnl` (v123 paths fix this
+    # — see services/pnl_compute.py), and (b) once scanner paused, the
+    # check never ran at all.
+    #
+    # Post-v123: an INDEPENDENT 15s task reads PnL directly from
+    # `bot_trades` (today's UTC closed trades) PLUS live unrealized PnL
+    # from `_open_trades`. Fires `safety_guardrails.trip_kill_switch()`
+    # AND `bot.pause()` when total ≤ -max_daily_loss. Survives scanner
+    # pause, runs whenever the bot service is up.
+    #
+    # Reads from BOTH max_daily_loss caps (risk_params + safety_config)
+    # and trips on the lower (more restrictive) one.
+
+    async def _kill_switch_monitor_loop(self):
+        """Continuous daily-loss enforcement — runs every 15s."""
+        import os
+        try:
+            import motor.motor_asyncio
+        except ImportError:
+            logger.warning(
+                "[v123 kill-switch] motor not available — continuous "
+                "monitor disabled"
+            )
+            return
+
+        mongo_url = os.environ.get("MONGO_URL")
+        if not mongo_url:
+            logger.warning(
+                "[v123 kill-switch] MONGO_URL not set — continuous "
+                "monitor disabled"
+            )
+            return
+
+        client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
+        db = client[os.environ.get("DB_NAME", "tradecommand")]
+
+        logger.info("[v123 kill-switch] Continuous monitor started (15s cadence)")
+
+        while self._running:
+            try:
+                await asyncio.sleep(15.0)
+                snapshot = await self._compute_realtime_daily_pnl(db)
+                total_pnl = snapshot["realized"] + snapshot["unrealized"]
+
+                # Compute the effective daily-loss limit. Pick LOWER
+                # (more restrictive) of risk_params.max_daily_loss and
+                # safety_config.max_daily_loss_usd.
+                limits = []
+                rp_lim = float(getattr(self.risk_params, "max_daily_loss", 0) or 0)
+                if rp_lim > 0:
+                    limits.append(rp_lim)
+                try:
+                    from services.safety_guardrails import get_safety_guardrails
+                    sg = get_safety_guardrails()
+                    sg_lim = float(getattr(sg.config, "max_daily_loss_usd", 0) or 0)
+                    if sg_lim > 0:
+                        limits.append(sg_lim)
+                except Exception:
+                    sg = None
+                if not limits:
+                    continue
+                effective_limit = min(limits)
+
+                if total_pnl <= -effective_limit:
+                    # TRIP
+                    reason = (
+                        f"v123_realtime_monitor: realized=${snapshot['realized']:,.0f} "
+                        f"+ unrealized=${snapshot['unrealized']:,.0f} "
+                        f"= ${total_pnl:,.0f} ≤ -${effective_limit:,.0f} "
+                        f"(over {snapshot['closed_count']} closed trades)"
+                    )
+                    logger.error("[v123 kill-switch] TRIPPED — %s", reason)
+                    if sg is not None:
+                        try:
+                            sg.trip_kill_switch(reason)
+                        except Exception as e:
+                            logger.error("[v123 kill-switch] trip failed: %s", e)
+                    # Also flip bot to paused mode so scan loop stops
+                    # firing new entries even if kill-switch reset.
+                    try:
+                        from services.trading_bot_service import BotMode as _BM
+                        self._mode = _BM.PAUSED
+                    except Exception:
+                        pass
+                    self._daily_stats.daily_limit_hit = True
+                elif abs(total_pnl) > 0:
+                    # Diagnostic heartbeat (DEBUG-level so we don't spam INFO)
+                    logger.debug(
+                        "[v123 kill-switch] pnl=$%.0f / limit=$%.0f (%d closed)",
+                        total_pnl, effective_limit, snapshot["closed_count"],
+                    )
+            except asyncio.CancelledError:
+                logger.info("[v123 kill-switch] monitor cancelled")
+                return
+            except Exception as e:
+                logger.error("[v123 kill-switch] monitor iteration crashed: %s", e)
+                await asyncio.sleep(5.0)
+
+    async def _compute_realtime_daily_pnl(self, db) -> Dict[str, float]:
+        """Single source of truth for "today's PnL right now". Reads
+        directly from `bot_trades` (realized) + `_open_trades` cache
+        (unrealized). PAPER trades excluded.
+
+        Today's window = UTC midnight to now.
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        today_iso = _dt.now(_tz.utc).strftime("%Y-%m-%dT00:00:00")
+
+        # Realized — sum net_pnl on today's LIVE closed trades
+        realized = 0.0
+        closed_count = 0
+        try:
+            cursor = db["bot_trades"].find({
+                "status": {"$in": ["closed", "CLOSED"]},
+                "$or": [
+                    {"closed_at":   {"$gte": today_iso}},
+                    {"exit_time":   {"$gte": today_iso}},
+                ],
+            }, {"_id": 0, "net_pnl": 1, "realized_pnl": 1, "executor_mode": 1, "mode": 1})
+            async for t in cursor:
+                m = (t.get("executor_mode") or t.get("mode") or "LIVE").upper()
+                if m == "PAPER":
+                    continue
+                v = t.get("net_pnl")
+                if v is None:
+                    v = t.get("realized_pnl") or 0.0
+                try:
+                    realized += float(v)
+                except (TypeError, ValueError):
+                    pass
+                closed_count += 1
+        except Exception as e:
+            logger.debug("[v123 kill-switch] realized-pnl query failed: %s", e)
+
+        # Unrealized — sum from in-memory open trades (best-effort)
+        unrealized = 0.0
+        try:
+            for t in self._open_trades.values():
+                try:
+                    unrealized += float(getattr(t, "unrealized_pnl", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+        except Exception:
+            pass
+
+        return {
+            "realized":     round(realized, 2),
+            "unrealized":   round(unrealized, 2),
+            "closed_count": closed_count,
+        }
+
+
     
     async def reconcile_positions_with_ib(self) -> Dict:
         """Reconcile bot positions with IB — delegated to PositionReconciler module."""

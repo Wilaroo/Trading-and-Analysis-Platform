@@ -127,11 +127,19 @@ class PositionManager:
                             # IB has the opposite direction — bot's row
                             # is wrong-direction phantom (today's SOFI
                             # bug exactly). Sweep it.
+                            # v19.34.123 — compute realized PnL using
+                            # current_price as best-effort exit (the
+                            # bot's recorded direction was wrong, so
+                            # the original entry math is meaningless;
+                            # but at least we mark the trade with a
+                            # consistent close value rather than $0).
+                            from services.pnl_compute import apply_close_pnl
+                            apply_close_pnl(
+                                _trade,
+                                reason="wrong_direction_phantom_swept_v19_29",
+                                exit_price=getattr(_trade, "current_price", None),
+                            )
                             _trade.status = _TS.CLOSED
-                            _trade.close_reason = "wrong_direction_phantom_swept_v19_29"
-                            from datetime import datetime as _dt3, timezone as _tz3
-                            if not getattr(_trade, "closed_at", None):
-                                _trade.closed_at = _dt3.now(_tz3.utc).isoformat()
                             try:
                                 await asyncio.to_thread(bot._persist_trade, _trade)
                             except Exception:
@@ -1696,12 +1704,16 @@ class PositionManager:
                 f"no position. Marking trade {trade_id} CLOSED locally "
                 f"(reason={reason}) without broker call."
             )
-            trade.exit_price = trade.current_price
+            # v19.34.123 — Compute realized PnL on phantom-recovery
+            # close. Pre-v123 only `exit_price` was set; realized_pnl
+            # stayed at 0 even when the position actually moved. Fixed.
+            from services.pnl_compute import apply_close_pnl
+            apply_close_pnl(
+                trade,
+                reason=f"{reason}_phantom_recovery_v19_34_27",
+                exit_price=getattr(trade, "current_price", None),
+            )
             trade.status = TradeStatus.CLOSED
-            trade.closed_at = datetime.now(timezone.utc).isoformat()
-            trade.close_reason = f"{reason}_phantom_recovery_v19_34_27"
-            trade.unrealized_pnl = 0
-            trade.remaining_shares = 0
             del bot._open_trades[trade_id]
             bot._closed_trades.append(trade)
             try:
