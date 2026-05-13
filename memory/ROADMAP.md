@@ -27,6 +27,56 @@ Operator restarted after v19.34.124, ran the verification runbook, and reported 
 ---
 
 
+## 🟢 P2 — Symbol life-cycle drift detector (saved 2026-02-13)
+
+Now that `v19.34.140` makes mega-cap names immune to unqualifiable
+promotion, the strike counter on **non**-mega-cap names becomes a
+clean signal for genuine symbol life-cycle events — delisting,
+ticker renames, mergers, halts. Currently we silently nuke at the
+threshold and only find out weeks later when the bot stops scanning
+the symbol.
+
+### Scope
+- New service path inside `services/symbol_universe.py::mark_unqualifiable`:
+  on every `$inc unqualifiable_failure_count`, emit a soft alert
+  (chat-channel / push notification) once the count crosses
+  `STRIKE_NUDGE_THRESHOLD` (e.g. ceil(effective_threshold * 0.6)).
+- Format: `📉 {SYMBOL} accumulating unqualifiable strikes:
+  {count}/{effective_threshold} — reason="{last_reason}". Likely
+  delisted / renamed / halted. Review before next session.`
+- De-dupe via a `last_nudge_at` field on the cache doc — fire ONCE
+  per symbol per (calendar day OR pre-promotion event), whichever
+  comes first.
+- Skip nudges entirely for mega-cap (immunity catches those).
+
+### Why
+- Catches life-cycle events 1–4 sessions BEFORE the symbol gets
+  silently promoted to unqualifiable. Operator has time to verify
+  on IB / news / earnings calendar and decide:
+  - Real life-cycle event → confirm + remove from any custom
+    watchlist; relax (the system will eventually drop it).
+  - Transient IB issue → run `/clear-unqualifiable` proactively
+    BEFORE it gets promoted, so there's never a coverage gap.
+- Cleanly separates "transient IB error" from "real corporate
+  action" without requiring an EDGAR / news-feed integration.
+- Zero false-positive risk: nudge is informational; doesn't change
+  any system behavior.
+
+### Acceptance
+- One nudge per symbol per day max.
+- Mega-cap names produce ZERO nudges.
+- Non-mega-cap names produce a nudge at `60%` of effective threshold.
+- Test: hammer a non-mega-cap name with `floor(0.6 × effective) - 1`
+  strikes → no nudge. One more strike → exactly one nudge fires.
+  Hammer 20 more strikes same day → no additional nudges.
+
+### Channel
+- Pipe through the existing `live_alerts` push pipe used by the
+  scanner-coverage UI panel. No new integration needed.
+
+---
+
+
 ## 🟢 P2 — Session-color background tints on trade timestamps (saved 2026-02-13)
 
 Now that every operator-facing timestamp renders with a ` ET` suffix
