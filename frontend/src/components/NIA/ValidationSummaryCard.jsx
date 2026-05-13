@@ -256,7 +256,7 @@ const ValidationSummaryCard = memo(() => {
           className="text-[12px] text-zinc-600 text-right pt-1 border-t border-white/5"
           data-testid="validation-summary-timestamp"
         >
-          Updated {new Date(summary.generated_at).toLocaleTimeString()}
+          Updated {new Date(summary.generated_at).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
         </div>
       )}
     </div>

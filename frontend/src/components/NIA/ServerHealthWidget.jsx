@@ -90,7 +90,7 @@ const ServerHealthWidget = memo(() => {
 
           {data?.last_refresh && (
             <div className="text-[12px] text-zinc-600 text-right">
-              Cache: {new Date(data.last_refresh).toLocaleTimeString()}
+              Cache: {new Date(data.last_refresh).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
               {data?.loop && ` | Loop: ${data.loop}`}
             </div>
           )}

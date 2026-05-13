@@ -247,7 +247,7 @@ const AlertsPage = () => {
                           </div>
                           <p className="text-sm text-zinc-300">{alert.strategy_name}</p>
                           <p className="text-xs text-zinc-500 mt-1">
-                            {new Date(alert.timestamp).toLocaleString()}
+                            {new Date(alert.timestamp).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                           </p>
                         </div>
                       </div>
@@ -326,7 +326,7 @@ const AlertsPage = () => {
                             <p className="text-xs text-zinc-400 mt-1">EPS Est: ${notif.eps_estimate}</p>
                           )}
                           <p className="text-xs text-zinc-500 mt-1">
-                            {new Date(notif.created_at).toLocaleString()}
+                            {new Date(notif.created_at).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                           </p>
                         </div>
                       </div>

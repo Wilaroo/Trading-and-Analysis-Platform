@@ -348,7 +348,7 @@ const EarningsCalendarPage = () => {
           </button>
           <div className="text-center">
             <p className="text-lg font-semibold">
-              {new Date(dateRange.start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {new Date(dateRange.end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              {new Date(dateRange.start).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' })} - {new Date(dateRange.end).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', year: 'numeric' })}
             </p>
             <p className="text-sm text-zinc-500">{calendar.length} earnings reports</p>
           </div>
@@ -414,7 +414,7 @@ const EarningsCalendarPage = () => {
                     onClick={() => handleSelectEarning(earning)}
                   >
                     <td className="text-zinc-400">
-                      {new Date(earning.earnings_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {new Date(earning.earnings_date).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' })}
                     </td>
                     <td>
                       <div>
@@ -467,7 +467,7 @@ const EarningsCalendarPage = () => {
           {groupedData.map((day, idx) => (
             <Card key={idx} className="min-h-[100px] p-2" hover={false}>
               <p className="text-xs text-zinc-400 mb-2">
-                {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {new Date(day.date).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric' })}
               </p>
               <div className="space-y-1">
                 {[...day.before_open, ...day.after_close].slice(0, 3).map((e, i) => (
@@ -516,7 +516,7 @@ const EarningsCalendarPage = () => {
                   </div>
                   <p className="text-zinc-400">{selectedEarning.company_name}</p>
                   <p className="text-sm text-zinc-500">
-                    {selectedEarning.fiscal_quarter} • {new Date(selectedEarning.earnings_date).toLocaleDateString()}
+                    {selectedEarning.fiscal_quarter} • {new Date(selectedEarning.earnings_date).toLocaleDateString('en-US', { timeZone: 'America/New_York' })}
                   </p>
                 </div>
                 <button onClick={() => setSelectedEarning(null)} className="text-zinc-500 hover:text-white">

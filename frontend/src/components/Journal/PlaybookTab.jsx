@@ -274,7 +274,7 @@ const PlaybookTab = ({ onSelectPlaybook }) => {
               </p>
               <p className="text-[12px] text-zinc-400">
                 {eodStatus.scheduler_running 
-                  ? `Next analysis: ${eodStatus.next_runs?.auto_playbook_analysis ? new Date(eodStatus.next_runs.auto_playbook_analysis).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:45 PM ET weekdays'}`
+                  ? `Next analysis: ${eodStatus.next_runs?.auto_playbook_analysis ? new Date(eodStatus.next_runs.auto_playbook_analysis).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:45 PM ET weekdays'}`
                   : 'Scheduler not running'
                 }
               </p>

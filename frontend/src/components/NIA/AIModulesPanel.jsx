@@ -94,7 +94,7 @@ const AIModulesPanel = memo(({ data, connectors, thresholds, onRefresh, onRunCal
                           {module.lastTrained && (
                             <div className="flex items-center justify-between text-xs mt-1">
                               <span className="text-zinc-400">Last Trained</span>
-                              <span className="text-zinc-500 font-mono text-[12px]">{new Date(module.lastTrained).toLocaleDateString()}</span>
+                              <span className="text-zinc-500 font-mono text-[12px]">{new Date(module.lastTrained).toLocaleDateString('en-US', { timeZone: 'America/New_York' })}</span>
                             </div>
                           )}
                         </>

@@ -225,7 +225,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
             <div className="flex items-center justify-between text-[13px] text-zinc-400">
               <span>{snapshot.timeframe} chart</span>
               <span>{snapshot.bars_count > 0 ? `${snapshot.bars_count} bars` : 'No data'}{snapshot.bars_source === 'synthetic' ? ' (simulated)' : snapshot.bars_source === 'historical' ? ' (live data)' : ''}</span>
-              <span>Generated {new Date(snapshot.generated_at).toLocaleDateString()}</span>
+              <span>Generated {new Date(snapshot.generated_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' })}</span>
             </div>
           </div>
         </div>
@@ -265,7 +265,7 @@ const TradeSnapshotViewer = ({ tradeId, source = 'bot' }) => {
                     {ann.time && (
                       <span className="text-[13px] text-zinc-500 ml-auto flex items-center gap-1">
                         <Clock className="w-2.5 h-2.5" />
-                        {new Date(ann.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(ann.time).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     )}
                     <ChevronDown className={`w-3 h-3 text-zinc-500 transition-transform ${isActive ? 'rotate-180' : ''}`} />
@@ -779,7 +779,7 @@ const TradeRow = ({ trade, onClose, onEdit, onDelete, onUpdateNotes, onEnrichAI 
             </div>
             
             <p className="text-xs text-zinc-500 mt-2">
-              {new Date(trade.entry_date).toLocaleDateString()} 
+              {new Date(trade.entry_date).toLocaleDateString('en-US', { timeZone: 'America/New_York' })} 
               {trade.holding_days != null && trade.holding_days !== undefined && ` • ${trade.holding_days} day${trade.holding_days !== 1 ? 's' : ''}`}
               {trade.close_reason && (
                 <span className="ml-2 text-zinc-400">

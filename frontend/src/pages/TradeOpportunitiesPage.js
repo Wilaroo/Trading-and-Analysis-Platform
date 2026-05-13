@@ -1629,7 +1629,7 @@ const TickerDetailModal = ({ opportunity, strategies, onClose, onTrade }) => {
                               {news.timestamp && (
                                 <span className="flex items-center gap-1">
                                   <Clock className="w-3 h-3" />
-                                  {new Date(news.timestamp).toLocaleTimeString()}
+                                  {new Date(news.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
                                 </span>
                               )}
                               {news.sentiment && news.sentiment !== 'neutral' && (
@@ -2173,7 +2173,7 @@ const TradeOpportunitiesPage = () => {
             
             {lastScanTime && (
               <p className="text-[13px] text-zinc-500 text-center mt-2">
-                Last scan: {lastScanTime.toLocaleTimeString()}
+                Last scan: {lastScanTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
               </p>
             )}
           </Card>
@@ -2190,7 +2190,7 @@ const TradeOpportunitiesPage = () => {
             </h2>
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <Clock className="w-3 h-3" />
-              {lastScanTime ? `Updated ${lastScanTime.toLocaleTimeString()}` : 'Not scanned yet'}
+              {lastScanTime ? `Updated ${lastScanTime.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}` : 'Not scanned yet'}
             </div>
           </div>
           

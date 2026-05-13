@@ -117,7 +117,7 @@ const DRCTab = () => {
             Daily Report Card
           </h2>
           <p className="text-xs text-zinc-500">
-            {drc?.date ? new Date(drc.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
+            {drc?.date ? new Date(drc.date).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -209,7 +209,7 @@ const DRCTab = () => {
               </p>
               <p className="text-[12px] text-zinc-400">
                 {eodStatus.scheduler_running 
-                  ? `Next: ${eodStatus.next_runs?.auto_generate_drc ? new Date(eodStatus.next_runs.auto_generate_drc).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:30 PM ET weekdays'}`
+                  ? `Next: ${eodStatus.next_runs?.auto_generate_drc ? new Date(eodStatus.next_runs.auto_generate_drc).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) : '4:30 PM ET weekdays'}`
                   : 'Scheduler not running'
                 }
               </p>
@@ -500,7 +500,7 @@ const DRCTab = () => {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-400">
-                      {new Date(d.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      {new Date(d.date).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })}
                     </span>
                     <span className={`text-sm font-bold ${getGradeColor(d.overall_grade)}`}>
                       {d.overall_grade || '-'}

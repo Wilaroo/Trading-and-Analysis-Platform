@@ -137,7 +137,7 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
   const maxRisk = drc?.max_daily_risk ?? drc?.max_daily_r;
 
   const dateLabel = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
+    timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric',
   });
   const timeLabel = fmtET12(new Date());
 

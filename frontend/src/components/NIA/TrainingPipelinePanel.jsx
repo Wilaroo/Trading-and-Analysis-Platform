@@ -215,7 +215,7 @@ const PhaseTracker = memo(({ pipelineStatus, isTraining }) => {
             <div className="flex items-center gap-1.5">
               <span className="text-[12px] text-zinc-500">DONE</span>
               <span className="text-xs font-mono text-emerald-400/80">
-                ~{new Date(Date.now() + eta * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                ~{new Date(Date.now() + eta * 1000).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
           )}

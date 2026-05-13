@@ -220,7 +220,7 @@ const TraderSyncImport = ({ onImportComplete }) => {
                 <div>
                   <p className="text-xs text-white">{batch.trade_count} trades</p>
                   <p className="text-[12px] text-zinc-500">
-                    {new Date(batch.imported_at).toLocaleDateString()} • 
+                    {new Date(batch.imported_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' })} • 
                     ${batch.total_pnl?.toFixed(0)} P&L • 
                     {batch.symbol_count} symbols
                   </p>

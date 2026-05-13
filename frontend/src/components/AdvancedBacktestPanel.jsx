@@ -2659,7 +2659,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                           const ts = d.ai_decision?.agents?.timeseries;
                           return (
                             <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                              <td className="py-1.5 px-2 text-slate-400">{d.date ? new Date(d.date).toLocaleDateString() : '-'}</td>
+                              <td className="py-1.5 px-2 text-slate-400">{d.date ? new Date(d.date).toLocaleDateString('en-US', { timeZone: 'America/New_York' }) : '-'}</td>
                               <td className="py-1.5 px-2 font-mono text-slate-200">{d.symbol}</td>
                               <td className="py-1.5 px-2 text-slate-300">{d.signal?.type}</td>
                               <td className="py-1.5 px-2">
@@ -2733,7 +2733,7 @@ const FullAISimTab = ({ onJobStarted, setLoading, loading }) => {
                         ${job.total_pnl.toFixed(0)}
                       </span>
                     )}
-                    {job.started_at && <span>{new Date(job.started_at).toLocaleDateString()}</span>}
+                    {job.started_at && <span>{new Date(job.started_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' })}</span>}
                   </div>
                 </button>
               );

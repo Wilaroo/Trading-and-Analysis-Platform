@@ -93,7 +93,7 @@ const AlertItem = ({ alert }) => (
         <span className="badge badge-info">{alert.strategy_id}</span>
       </div>
       <p className="text-sm text-zinc-400 truncate">{alert.strategy_name}</p>
-      <p className="text-xs text-zinc-500 mt-1">{new Date(alert.timestamp).toLocaleTimeString()}</p>
+      <p className="text-xs text-zinc-500 mt-1">{new Date(alert.timestamp).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}</p>
     </div>
   </motion.div>
 );

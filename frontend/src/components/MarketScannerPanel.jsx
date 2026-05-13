@@ -371,7 +371,7 @@ export default function MarketScannerPanel() {
                       {scan.status}
                     </span>
                     <span>{scan.total_signals || 0} signals</span>
-                    <span>{new Date(scan.created_at).toLocaleDateString()}</span>
+                    <span>{new Date(scan.created_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' })}</span>
                   </div>
                 </button>
               ))}

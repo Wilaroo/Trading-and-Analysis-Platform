@@ -128,7 +128,7 @@ const GamePlanTab = () => {
             Daily Game Plan
           </h2>
           <p className="text-xs text-zinc-500">
-            {gamePlan?.date ? new Date(gamePlan.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
+            {gamePlan?.date ? new Date(gamePlan.date).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : 'Today'}
             {gamePlan?.is_night_before && <span className="ml-2 text-emerald-400">✓ Prepared night before</span>}
           </p>
         </div>
@@ -483,7 +483,7 @@ const GamePlanTab = () => {
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-400">
-                      {new Date(plan.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      {new Date(plan.date).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })}
                     </span>
                     {plan.is_complete && <Check className="w-3 h-3 text-emerald-400" />}
                   </div>

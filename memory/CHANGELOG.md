@@ -3,6 +3,61 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.136) — Frontend timezone sweep (ET enforcement)
+
+User reported the same trades displaying with different timestamps in the
+Drill-Down view vs Audit logs. The minute/second offsets were identical
+with a strict 4h delta — proving it was the **same record** rendered with
+two different timezones (ET vs local browser UTC-4). Many React date
+formatters were calling `toLocaleTimeString()` / `toLocaleDateString()` /
+`toLocaleString()` **without** the `timeZone: 'America/New_York'` option,
+so they fell back to local-browser time.
+
+This release sweeps the entire frontend to force ET on every Date
+formatter that renders user-facing trade/market timestamps.
+
+### Files patched in this session (final pass)
+
+- `components/NIA/ValidationSummaryCard.jsx` — `Updated …`
+- `components/NIA/ServerHealthWidget.jsx` — `Cache: …`
+- `components/NIA/SentComIntelligencePanel.jsx` — `timeStr`
+- `components/NIA/TrainingPipelinePanel.jsx` — ETA label
+- `components/NIA/ModelScorecard.jsx` — `Validated …`
+- `components/NIA/SetupModelsPanel.jsx` — tooltip chosen-at
+- `components/NIA/AIModulesPanel.jsx` — `lastTrained`
+- `components/Journal/GamePlanTab.jsx` — header + history rows
+- `components/Journal/DRCTab.jsx` — header + history rows + next-run
+- `components/Journal/PlaybookTab.jsx` — next-run label
+- `components/Journal/TraderSyncImport.jsx` — `imported_at`
+- `components/AdvancedBacktestPanel.jsx` — equity-curve dates + job list
+- `components/MarketScannerPanel.jsx` — scan `created_at`
+- `components/MorningBriefingModal.jsx` — `dateLabel`
+- `pages/DashboardPage.js` — alert ticker timestamp
+- `pages/TradeOpportunitiesPage.js` — news + last-scan timestamps
+- `pages/TradeJournalPage.js` — snapshot, annotations, entry_date
+- `pages/AlertsPage.js` — strategy + earnings notifications
+- `pages/WatchlistPage.js` — `added_at`
+- `pages/EarningsCalendarPage.js` — header range, row dates, modal date
+
+(Plus the ~30 files already patched in the previous session's bulk pass.)
+
+### Build
+```
+cd /app/frontend && yarn build
+```
+Build succeeded in 22.6s. Bundle: `541.99 kB` gz (+383 B for the
+added timezone literals). The build artifact contains **47** distinct
+`America/New_York` literals — every user-facing timestamp now renders
+in ET regardless of operator browser locale.
+
+### How to verify on DGX
+1. `git pull && cd frontend && yarn build`
+2. Restart the FastAPI process (it serves `frontend/build`).
+3. Open any panel with a timestamp — Open Positions, Drill-Down,
+   Trade Journal, Alerts. The same trade should now show the same
+   ET time in every panel.
+
+
 ## 2026-02-13 (v19.34.134-verify + v19.34.135) — Cooldown test verified + audit cleanups
 
 ### v19.34.134 verification

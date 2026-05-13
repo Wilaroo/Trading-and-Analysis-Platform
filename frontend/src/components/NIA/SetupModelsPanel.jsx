@@ -429,7 +429,7 @@ const SetupCard = memo(({ name, data, trainingStatus, onTrain, validations, batc
                         return tbc ? (
                           <span
                             className="text-sky-400/80 border border-sky-500/20 rounded px-1"
-                            title={`PT=${tbc.pt_atr_mult}×ATR  SL=${tbc.sl_atr_mult}×ATR  max_bars=${tbc.max_bars}  swept ${tbc.chosen_at ? new Date(tbc.chosen_at).toLocaleDateString() : 'n/a'}`}
+                            title={`PT=${tbc.pt_atr_mult}×ATR  SL=${tbc.sl_atr_mult}×ATR  max_bars=${tbc.max_bars}  swept ${tbc.chosen_at ? new Date(tbc.chosen_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' }) : 'n/a'}`}
                             data-testid={`tb-config-${name}-${p.bar_size}`}
                           >PT {tbc.pt_atr_mult}× / SL {tbc.sl_atr_mult}×</span>
                         ) : (

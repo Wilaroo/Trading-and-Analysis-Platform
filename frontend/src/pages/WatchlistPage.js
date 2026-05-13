@@ -192,7 +192,7 @@ const WatchlistPage = () => {
                         </div>
                       </td>
                       <td className="text-zinc-500 text-sm">
-                        {item.added_at ? new Date(item.added_at).toLocaleDateString() : '--'}
+                        {item.added_at ? new Date(item.added_at).toLocaleDateString('en-US', { timeZone: 'America/New_York' }) : '--'}
                       </td>
                       <td>
                         <button
