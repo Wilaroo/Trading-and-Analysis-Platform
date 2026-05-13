@@ -3,6 +3,104 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.124) — Roadmap fixes #3 (audit) / #4 (alert_outcomes) / #5 (sign-mismatch) / #6 (PAPER filter) / #7 (enabled-setups GET)
+
+Continuing the v19.34.121 post-mortem roadmap. Five fixes shipped in
+one commit; the remaining #3 work (bracket re-issue on consolidator
+merge) is the only larger item still pending.
+
+### #4 — `alert_outcomes` writer wired into every close path
+
+Pre-v124 only `enhanced_scanner.record_alert_outcome` wrote to this
+collection, AND it required `alert_id ∈ scanner._live_alerts`. Trades
+arriving via reconciler / operator-flatten / phantom-recovery paths
+had no alert_id registered → collection was empty / stale → setup
+grading and learning loop had no signal.
+
+**`services/pnl_compute.py`**:
+- New `_record_alert_outcome_bestEffort(trade, reason, pnl, exit_price, exit_source)`
+- Lazy-initialized pymongo client (cached singleton, `serverSelectionTimeoutMS=1500`)
+- Falls back to no-op silently when MONGO_URL is missing (preview pod, tests, CI)
+- `apply_close_pnl(...)` now calls it by default (`record_outcome=True`)
+- Writes are upserts keyed on `trade_id` so retry-on-failure paths
+  don't create duplicates
+- Schema is a SUPERSET of scanner's writer — adds `net_pnl`,
+  `exit_price`, `exit_price_source`, `close_reason`, `recorded_by`
+  fields. Existing consumers read unchanged.
+
+Result: every close path that uses `apply_close_pnl` (all 5 silent
+paths from v123) now auto-feeds the grading + learning loop. Effective
+on next close after backend restart.
+
+### #3 (part 1 of 2) — Bracket lifecycle audit endpoint
+
+New endpoint **`GET /api/diagnostic/bracket-lifecycle`**. Walks
+`bracket_lifecycle_events` for a (symbol, date) and returns events
+grouped by `trade_id` with derived metrics:
+- `attaches`, `cancels`, `reissues` per trade
+- `orphaned_stops` (last event was cancel with no subsequent attach)
+- `mass_cancel_clusters` (5+ cancels in any 60s window — flags the
+  Feb 2026 11:21 mass-cancel pattern)
+
+Query params: `symbol`, `date` (ISO, default today UTC), `trade_id`,
+`limit`. Read-only, safe to hit anytime.
+
+Bracket re-issue on consolidator merge (the second half of #3) is
+deferred to next session — touches a hot path and needs careful test
+coverage.
+
+### #5 — Signed-position-sign-mismatch audit (ARGX-class)
+
+The Feb 2026 ARGX incident: bot entered LONG 118+4sh @ 9:51; by 15:21
+the symbol was SHORT 118 at IB (sibling-bracket roll-flipped the
+direction). v19.29's wrong-direction sweep didn't catch it because
+the sweep only fires when `ib_qty_my_dir == 0 AND ib_qty_opp_dir > 0`;
+during the roll BOTH had shares for a tick.
+
+**`services/position_manager.py:_sweep_wrong_direction_phantom`**:
+- New v124 audit block computes signed-net IB position vs bot's
+  tracked signed net per symbol
+- When signs disagree (e.g. bot=+118, IB=−118), emits a P0 stream
+  warning (`sentcom_service.emit_stream_event`) with the operator-
+  facing diagnosis: "DIRECTION FLIP at broker. Manual reconcile or
+  flatten recommended."
+- Intentionally does NOT auto-heal — auto-flipping direction on a
+  bracket race is more dangerous than emitting a loud signal and
+  letting the operator decide.
+
+### #6 — PAPER/LIVE segregation in Closed Trades
+
+**`GET /api/trading-bot/trades/closed`** now accepts `?mode=LIVE` (or
+`?mode=PAPER`) query param. Filters by `executor_mode` so the Closed
+Today panel can show LIVE only and stop polluting the daily PnL with
+~$1.5k of commingled paper trades (as observed in the Feb 2026 tape).
+
+### #7 — `GET /api/trading-bot/enabled-setups`
+
+Pre-v124 the operator could only POST a new whitelist but had no way
+to READ the live one — `/state.enabled_setups` returned null. Caused
+a placeholder-clobber incident in the v19.34.121 session where the
+operator pasted the literal string `REPLACE_WITH_YOUR_FULL_LIST...`
+into the config and had no visibility into the broken state.
+
+New endpoint returns:
+```
+{ "success": true, "count": 52, "enabled_setups": [...] }
+```
+
+### Verification — All four new endpoints return 200
+
+```
+GET /api/trading-bot/enabled-setups               200
+GET /api/diagnostic/bracket-lifecycle?symbol=...  200
+GET /api/trading-bot/trades/closed?mode=LIVE      200
+GET /api/diagnostic/setup-winrate-breakdown       200 (v122)
+```
+
+189/189 regression tests still passing across all v118-v123 suites.
+
+
+
 ## 2026-02-12 (v19.34.123) — PnL Accuracy + Continuous Kill-Switch + RJF Runaway Killer
 
 Three structural fixes for the Feb 2026 -$25k incident. Each was top

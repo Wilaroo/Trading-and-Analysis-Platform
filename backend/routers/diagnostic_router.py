@@ -1750,3 +1750,142 @@ def setup_winrate_breakdown(
         ),
     }
 
+
+
+# ── v19.34.124 — Bracket lifecycle audit endpoint ────────────────────
+#
+# Today's incident: 100+ bot-placed stop loss legs cancelled in two
+# mass waves (11:21 and 15:29). Zero bot stops actually fired. Need a
+# way to walk `bracket_lifecycle_events` and find the cause without
+# pulling the whole collection.
+#
+# This endpoint takes (symbol, date) and returns every attach / cancel
+# / reissue event grouped by trade_id, so the operator can spot:
+#   • Stops cancelled without a replacement → orphaned canonical
+#   • Multiple OCA groups on one canonical → IB OCA conflict
+#   • Cancel-cluster (5+ cancels in <60s) → mass-cancel root cause
+
+@router.get("/bracket-lifecycle")
+def bracket_lifecycle_audit(
+    symbol: Optional[str] = None,
+    date: Optional[str] = None,  # ISO date, default = today UTC
+    trade_id: Optional[str] = None,
+    limit: int = 200,
+):
+    """Walk `bracket_lifecycle_events` for a symbol or trade_id.
+
+    Returns events grouped by trade_id with derived metrics:
+      • `attach_count`, `cancel_count`, `reissue_count` per trade
+      • `mass_cancel_clusters`: timestamp windows with 5+ cancels in 60s
+      • `orphaned_stops`: trades whose last cancel had no subsequent attach
+    """
+    db = _get_db()
+
+    if not date:
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start_iso = f"{date}T00:00:00"
+    end_iso   = f"{date}T23:59:59"
+
+    q: Dict[str, Any] = {
+        "ts": {"$gte": start_iso, "$lte": end_iso},
+    }
+    if symbol:
+        q["symbol"] = symbol.upper()
+    if trade_id:
+        q["trade_id"] = trade_id
+
+    events = list(
+        db["bracket_lifecycle_events"]
+          .find(q, {"_id": 0})
+          .sort("ts", 1)
+          .limit(limit)
+    )
+
+    # Group by trade_id
+    from collections import defaultdict
+    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for ev in events:
+        grouped[ev.get("trade_id") or "<no_trade_id>"].append(ev)
+
+    # Derived metrics per trade
+    per_trade: List[Dict[str, Any]] = []
+    for tid, evts in grouped.items():
+        attaches  = [e for e in evts if (e.get("event") or "").lower() in ("attach", "attached", "submitted", "presubmitted")]
+        cancels   = [e for e in evts if (e.get("event") or "").lower() in ("cancel", "cancelled", "canceled")]
+        reissues  = [e for e in evts if (e.get("event") or "").lower() in ("reissue", "reissued")]
+        last_event = evts[-1] if evts else None
+        orphaned = (
+            last_event is not None
+            and (last_event.get("event") or "").lower() in ("cancel", "cancelled", "canceled")
+        )
+        per_trade.append({
+            "trade_id": tid,
+            "symbol": (evts[0].get("symbol") if evts else None),
+            "event_count": len(evts),
+            "attaches": len(attaches),
+            "cancels": len(cancels),
+            "reissues": len(reissues),
+            "orphaned_stop": orphaned,
+            "first_event_at": evts[0].get("ts") if evts else None,
+            "last_event_at":  evts[-1].get("ts") if evts else None,
+            "events": evts,
+        })
+
+    # Mass-cancel cluster detection: window every cancel event, count
+    # how many other cancels are within 60 seconds.
+    from datetime import datetime as _dt
+    cancel_events = sorted(
+        [e for e in events if (e.get("event") or "").lower() in ("cancel", "cancelled", "canceled")],
+        key=lambda x: x.get("ts") or "",
+    )
+    clusters: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(cancel_events):
+        anchor = cancel_events[i]
+        try:
+            anchor_t = _dt.fromisoformat(anchor.get("ts", "").replace("Z", "+00:00"))
+        except Exception:
+            i += 1
+            continue
+        window_evts = [anchor]
+        j = i + 1
+        while j < len(cancel_events):
+            try:
+                t_j = _dt.fromisoformat(cancel_events[j].get("ts", "").replace("Z", "+00:00"))
+            except Exception:
+                j += 1
+                continue
+            if (t_j - anchor_t).total_seconds() <= 60:
+                window_evts.append(cancel_events[j])
+                j += 1
+            else:
+                break
+        if len(window_evts) >= 5:
+            clusters.append({
+                "started_at": anchor.get("ts"),
+                "window_seconds": 60,
+                "cancel_count": len(window_evts),
+                "symbols": sorted({e.get("symbol") for e in window_evts if e.get("symbol")}),
+            })
+            i = j  # skip past this cluster
+        else:
+            i += 1
+
+    orphaned = [t for t in per_trade if t["orphaned_stop"]]
+
+    return {
+        "success": True,
+        "query": {"symbol": symbol, "date": date, "trade_id": trade_id, "limit": limit},
+        "total_events": len(events),
+        "unique_trades": len(grouped),
+        "per_trade": sorted(per_trade, key=lambda r: -r["event_count"]),
+        "mass_cancel_clusters": clusters,
+        "orphaned_stops": [{"trade_id": t["trade_id"], "symbol": t["symbol"],
+                            "last_event_at": t["last_event_at"]} for t in orphaned],
+        "summary": (
+            f"{len(events)} events across {len(grouped)} trades. "
+            f"{len(clusters)} mass-cancel cluster(s). "
+            f"{len(orphaned)} trade(s) with orphaned stops."
+        ),
+    }
+

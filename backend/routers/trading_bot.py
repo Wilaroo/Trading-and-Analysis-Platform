@@ -2511,6 +2511,25 @@ def update_bot_config(config: BotConfigUpdate):
     return {"success": True, "message": "Configuration updated"}
 
 
+# v19.34.124 — GET endpoint that exposes the live enabled_setups list.
+# Pre-v124 the operator could only POST a new list (set_enabled_setups)
+# but had no way to READ the current one — `/state.enabled_setups`
+# returned null. Resulted in a placeholder-clobber incident where the
+# operator pasted the literal string `REPLACE_WITH_YOUR_FULL_LIST...`
+# into the config and had no visibility into the broken state.
+@router.get("/enabled-setups")
+def get_enabled_setups():
+    """Return the live `_enabled_setups` whitelist."""
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    enabled = list(getattr(_trading_bot, "_enabled_setups", []) or [])
+    return {
+        "success": True,
+        "count": len(enabled),
+        "enabled_setups": enabled,
+    }
+
+
 @router.post("/risk-params")
 def update_risk_params(params: RiskParamsUpdate):
     """Update risk management parameters"""
@@ -2844,13 +2863,28 @@ def get_open_trades():
 
 
 @router.get("/trades/closed")
-def get_closed_trades(limit: int = Query(50, ge=1, le=500)):
-    """Get closed trades history"""
+def get_closed_trades(
+    limit: int = Query(50, ge=1, le=500),
+    mode: Optional[str] = Query(None, description="Filter by executor_mode (LIVE / PAPER)"),
+):
+    """Get closed trades history.
+
+    v19.34.124: `mode` query param filters by `executor_mode`. Pass
+    `mode=LIVE` to exclude PAPER trades from the daily PnL view (the
+    Feb 2026 incident showed PAPER trades commingled in the Closed
+    Today panel, polluting the live PnL with ~$1.5k of paper losses).
+    """
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
-    
+
     trades = _trading_bot.get_closed_trades(limit=limit)
-    return {"success": True, "count": len(trades), "trades": trades}
+    if mode:
+        m = mode.strip().upper()
+        trades = [
+            t for t in trades
+            if str(t.get("executor_mode") or t.get("mode") or "LIVE").upper() == m
+        ]
+    return {"success": True, "count": len(trades), "trades": trades, "mode_filter": mode}
 
 
 @router.get("/trades/all")

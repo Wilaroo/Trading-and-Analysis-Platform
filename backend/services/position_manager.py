@@ -108,6 +108,87 @@ class PositionManager:
                 # is fully phantom — close-state it without firing
                 # any IB action so the bot doesn't try to "manage"
                 # a position that doesn't exist.
+                # v19.34.124 — Signed-position-sign-mismatch audit.
+                # The ARGX class incident (Feb 2026): bot entered LONG
+                # 118+4sh; by EOD the same symbol was SHORT 118 at IB
+                # (sibling-bracket roll-flipped direction without the
+                # v19.29 sweep catching it because the sweep only fires
+                # when `ib_qty_my_dir == 0 AND ib_qty_opp_dir > 0`. If
+                # BOTH directions had shares momentarily during the roll,
+                # the sweep missed.
+                #
+                # v124 audit: compute signed-net IB position and bot's
+                # tracked signed net. If they disagree by >1 share for
+                # a symbol, emit a P0 stream warning (we don't auto-heal
+                # to avoid bracket conflicts — operator decides). This
+                # gives the operator real-time visibility into
+                # sign-drift, which the share-drift reconciler doesn't
+                # flag because it only checks abs(net).
+                try:
+                    by_sym_bot_signed: Dict[str, int] = {}
+                    for _t in bot._open_trades.values():
+                        if getattr(_t, "status", None) == _TS.CLOSED:
+                            continue
+                        _s = (getattr(_t, "symbol", "") or "").upper()
+                        if not _s:
+                            continue
+                        _d = (
+                            _t.direction.value
+                            if hasattr(_t.direction, "value")
+                            else str(_t.direction)
+                        ).lower()
+                        sign = 1 if _d == "long" else -1
+                        try:
+                            qty = int(abs(int(getattr(_t, "shares", 0) or 0)))
+                        except Exception:
+                            qty = 0
+                        by_sym_bot_signed[_s] = by_sym_bot_signed.get(_s, 0) + sign * qty
+
+                    by_sym_ib_signed: Dict[str, int] = {}
+                    for (sym, d), q in (ib_pos_map or {}).items():
+                        sign = 1 if d == "long" else -1
+                        try:
+                            by_sym_ib_signed[sym] = by_sym_ib_signed.get(sym, 0) + sign * int(q or 0)
+                        except Exception:
+                            continue
+
+                    all_syms = set(by_sym_bot_signed) | set(by_sym_ib_signed)
+                    for s in all_syms:
+                        bot_net = by_sym_bot_signed.get(s, 0)
+                        ib_net = by_sym_ib_signed.get(s, 0)
+                        # Sign mismatch only flagged when BOTH non-zero
+                        # and signs disagree, OR delta is large.
+                        if bot_net == 0 and ib_net == 0:
+                            continue
+                        signs_disagree = (bot_net > 0 and ib_net < 0) or (bot_net < 0 and ib_net > 0)
+                        if signs_disagree:
+                            logger.error(
+                                "🚨 [v124 sign-mismatch] %s: bot=%+d IB=%+d "
+                                "— DIRECTION FLIP at broker. Manual reconcile "
+                                "or flatten required.", s, bot_net, ib_net,
+                            )
+                            try:
+                                from services.sentcom_service import emit_stream_event
+                                await emit_stream_event({
+                                    "kind": "warning",
+                                    "severity": "P0",
+                                    "title": f"{s}: direction sign mismatch",
+                                    "body": (
+                                        f"bot tracks {bot_net:+d}sh; IB has {ib_net:+d}sh "
+                                        f"(opposite direction). Likely sibling-bracket roll-flip "
+                                        f"(ARGX-class). Manual reconcile or flatten recommended."
+                                    ),
+                                    "trade_symbol": s,
+                                    "source": "v19_34_124_sign_audit",
+                                })
+                            except Exception:
+                                pass
+                except Exception as _audit_err:
+                    logger.debug(
+                        "[v124 sign-mismatch] audit crashed (non-fatal): %s",
+                        _audit_err,
+                    )
+
                 for _tid, _trade in list(bot._open_trades.items()):
                     try:
                         if _trade.status == _TS.CLOSED:

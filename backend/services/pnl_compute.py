@@ -51,6 +51,110 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.124 — alert_outcomes writer (best-effort, fire-and-forget) ──
+# Synchronous pymongo client cached on first call. Falls back to a no-op
+# silently if MONGO_URL is missing (preview pod, tests, etc.).
+
+_AO_CLIENT = None  # cached MongoClient
+_AO_DB = None
+
+
+def _get_outcomes_collection():
+    """Lazy-init the alert_outcomes collection handle. Returns None
+    when MongoDB is unreachable / not configured so callers can skip
+    cleanly."""
+    global _AO_CLIENT, _AO_DB
+    if _AO_DB is not None:
+        return _AO_DB["alert_outcomes"]
+    import os
+    mongo_url = os.environ.get("MONGO_URL")
+    if not mongo_url:
+        return None
+    try:
+        from pymongo import MongoClient
+        _AO_CLIENT = MongoClient(mongo_url, serverSelectionTimeoutMS=1500)
+        _AO_DB = _AO_CLIENT[os.environ.get("DB_NAME", "tradecommand")]
+        return _AO_DB["alert_outcomes"]
+    except Exception as e:
+        logger.debug("[pnl_compute] alert_outcomes mongo init failed: %s", e)
+        return None
+
+
+def _record_alert_outcome_bestEffort(
+    trade: Any, reason: str, pnl: Dict[str, float],
+    exit_price: float, exit_source: str,
+) -> None:
+    """Write one row to `alert_outcomes` from the trade's data. This is
+    intentionally schema-COMPATIBLE with `enhanced_scanner.record_alert_outcome`
+    so consumers (setup-grading, learning loop, /diagnostic/setup-winrate-
+    breakdown) can read both without branching."""
+    coll = _get_outcomes_collection()
+    if coll is None:
+        return
+    realized = pnl.get("realized_pnl", 0.0)
+    # Outcome derived from realized PnL (single source of truth post-v123).
+    if realized > 0:
+        outcome = "won"
+    elif realized < 0:
+        outcome = "lost"
+    else:
+        outcome = "scratch"
+
+    # Best-effort R-multiple: (exit - entry) / (entry - stop)
+    r_multiple = 0.0
+    try:
+        entry = float(getattr(trade, "fill_price", 0) or 0)
+        stop = float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0)
+        if entry > 0 and stop > 0:
+            risk_per_share = abs(entry - stop)
+            if risk_per_share > 0:
+                d_obj = getattr(trade, "direction", None)
+                dv = getattr(d_obj, "value", str(d_obj) if d_obj else "long").lower()
+                if dv == "long":
+                    pps = exit_price - entry
+                else:
+                    pps = entry - exit_price
+                r_multiple = round(pps / risk_per_share, 3)
+    except Exception:
+        pass
+
+    doc = {
+        # Use trade.id as the de-duplication / join key. Schema is a
+        # SUPERSET of scanner's writer — extra fields are additive.
+        "alert_id": getattr(trade, "id", None) or getattr(trade, "alert_id", None),
+        "trade_id": getattr(trade, "id", None),
+        "symbol": getattr(trade, "symbol", None),
+        "setup_type": getattr(trade, "setup_type", None),
+        "direction": (lambda d: getattr(d, "value", str(d) if d else None))(
+            getattr(trade, "direction", None)
+        ),
+        "outcome": outcome,
+        "pnl": realized,
+        "net_pnl": pnl.get("net_pnl", 0.0),
+        "r_multiple": r_multiple,
+        "trade_grade": getattr(trade, "trade_grade", None),
+        "entry_price": getattr(trade, "fill_price", None),
+        "exit_price": exit_price,
+        "exit_price_source": exit_source,
+        "stop_loss": getattr(trade, "stop_price", None) or getattr(trade, "stop_loss", None),
+        "target": getattr(trade, "tp_price", None) or getattr(trade, "target", None),
+        "shares": pnl.get("shares") or getattr(trade, "shares", None),
+        "close_reason": reason,
+        "closed_at": getattr(trade, "closed_at", datetime.now(timezone.utc).isoformat()),
+        "recorded_by": "pnl_compute_v19_34_124",
+    }
+    try:
+        # Upsert keyed on trade_id so retry-on-failure paths don't
+        # create duplicate outcome rows.
+        coll.update_one(
+            {"trade_id": doc["trade_id"]},
+            {"$set": doc},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.debug("[pnl_compute] alert_outcomes upsert failed: %s", e)
+
+
 def compute_close_pnl(
     *,
     direction: str,
@@ -116,10 +220,16 @@ def apply_close_pnl(
     exit_price: Optional[float] = None,
     commission: Optional[float] = None,
     now_iso: Optional[str] = None,
+    record_outcome: bool = True,
 ) -> Dict[str, Any]:
     """Compute and write realized_pnl + net_pnl onto `trade` in-place.
     ALSO writes: exit_price, close_reason, closed_at, unrealized_pnl=0,
     remaining_shares=0, exit_price_source (audit breadcrumb).
+
+    v19.34.124: When `record_outcome=True` (default), ALSO writes an
+    `alert_outcomes` row to MongoDB so the setup-grading + learning
+    loop have data. Best-effort fire-and-forget — failures here never
+    block the close.
 
     Returns the computed dict for logging / tests. NEVER raises — silent
     failures are logged and the function returns a best-effort dict.
@@ -179,6 +289,22 @@ def apply_close_pnl(
         out["exit_price_source"] = source
         out["shares"] = shares
         out["direction"] = direction
+
+        # v19.34.124 — Feed alert_outcomes for grading + learning loop.
+        # Pre-v124 only `enhanced_scanner.record_alert_outcome` wrote to
+        # this collection AND it required alert_id ∈ scanner._live_alerts
+        # (which excluded reconciler/operator close paths). Result:
+        # `alert_outcomes` collection was empty / stale, EOD grading and
+        # learning loop had no signal. Direct write here covers EVERY
+        # close path that uses apply_close_pnl.
+        if record_outcome:
+            try:
+                _record_alert_outcome_bestEffort(trade, reason, pnl, resolved_exit, source)
+            except Exception as _ao_err:
+                logger.debug(
+                    "[pnl_compute] alert_outcomes write skipped: %s", _ao_err,
+                )
+
         return out
     except Exception as exc:
         logger.error(
