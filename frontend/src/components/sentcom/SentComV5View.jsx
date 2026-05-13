@@ -45,6 +45,7 @@ import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
 import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
 import { ConnectivityCheck } from './v5/ConnectivityCheck';
+import { ScannerCoverageAuditPanel } from './v5/ScannerCoverageAuditPanel';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 // v19.30.11 (2026-05-01) — high-priority system alerts (pusher dead 30s+,
 // mongo down, etc.) with explicit operator action guidance. Goes ABOVE
@@ -495,6 +496,7 @@ export const SentComV5View = ({
             </button>
             <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
             <ConnectivityCheck />
+            <ScannerCoverageAuditPanel />
             {/* v19.34.13 (2026-05-06) — `<PusherHealthChip />` removed
                 here. Operator feedback after v19.34.12: the chip
                 duplicates the larger `<PusherHeartbeatTile />` panel

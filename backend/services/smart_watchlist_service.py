@@ -42,6 +42,15 @@ class WatchlistItem:
     is_sticky: bool = False  # Manual adds are sticky
     score: int = 0
     notes: str = ""
+    # 2026-02-13 (v19.34.139) — Self-curating auto-pin.
+    # A symbol that hit ≥AUTO_PIN_THRESHOLD distinct setups in any
+    # rolling window gets promoted to `auto_pinned=true`. Auto-pinned
+    # items survive for AUTO_PIN_EXPIRY_DAYS sessions of silence
+    # (vs. EOD for normal scanner items), giving the bot more chances
+    # to catch follow-through on a name that's clearly in-play. They
+    # are NOT `is_sticky` — operator can still manually remove them.
+    auto_pinned: bool = False
+    auto_pinned_at: Optional[datetime] = None
     
     def to_dict(self) -> Dict:
         return {
@@ -54,7 +63,11 @@ class WatchlistItem:
             "timeframe": self.timeframe.value,
             "is_sticky": self.is_sticky,
             "score": self.score,
-            "notes": self.notes
+            "notes": self.notes,
+            "auto_pinned": self.auto_pinned,
+            "auto_pinned_at": (
+                self.auto_pinned_at.isoformat() if self.auto_pinned_at else None
+            ),
         }
     
     @classmethod
@@ -69,7 +82,12 @@ class WatchlistItem:
             timeframe=StrategyTimeframe(data.get("timeframe", "intraday")),
             is_sticky=data.get("is_sticky", False),
             score=data.get("score", 0),
-            notes=data.get("notes", "")
+            notes=data.get("notes", ""),
+            auto_pinned=data.get("auto_pinned", False),
+            auto_pinned_at=(
+                datetime.fromisoformat(data["auto_pinned_at"])
+                if data.get("auto_pinned_at") else None
+            ),
         )
 
 
@@ -146,6 +164,19 @@ class SmartWatchlistService:
     
     MAX_WATCHLIST_SIZE = 50
     SWING_EXPIRY_HOURS = 72
+
+    # 2026-02-13 (v19.34.139) — Self-curating auto-pin.
+    # A symbol that fires AUTO_PIN_THRESHOLD or more DISTINCT setup types
+    # (tracked via len(strategies_matched)) gets promoted to auto-pinned
+    # so it survives EOD expiry — gives the bot more chances to catch
+    # follow-through on the next session. Auto-pinned items expire
+    # after AUTO_PIN_EXPIRY_DAYS of total silence.
+    #
+    # Tuned conservatively: 3 distinct setups = real in-play signal,
+    # not just one detector spamming. 5 days = one full trading week
+    # of no follow-through before the system stops scanning it.
+    AUTO_PIN_THRESHOLD = 3
+    AUTO_PIN_EXPIRY_DAYS = 5
     
     def __init__(self, db: Collection = None):
         self._db = db
@@ -212,7 +243,16 @@ class SmartWatchlistService:
         
         now = datetime.now(timezone.utc)
         reference_time = item.last_signal_at or item.added_at
-        
+
+        # 2026-02-13 (v19.34.139) — Self-curating auto-pin: items that
+        # cleared the AUTO_PIN_THRESHOLD get a longer leash so we don't
+        # drop a name that's clearly in-play just because it went quiet
+        # for an afternoon. AUTO_PIN_EXPIRY_DAYS days of total silence
+        # before the auto-pin expires.
+        if item.auto_pinned:
+            expiry_time = reference_time + timedelta(days=self.AUTO_PIN_EXPIRY_DAYS)
+            return now > expiry_time
+
         if item.timeframe in [StrategyTimeframe.SCALP, StrategyTimeframe.INTRADAY]:
             # Expires at end of trading day
             # If last signal was before today's close and we're past close, it's expired
@@ -241,24 +281,31 @@ class SmartWatchlistService:
         return True
     
     def _enforce_max_size(self):
-        """Ensure watchlist doesn't exceed max size by removing lowest scored non-sticky items"""
+        """Ensure watchlist doesn't exceed max size by removing lowest scored
+        non-sticky, non-auto-pinned items.
+
+        Retention priority (descending):
+          1. operator-pinned (`is_sticky`)
+          2. auto-pinned (`auto_pinned`, v19.34.139)
+          3. score desc
+        """
         if len(self._watchlist) <= self.MAX_WATCHLIST_SIZE:
             return
-        
-        # Sort by: sticky first, then by score descending
+
         sorted_items = sorted(
             self._watchlist.values(),
-            key=lambda x: (x.is_sticky, x.score),
+            key=lambda x: (x.is_sticky, x.auto_pinned, x.score),
             reverse=True
         )
-        
-        # Keep only top MAX_WATCHLIST_SIZE
+
         to_remove = sorted_items[self.MAX_WATCHLIST_SIZE:]
         for item in to_remove:
-            if not item.is_sticky:  # Double-check we're not removing manual adds
-                del self._watchlist[item.symbol]
-                self._remove_item_from_db(item.symbol)
-                logger.debug(f"Removed {item.symbol} from watchlist (max size enforcement)")
+            # Never silently drop operator pins or auto-pinned items.
+            if item.is_sticky or item.auto_pinned:
+                continue
+            del self._watchlist[item.symbol]
+            self._remove_item_from_db(item.symbol)
+            logger.debug(f"Removed {item.symbol} from watchlist (max size enforcement)")
     
     def cleanup_expired(self) -> List[str]:
         """Remove expired items from watchlist"""
@@ -318,6 +365,19 @@ class SmartWatchlistService:
             }
             if timeframe_priority[timeframe] > timeframe_priority[item.timeframe]:
                 item.timeframe = timeframe
+            # 2026-02-13 (v19.34.139) — Auto-pin promotion. Once a symbol
+            # crosses the distinct-setup threshold, mark it so cleanup
+            # gives it the 5-day grace window instead of the EOD cutoff.
+            if (not item.auto_pinned
+                    and len(item.strategies_matched) >= self.AUTO_PIN_THRESHOLD):
+                item.auto_pinned = True
+                item.auto_pinned_at = now
+                logger.info(
+                    f"🎯 {symbol} auto-pinned to watchlist — "
+                    f"{len(item.strategies_matched)} distinct setups "
+                    f"({', '.join(item.strategies_matched[:5])}). "
+                    f"Survives until {self.AUTO_PIN_EXPIRY_DAYS}d of silence."
+                )
         else:
             # Create new entry
             item = WatchlistItem(
@@ -392,14 +452,14 @@ class SmartWatchlistService:
         return {"success": True, "symbol": symbol, "message": f"Removed {symbol} from watchlist"}
     
     def get_watchlist(self, include_expired: bool = False) -> List[WatchlistItem]:
-        """Get current watchlist, sorted by score"""
+        """Get current watchlist, sorted by sticky → auto_pinned → score"""
         # Cleanup expired first
         if not include_expired:
             self.cleanup_expired()
         
         items = sorted(
             self._watchlist.values(),
-            key=lambda x: (x.is_sticky, x.score),
+            key=lambda x: (x.is_sticky, x.auto_pinned, x.score),
             reverse=True
         )
         return items
@@ -422,22 +482,28 @@ class SmartWatchlistService:
         items = list(self._watchlist.values())
         
         manual_count = sum(1 for i in items if i.is_sticky)
-        scanner_count = len(items) - manual_count
-        
+        auto_pinned_count = sum(
+            1 for i in items if i.auto_pinned and not i.is_sticky
+        )
+        scanner_count = len(items) - manual_count - auto_pinned_count
+
         by_timeframe = {
             "scalp": sum(1 for i in items if i.timeframe == StrategyTimeframe.SCALP),
             "intraday": sum(1 for i in items if i.timeframe == StrategyTimeframe.INTRADAY),
             "swing": sum(1 for i in items if i.timeframe == StrategyTimeframe.SWING),
             "position": sum(1 for i in items if i.timeframe == StrategyTimeframe.POSITION),
         }
-        
+
         return {
             "total": len(items),
             "manual": manual_count,
+            "auto_pinned": auto_pinned_count,
             "scanner": scanner_count,
             "by_timeframe": by_timeframe,
             "max_size": self.MAX_WATCHLIST_SIZE,
-            "blacklist_count": len(self._blacklist)
+            "blacklist_count": len(self._blacklist),
+            "auto_pin_threshold": self.AUTO_PIN_THRESHOLD,
+            "auto_pin_expiry_days": self.AUTO_PIN_EXPIRY_DAYS,
         }
     
     def to_api_response(self) -> Dict:

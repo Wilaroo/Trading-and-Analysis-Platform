@@ -202,27 +202,37 @@ def test_get_universe_rejects_unknown_tier():
 # ---- mark_unqualifiable promotion semantics --------------------------
 
 def test_mark_unqualifiable_promotes_after_threshold_strikes():
+    """Strikes below the threshold must NOT promote; the strike that
+    crosses the threshold MUST promote; subsequent calls stay flagged
+    but don't re-emit `promoted_now=True`.
+
+    Written threshold-agnostic on purpose — on 2026-04-29 the threshold
+    was lowered from 3 → 1 because "No security definition" is a
+    DETERMINISTIC IB error. If it changes again the test still works.
+    """
     from services import symbol_universe as su
     db = _DB([{"symbol": "FOO", "avg_dollar_volume": 100_000_000}])
+    threshold = su.UNQUALIFIABLE_FAILURE_THRESHOLD
 
-    r1 = su.mark_unqualifiable(db, "FOO", reason="No security definition")
-    assert r1["failure_count"] == 1
-    assert r1["unqualifiable"] is False
-    assert r1["promoted_now"] is False
+    # Strikes 1 .. threshold-1 must NOT promote.
+    for i in range(1, threshold):
+        r = su.mark_unqualifiable(db, "FOO", reason="No security definition")
+        assert r["failure_count"] == i
+        assert r["unqualifiable"] is False, (
+            f"strike {i} of {threshold} should NOT promote"
+        )
+        assert r["promoted_now"] is False
 
-    r2 = su.mark_unqualifiable(db, "FOO", reason="No security definition")
-    assert r2["failure_count"] == 2
-    assert r2["unqualifiable"] is False
-
-    r3 = su.mark_unqualifiable(db, "FOO", reason="No security definition")
-    assert r3["failure_count"] == su.UNQUALIFIABLE_FAILURE_THRESHOLD
-    assert r3["unqualifiable"] is True
-    assert r3["promoted_now"] is True
+    # The strike that crosses the threshold MUST promote.
+    r_cross = su.mark_unqualifiable(db, "FOO", reason="No security definition")
+    assert r_cross["failure_count"] == threshold
+    assert r_cross["unqualifiable"] is True
+    assert r_cross["promoted_now"] is True
 
     # Already promoted — calling again does NOT re-emit promoted_now=True.
-    r4 = su.mark_unqualifiable(db, "FOO", reason="No security definition")
-    assert r4["unqualifiable"] is True
-    assert r4["promoted_now"] is False
+    r_after = su.mark_unqualifiable(db, "FOO", reason="No security definition")
+    assert r_after["unqualifiable"] is True
+    assert r_after["promoted_now"] is False
 
     # And the symbol is now excluded from the universe.
     assert "FOO" not in su.get_universe(db, "intraday")

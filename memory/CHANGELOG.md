@@ -3,6 +3,89 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.139) — Self-curating Watchlist + V5 Coverage Audit Panel
+
+Three improvements stacked on the v19.34.138 mega-cap pin:
+
+### A. Self-curating Smart Watchlist (auto-pin)
+- `services/smart_watchlist_service.py::WatchlistItem` gains
+  `auto_pinned: bool` + `auto_pinned_at: Optional[datetime]` fields
+  (legacy-compatible — old docs hydrate with `auto_pinned=False`).
+- `add_scanner_hit()` now promotes a symbol to `auto_pinned=True`
+  the moment it crosses `AUTO_PIN_THRESHOLD = 3` *distinct* setup
+  types (not just signal count — spamming one detector won't
+  promote, which keeps noise out).
+- `_is_expired()` gives auto-pinned items `AUTO_PIN_EXPIRY_DAYS = 5`
+  of silence before expiry instead of the EOD cutoff — five trading
+  sessions of no follow-through must occur before the system stops
+  scanning it.
+- `_enforce_max_size()` retention order is now
+  `is_sticky → auto_pinned → score` — auto-pinned names are NEVER
+  evicted by max-size enforcement (only operator can remove them).
+- `get_watchlist()` sorts by the same retention key.
+- `get_stats()` surfaces `auto_pinned` count + the two threshold
+  constants for UI display.
+
+Result: the system now SELF-CURATES the next SNDK before the
+operator has to remember to add it. When the same name fires
+vwap_bounce + gap_and_go + hod_breakout in one session, it
+auto-pins and survives 5 days of silence — giving the bot the
+maximum chance to catch follow-through.
+
+### B. V5 Scanner Coverage Audit Panel
+- NEW `components/sentcom/v5/ScannerCoverageAuditPanel.jsx` — a
+  compact chip in the V5 HUD next to `<ConnectivityCheck />` that
+  surfaces the worst-case `/api/diagnostic/symbol-coverage` verdict
+  at a glance (green / amber / red).
+- Click expands a full-screen drawer with:
+  - 4 summary tiles (Healthy / Unqualifiable / Missing / Stale bars)
+  - One-click "Clear all" rescue button for the
+    `unqualifiable_flagged` list (POSTs `/clear-unqualifiable` and
+    refetches)
+  - Action recommendations from the backend
+  - Per-symbol table (Symbol · Verdict · ADV · Tier-2 rank · Bars age
+    · Mega-cap PIN badge)
+- Wired into `SentComV5View.jsx` HUD.
+- `yarn build` succeeded in 23.75s. New JS bundle.
+
+### C. Test #9 fixed — threshold-agnostic
+- `tests/test_universe_canonical.py::test_mark_unqualifiable_promotes_after_threshold_strikes`
+  was written assuming the old 3-strike threshold and silently broke
+  when the threshold dropped to 1 on 2026-04-29. Rewritten
+  threshold-agnostic — it now reads `UNQUALIFIABLE_FAILURE_THRESHOLD`
+  at runtime and exercises strikes 1..threshold-1 (must not promote)
+  followed by the crossing strike (must promote). Test now passes
+  for any threshold value.
+
+### #7 (order_id normalisation) — scoped out
+Investigated. The codebase already uses two cleanly-separated fields:
+  - `order_id: str` (bot-side UUID identifier)
+  - `ib_order_id: int` (IB's internal numeric order ID)
+Distinct domains, distinct purposes. The handoff's perceived "mix"
+is actually two correctly-typed fields. The only ambiguous signatures
+are 3 `cancel_order(order_id: int)` definitions in `ib_service.py`
++ `ib_direct_service.py` where the parameter SHOULD be named
+`ib_order_id` — but renaming risks breaking critical execution paths
+with no behaviour-bug justification. Recommend deferring until a
+concrete type-error surfaces.
+
+### Tests
+NEW `tests/test_smart_watchlist_auto_pin_v19_34_139.py` — 10 cases:
+- Below-threshold distinct setups don't auto-pin.
+- Crossing threshold promotes.
+- Same setup spam doesn't promote (distinct-only).
+- Auto-pin flag persists; timestamp doesn't regress.
+- Intraday auto-pin survives EOD rollover.
+- Auto-pin DOES expire after `AUTO_PIN_EXPIRY_DAYS + 1`.
+- Auto-pinned name NOT evicted by max-size flood.
+- `get_watchlist()` orders sticky → auto → score correctly.
+- `get_stats()` reports auto-pinned count + thresholds.
+- to_dict / from_dict round-trip + legacy backwards-compat.
+
+Full suite: **54 pytest cases pass** (10 new auto-pin + 16 mega-cap
++ 5 scanner-canonical + 17 universe-canonical + 6 misc related).
+
+
 ## 2026-02-13 (v19.34.138) — Mega-Cap Pin + Scanner Coverage Diagnostic
 
 Operator flagged: "TSLA / SNDK / MU / NVDA / AMD have been the biggest
