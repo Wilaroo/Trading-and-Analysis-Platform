@@ -3182,3 +3182,116 @@ async def position_pnl_audit(
         },
         "actions": actions,
     }
+
+
+
+@router.get("/bracket-status")
+async def bracket_status_per_symbol(symbols: Optional[str] = None):
+    """v19.34.143 helper — live `stop_order_id` snapshot per bot trade.
+
+    Returns one row per fragment in `_open_trades` for the requested
+    symbols (or ALL open fragments when no filter). Used by
+    `scripts/verify_naked_orphan_healing.py` to confirm the
+    v19.34.143 emergency-stop sweep actually attached real IB
+    brackets to TE / EGO / KTOS within the expected 60s cadence.
+
+    Each fragment row carries:
+      - `trade_id`, `symbol`, `shares`, `remaining_shares`
+      - `setup_type`, `entered_by`
+      - `stop_order_id` (raw — may be None, SIM-*, ADOPT-*, or real)
+      - `target_order_ids`, `oca_group`
+      - `is_simulated_stop` (True for `SIM-*` / `ADOPT-STOP-*`)
+      - `in_live_orders` (True if `stop_order_id` matches a pusher
+        snapshot live order; False otherwise)
+      - `status`: BRACKETED / NAKED_NO_STOP / NAKED_SIM / NAKED_STALE
+
+    Lightweight (no PnL math, no audit verdicts) — just the bracket
+    health surface the operator needs for healing verification.
+    """
+    # Resolve open-orders set for the in_live_orders check. Uses the
+    # same 3-tier resolver as `_naked_position_sweep`.
+    live_order_ids: set = set()
+    open_orders_source: Optional[str] = None
+    try:
+        from services.orphan_gtc_reconciler import _fetch_ib_open_orders
+        ib_orders, source_info = await _fetch_ib_open_orders()
+        open_orders_source = (source_info or {}).get("tier")
+        for o in (ib_orders or []):
+            if not isinstance(o, dict):
+                continue
+            for k in ("ib_order_id", "order_id", "orderId", "perm_id", "id"):
+                v = o.get(k)
+                if v is not None:
+                    live_order_ids.add(str(v))
+    except Exception as e:
+        open_orders_source = f"error:{e}"
+
+    target_syms: Optional[set] = None
+    if symbols:
+        target_syms = {s.strip().upper() for s in symbols.split(",") if s.strip()}
+
+    try:
+        from services.trading_bot_service import (
+            get_trading_bot_service as _gtb,
+        )
+        _bot = _gtb()
+    except Exception as e:
+        return {"success": False, "error": f"bot_unavailable:{e}"}
+
+    rows = []
+    counters = {"bracketed": 0, "naked_no_stop": 0,
+                "naked_sim": 0, "naked_stale": 0}
+    for _tid, _t in list(getattr(_bot, "_open_trades", {}).items()):
+        sym = (getattr(_t, "symbol", "") or "").upper()
+        if not sym:
+            continue
+        if target_syms and sym not in target_syms:
+            continue
+        rs = int(abs(getattr(_t, "remaining_shares", 0) or 0))
+        if rs <= 0:
+            continue
+        stop_id = getattr(_t, "stop_order_id", None)
+        stop_id_str = str(stop_id) if stop_id is not None else None
+        is_sim = bool(
+            stop_id_str and (
+                stop_id_str.startswith("SIM-")
+                or stop_id_str.startswith("ADOPT-STOP-")
+            )
+        )
+        in_live = bool(stop_id_str and stop_id_str in live_order_ids)
+        if stop_id_str is None:
+            status = "NAKED_NO_STOP"
+            counters["naked_no_stop"] += 1
+        elif is_sim:
+            status = "NAKED_SIM"
+            counters["naked_sim"] += 1
+        elif not in_live:
+            status = "NAKED_STALE"
+            counters["naked_stale"] += 1
+        else:
+            status = "BRACKETED"
+            counters["bracketed"] += 1
+        rows.append({
+            "trade_id": _tid,
+            "symbol": sym,
+            "shares": int(abs(getattr(_t, "shares", 0) or 0)),
+            "remaining_shares": rs,
+            "setup_type": getattr(_t, "setup_type", None),
+            "entered_by": getattr(_t, "entered_by", None),
+            "stop_order_id": stop_id_str,
+            "target_order_ids": list(getattr(_t, "target_order_ids", []) or []),
+            "oca_group": getattr(_t, "oca_group", None),
+            "is_simulated_stop": is_sim,
+            "in_live_orders": in_live,
+            "status": status,
+        })
+
+    return {
+        "success": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "filter_symbols": sorted(target_syms) if target_syms else None,
+        "open_orders_source": open_orders_source,
+        "live_order_id_count": len(live_order_ids),
+        "rows": rows,
+        "summary": {"total": len(rows), **counters},
+    }

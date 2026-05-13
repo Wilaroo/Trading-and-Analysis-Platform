@@ -3,6 +3,62 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.143b) — Operator tooling: bracket-status endpoint + forensic scripts
+
+The v19.34.142e `ledger_fragments[]` payload is only emitted on
+`QTY_MAGNITUDE_MISMATCH` rows — fine for KMB triage, but useless
+for verifying that v19.34.143's emergency-stop sweep actually
+healed TE/EGO/KTOS once they're no longer drifting. Built two
+operator-facing artifacts for live DGX use:
+
+### NEW endpoint — `GET /api/diagnostic/bracket-status[?symbols=A,B,C]`
+Lightweight live snapshot of every open fragment in `_open_trades`.
+Each row carries `trade_id, symbol, shares, remaining_shares,
+setup_type, entered_by, stop_order_id, target_order_ids, oca_group,
+is_simulated_stop, in_live_orders, status` where `status` is one of
+`BRACKETED / NAKED_NO_STOP / NAKED_SIM / NAKED_STALE`. Cross-references
+against the same 3-tier open-orders resolver as the naked sweep
+(`ib_direct → pusher-relay → _pushed_ib_data["orders"]`). Returns
+`open_orders_source` so the operator knows which tier replied.
+
+### NEW scripts (`/app/scripts/`)
+- **`kmb_fragment_forensics.py`** — hits `/position-pnl-audit`,
+  isolates magnitude-mismatch rows (or `--symbol KMB --include-ok`
+  for a single name), pretty-prints `ledger_fragments[]` with a
+  heuristic that flags the likely double-book pair
+  (`reconciled_excess_slice` + `bot_originated` summing past IB qty).
+- **`verify_naked_orphan_healing.py`** — polls the new
+  `/bracket-status` endpoint every 30s for TE/EGO/KTOS (configurable
+  via `--symbols`), classifies each fragment, and prints HEAL when
+  a prior `NAKED_*` poll flips to `BRACKETED` (proves the v19.34.143
+  emergency-stop sweep fired). Default cap: 10 minutes.
+
+### Why this composition
+Earlier the verification script tried to read `stop_order_id` from
+the audit's `ledger_fragments`, but those only populate on
+`QTY_MAGNITUDE_MISMATCH` rows. Adding the dedicated `/bracket-status`
+endpoint keeps the audit endpoint focused on PnL drift and the
+healing script focused on bracket health — clean separation of
+concerns, no cross-leakage of responsibilities.
+
+### Tests
+`tests/test_bracket_status_endpoint_v19_34_143.py` — 5 cases:
+mixed BRACKETED / NAKED_NO_STOP / NAKED_SIM / NAKED_STALE
+classification, summary aggregation, `?symbols=` filter,
+zero-`remaining_shares` skip, graceful degrade when open-orders
+fetch raises. All 66/66 in-scope tests pass cumulatively across the
+session.
+
+### Operator usage
+```bash
+# On the DGX, after the next live session:
+cd ~/Trading-and-Analysis-Platform
+python3 scripts/kmb_fragment_forensics.py --symbol KMB --include-ok
+python3 scripts/verify_naked_orphan_healing.py --symbols TE,EGO,KTOS
+```
+
+
+
 ## 2026-02-13 (v19.34.144) — Position consolidator: clamp to IB qty
 
 Follow-on to the KMB phantom-share crisis (v19.34.142d). When the
