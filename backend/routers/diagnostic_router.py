@@ -4515,6 +4515,7 @@ async def position_reopen_forensics(
             qty = 0.0
 
         last_trade = None
+        all_today_trades: List[Dict[str, Any]] = []
         if db is not None:
             try:
                 # Latest bot_trade row for this symbol — regardless of status,
@@ -4530,6 +4531,26 @@ async def position_reopen_forensics(
                          "timeframe": 1},
                         sort=[("executed_at", -1)],
                     )
+                )
+                # v19.34.152b — ALL today's trades for this symbol, so we
+                # can see both the 3:57 entry AND the 3:58 duplicate.
+                day_start_et = now_et.replace(
+                    hour=0, minute=0, second=0, microsecond=0,
+                )
+                day_start_utc = day_start_et.astimezone(timezone.utc).isoformat()
+                all_today_trades = await asyncio.to_thread(
+                    lambda: list(db.bot_trades.find(
+                        {
+                            "symbol": sym,
+                            "executed_at": {"$gte": day_start_utc},
+                        },
+                        {"_id": 0, "id": 1, "executed_at": 1,
+                         "entered_by": 1, "setup_type": 1, "status": 1,
+                         "direction": 1, "shares": 1, "remaining_shares": 1,
+                         "entry_price": 1, "exit_price": 1,
+                         "closed_at": 1, "close_reason": 1,
+                         "close_at_eod": 1},
+                    ).sort("executed_at", 1))
                 )
             except Exception as e:
                 last_trade = {"_error": str(e)}
@@ -4576,6 +4597,8 @@ async def position_reopen_forensics(
             "is_recent_entry": is_recent_entry,
             "most_recent_fill_age_seconds": most_recent_fill_age,
             "last_bot_trade": last_trade,
+            "all_today_trades": all_today_trades,
+            "today_trade_count": len(all_today_trades),
         })
 
     # Sort: most-recent fills first, so the "did the bot just reopen?" symbols

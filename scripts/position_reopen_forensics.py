@@ -78,18 +78,7 @@ def main() -> int:
     print("=" * 78)
     print("Per-symbol")
     print("=" * 78)
-    print(
-        f"  {'symbol':<6} {'qty':>8} {'verdict':<32} "
-        f"{'fill_age':>10} {'entered_by':<30} setup"
-    )
     for r in resp.get("rows") or []:
-        bt = r.get("last_bot_trade") or {}
-        eb = (bt.get("entered_by") or "—")[:30]
-        st = (bt.get("setup_type") or "—")[:18]
-        fa = r.get("most_recent_fill_age_seconds")
-        fa_str = (
-            f"{fa // 60}m {fa % 60}s" if fa is not None else "—"
-        )
         emoji = {
             "REOPENED_BY_BOT": "🚨",
             "ADOPTED_FROM_IB": "ℹ ",
@@ -97,9 +86,25 @@ def main() -> int:
             "NO_BOT_RECORD": "⚠ ",
         }.get(r.get("verdict"), "  ")
         print(
-            f"  {emoji}{r.get('symbol'):<5} {int(r.get('ib_qty', 0)):>8} "
-            f"{r.get('verdict'):<32} {fa_str:>10} {eb:<30} {st}"
+            f"\n  {emoji} {r.get('symbol'):<6} qty={int(r.get('ib_qty', 0)):>+8}  "
+            f"verdict={r.get('verdict')}  "
+            f"today_trades={r.get('today_trade_count', 0)}"
         )
+        for t in (r.get("all_today_trades") or []):
+            ts = (t.get("executed_at") or "")[:19]
+            eb = (t.get("entered_by") or "—")
+            st = (t.get("setup_type") or "—")
+            sh = t.get("shares", "—")
+            dr = t.get("direction") or "—"
+            ep = t.get("entry_price")
+            stat = t.get("status") or "—"
+            cls_at = (t.get("closed_at") or "")[:19] or "—"
+            cls_rsn = t.get("close_reason") or ""
+            print(
+                f"      • {ts}  {dr:<5} {sh:<6} @ {ep}  "
+                f"entered_by={eb:<28} setup={st:<14} "
+                f"status={stat:<7} closed_at={cls_at}  {cls_rsn}"
+            )
 
     print()
     print("=" * 78)
