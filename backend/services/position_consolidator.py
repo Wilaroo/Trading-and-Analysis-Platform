@@ -372,6 +372,37 @@ class PositionConsolidator:
                 f"target ${(canonical.target_prices or [0])[0]:.2f}."
             )
 
+        # v19.34.127 — Persist consolidator merge to bracket_lifecycle_events
+        # so /diagnostic/bracket-lifecycle surfaces it. Pre-v127 only the
+        # bracket_reissue_service path wrote these events; consolidator
+        # cancel+reattach went unrecorded, which is why yesterday's
+        # incident showed 0 events for bleeding symbols.
+        try:
+            from services.bracket_reissue_service import _persist_lifecycle_event
+            await _persist_lifecycle_event(
+                bot=bot,
+                event={
+                    "phase": "consolidator_merge_reissue",
+                    "success": oca_attached,
+                    "trade_id": canonical.id,
+                    "symbol": sym,
+                    "reason": "consolidator_v19_34_42",
+                    "merged_from_siblings": [getattr(s, "id", None) for s in siblings],
+                    "old_canonical_shares": old_canonical_shares,
+                    "new_total_shares": total_shares,
+                    "cancel_errors": cancel_errors,
+                    "new_stop_order_id": (
+                        str(canonical.stop_order_id) if oca_attached else None
+                    ),
+                    "oca_group": canonical.oca_group if oca_attached else None,
+                    "error": None if oca_attached else oca_error,
+                },
+            )
+        except Exception as _persist_err:
+            logger.debug(
+                f"[v19.34.127] consolidator lifecycle persist failed: {_persist_err}"
+            )
+
         # ── Step 4 + 6: close siblings, drop from in-memory.
         now_iso = datetime.now(timezone.utc).isoformat()
         sibling_ids_closed: List[str] = []

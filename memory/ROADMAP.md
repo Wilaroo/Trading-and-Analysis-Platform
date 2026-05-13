@@ -4,6 +4,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ✅ 2026-02-12 — v19.34.127 SHIPPED — Naked-position sweep + consolidator audit trail
+
+**The actual -$25k bug is now fixed.** Yesterday's diagnostic proved IB independently cancelled 100+ of our stops at 11:21 and 15:29; our code had no detection path for IB-initiated cancellations. New `_naked_position_sweep` runs every 60s inside the already-alive kill-switch monitor: pulls IB's live order book, cross-references against every `trade.stop_order_id` in `_open_trades`, emergency-reissues any missing stop via `attach_oca_stop_target`, and writes `phase: "naked_sweep_reissue"` to `bracket_lifecycle_events`. Consolidator merges now also persist `phase: "consolidator_merge_reissue"`. 11 new pytest cases + 67 regression tests pass.
+
+After this ships, an IB-cancelled stop is detected within 60 seconds, a fresh OCA is queued, and the event is audit-logged. Yesterday's silent-naked failure mode is closed.
+
+---
+
+
+
 ## ✅ 2026-02-12 — v19.34.125 SHIPPED — Bracket-lifecycle diagnostic schema fix + kill-switch heartbeat
 
 Operator restarted after v19.34.124, ran the verification runbook, and reported all three diagnostic outputs were empty/silent on the -$25k incident day. Root-caused and patched:

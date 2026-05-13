@@ -4047,6 +4047,26 @@ class TradingBotService:
                     )
                     print(msg, flush=True)
                     logger.info(msg)
+
+                # v19.34.127 — Naked-position sweep (every 4th iter = 60s).
+                # The actual -$25k cause: yesterday IB mass-cancelled
+                # 100+ stops independently of our code, leaving the bot
+                # holding naked positions with no detection path. This
+                # sweep walks `_open_trades`, asks IB for live orders,
+                # and emergency-reissues any missing stop. Result lands
+                # in `bracket_lifecycle_events` so future incidents are
+                # traceable.
+                if _hb_counter % 4 == 0:
+                    try:
+                        await self._naked_position_sweep()
+                    except Exception as _sweep_err:
+                        print(
+                            f"[v127 naked-sweep] iteration crashed: {_sweep_err}",
+                            flush=True,
+                        )
+                        logger.error(
+                            "[v127 naked-sweep] iteration crashed: %s", _sweep_err,
+                        )
             except asyncio.CancelledError:
                 logger.info("[v123 kill-switch] monitor cancelled")
                 return
@@ -4106,6 +4126,195 @@ class TradingBotService:
             "unrealized":   round(unrealized, 2),
             "closed_count": closed_count,
         }
+
+
+    # ─── v19.34.127 — Naked-position sweep ─────────────────────────────
+    #
+    # Yesterday's incident (-$25k): IB mass-cancelled 100+ of our stops
+    # at 11:21 and 15:29. Our consolidator / reissue paths only fire when
+    # we initiate the change; if IB independently nukes a stop (admin
+    # cancel, OCA conflict, max-orders trim, etc.) we had ZERO detection.
+    # `bracket_lifecycle_events` for RJF/MTB/ARGX/UPS confirmed: 0
+    # reissue events on the bleeding day.
+    #
+    # This sweep, fired every 60s inside `_kill_switch_monitor_loop`,
+    # asks IB for the live order book and cross-references against
+    # every `trade.stop_order_id` in `_open_trades`. Any mismatch →
+    # emergency `attach_oca_stop_target` + persist a `phase:
+    # "naked_sweep_reissue"` row to `bracket_lifecycle_events` so the
+    # operator can audit what happened.
+    #
+    # Skipped silently when:
+    #   • Bot is in PAPER mode (no IB connection)
+    #   • Trade executor not attached
+    #   • IB get_open_orders raises (broker offline) — next sweep retries
+
+    async def _naked_position_sweep(self) -> Dict[str, Any]:
+        """Walk `_open_trades` and reissue any missing stop at IB.
+
+        Returns a result dict for diagnostics / tests:
+            {"checked": int, "naked_found": int, "reissued": int,
+             "reissue_failed": int, "skipped_reason": Optional[str]}
+        """
+        result: Dict[str, Any] = {
+            "checked": 0, "naked_found": 0, "reissued": 0,
+            "reissue_failed": 0, "skipped_reason": None,
+        }
+
+        executor = getattr(self, "_trade_executor", None)
+        if executor is None:
+            result["skipped_reason"] = "no_trade_executor"
+            return result
+
+        # Resolve IB connector — try common attribute names.
+        ib_conn = (
+            getattr(executor, "_ib_service", None)
+            or getattr(executor, "ib_service", None)
+            or getattr(executor, "_ib_connector", None)
+        )
+        if ib_conn is None or not hasattr(ib_conn, "get_open_orders"):
+            result["skipped_reason"] = "no_ib_connector"
+            return result
+
+        # Skip if executor is in non-LIVE mode (paper trading has no
+        # actual IB orders to query).
+        mode_str = (
+            getattr(executor, "mode", None)
+            or getattr(executor, "_mode", None)
+            or "LIVE"
+        )
+        try:
+            mode_str = getattr(mode_str, "value", str(mode_str)).upper()
+        except Exception:
+            mode_str = str(mode_str).upper()
+        if mode_str != "LIVE":
+            result["skipped_reason"] = f"non_live_mode:{mode_str}"
+            return result
+
+        # 1) Snapshot IB open orders → set of live order_ids.
+        try:
+            ib_orders = await ib_conn.get_open_orders()
+        except Exception as e:
+            result["skipped_reason"] = f"ib_get_open_orders_failed:{e}"
+            return result
+
+        live_order_ids = set()
+        for o in (ib_orders or []):
+            for k in ("order_id", "orderId", "id"):
+                v = o.get(k) if isinstance(o, dict) else None
+                if v is not None:
+                    live_order_ids.add(str(v))
+                    break
+
+        # 2) Walk every open trade with shares > 0.
+        from services.bracket_reissue_service import _persist_lifecycle_event
+        for tid, trade in list(self._open_trades.items()):
+            try:
+                rs = int(abs(getattr(trade, "remaining_shares", 0) or 0))
+                if rs <= 0:
+                    continue
+                result["checked"] += 1
+
+                stop_id = getattr(trade, "stop_order_id", None)
+                stop_id_str = str(stop_id) if stop_id is not None else None
+                is_naked = (stop_id_str is None) or (stop_id_str not in live_order_ids)
+                if not is_naked:
+                    continue
+
+                result["naked_found"] += 1
+                sym = getattr(trade, "symbol", "?")
+                print(
+                    f"[v127 naked-sweep] {sym} {tid} NAKED — "
+                    f"stop_id={stop_id_str!r} not in {len(live_order_ids)} live "
+                    f"orders. Emergency re-issue.",
+                    flush=True,
+                )
+
+                # 3) Emergency re-issue via attach_oca_stop_target.
+                oca_result = None
+                try:
+                    if hasattr(executor, "attach_oca_stop_target"):
+                        oca_result = await executor.attach_oca_stop_target(trade)
+                except Exception as e:
+                    oca_result = {"success": False, "error": f"{type(e).__name__}:{e}"}
+
+                ok = bool(oca_result and oca_result.get("success"))
+                if ok:
+                    trade.stop_order_id = oca_result.get("stop_order_id")
+                    tgt_id = oca_result.get("target_order_id")
+                    if tgt_id is not None:
+                        trade.target_order_id = tgt_id
+                        try:
+                            if not getattr(trade, "target_order_ids", None):
+                                trade.target_order_ids = []
+                            trade.target_order_ids.append(tgt_id)
+                        except Exception:
+                            pass
+                    trade.oca_group = oca_result.get("oca_group")
+                    # Persist new order IDs.
+                    try:
+                        save_fn = getattr(self, "_save_trade", None) or getattr(self, "_persist_trade", None)
+                        if save_fn:
+                            r = save_fn(trade)
+                            if asyncio.iscoroutine(r):
+                                await r
+                    except Exception:
+                        pass
+                    result["reissued"] += 1
+                else:
+                    result["reissue_failed"] += 1
+                    print(
+                        f"[v127 naked-sweep] {sym} {tid} REISSUE FAILED — "
+                        f"{(oca_result or {}).get('error', 'unknown')}. "
+                        f"Position remains NAKED.",
+                        flush=True,
+                    )
+
+                # 4) Persist lifecycle event so /diagnostic/bracket-lifecycle
+                #    surfaces this — schema-compatible with consolidator events.
+                try:
+                    await _persist_lifecycle_event(
+                        bot=self,
+                        event={
+                            "phase": "naked_sweep_reissue",
+                            "success": ok,
+                            "trade_id": tid,
+                            "symbol": sym,
+                            "reason": "naked_position_detected",
+                            "previous_stop_order_id": stop_id_str,
+                            "new_stop_order_id": (
+                                str(oca_result.get("stop_order_id"))
+                                if ok else None
+                            ),
+                            "oca_group": (oca_result or {}).get("oca_group"),
+                            "remaining_shares": rs,
+                            "ib_live_order_count": len(live_order_ids),
+                            "error": None if ok else (oca_result or {}).get("error"),
+                        },
+                    )
+                except Exception as _persist_err:
+                    print(
+                        f"[v127 naked-sweep] lifecycle persist failed: "
+                        f"{_persist_err}",
+                        flush=True,
+                    )
+            except Exception as _iter_err:
+                print(
+                    f"[v127 naked-sweep] per-trade iteration crashed for "
+                    f"{tid}: {_iter_err}",
+                    flush=True,
+                )
+                continue
+
+        if result["naked_found"] > 0:
+            print(
+                f"[v127 naked-sweep] complete — checked={result['checked']} "
+                f"naked={result['naked_found']} reissued={result['reissued']} "
+                f"failed={result['reissue_failed']}",
+                flush=True,
+            )
+        return result
+
 
 
     

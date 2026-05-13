@@ -3,6 +3,83 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-12 (v19.34.127) — Naked-position sweep + consolidator lifecycle audit trail
+
+**THE root-cause fix for the -$25k incident.** Yesterday's
+`/diagnostic/bracket-lifecycle?symbol=RJF&date=2026-05-12` returned
+**zero events** even though IB mass-cancelled 100+ of our stops at
+11:21 and 15:29. Confirmed: our existing consolidator / reissue paths
+only fire when WE initiate the change; IB-initiated cancellations had
+ZERO detection path. The bot held naked positions for hours without
+knowing.
+
+### Fix #1 — Naked-position sweep (`trading_bot_service.py`)
+
+New `_naked_position_sweep()` method, fired every 60s (every 4th
+iteration) from inside the already-running `_kill_switch_monitor_loop`:
+
+1. Pull live order book from IB (`ib_service.get_open_orders()`).
+2. For every trade in `_open_trades` with `remaining_shares > 0`,
+   check whether `trade.stop_order_id` appears in the live order set.
+3. If `None` OR not in live orders → trade is NAKED.
+4. Emergency `attach_oca_stop_target(trade)` to re-issue.
+5. Persist `phase: "naked_sweep_reissue"` event to
+   `bracket_lifecycle_events` (success AND failure cases) so the
+   operator can audit IB-initiated cancellations forever after.
+
+Skipped silently when:
+- Bot is in PAPER mode (no IB connection)
+- Trade executor not attached
+- IB get_open_orders raises (broker offline) — next sweep retries
+- Per-trade iteration crashes — other trades still processed
+
+### Fix #2 — Consolidator merge audit trail (`position_consolidator.py`)
+
+Pre-v127 the consolidator's cancel-old + attach-new path performed
+the correct broker calls but never wrote to `bracket_lifecycle_events`.
+Now it persists `phase: "consolidator_merge_reissue"` after each
+merge with `merged_from_siblings`, `old_canonical_shares`,
+`new_total_shares`, `cancel_errors`, and the new `stop_order_id` /
+`oca_group`. Success AND failure paths emit the event.
+
+### Tests
+
+- `tests/test_naked_position_sweep_v19_34_127.py` — 9 cases:
+  - Missing stop_order_id detected as naked → reissue + event
+  - Stop_order_id present but not in IB live orders → naked → reissue + event
+  - Stop is live in IB → no action (no false-positive reissue)
+  - Paper mode skipped (no IB query)
+  - No executor skipped gracefully
+  - IB outage skipped with reason (no crash, retries next cycle)
+  - Reissue failure persists `success=False` event for operator audit
+  - Per-trade crash doesn't wedge the sweep
+  - Zero-share trades ignored
+
+- `tests/test_consolidator_lifecycle_event_v19_34_127.py` — 2 cases:
+  - Successful merge emits success=True event with merged share math
+  - Failed OCA attach emits success=False event with error message
+
+- 78 regression tests pass (lifecycle, bracket reissue, consolidator,
+  PnL compute, runaway prevention, naked sweep, consolidator events).
+
+### Operator verification (post-pull/restart)
+
+```bash
+# After 60s, the sweep has run at least once. If any naked positions
+# existed, they're now reissued and a row exists in lifecycle events.
+grep "v127 naked-sweep" /tmp/backend.log | tail -20
+
+# Real-time audit — any phase=naked_sweep_reissue in today's events?
+curl -s "$BACKEND_URL/api/diagnostic/bracket-lifecycle?date=$(date -u +%F)" \
+  | jq '[.per_trade[].events[] | select(.phase=="naked_sweep_reissue")] | length'
+```
+
+After this ships, an IB-initiated stop cancellation is detected within
+60 seconds, an emergency OCA bracket is queued, and the event lands in
+`bracket_lifecycle_events`. Yesterday's silent failure mode is closed.
+
+
+
 ## 2026-02-12 (v19.34.126) — Kill-switch monitor log visibility fix
 
 After v19.34.125 ship, operator verified the endpoint fix but reported
