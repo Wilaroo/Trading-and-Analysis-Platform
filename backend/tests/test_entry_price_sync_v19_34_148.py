@@ -321,6 +321,7 @@ async def test_zero_entry_price_skipped(monkeypatch):
 # ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_db_persist_failure_does_not_block_other_syncs(monkeypatch):
     """If one trade's db update_one raises, the sync continues for
     the others and reports the failure in `persist_errors`."""
@@ -337,11 +338,8 @@ async def test_db_persist_failure_does_not_block_other_syncs(monkeypatch):
 
     db = MagicMock()
     coll = MagicMock()
-    # Fail only for "b".
-    call_count = {"n": 0}
 
     async def _fake_update(filt, *_a, **_kw):
-        call_count["n"] += 1
         if filt.get("id") == "b":
             raise RuntimeError("connection reset")
         return MagicMock(modified_count=1)
@@ -350,11 +348,55 @@ async def test_db_persist_failure_does_not_block_other_syncs(monkeypatch):
 
     bot = _make_bot(open_trades={"g": t_good, "b": t_bad}, db=db)
     report = await sync_entry_prices_to_ib_avg_cost(bot)
-
-    # Both reported as synced (in-memory mutated successfully).
     assert len(report["synced"]) == 2
-    # But persist_errors has the BAD one.
     err_syms = {e["symbol"] for e in report["persist_errors"]}
     assert err_syms == {"BAD"}
-    # GOOD did persist.
     assert report["persisted_to_db"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_pymongo_driver_no_await_error(monkeypatch):
+    """v19.34.148b — operator's DGX runs the SYNC pymongo driver, not
+    Motor. `db['bot_trades'].update_one(...)` returns `UpdateResult`
+    directly (not a coroutine). Pre-148b the sync code awaited it
+    and crashed: "object UpdateResult can't be used in 'await'
+    expression". Now the sync detects coroutine vs result and only
+    awaits when awaitable."""
+    from services.entry_price_sync import sync_entry_prices_to_ib_avg_cost
+
+    _patch_ib(monkeypatch, [
+        {"symbol": "ICLN", "position": 100, "avgCost": 28.95},
+        {"symbol": "CW",   "position": 24,  "avgCost": 746.13},
+    ])
+    t_icln = _make_trade(tid="t-icln", symbol="ICLN", qty=100,
+                         entry_price=28.50)
+    t_cw   = _make_trade(tid="t-cw",   symbol="CW",   qty=24,
+                         entry_price=744.29)
+
+    # SYNCHRONOUS update_one — returns a plain object, NOT a coroutine.
+    sync_update_calls = []
+
+    class _SyncUpdateResult:
+        modified_count = 1
+
+    def _sync_update_one(filt, update):
+        sync_update_calls.append((filt, update))
+        return _SyncUpdateResult()
+
+    coll = MagicMock()
+    coll.update_one = _sync_update_one  # plain sync callable
+    db = MagicMock()
+    db.__getitem__ = MagicMock(return_value=coll)
+
+    bot = _make_bot(open_trades={"t-icln": t_icln, "t-cw": t_cw}, db=db)
+    report = await sync_entry_prices_to_ib_avg_cost(bot)
+
+    # Both syncs went through; persisted to (sync) DB.
+    assert len(report["synced"]) == 2
+    assert report["persisted_to_db"] == 2
+    assert report["persist_errors"] == []
+    # The sync update_one was actually called twice.
+    assert len(sync_update_calls) == 2
+    # In-memory mutated.
+    assert t_icln.entry_price == pytest.approx(28.95, abs=0.001)
+    assert t_cw.entry_price == pytest.approx(746.13, abs=0.001)

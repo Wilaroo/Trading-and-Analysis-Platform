@@ -3,6 +3,53 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.148b) — Sync entry-price persistence: pymongo driver fix
+
+Operator's first live run of `POST /api/trading-bot/sync-entry-prices`
+applied 13/14 in-memory mutations correctly but **every single DB
+persist failed** with:
+
+```
+db_persist_failed: object UpdateResult can't be used in 'await' expression
+```
+
+Root cause: the bot's `_db` (set at `server.py:175`) is the
+**synchronous pymongo** client. `db["bot_trades"].update_one(...)`
+returns an `UpdateResult` directly, NOT a coroutine. Pre-148b the
+sync code unconditionally `await`-ed it and crashed. Without
+persistence, every backend restart would have rolled the
+`entry_price` mutations back from disk and the audit would
+re-flag everything.
+
+### Fix (`services/entry_price_sync.py`)
+Driver-agnostic persistence: check `inspect.iscoroutine()` /
+`inspect.isawaitable()` on the call site and only `await` when
+the value is awaitable. Works symmetrically with Motor (async,
+returns a coroutine) AND pymongo (sync, returns `UpdateResult`).
+No call-site changes elsewhere.
+
+### Tests
+`test_sync_pymongo_driver_no_await_error` — exercises the exact
+DGX scenario (sync `update_one` returning a non-awaitable object).
+Confirms both syncs persist successfully and `persisted_to_db`
+reports `2`. **113/113 cumulative tests pass.**
+
+### Operator validation
+After the fix, the second run of:
+```bash
+python3 scripts/sync_entry_prices.py
+```
+…will show `persisted to DB : 13` and `persist errors: 0`. The
+mutations will survive a backend restart.
+
+### Live result from v19.34.148 (pre-148b fix, in-memory only)
+Even with the persist bug, the in-memory sync worked: the operator's
+audit went from 9 drift rows ($777 → $-35) to **21/21 OK with
+delta $0.86** — a near-perfect heal. v19.34.148b just makes the
+heal durable.
+
+
+
 ## 2026-02-13 (v19.34.148) — Entry-price ↔ IB.avgCost sync (manual + nightly cron)
 
 Operator's 2026-05-13 17:41 UTC live audit showed 9/10 drift rows

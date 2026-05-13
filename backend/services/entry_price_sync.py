@@ -212,11 +212,18 @@ async def sync_entry_prices_to_ib_avg_cost(
             continue
 
         # Persist to MongoDB. The `entry_price` field is canonical
-        # on the `bot_trades` collection.
+        # on the `bot_trades` collection. v19.34.148b — the bot's
+        # `_db` is the SYNCHRONOUS pymongo client (server.py:175),
+        # not Motor. `update_one` returns an `UpdateResult` directly,
+        # not a coroutine — awaiting it raises "object UpdateResult
+        # can't be used in 'await' expression". Use `inspect.iscoroutine`
+        # to handle both async (Motor) and sync (pymongo) callers
+        # symmetrically.
         db = getattr(bot, "_db", None)
         if db is not None:
             try:
-                await db["bot_trades"].update_one(
+                import inspect as _inspect
+                _update_call = db["bot_trades"].update_one(
                     {"id": tid},
                     {"$set": {
                         "entry_price": float(ib_avg),
@@ -228,6 +235,8 @@ async def sync_entry_prices_to_ib_avg_cost(
                         "entry_price_pre_sync": bot_entry,
                     }},
                 )
+                if _inspect.iscoroutine(_update_call) or _inspect.isawaitable(_update_call):
+                    await _update_call
                 persisted += 1
             except Exception as e:
                 persist_errors.append({
