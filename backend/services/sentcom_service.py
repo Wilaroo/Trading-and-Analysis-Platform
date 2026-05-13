@@ -2192,8 +2192,39 @@ class SentComService:
                         symbol_for_quote = (trade.get("symbol") or "").upper()
                         live_quote = ib_quotes.get(symbol_for_quote, {}) if symbol_for_quote else {}
                         live_price = live_quote.get("last") or live_quote.get("close")
+                        # 2026-02-13 (v19.34.142f) — track which price
+                        # source produced `current`. Bot-tracked rows
+                        # previously emitted `pnl_source=null` so the
+                        # audit endpoint couldn't tell whether a
+                        # CW/ENTG drift was caused by stale avg_cost,
+                        # stale `trade.current_price` (timer-driven
+                        # position_manager hasn't refreshed), or a
+                        # genuinely missing quote. Now: we stamp the
+                        # exact source on every bot row.
+                        pnl_source = "unknown"
                         if live_price and float(live_price) > 0:
                             current = float(live_price)
+                            # `live_quote.last` takes precedence over
+                            # `live_quote.close` in the chained `or`
+                            # above, so disambiguate by re-checking
+                            # which key actually produced the value.
+                            if live_quote.get("last") and float(live_quote.get("last") or 0) > 0:
+                                pnl_source = "quote_last"
+                            elif live_quote.get("close") and float(live_quote.get("close") or 0) > 0:
+                                pnl_source = "quote_close"
+                            else:
+                                pnl_source = "quote_unknown_key"
+                        elif trade.get("current_price") and float(trade.get("current_price") or 0) > 0:
+                            # Already assigned above (`current = trade.current_price`).
+                            # This is the position_manager-driven snapshot
+                            # — can be stale up to one manage tick.
+                            pnl_source = "trade_current_price_stale"
+                        elif entry and float(entry) > 0:
+                            # Worst case: no live mark + no manage-tick
+                            # update → PnL collapses to 0 against entry.
+                            # Surface this so operator knows the row
+                            # is missing a real mark.
+                            pnl_source = "entry_price_fallback"
                         shares = trade.get("shares") or trade.get("quantity", 0) or 0
                         direction = trade.get("direction", "long")
                         
@@ -2354,6 +2385,13 @@ class SentComService:
                             # rows distinctly and surface "prior verdict:
                             # REJECT" inline when the bot's own logic
                             # was actively rejecting this setup.
+                            # 2026-02-13 (v19.34.142f) — bot-row PnL
+                            # source (quote_last / quote_close /
+                            # trade_current_price_stale / entry_price_fallback).
+                            # Pre-v19.34.142f this was null on bot rows,
+                            # making CW/ENTG drift impossible to root-
+                            # cause from the audit endpoint.
+                            "pnl_source": pnl_source,
                             "entered_by": trade.get("entered_by") or "bot_fired",
                             "prior_verdict_conflict": bool(
                                 trade.get("prior_verdict_conflict")

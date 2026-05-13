@@ -144,27 +144,91 @@ class PositionConsolidator:
             "unrealized_pnl": float(getattr(t, "unrealized_pnl", 0) or 0),
         }
 
+    @staticmethod
+    def _fetch_ib_qty_map() -> Dict[str, int]:
+        """v19.34.144 — read the pusher's IB position snapshot.
+
+        Returns `{SYMBOL: signed_qty}` from `_pushed_ib_data["positions"]`.
+        Used to clamp consolidation share counts so the canonical trade
+        never ends up holding MORE shares than IB actually has.
+        Returns `{}` on any error — caller treats missing data as
+        "skip the clamp, fall back to ledger sum" (safe default).
+        """
+        try:
+            from routers.ib import _pushed_ib_data
+            positions = (_pushed_ib_data or {}).get("positions") or []
+            out: Dict[str, int] = {}
+            for p in positions:
+                if not isinstance(p, dict):
+                    continue
+                sym = (p.get("symbol") or "").upper()
+                qty = p.get("position")
+                if not sym or qty is None:
+                    continue
+                try:
+                    out[sym] = int(qty)
+                except (TypeError, ValueError):
+                    continue
+            return out
+        except Exception:
+            return {}
+
     def _build_diff(self, bot: "TradingBotService") -> Dict[str, Any]:
         """Build per-symbol diff for fragmented groups (N>1 open trades)."""
         groups = self._group_open_trades(bot)
+        # v19.34.144 — KMB clamp: when the ledger sum overshoots IB,
+        # cap proposed_total_shares to IB qty so we don't size the
+        # canonical's new bracket to phantom shares.
+        ib_qty_map = self._fetch_ib_qty_map()
         diffs: List[Dict[str, Any]] = []
         for (sym, direction), trades in sorted(groups.items()):
             if len(trades) <= 1:
                 continue
             canonical = self._pick_canonical(trades)
             siblings = [t for t in trades if getattr(t, "id", None) != getattr(canonical, "id", None)]
-            total_shares = sum(int(abs(getattr(t, "remaining_shares", 0) or 0)) for t in trades)
+            ledger_sum = sum(int(abs(getattr(t, "remaining_shares", 0) or 0)) for t in trades)
+            # Clamp logic. ib_qty_signed is None if IB hasn't pushed a
+            # snapshot for this symbol (don't clamp — risky to assume).
+            ib_qty_signed = ib_qty_map.get(sym)
+            ib_qty_abs: Optional[int] = (
+                abs(int(ib_qty_signed)) if ib_qty_signed is not None else None
+            )
+            # Direction-aware: if IB is LONG but the ledger group is
+            # SHORT (or vice versa), don't clamp — the sign-mismatch
+            # path in the diagnostic owns that case.
+            same_direction = True
+            if ib_qty_signed is not None:
+                ib_is_long = ib_qty_signed > 0
+                want_long = direction == "long"
+                same_direction = ib_is_long == want_long
+            if (
+                ib_qty_abs is not None
+                and same_direction
+                and ib_qty_abs > 0
+                and ledger_sum > ib_qty_abs
+            ):
+                proposed_total = ib_qty_abs
+                clamped = True
+                overshoot = ledger_sum - ib_qty_abs
+            else:
+                proposed_total = ledger_sum
+                clamped = False
+                overshoot = 0
             diffs.append({
                 "symbol": sym,
                 "direction": direction,
                 "fragment_count": len(trades),
-                "current_total_shares": total_shares,
+                "current_total_shares": ledger_sum,
                 "proposed_canonical": self._summarize_trade(canonical),
-                "proposed_total_shares": total_shares,
+                "proposed_total_shares": proposed_total,
                 "proposed_stop": float(getattr(canonical, "stop_price", 0) or 0),
                 "proposed_target": float(((getattr(canonical, "target_prices", []) or [0])[0]) or 0),
                 "siblings_to_close": [self._summarize_trade(t) for t in siblings],
                 "expected_pnl_impact": 0.0,  # PnL is folded, not realized
+                # v19.34.144 — clamp transparency.
+                "ib_qty": ib_qty_signed,
+                "ledger_sum_overshoot": overshoot,
+                "clamped_to_ib_qty": clamped,
             })
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),

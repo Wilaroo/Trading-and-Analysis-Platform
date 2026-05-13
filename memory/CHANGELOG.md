@@ -3,6 +3,82 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.144) — Position consolidator: clamp to IB qty
+
+Follow-on to the KMB phantom-share crisis (v19.34.142d). When the
+operator runs the consolidator (or `auto_consolidate_if_safe` fires
+during a reconcile loop) on a fragmented group whose ledger sum
+overshoots IB, pre-v19.34.144 the canonical trade was sized to the
+ledger sum — meaning the new OCA bracket was placed for MORE shares
+than IB has. On a stop fire, this opens an unmanaged short for the
+overshoot delta.
+
+### Fix (`services/position_consolidator.py::_build_diff`)
+- New helper `_fetch_ib_qty_map()` reads
+  `routers.ib._pushed_ib_data["positions"]` and returns
+  `{SYMBOL: signed_qty}` for the clamp lookup.
+- `proposed_total_shares` is now
+  `min(ledger_sum, abs(ib_qty))` whenever the IB qty is positive,
+  same-direction, and SMALLER than the ledger sum. The clamp is
+  skipped (safely) when:
+  - IB snapshot missing for the symbol → fall back to ledger sum
+  - Direction mismatch (LONG ledger vs SHORT IB) → let the
+    `QTY_SIGN_MISMATCH` path own that case
+  - `_pushed_ib_data` raises → empty map, no clamp
+- Diff exposes three new transparency fields per group: `ib_qty`,
+  `ledger_sum_overshoot`, `clamped_to_ib_qty`. These flow through
+  to the dry-run report so the operator sees exactly what got
+  trimmed and why.
+- Existing `_consolidate_one_group` reads `proposed_total_shares`
+  unchanged, so the canonical's `remaining_shares` is now correctly
+  set to `min(ledger, ib_qty)` — no other call-site changes needed.
+
+### Tests
+`tests/test_position_consolidator_clamp_v19_34_144.py` — 10 cases:
+KMB happy path, canonical-pick preservation, no-clamp paths
+(matching qty / ledger short / direction mismatch / missing
+snapshot / IB module unavailable), symmetric short overshoot, no
+single-fragment scope creep, contract check on
+`_consolidate_one_group`. All 10 pass.
+
+Note: single-fragment overshoot (e.g. one BotTrade tracking 144sh
+when IB has 55) is OUT of scope for the consolidator — that case
+is owned by `POST /api/trading-bot/reconcile-share-drift`'s
+`partial_external_close` LIFO shrink path (v19.34.15b).
+
+
+## 2026-02-13 (v19.34.142f) — Bot-row `pnl_source` instrumentation
+
+Issue from previous handoff: bot-tracked rows (CW, ENTG) returned
+`pnl_source: null` from `get_our_positions()`. The audit endpoint
+classified them as `DRIFT_ABS` / `DRIFT_PCT` but the operator
+couldn't distinguish stale `trade.current_price`, missing pusher
+quote, or a wrong-`entry_price` bug.
+
+### Fix (`services/sentcom_service.py::get_our_positions`)
+Bot-row branch now stamps `pnl_source` with one of:
+
+| Source | Meaning |
+| --- | --- |
+| `quote_last` | Live L1 last price from the pusher |
+| `quote_close` | Pusher snapshot, no live last yet (off-hours) |
+| `trade_current_price_stale` | Manage-tick-driven `current_price` (can lag) |
+| `entry_price_fallback` | No mark available → PnL pinned to entry |
+| `unknown` | Half-broken legacy trade with no entry & no mark |
+
+Both branches (bot-tracked + IB-orphan) now emit `pnl_source` on
+every row, closing the diagnostic loop. The audit's `pnl_source`
+column on `DRIFT_*` rows now actually identifies WHICH source
+produced the suspect number.
+
+### Tests
+`tests/test_bot_pnl_source_v19_34_142f.py` — 13 cases:
+classifier coverage for every source path, parametrized truth
+table, contract check that the production code keeps emitting
+`"pnl_source": pnl_source` for both row types.
+
+
+
 ## 2026-02-13 (v19.34.143) — Naked-sweep: simulated-ID detection + emergency hard-stop fallback
 
 Live audit surfaced TE / EGO / KTOS sitting unprotected at IB despite
