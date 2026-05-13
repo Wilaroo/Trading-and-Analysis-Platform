@@ -32,24 +32,49 @@ def _bot_with_recently_closed(symbols_with_ages_s):
     return bot
 
 
+def _patch_ib(ib_positions, ib_quotes):
+    """Patch the routers.ib module-level objects the reconciler imports
+    inline (`from routers.ib import _pushed_ib_data, is_pusher_connected`).
+
+    Returns a list of context managers the caller must enter together.
+    """
+    import routers.ib as ib_mod
+
+    patches = [
+        patch.object(ib_mod, "_pushed_ib_data", {
+            "positions": ib_positions, "quotes": ib_quotes,
+        }, create=True),
+        patch.object(ib_mod, "is_pusher_connected", lambda: True, create=True),
+    ]
+    return patches
+
+
 @pytest.mark.asyncio
 async def test_reconciler_skips_recently_closed_symbol():
     """A symbol closed 10 min ago must NOT be re-adopted as an orphan."""
     from services.position_reconciler import PositionReconciler
 
     bot = _bot_with_recently_closed({"AJG": 600})  # 10 min ago
+    bot.risk_params = SimpleNamespace(
+        reconciled_default_stop_pct=2.0,
+        reconciled_default_rr=2.0,
+    )
 
     # Patch IB to report AJG as a live position
     ib_quotes = {"AJG": {"last": 197.40}}
     ib_positions = [{"symbol": "AJG", "qty": 67, "avg_cost": 198.57}]
 
-    with patch("services.position_reconciler._pushed_ib_data", {
-        "positions": ib_positions, "quotes": ib_quotes,
-    }):
+    patches = _patch_ib(ib_positions, ib_quotes)
+    for p in patches:
+        p.start()
+    try:
         rec = PositionReconciler()
         report = await rec.reconcile_orphan_positions(
-            bot, symbols=["AJG"], dry_run=False, all_orphans=False,
+            bot, symbols=["AJG"], all_orphans=False,
         )
+    finally:
+        for p in patches:
+            p.stop()
 
     # AJG must be in skipped, with reason `recently_closed_cooldown`
     skipped_symbols = {s["symbol"]: s for s in report.get("skipped", [])}
@@ -66,16 +91,24 @@ async def test_reconciler_adopts_after_cooldown_expires():
     from services.position_reconciler import PositionReconciler
 
     bot = _bot_with_recently_closed({"AJG": 31 * 60})  # 31 min ago
+    bot.risk_params = SimpleNamespace(
+        reconciled_default_stop_pct=2.0,
+        reconciled_default_rr=2.0,
+    )
     ib_quotes = {"AJG": {"last": 197.40}}
     ib_positions = [{"symbol": "AJG", "qty": 67, "avg_cost": 198.57}]
 
-    with patch("services.position_reconciler._pushed_ib_data", {
-        "positions": ib_positions, "quotes": ib_quotes,
-    }):
+    patches = _patch_ib(ib_positions, ib_quotes)
+    for p in patches:
+        p.start()
+    try:
         rec = PositionReconciler()
         report = await rec.reconcile_orphan_positions(
-            bot, symbols=["AJG"], dry_run=True, all_orphans=False,
+            bot, symbols=["AJG"], all_orphans=False,
         )
+    finally:
+        for p in patches:
+            p.stop()
 
     # AJG should NOT be skipped for the cooldown reason
     skipped = report.get("skipped", [])

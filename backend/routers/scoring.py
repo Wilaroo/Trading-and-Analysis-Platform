@@ -5,7 +5,7 @@ Endpoints for Universal Scoring System and Top Picks
 from fastapi import APIRouter, Query
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 from services.scoring_engine import get_scoring_engine
 
@@ -105,7 +105,7 @@ async def analyze_batch(request: BatchScoreRequest):
     results = await engine.score_batch(stocks, market_dict)
     return {
         "count": len(results),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "scores": results
     }
 
@@ -138,7 +138,7 @@ async def get_top_picks(
         "timeframe_filter": timeframe,
         "direction_filter": direction,
         "count": len(top),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "picks": top
     }
 

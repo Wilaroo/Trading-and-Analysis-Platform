@@ -3,6 +3,44 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.134-verify + v19.34.135) — Cooldown test verified + audit cleanups
+
+### v19.34.134 verification
+The previous session shipped the 30-min per-symbol reconciler cooldown
+(seals the AJG/FLEX duplicate-close loop) but never executed the
+pytest suite. This session:
+
+1. Re-pointed the test's `patch(...)` targets to the actual source
+   module (`routers.ib._pushed_ib_data` + `routers.ib.is_pusher_connected`)
+   instead of the inline import location, which mock cannot reach.
+2. Removed the non-existent `dry_run=` kwarg from the test calls.
+3. Added a `risk_params` SimpleNamespace to the bot stub so the
+   reconciler's risk-default resolution doesn't AttributeError.
+
+Result: `pytest backend/tests/test_recently_closed_cooldown_v19_34_134.py`
+**3 passed, 0 failed** — cooldown fix officially verified.
+
+### v19.34.135 — Deprecated datetime + timeout-loop audit cleanups
+
+Two surgical fixes from the audit backlog (P1):
+
+- **`routers/scoring.py:108, 141`**: replaced `datetime.utcnow()` with
+  `datetime.now(timezone.utc)` so the response timestamp is genuinely
+  timezone-aware. Old form is deprecated in Py3.12 and silently strips
+  tz info, which can break downstream consumers that assert UTC.
+- **`services/trade_executor_service.py:457`**: replaced
+  `(datetime.now() - start_time).seconds < timeout` with
+  `(time.monotonic() - start_time) < timeout` for the order-fill wait
+  loop. Two bugs killed in one move: (1) `timedelta.seconds` discards
+  the day component and wraps DST, (2) wall-clock comparisons can go
+  negative on NTP step adjustments. `time.monotonic()` is the textbook
+  answer for "elapsed since X."
+
+Both modules re-imported cleanly; no behavior changes outside the
+exact intent.
+
+
+
 ## 2026-02-12 (v19.34.133) — Realized PnL forensic audit + Evaluate tile honesty
 
 ### Operator-reported bug

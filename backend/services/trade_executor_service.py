@@ -454,8 +454,8 @@ class TradeExecutorService:
         """Wait for order to fill with timeout"""
         from alpaca.trading.enums import OrderStatus
         
-        start_time = datetime.now()
-        while (datetime.now() - start_time).seconds < timeout:
+        start_time = time.monotonic()
+        while (time.monotonic() - start_time) < timeout:
             try:
                 order = await asyncio.to_thread(
                     lambda: self._alpaca_client.get_order_by_id(order_id)
