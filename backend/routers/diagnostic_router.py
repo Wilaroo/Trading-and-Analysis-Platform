@@ -2701,3 +2701,231 @@ def clear_unqualifiable(req: ClearUnqualifiableRequest):
         "reason": req.reason,
         "results": results,
     }
+
+
+
+# =============================================================================
+# 2026-02-13 (v19.34.142) — Position PnL Audit (bot vs IB cross-reference)
+# =============================================================================
+#
+# Endpoint: GET /api/diagnostic/position-pnl-audit
+#
+# For every open position in IB (the source of truth), compare what the
+# bot's V5 panel SHOULD render against IB's authoritative unrealized PnL.
+# Surfaces drift in three buckets:
+#   - delta_abs  > $20   (probably wrong)
+#   - delta_pct  > 5%    (probably stale mark)
+#   - missing_in_bot     (IB has it, bot panel doesn't render it)
+#   - phantom_in_bot     (bot panel renders it, IB doesn't have it)
+#
+# Drives a new V5 chip (paired with the v19.34.138 Coverage chip) so
+# operator catches per-position drift WITHOUT having to manually
+# cross-reference TWS every time.
+# =============================================================================
+
+
+def _ib_position_snapshot() -> List[Dict[str, Any]]:
+    """Pull the current IB position list from the pusher cache.
+    Defensive — returns [] if the pusher is offline."""
+    try:
+        from routers.ib import _pushed_ib_data
+        return list(_pushed_ib_data.get("positions") or [])
+    except Exception:
+        return []
+
+
+@router.get("/position-pnl-audit")
+async def position_pnl_audit(
+    drift_abs_threshold: float = 20.0,
+    drift_pct_threshold: float = 5.0,
+):
+    """Cross-reference bot panel PnL against IB ground-truth.
+
+    Query params:
+      drift_abs_threshold (default $20): flag rows whose $ delta exceeds.
+      drift_pct_threshold (default 5%):  flag rows whose % delta exceeds.
+
+    Response:
+      {
+        "success": true,
+        "generated_at": "...",
+        "ib_position_count": 16,
+        "bot_position_count": 16,
+        "rows": [
+          {"symbol":"TE", "ib_qty":-7204, "bot_qty":-7204,
+           "ib_unrealized": -1082.83, "bot_unrealized": 0.0,
+           "delta_abs": 1082.83, "delta_pct": 100.0,
+           "pnl_source": "unknown_no_mark", "verdict": "DRIFT_ABS"},
+          ...
+        ],
+        "summary": {
+          "total_audited": 16,
+          "ok": 11,
+          "drift_abs": 3,
+          "drift_pct": 1,
+          "missing_in_bot": 0,
+          "phantom_in_bot": 0,
+          "totals": {"ib_unrealized": 232.88, "bot_unrealized": 153.16,
+                     "delta": 79.72}
+        },
+        "actions": [...]
+      }
+    """
+    db = _get_db()
+    if db is None:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+
+    # 1) IB ground truth
+    ib_positions = _ib_position_snapshot()
+    ib_by_symbol: Dict[str, Dict[str, Any]] = {}
+    for p in ib_positions:
+        sym = (p.get("symbol") or "").upper()
+        qty = float(p.get("position", 0) or 0)
+        if not sym or abs(qty) < 0.001:
+            continue
+        ib_by_symbol[sym] = {
+            "qty": qty,
+            "avg_cost": float(p.get("avgCost", p.get("avg_cost", 0)) or 0),
+            "market_price": float(
+                p.get("marketPrice", p.get("market_price", 0)) or 0
+            ),
+            "unrealized": float(
+                p.get("unrealizedPnL", p.get("unrealizedPNL",
+                p.get("unrealized_pnl", 0))) or 0
+            ),
+        }
+
+    # 2) Bot panel — same path the V5 UI uses.
+    try:
+        from services.sentcom_service import get_sentcom_service
+        svc = get_sentcom_service()
+        bot_rows = await svc.get_our_positions()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"bot panel read failed: {e}")
+    bot_by_symbol: Dict[str, Dict[str, Any]] = {}
+    for r in bot_rows or []:
+        sym = (r.get("symbol") or "").upper()
+        if not sym:
+            continue
+        bot_by_symbol[sym] = {
+            "qty": float(r.get("shares") or r.get("remaining_shares") or 0),
+            "unrealized": float(r.get("unrealized_pnl") or 0),
+            "pnl_source": r.get("pnl_source"),
+            "source": r.get("source"),
+        }
+
+    # 3) Build the diff.
+    rows: List[Dict[str, Any]] = []
+    bucket = {"ok": 0, "drift_abs": 0, "drift_pct": 0,
+              "missing_in_bot": 0, "phantom_in_bot": 0}
+    total_ib_pnl = 0.0
+    total_bot_pnl = 0.0
+
+    all_symbols = set(ib_by_symbol) | set(bot_by_symbol)
+    for sym in sorted(all_symbols):
+        ib = ib_by_symbol.get(sym)
+        bt = bot_by_symbol.get(sym)
+        if ib and not bt:
+            rows.append({
+                "symbol": sym, "ib_qty": ib["qty"], "bot_qty": 0,
+                "ib_unrealized": ib["unrealized"], "bot_unrealized": 0.0,
+                "delta_abs": abs(ib["unrealized"]),
+                "delta_pct": 100.0 if ib["unrealized"] else 0.0,
+                "pnl_source": None, "verdict": "MISSING_IN_BOT",
+            })
+            bucket["missing_in_bot"] += 1
+            total_ib_pnl += ib["unrealized"]
+            continue
+        if bt and not ib:
+            rows.append({
+                "symbol": sym, "ib_qty": 0, "bot_qty": bt["qty"],
+                "ib_unrealized": 0.0, "bot_unrealized": bt["unrealized"],
+                "delta_abs": abs(bt["unrealized"]),
+                "delta_pct": 100.0 if bt["unrealized"] else 0.0,
+                "pnl_source": bt.get("pnl_source"),
+                "verdict": "PHANTOM_IN_BOT",
+            })
+            bucket["phantom_in_bot"] += 1
+            total_bot_pnl += bt["unrealized"]
+            continue
+        # Both sides have it — compare.
+        ib_pnl = ib["unrealized"]
+        bot_pnl = bt["unrealized"]
+        total_ib_pnl += ib_pnl
+        total_bot_pnl += bot_pnl
+        delta_abs = abs(ib_pnl - bot_pnl)
+        delta_pct = (
+            (delta_abs / abs(ib_pnl) * 100.0) if ib_pnl else
+            (100.0 if bot_pnl else 0.0)
+        )
+        if delta_abs >= drift_abs_threshold:
+            verdict = "DRIFT_ABS"
+            bucket["drift_abs"] += 1
+        elif delta_pct >= drift_pct_threshold:
+            verdict = "DRIFT_PCT"
+            bucket["drift_pct"] += 1
+        else:
+            verdict = "OK"
+            bucket["ok"] += 1
+        rows.append({
+            "symbol": sym,
+            "ib_qty": ib["qty"], "bot_qty": bt["qty"],
+            "ib_unrealized": round(ib_pnl, 2),
+            "bot_unrealized": round(bot_pnl, 2),
+            "delta_abs": round(delta_abs, 2),
+            "delta_pct": round(delta_pct, 2),
+            "pnl_source": bt.get("pnl_source"),
+            "bot_source": bt.get("source"),
+            "verdict": verdict,
+        })
+
+    # 4) Actions.
+    actions: List[str] = []
+    if bucket["missing_in_bot"]:
+        actions.append(
+            f"{bucket['missing_in_bot']} symbol(s) in IB but missing from "
+            "the bot panel — run Reconcile in the V5 UI or POST "
+            "/api/trading-bot/reconcile-share-drift."
+        )
+    if bucket["phantom_in_bot"]:
+        actions.append(
+            f"{bucket['phantom_in_bot']} symbol(s) tracked by the bot but "
+            "absent from IB. Likely a stale `_open_trades` entry; run "
+            "the share-drift auto-sweep or restart the bot worker."
+        )
+    if bucket["drift_abs"] or bucket["drift_pct"]:
+        worst = max(rows, key=lambda r: r.get("delta_abs") or 0,
+                    default=None)
+        if worst and worst.get("delta_abs", 0) > 0:
+            actions.append(
+                f"Worst drift: {worst['symbol']} "
+                f"(Δ ${worst['delta_abs']:.2f}, {worst['delta_pct']:.1f}%). "
+                f"pnl_source={worst.get('pnl_source')!r} — "
+                "if 'unknown_no_mark', the L1 quote isn't streaming "
+                "(see IB_PUSHER_L1_AUTO_TOP_N) or updatePortfolio() "
+                "hasn't refreshed yet."
+            )
+    if not actions:
+        actions.append("All positions agree with IB within thresholds.")
+
+    return {
+        "success": True,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "ib_position_count": len(ib_by_symbol),
+        "bot_position_count": len(bot_by_symbol),
+        "thresholds": {
+            "drift_abs_usd": drift_abs_threshold,
+            "drift_pct": drift_pct_threshold,
+        },
+        "rows": rows,
+        "summary": {
+            "total_audited": len(rows),
+            **bucket,
+            "totals": {
+                "ib_unrealized": round(total_ib_pnl, 2),
+                "bot_unrealized": round(total_bot_pnl, 2),
+                "delta": round(total_ib_pnl - total_bot_pnl, 2),
+            },
+        },
+        "actions": actions,
+    }

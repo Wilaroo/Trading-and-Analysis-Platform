@@ -2432,6 +2432,64 @@ class SentComService:
                     else:
                         unrealized_pnl = (unrealized_pnl_full or 0) * ratio
                     unrealized_pnl = unrealized_pnl or 0
+
+                    # 2026-02-13 (v19.34.142) — Orphan-position $0 PnL fix.
+                    # When `updatePortfolio()` hasn't refreshed for a
+                    # freshly-reconciled orphan, both `unrealizedPNL` and
+                    # `marketPrice` arrive as 0 from the pusher, so the
+                    # row would render `$0` PnL — making TE's real -$1k
+                    # loss invisible. Fall back to the live L1 quote
+                    # (which DOES refresh independently of portfolio
+                    # updates) → live_bar_cache close → log + display
+                    # an honest "stale" flag instead of a false $0.
+                    pnl_source = "ib_unrealized"
+                    if (unrealized_pnl == 0 and avg_cost and shares):
+                        fallback_mark: float = 0.0
+                        # 1) Try the L1 quote dict (mid → last → bid/ask).
+                        _q = ib_quotes.get(symbol) or ib_quotes.get(symbol.upper())
+                        if isinstance(_q, dict):
+                            for _k in ("last", "mid", "close", "bid", "ask"):
+                                _v = _q.get(_k)
+                                try:
+                                    if _v and float(_v) > 0:
+                                        fallback_mark = float(_v)
+                                        pnl_source = f"quote_{_k}"
+                                        break
+                                except (TypeError, ValueError):
+                                    continue
+                        # 2) Last-resort: live_bar_cache close.
+                        if fallback_mark == 0.0:
+                            try:
+                                bar = self.db["live_bar_cache"].find_one(
+                                    {"symbol": symbol},
+                                    {"_id": 0, "close": 1, "c": 1, "price": 1},
+                                    sort=[("ts", -1)],
+                                )
+                                if bar:
+                                    for _k in ("close", "c", "price"):
+                                        _v = bar.get(_k)
+                                        try:
+                                            if _v and float(_v) > 0:
+                                                fallback_mark = float(_v)
+                                                pnl_source = f"live_bar_{_k}"
+                                                break
+                                        except (TypeError, ValueError):
+                                            continue
+                            except Exception as e:
+                                logger.debug(
+                                    f"orphan-PnL: live_bar_cache read failed "
+                                    f"for {symbol}: {e}"
+                                )
+                        if fallback_mark > 0:
+                            unrealized_pnl = (
+                                (fallback_mark - float(avg_cost)) * float(shares)
+                            )
+                            # Update market_price too so cost-basis math
+                            # and pnl_pct below see a non-zero mark.
+                            if not market_price:
+                                market_price = fallback_mark
+                        else:
+                            pnl_source = "unknown_no_mark"
                     
                     # Calculate P&L percent
                     total_cost = abs(shares * avg_cost) if shares and avg_cost else 0
@@ -2616,6 +2674,14 @@ class SentComService:
                             (enrich_trade or {}).get("prior_verdicts") or []
                         ),
                         "synthetic_source": (enrich_trade or {}).get("synthetic_source"),
+                        # 2026-02-13 (v19.34.142) — Which source produced
+                        # the displayed unrealized PnL. `ib_unrealized` =
+                        # IB's updatePortfolio() snapshot. `quote_*` =
+                        # live L1 fallback. `live_bar_*` = last-resort
+                        # cached bar. `unknown_no_mark` = no mark
+                        # available; UI should render warning instead
+                        # of pretending it's $0.
+                        "pnl_source": pnl_source,
                     })
         except Exception as e:
             logger.error(f"Error getting IB positions: {e}")

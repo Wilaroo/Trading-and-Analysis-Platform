@@ -3,6 +3,70 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.142) — Orphan PnL fallback + Position PnL Audit endpoint
+
+Operator-flagged Bug #4 from v19.34.141: 5 reconciled orphans
+(TE/EGO/KTOS/SSNC/CHWY) all displayed `+$0` PnL even though IB had
+real unrealized values for them (TE alone: −$1,082.83). Compounded
+by a deeper UX problem — the operator had no way to know per-position
+when bot disagrees with IB.
+
+### Bug #4 root cause — orphan-PnL fallback chain
+`services/sentcom_service.py::get_our_positions` computes orphan PnL
+from the IB pusher snapshot. For freshly-reconciled positions,
+`updatePortfolio()` hasn't yet fired so the pusher sends qty +
+avgCost with `unrealizedPNL=0` and `marketPrice=0`. The pre-fix
+code's fallback `(market_price - avg_cost) * shares` evaluated to
+`(0 - avg_cost) * shares` ≈ 0, hiding the real loss.
+
+Fix: three-tier fallback when `unrealizedPNL=0` and `marketPrice=0`:
+  1. **L1 quote dict** — `last → mid → close → bid → ask` from
+     `_pushed_ib_data["quotes"][symbol]`. Live ticks refresh
+     independently of `updatePortfolio()` so they're usually fresh
+     even for fresh orphans.
+  2. **`live_bar_cache`** — most recent cached bar's
+     `close / c / price`. Last resort but better than $0.
+  3. **`pnl_source = "unknown_no_mark"`** — explicit sentinel so the
+     UI can render a warning chip instead of pretending $0 is real.
+
+Each row now carries `pnl_source` so the operator can see exactly
+which fallback produced the displayed PnL.
+
+### NEW endpoint — `GET /api/diagnostic/position-pnl-audit`
+Cross-references the bot's V5 panel PnL against IB's authoritative
+unrealized PnL for every open position. Classifies each row:
+
+  - `OK` — agrees within thresholds.
+  - `DRIFT_ABS` — Δ$ exceeds `drift_abs_threshold` (default $20).
+  - `DRIFT_PCT` — Δ% exceeds `drift_pct_threshold` (default 5%).
+  - `MISSING_IN_BOT` — IB has it; bot panel doesn't render it.
+  - `PHANTOM_IN_BOT` — bot panel renders it; IB doesn't have it.
+
+Top-level summary: per-bucket counts + IB total / bot total / delta.
+Action recommendations point to the worst-drift symbol with its
+`pnl_source` so the operator immediately sees whether the gap is
+a quote-staleness issue, a missing reconcile, or a phantom row.
+
+Thresholds are query-tunable so the operator can ratchet up
+sensitivity during volatile sessions.
+
+### Tests
+NEW `tests/test_position_pnl_audit_v19_34_142.py` — 9 cases:
+- Orphan-PnL uses IB unrealized when present.
+- Falls back to `quote_last` when IB unrealized is 0.
+- `bid → ask` order honored when `last` missing.
+- Falls back to `live_bar_cache.close` when no quote.
+- `pnl_source = "unknown_no_mark"` when all fallbacks fail.
+- Endpoint classifies each row correctly (OK / DRIFT_ABS /
+  MISSING_IN_BOT / PHANTOM_IN_BOT).
+- Summary aggregates per-bucket counts + totals.
+- Action recommendations call out the worst-drift symbol.
+- Threshold overrides correctly relax classification.
+
+Full suite: **71 pytest cases pass** (9 new + 62 prior). Backend
+hot-reloads; live endpoint smoke-tested on the cloud sandbox.
+
+
 ## 2026-02-13 (v19.34.141) — PnL display fixes: realized window + dedup + buying power
 
 Operator reported app showed **Realized −$4,378.49 / Unrealized +$153.16 /
