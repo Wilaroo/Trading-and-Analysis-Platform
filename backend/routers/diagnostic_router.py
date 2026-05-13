@@ -3338,6 +3338,15 @@ async def position_pnl_audit(
                         "loop or check IB pusher L1 subscription "
                         "(IB_PUSHER_L1_AUTO_TOP_N) for affected symbols."
                     ),
+                    "ib_market_price": (
+                        "bot is using IB's broker-side `marketPrice` "
+                        "(same mark IB uses to compute its own "
+                        "unrealizedPNL). Drift here would indicate "
+                        "an avg_cost / cost_basis mismatch — check "
+                        "the avg_cost_drift columns. If avg_cost "
+                        "drift is also zero, the IB snapshot itself "
+                        "is stale (updatePortfolio() not refreshing)."
+                    ),
                     "quote_last": (
                         "bot is using LIVE L1 `last` from the pusher — "
                         "quote feed is healthy. The drift here is "

@@ -3,6 +3,79 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.149) — Bot PnL prefers IB.marketPrice over quote_last
+
+After v19.34.148 healed avg_cost drift to **zero**, the operator's
+audit still showed ~$400 of delta where the worst offender (SIVR)
+had `entry == avg_cost` exactly and yet a $148 PnL gap. v19.34.146's
+cluster hint correctly identified it as quote-source skew:
+
+> "The drift here is timing skew between bot's quote_last and IB's
+> updatePortfolio().marketPrice (different price feeds tick at
+> slightly different cadence)."
+
+On a 750-share SIVR, even a 20¢ tick gap between the pusher's L1
+last and IB's portfolio-snapshot marketPrice compounds to $148.
+
+### Fix (`services/sentcom_service.py::get_our_positions`)
+Bot-row PnL math now uses IB's `marketPrice` (from
+`_pushed_ib_data["positions"][...].marketPrice`) as the highest-
+priority price source, falling back to the existing chain
+(`quote_last → quote_close → trade_current_price_stale →
+entry_price_fallback → unknown`) only when IB hasn't pushed a
+portfolio snapshot for the symbol.
+
+New `pnl_source` value: `"ib_market_price"`. Audit-endpoint
+cluster-hint map includes a description so dominant clusters on
+this source surface a meaningful remediation (zero drift means
+broker-side parity; non-zero drift means either avg_cost mismatch
+OR a stale IB snapshot).
+
+### Why this is the correct fix
+IB's `marketPrice` is **the same mark the broker uses to compute
+its own `unrealizedPNL`**. By using it as the bot's `current`
+price, `bot.unrealizedPNL` and `ib.unrealizedPNL` are mathematically
+guaranteed to agree (given matching `entry_price ≈ avgCost`, which
+v19.34.148 now keeps healed nightly). The audit delta should
+collapse to near zero on healthy state.
+
+### Priority chain (new vs old)
+| Priority | v19.34.142f (old) | v19.34.149 (new) |
+| --- | --- | --- |
+| 1 | quote_last | **ib_market_price** |
+| 2 | quote_close | quote_last |
+| 3 | trade_current_price_stale | quote_close |
+| 4 | entry_price_fallback | trade_current_price_stale |
+| 5 | unknown | entry_price_fallback |
+| 6 | — | unknown |
+
+### Tests
+`tests/test_ib_market_price_priority_v19_34_149.py` — 11 cases:
+priority-chain truth table (ib_market_price wins, zero/None
+gracefully falls through), parametrized verification, contract
+test that the production code reads `ib_pos_info.get("market_price")`
+before consulting `live_quote.last`, contract test that the audit
+hint map carries the new source.
+
+**91/91 cumulative in-scope tests pass.**
+
+### Expected audit behavior after v19.34.149
+```
+audited            : 21
+ok                 : 21
+drift_abs          : 0
+drift_pct          : 0
+delta              : ~$0
+pnl_source_breakdown_all: {ib_market_price=21}
+```
+
+If IB pusher's `updatePortfolio()` lags, rows fall back to
+`quote_last` and the audit will surface a mixed breakdown
+(`ib_market_price=N, quote_last=M`) — an early-warning that the
+pusher needs attention.
+
+
+
 ## 2026-02-13 (v19.34.148b) — Sync entry-price persistence: pymongo driver fix
 
 Operator's first live run of `POST /api/trading-bot/sync-entry-prices`

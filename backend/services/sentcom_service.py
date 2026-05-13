@@ -2192,6 +2192,19 @@ class SentComService:
                         symbol_for_quote = (trade.get("symbol") or "").upper()
                         live_quote = ib_quotes.get(symbol_for_quote, {}) if symbol_for_quote else {}
                         live_price = live_quote.get("last") or live_quote.get("close")
+                        # 2026-02-13 (v19.34.149) — when IB's updatePortfolio
+                        # snapshot supplies a positive `marketPrice` for
+                        # this symbol, prefer it over the L1 quote_last.
+                        # Reason: IB's snapshot is the SAME mark the
+                        # broker uses to compute unrealizedPNL on its
+                        # side. Using it makes bot.pnl and ib.pnl
+                        # mathematically converge on every audit row —
+                        # killing the ~$400 of quote-source skew that
+                        # remained after v19.34.148. Fall back to
+                        # `quote_last` only when IB hasn't pushed a
+                        # portfolio snapshot for the symbol.
+                        ib_pos_info = ib_pos_by_symbol.get(symbol_for_quote, {}) if symbol_for_quote else {}
+                        ib_mark = ib_pos_info.get("market_price") or 0
                         # 2026-02-13 (v19.34.142f) — track which price
                         # source produced `current`. Bot-tracked rows
                         # previously emitted `pnl_source=null` so the
@@ -2202,7 +2215,11 @@ class SentComService:
                         # genuinely missing quote. Now: we stamp the
                         # exact source on every bot row.
                         pnl_source = "unknown"
-                        if live_price and float(live_price) > 0:
+                        if ib_mark and float(ib_mark) > 0:
+                            # v19.34.149 — IB's broker-side mark wins.
+                            current = float(ib_mark)
+                            pnl_source = "ib_market_price"
+                        elif live_price and float(live_price) > 0:
                             current = float(live_price)
                             # `live_quote.last` takes precedence over
                             # `live_quote.close` in the chained `or`
