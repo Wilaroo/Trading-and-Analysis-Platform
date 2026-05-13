@@ -4228,6 +4228,14 @@ class TradingBotService:
 
         # 2) Walk every open trade with shares > 0.
         from services.bracket_reissue_service import _persist_lifecycle_event
+        # 2026-02-13 (v19.34.143) — emergency hard %-stop fallback for
+        # reconciled orphans whose `stop_price` / `target_prices` got
+        # nuked or were never set. Without this, `attach_oca_stop_target`
+        # bails with "missing stop_price or target_price" and the
+        # position stays NAKED forever (TE/EGO/KTOS scenario).
+        # The 2% / 3% defaults mirror `reconcile_orphan_positions`.
+        EMERGENCY_STOP_PCT = 2.0
+        EMERGENCY_RR = 1.5
         for tid, trade in list(self._open_trades.items()):
             try:
                 rs = int(abs(getattr(trade, "remaining_shares", 0) or 0))
@@ -4237,7 +4245,22 @@ class TradingBotService:
 
                 stop_id = getattr(trade, "stop_order_id", None)
                 stop_id_str = str(stop_id) if stop_id is not None else None
-                is_naked = (stop_id_str is None) or (stop_id_str not in live_order_ids)
+                # v19.34.143 — Treat simulated stop IDs (SIM-STP-*,
+                # ADOPT-STOP-* without a real IB ack) as NAKED. These
+                # appear when `attach_oca_stop_target` ran while the
+                # pusher was offline; the trade looks bracketed in the
+                # bot but isn't protected at IB.
+                is_simulated = bool(
+                    stop_id_str and (
+                        stop_id_str.startswith("SIM-")
+                        or stop_id_str.startswith("ADOPT-STOP-")
+                    )
+                )
+                is_naked = (
+                    stop_id_str is None
+                    or is_simulated
+                    or (stop_id_str not in live_order_ids)
+                )
                 if not is_naked:
                     continue
 
@@ -4245,10 +4268,72 @@ class TradingBotService:
                 sym = getattr(trade, "symbol", "?")
                 print(
                     f"[v127 naked-sweep] {sym} {tid} NAKED — "
-                    f"stop_id={stop_id_str!r} not in {len(live_order_ids)} live "
-                    f"orders. Emergency re-issue.",
+                    f"stop_id={stop_id_str!r} simulated={is_simulated} "
+                    f"not in {len(live_order_ids)} live orders. "
+                    f"Emergency re-issue.",
                     flush=True,
                 )
+
+                # v19.34.143 — emergency hard %-stop fallback. Before
+                # delegating to attach_oca_stop_target, make sure
+                # stop_price + target_prices are sane. If either is
+                # missing or zero, synthesize a 2% hard stop / 3% target
+                # off the entry price so the attach call can succeed
+                # instead of bouncing on "missing stop_price".
+                emergency_synth = None
+                try:
+                    entry = float(
+                        getattr(trade, "fill_price", None)
+                        or getattr(trade, "entry_price", None)
+                        or 0
+                    )
+                    cur_stop = float(getattr(trade, "stop_price", 0) or 0)
+                    tgt_list = getattr(trade, "target_prices", None) or []
+                    cur_tgt = (
+                        float(tgt_list[0])
+                        if tgt_list and tgt_list[0] is not None
+                        else 0
+                    )
+                    direction_val = getattr(trade, "direction", None)
+                    direction_str = (
+                        getattr(direction_val, "value", str(direction_val))
+                        if direction_val is not None
+                        else "long"
+                    ).lower()
+                    if entry > 0 and (cur_stop <= 0 or cur_tgt <= 0):
+                        stop_dist = entry * (EMERGENCY_STOP_PCT / 100.0)
+                        target_dist = stop_dist * EMERGENCY_RR
+                        if direction_str == "long":
+                            new_stop = entry - stop_dist
+                            new_tgt = entry + target_dist
+                        else:
+                            new_stop = entry + stop_dist
+                            new_tgt = entry - target_dist
+                        trade.stop_price = round(new_stop, 4)
+                        trade.target_prices = [round(new_tgt, 4)]
+                        emergency_synth = {
+                            "entry": entry,
+                            "stop_price": trade.stop_price,
+                            "target_price": trade.target_prices[0],
+                            "stop_pct": EMERGENCY_STOP_PCT,
+                            "rr": EMERGENCY_RR,
+                            "reason": "missing_stop_or_target",
+                        }
+                        print(
+                            f"[v127 naked-sweep] {sym} {tid} synthesized "
+                            f"emergency {EMERGENCY_STOP_PCT}% stop "
+                            f"@ ${trade.stop_price:.2f} / target "
+                            f"@ ${trade.target_prices[0]:.2f} "
+                            f"(entry=${entry:.2f}) before re-issue. "
+                            f"detail={emergency_synth}",
+                            flush=True,
+                        )
+                except Exception as _synth_err:
+                    print(
+                        f"[v127 naked-sweep] {sym} {tid} emergency stop "
+                        f"synthesis failed: {_synth_err}",
+                        flush=True,
+                    )
 
                 # 3) Emergency re-issue via attach_oca_stop_target.
                 oca_result = None

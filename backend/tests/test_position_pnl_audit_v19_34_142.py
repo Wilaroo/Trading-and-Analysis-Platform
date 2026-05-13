@@ -361,6 +361,164 @@ class TestQtySignReconstruction:
         assert "OPPOSITE direction" in joined or "qty_sign" in joined.lower()
 
 
+class TestQtyMagnitudeMismatch:
+    """v19.34.142d — KMB phantom-share crisis. The bot's `_open_trades`
+    ledger said it owned 144 KMB shares while IB only had 55. If the
+    bot fired a stop-loss, it would short 89 phantom shares (naked
+    short position). The audit must detect this case as a distinct
+    verdict (QTY_MAGNITUDE_MISMATCH) — separate from sign mismatch
+    or PnL drift — and surface a high-severity action."""
+
+    @pytest.fixture
+    def patched_kmb(self, monkeypatch):
+        import sys
+        # IB has 55 shares of KMB at $135.00.  Bot ledger says 144.
+        # Bot and IB AGREE on direction (both LONG) — this is purely a
+        # magnitude bug, NOT a sign-flip.
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                {"symbol": "KMB", "position": 55,
+                 "avgCost": 135.00, "marketPrice": 134.50,
+                 "unrealizedPNL": -27.50},
+                # Sanity: a clean match in the same payload
+                # must not be flagged as magnitude mismatch.
+                {"symbol": "AAPL", "position": 100,
+                 "avgCost": 200.0, "marketPrice": 201.0,
+                 "unrealizedPNL": 100.0},
+                # Boundary: 1-share difference falls inside tolerance.
+                {"symbol": "MSFT", "position": 50,
+                 "avgCost": 400.0, "marketPrice": 401.0,
+                 "unrealizedPNL": 50.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    # Bot says it has 144 long KMB shares — 89 phantom.
+                    {"symbol": "KMB", "shares": 144, "direction": "long",
+                     "pnl": -72.0, "pnl_source": "ib_unrealized",
+                     "source": "bot"},
+                    # AAPL matches cleanly.
+                    {"symbol": "AAPL", "shares": 100, "direction": "long",
+                     "pnl": 100.0, "pnl_source": "ib_unrealized",
+                     "source": "bot"},
+                    # MSFT: bot=51, ib=50 → within 1-share tolerance.
+                    {"symbol": "MSFT", "shares": 51, "direction": "long",
+                     "pnl": 51.0, "pnl_source": "ib_unrealized",
+                     "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+        return None
+
+    @pytest.mark.asyncio
+    async def test_kmb_magnitude_mismatch_surfaced(self, patched_kmb):
+        """The KMB row must classify as QTY_MAGNITUDE_MISMATCH with
+        the correct qty_delta (89 shares)."""
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["KMB"]["verdict"] == "QTY_MAGNITUDE_MISMATCH"
+        assert by_sym["KMB"]["ib_qty"] == 55
+        assert by_sym["KMB"]["bot_qty"] == 144
+        assert by_sym["KMB"]["qty_delta"] == 89.0
+        # Sign-mismatch must NOT trip on a same-direction drift.
+        assert by_sym["KMB"]["verdict"] != "QTY_SIGN_MISMATCH"
+
+    @pytest.mark.asyncio
+    async def test_within_tolerance_not_flagged(self, patched_kmb):
+        """1-share drift sits inside the max(1, ib_qty*1%) tolerance →
+        the row must classify as OK or DRIFT_ABS (PnL-only), never
+        QTY_MAGNITUDE_MISMATCH."""
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["MSFT"]["verdict"] != "QTY_MAGNITUDE_MISMATCH"
+
+    @pytest.mark.asyncio
+    async def test_clean_match_not_flagged(self, patched_kmb):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["AAPL"]["verdict"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_summary_counts_magnitude_mismatch(self, patched_kmb):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        assert resp["summary"]["qty_magnitude_mismatch"] == 1
+
+    @pytest.mark.asyncio
+    async def test_actions_surface_kmb_with_naked_warning(self, patched_kmb):
+        """Operator must see a high-severity action mentioning KMB,
+        the share delta, and the NAKED-position warning."""
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        joined = " | ".join(resp["actions"])
+        assert "KMB" in joined
+        assert "MAGNITUDE" in joined.upper() or "magnitude" in joined.lower()
+        assert "naked" in joined.lower() or "NAKED" in joined
+        # Worst offender's qty_delta must appear so operator can copy/paste
+        # the number into a reconcile command.
+        assert "89" in joined
+
+    @pytest.mark.asyncio
+    async def test_one_percent_tolerance_for_large_positions(
+        self, monkeypatch
+    ):
+        """For a 1000-share IB position, 1% = 10 shares tolerance.
+        A 5-share drift should NOT trigger; a 15-share drift SHOULD."""
+        import sys
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                # 1000 shares — 5 share diff (within 10-share tolerance).
+                {"symbol": "SMALL_DRIFT", "position": 1000,
+                 "avgCost": 50.0, "marketPrice": 50.1,
+                 "unrealizedPNL": 100.0},
+                # 1000 shares — 15 share diff (exceeds 10-share tolerance).
+                {"symbol": "BIG_DRIFT", "position": 1000,
+                 "avgCost": 50.0, "marketPrice": 50.1,
+                 "unrealizedPNL": 100.0},
+            ],
+            "quotes": {},
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    {"symbol": "SMALL_DRIFT", "shares": 1005,
+                     "direction": "long", "pnl": 100.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                    {"symbol": "BIG_DRIFT", "shares": 1015,
+                     "direction": "long", "pnl": 100.0,
+                     "pnl_source": "ib_unrealized", "source": "bot"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        assert by_sym["SMALL_DRIFT"]["verdict"] != "QTY_MAGNITUDE_MISMATCH"
+        assert by_sym["BIG_DRIFT"]["verdict"] == "QTY_MAGNITUDE_MISMATCH"
+
+
+
+
 class TestPusherStalenessFallback:
     """When the IB pusher's updatePortfolio() lags, unrealizedPNL=0 for
     every position. The audit must NOT report `ib_unrealized=$0` —

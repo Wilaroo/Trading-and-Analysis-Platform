@@ -2994,7 +2994,40 @@ async def position_pnl_audit(
         # catch real drift).
         qty_tolerance = max(1.0, ib_mag * 0.01)
         if qty_delta > qty_tolerance:
-            rows.append({
+            # 2026-02-13 (v19.34.142e) — forensic breadcrumbs.
+            # Walk `_open_trades` (in-memory) AND the `bot_trades`
+            # collection for OPEN rows on this symbol. The operator
+            # needs to know WHICH fragments accumulated the phantom
+            # shares — KMB had 144 in the ledger but only 55 at IB,
+            # almost certainly because two fragments (e.g. an
+            # entry slice + a reconciled_excess slice) double-booked.
+            ledger_fragments: List[Dict[str, Any]] = []
+            try:
+                from services.trading_bot_service import (
+                    get_trading_bot_service as _gtb,
+                )
+                _bot = _gtb()
+                for _tid, _t in list(getattr(_bot, "_open_trades", {}).items()):
+                    if (getattr(_t, "symbol", "") or "").upper() != sym:
+                        continue
+                    _rs = int(abs(getattr(_t, "remaining_shares", 0) or 0))
+                    if _rs <= 0:
+                        continue
+                    ledger_fragments.append({
+                        "trade_id": _tid,
+                        "shares": int(abs(getattr(_t, "shares", 0) or 0)),
+                        "remaining_shares": _rs,
+                        "setup_type": getattr(_t, "setup_type", None),
+                        "entered_by": getattr(_t, "entered_by", None),
+                        "stop_order_id": getattr(_t, "stop_order_id", None),
+                        "entry_time": (
+                            getattr(_t, "executed_at", None)
+                            or getattr(_t, "created_at", None)
+                        ),
+                    })
+            except Exception as _frag_err:
+                ledger_fragments = [{"error": f"fragment_walk_failed:{_frag_err}"}]
+            row = {
                 "symbol": sym,
                 "ib_qty": ib["qty"], "bot_qty": bt["qty"],
                 "qty_delta": round(qty_delta, 2),
@@ -3009,7 +3042,12 @@ async def position_pnl_audit(
                 "ib_pnl_source": ib.get("ib_pnl_source"),
                 "bot_source": bt.get("source"),
                 "verdict": "QTY_MAGNITUDE_MISMATCH",
-            })
+                "ledger_fragments": ledger_fragments,
+                "ledger_fragment_count": len([
+                    f for f in ledger_fragments if "error" not in f
+                ]),
+            }
+            rows.append(row)
             bucket.setdefault("qty_magnitude_mismatch", 0)
             bucket["qty_magnitude_mismatch"] += 1
             total_ib_pnl += ib["unrealized"]
@@ -3070,6 +3108,30 @@ async def position_pnl_audit(
             "LONG what IB shows as SHORT (or vice versa). PnL math is "
             "untrustworthy until reconciled — investigate immediately."
         )
+    # 2026-02-13 (v19.34.142d) — KMB phantom-share crisis. The bot's
+    # ledger held 144 KMB shares while IB only had 55 (89 phantom
+    # shares). If the bot fires a market close, it overshoots IB and
+    # opens a naked 89-share short. Always surface this as a
+    # high-severity action with the worst offender's delta.
+    if bucket.get("qty_magnitude_mismatch", 0):
+        mag_rows = [r for r in rows
+                    if r["verdict"] == "QTY_MAGNITUDE_MISMATCH"]
+        worst_mag = max(mag_rows, key=lambda r: r.get("qty_delta") or 0,
+                        default=None)
+        offenders = [r["symbol"] for r in mag_rows]
+        if worst_mag:
+            actions.append(
+                f"🔴 {len(offenders)} symbol(s) have MAGNITUDE drift — "
+                f"bot ledger vs IB share count disagree by >1 share: "
+                f"{offenders[:5]}. Worst offender: {worst_mag['symbol']} "
+                f"(bot={worst_mag['bot_qty']}, ib={worst_mag['ib_qty']}, "
+                f"Δ={worst_mag['qty_delta']} shares). If the bot fires "
+                f"a close on {worst_mag['symbol']}, it will overshoot "
+                f"IB and open a NAKED position. Run "
+                f"`POST /api/trading-bot/reconcile-share-drift` or "
+                f"flatten the symbol manually in TWS BEFORE the next "
+                f"manage tick."
+            )
     if bucket["drift_abs"] or bucket["drift_pct"]:
         worst = max(rows, key=lambda r: r.get("delta_abs") or 0,
                     default=None)

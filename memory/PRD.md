@@ -27,6 +27,7 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 
 
 ## Key API surface
+- `GET /api/diagnostic/position-pnl-audit` — **v19.34.142d/e (2026-02-13)** — per-symbol diff of bot vs IB unrealized PnL with verdict classification (`OK`, `DRIFT_ABS`, `DRIFT_PCT`, `PHANTOM_IN_BOT`, `MISSING_IN_BOT`, `QTY_SIGN_MISMATCH`, `QTY_MAGNITUDE_MISMATCH`). Magnitude-mismatch rows include `ledger_fragments[]` listing every open BotTrade slice for the symbol (trade_id, shares, remaining_shares, setup_type, entered_by, stop_order_id, entry_time) so the operator can pinpoint which slice(s) over-booked vs IB. KMB phantom-share crisis use case: bot=144 / IB=55 fires a high-severity action with one-line `POST /api/trading-bot/reconcile-share-drift` remediation. Tolerance: `max(1 share, 1% of ib_qty)`.
 - `GET /api/portfolio` — IB pushed positions + manual fallback; quote_ready guard
 - `POST /api/portfolio/flatten-paper?confirm=FLATTEN` — flatten paper account, 120s cooldown
 - `GET /api/sentcom/positions` — bot + IB merged positions; injects live `_pushed_ib_data.quotes` into `current_price` so PnL doesn't lag the timer-driven `position_manager.update_open_positions` (2026-05-01 v19.22.3); exposes V5-rich fields `scan_tier / trade_style / reasoning[] / exit_rule / scale_out_state / trailing_stop_state / risk_reward_ratio / remaining_shares` (v19.23)

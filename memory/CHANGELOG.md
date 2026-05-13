@@ -3,6 +3,79 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.143) — Naked-sweep: simulated-ID detection + emergency hard-stop fallback
+
+Live audit surfaced TE / EGO / KTOS sitting unprotected at IB despite
+being adopted by `reconcile_orphan_positions`. Two failure modes
+identified:
+
+1. **Pusher-offline cascade**: `attach_oca_stop_target` returned
+   `SIM-STP-{trade.id}` / `ADOPT-STOP-{trade.id}` "simulated" IDs
+   when the pusher dropped during reconcile. The bot looked
+   bracketed but the order was never queued at IB. Pre-v19.34.143
+   the naked sweep silently matched these simulated IDs against an
+   empty live-order set and re-attempted the same broken attach.
+
+2. **Missing stop_price / target_prices**: when these fields were
+   nuked upstream, `attach_oca_stop_target` bails with `"missing
+   stop_price or target_price"` — position stays NAKED forever.
+
+### Fix (`services/trading_bot_service.py::_naked_position_sweep`)
+- Explicitly treat `SIM-STP-*` and `ADOPT-STOP-*` prefixes as NAKED,
+  forcing emergency re-issue on every tick until a real IB ack
+  comes back.
+- Before calling `attach_oca_stop_target`, if `stop_price <= 0` or
+  `target_prices[0] <= 0`, synthesize an emergency **2% hard stop /
+  1.5R target** off `fill_price` (or `entry_price` fallback).
+  Direction-aware: LONG below entry, SHORT above. Skips synthesis
+  cleanly if entry is also zero (no log spam).
+
+### Tests
+`tests/test_naked_position_sweep_v19_34_143.py` — 7 new cases:
+- `test_sim_stp_prefix_treated_as_naked`
+- `test_adopt_stop_prefix_treated_as_naked`
+- `test_real_stop_id_in_live_orders_not_flagged_naked`
+- `test_missing_stop_price_synthesizes_emergency_stop_long`
+- `test_missing_stop_price_synthesizes_emergency_stop_short`
+- `test_valid_stop_price_not_overwritten`
+- `test_missing_entry_skips_emergency_synth_but_still_attaches`
+
+All 11 v127 tests + 7 v143 tests pass = 18/18 naked-sweep coverage.
+
+
+## 2026-02-13 (v19.34.142d/e) — QTY_MAGNITUDE_MISMATCH + forensic breadcrumbs
+
+KMB live audit revealed bot ledger held 144 long shares while IB
+held only 55 — 89 phantom shares. If the bot fires a stop, it would
+short 89 phantom shares (the exact "unmanaged shares" failure mode
+from previous incidents).
+
+### Fix (`routers/diagnostic_router.py::position_pnl_audit`)
+- New verdict `QTY_MAGNITUDE_MISMATCH`: triggered when bot and IB
+  agree on direction but disagree on share count by more than
+  `max(1 share, 1% of ib_qty)` tolerance.
+- New `actions[]` line surfaces the symbol, share delta, and a
+  loud **NAKED-position warning** with a one-line operator
+  remediation: run
+  `POST /api/trading-bot/reconcile-share-drift` or flatten in TWS
+  *before the next manage tick*.
+- **Forensic breadcrumbs (`ledger_fragments`)** — for every
+  magnitude-mismatch row, the endpoint now walks
+  `bot._open_trades` and emits a list of all open fragments for
+  that symbol with `trade_id`, `shares`, `remaining_shares`,
+  `setup_type`, `entered_by`, `stop_order_id`, `entry_time`. This
+  is the live data the operator needs to identify *which* slice(s)
+  drifted (e.g. `reconciled_excess_v19_34_15b` double-booked against
+  a manual entry).
+
+### Tests
+`tests/test_position_pnl_audit_v19_34_142.py::TestQtyMagnitudeMismatch`
+— 6 new cases (KMB scenario, 1-share tolerance boundary, 1% rule for
+large positions, action-line wording, no false-positive on clean
+matches, summary aggregation). 19/19 audit tests pass.
+
+
+
 ## 2026-02-13 (v19.34.142c) — Audit: signed qty reconstruction + sign-mismatch verdict
 
 Live DGX run with the v19.34.142b patch showed `bot_qty: 492` on

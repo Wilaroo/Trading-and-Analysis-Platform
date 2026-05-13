@@ -3,6 +3,35 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🟢 NEXT — Root-cause the KMB fragment double-book (saved 2026-02-13, post v19.34.143)
+
+`v19.34.142e` now surfaces `ledger_fragments[]` on every magnitude
+mismatch, so the **next live audit run will tell us** which slices
+combined to overshoot IB (e.g. entry-slice `t-abc` 55sh +
+`reconciled_excess_v19_34_15b` slice `t-xyz` 89sh = 144sh ledger
+vs 55sh at IB). Once observed, decide between:
+
+1. **Auto-collapse** — when audit detects same-direction siblings
+   summing to more than IB qty, fire `_consolidate_one_group`
+   targeting **`min(sum, ib_qty)`** instead of `sum`. Currently
+   `position_consolidator.py:273` uses `g["proposed_total_shares"]`
+   = sum of fragment `remaining_shares`. If that sum exceeds the
+   real IB qty, we're double-booking; clamping to IB qty + reflowing
+   the smallest fragment's `remaining_shares` to zero is the fix.
+2. **Block the merge** — refuse to consolidate when sum > IB qty
+   and require operator to flatten or reconcile share-drift first.
+
+### Next debug step (when operator next runs the live audit)
+Capture the `ledger_fragments[]` for the offending symbol →
+identify the older fragment whose `remaining_shares` never decremented
+on a partial-close → patch the close path in `position_manager.py`
+that mutates `remaining_shares -= shares_to_sell` (line ~1374) to also
+zero out drained fragments before the consolidator next runs.
+
+---
+
+
+
 
 ## ✅ 2026-02-12 — v19.34.127 SHIPPED — Naked-position sweep + consolidator audit trail
 
