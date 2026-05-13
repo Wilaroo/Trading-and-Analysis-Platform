@@ -2734,6 +2734,73 @@ def _ib_position_snapshot() -> List[Dict[str, Any]]:
         return []
 
 
+def _ib_quote_snapshot() -> Dict[str, Dict[str, Any]]:
+    """Pull the current L1 quote dict (symbol → {last, bid, ask, ...})."""
+    try:
+        from routers.ib import _pushed_ib_data
+        return dict(_pushed_ib_data.get("quotes") or {})
+    except Exception:
+        return {}
+
+
+def _resolve_ib_unrealized(
+    *,
+    db,
+    symbol: str,
+    qty: float,
+    avg_cost: float,
+    market_price: float,
+    raw_unrealized: float,
+    ib_quotes: Dict[str, Dict[str, Any]],
+):
+    """Compute IB unrealized for the audit using the same 3-tier
+    fallback chain as `services/sentcom_service.py::get_our_positions`
+    (v19.34.142). Necessary because the IB pusher's
+    `on_portfolio_update()` callback can lag for minutes after a
+    fresh fill, leaving `unrealizedPNL=0` and `marketPrice=0` in the
+    cache while TWS has the real numbers locally. Without this
+    fallback the audit would report `ib_unrealized: $0.00` and a
+    false `DRIFT_ABS` verdict on every row.
+
+    Returns (unrealized: float, source: str) so the audit row can
+    surface WHICH side fell back to which method.
+    """
+    # 1) Direct from pusher (preferred).
+    if raw_unrealized:
+        return float(raw_unrealized), "ib_unrealized"
+    # 2) Compute from pusher's marketPrice + avgCost.
+    if market_price and avg_cost and qty:
+        return (market_price - avg_cost) * qty, "ib_market_price"
+    # 3) L1 quote fallback (same priority order as get_our_positions).
+    q = ib_quotes.get(symbol) or ib_quotes.get(symbol.upper())
+    if isinstance(q, dict):
+        for k in ("last", "mid", "close", "bid", "ask"):
+            v = q.get(k)
+            try:
+                if v and float(v) > 0:
+                    return (float(v) - avg_cost) * qty, f"quote_{k}"
+            except (TypeError, ValueError):
+                continue
+    # 4) live_bar_cache last resort.
+    try:
+        bar = db["live_bar_cache"].find_one(
+            {"symbol": symbol},
+            {"_id": 0, "close": 1, "c": 1, "price": 1},
+            sort=[("ts", -1)],
+        )
+        if bar:
+            for k in ("close", "c", "price"):
+                v = bar.get(k)
+                try:
+                    if v and float(v) > 0:
+                        return (float(v) - avg_cost) * qty, f"live_bar_{k}"
+                except (TypeError, ValueError):
+                    continue
+    except Exception:
+        pass
+    return 0.0, "unknown_no_mark"
+
+
 @router.get("/position-pnl-audit")
 async def position_pnl_audit(
     drift_abs_threshold: float = 20.0,
@@ -2777,22 +2844,35 @@ async def position_pnl_audit(
 
     # 1) IB ground truth
     ib_positions = _ib_position_snapshot()
+    ib_quotes = _ib_quote_snapshot()
     ib_by_symbol: Dict[str, Dict[str, Any]] = {}
+    pusher_unrealized_missing = 0
     for p in ib_positions:
         sym = (p.get("symbol") or "").upper()
         qty = float(p.get("position", 0) or 0)
         if not sym or abs(qty) < 0.001:
             continue
+        avg_cost = float(p.get("avgCost", p.get("avg_cost", 0)) or 0)
+        market_price = float(
+            p.get("marketPrice", p.get("market_price", 0)) or 0
+        )
+        raw_unrealized = float(
+            p.get("unrealizedPNL", p.get("unrealizedPnL",
+            p.get("unrealized_pnl", 0))) or 0
+        )
+        if raw_unrealized == 0 and avg_cost:
+            pusher_unrealized_missing += 1
+        unrealized, ib_source = _resolve_ib_unrealized(
+            db=db, symbol=sym, qty=qty,
+            avg_cost=avg_cost, market_price=market_price,
+            raw_unrealized=raw_unrealized, ib_quotes=ib_quotes,
+        )
         ib_by_symbol[sym] = {
             "qty": qty,
-            "avg_cost": float(p.get("avgCost", p.get("avg_cost", 0)) or 0),
-            "market_price": float(
-                p.get("marketPrice", p.get("market_price", 0)) or 0
-            ),
-            "unrealized": float(
-                p.get("unrealizedPnL", p.get("unrealizedPNL",
-                p.get("unrealized_pnl", 0))) or 0
-            ),
+            "avg_cost": avg_cost,
+            "market_price": market_price,
+            "unrealized": unrealized,
+            "ib_pnl_source": ib_source,
         }
 
     # 2) Bot panel — same path the V5 UI uses.
@@ -2883,6 +2963,7 @@ async def position_pnl_audit(
             "delta_abs": round(delta_abs, 2),
             "delta_pct": round(delta_pct, 2),
             "pnl_source": bt.get("pnl_source"),
+            "ib_pnl_source": ib.get("ib_pnl_source"),
             "bot_source": bt.get("source"),
             "verdict": verdict,
         })
@@ -2916,6 +2997,19 @@ async def position_pnl_audit(
     if not actions:
         actions.append("All positions agree with IB within thresholds.")
 
+    # 2026-02-13 (v19.34.142b) — surface pusher staleness as a
+    # standalone hint so the operator can distinguish "real bot drift"
+    # from "pusher portfolio_update lag".
+    if pusher_unrealized_missing:
+        actions.append(
+            f"⚠️ {pusher_unrealized_missing}/{len(ib_by_symbol)} IB position(s) "
+            "had `unrealizedPNL=0` in the pusher cache — the pusher's "
+            "`updatePortfolio()` callback isn't refreshing them. The "
+            "audit fell back to L1 quote / cached bar marks. Restart "
+            "the IB Gateway connection or check the pusher log if "
+            "this persists."
+        )
+
     return {
         "success": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2929,6 +3023,7 @@ async def position_pnl_audit(
         "summary": {
             "total_audited": len(rows),
             **bucket,
+            "pusher_unrealized_missing": pusher_unrealized_missing,
             "totals": {
                 "ib_unrealized": round(total_ib_pnl, 2),
                 "bot_unrealized": round(total_bot_pnl, 2),

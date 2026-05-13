@@ -3,6 +3,61 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-02-13 (v19.34.142b) — Audit endpoint: IB-side fallback parity
+
+Live DGX audit run revealed a deeper issue: the IB pusher's
+`on_portfolio_update()` callback isn't refreshing for any open
+position — every `unrealizedPNL` arrives as 0 in the pusher cache.
+So the audit was comparing the bot's `pnl` (correctly resolved via
+v19.34.142 fallback chain) against IB's stale-zero, producing a
+false `delta = −$1,197.22 / DRIFT_ABS` verdict on 8 of 17 rows.
+
+### Fix
+Audit endpoint now runs the **same** 3-tier fallback chain on the
+IB side that v19.34.142 added to the bot side:
+
+  1. Pusher's `unrealizedPNL` (preferred when non-zero).
+  2. Pusher's `(marketPrice - avgCost) * qty`.
+  3. L1 quote dict `last → mid → close → bid → ask`.
+  4. `live_bar_cache.close/c/price`.
+  5. Sentinel `ib_pnl_source: "unknown_no_mark"` when all fail.
+
+Each row now carries **both** `pnl_source` (bot) and `ib_pnl_source`
+(IB) so the operator sees exactly which fallback fired on each side
+and whether the drift is real bot disagreement or a measurement-mode
+mismatch.
+
+### New summary field — `pusher_unrealized_missing`
+Counts how many positions arrived from the pusher with
+`unrealizedPNL=0` despite having a non-zero `avgCost`. When > 0,
+a new action recommendation surfaces:
+
+> ⚠️ N/M IB position(s) had `unrealizedPNL=0` in the pusher cache —
+> the pusher's `updatePortfolio()` callback isn't refreshing them.
+> The audit fell back to L1 quote / cached bar marks. Restart the
+> IB Gateway connection or check the pusher log if this persists.
+
+This separates "real bot↔IB disagreement" from "pusher portfolio
+update lag" so the operator knows which dial to turn.
+
+### Field-name fix from earlier same-session iteration
+Also fixed the bot-side read: was `r.get("unrealized_pnl")`, should
+have been `r.get("pnl")` (the actual key in `get_our_positions()`
+output). Without that, all 16 bot rows came back as $0.
+
+### Tests
+2 new pytest cases added to
+`tests/test_position_pnl_audit_v19_34_142.py`:
+- `test_ib_side_falls_back_to_quote_when_pusher_unrealized_is_zero`
+- `test_summary_surfaces_pusher_staleness_count`
+
+Existing 9 tests updated with the real schema (`pnl` not
+`unrealized_pnl`, `unrealizedPNL` not `unrealizedPnL`).
+
+Full suite: **11/11 audit-specific tests pass** + **73 cumulative**
+across all v19.34.138-142 features.
+
+
 ## 2026-02-13 (v19.34.142) — Orphan PnL fallback + Position PnL Audit endpoint
 
 Operator-flagged Bug #4 from v19.34.141: 5 reconciled orphans

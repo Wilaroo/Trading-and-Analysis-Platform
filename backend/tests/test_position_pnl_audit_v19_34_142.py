@@ -181,17 +181,17 @@ class TestPositionPnLAuditEndpoint:
             "positions": [
                 {"symbol": "TSLA", "position": 100,
                  "avgCost": 400.0, "marketPrice": 410.0,
-                 "unrealizedPnL": 1000.0},
+                 "unrealizedPNL": 1000.0},
                 {"symbol": "TE", "position": -7204,
                  "avgCost": 5.40, "marketPrice": 0,
-                 "unrealizedPnL": -1082.83},
+                 "unrealizedPNL": -1082.83},
                 {"symbol": "NVDA", "position": 50,
                  "avgCost": 900.0, "marketPrice": 905.0,
-                 "unrealizedPnL": 250.0},
+                 "unrealizedPNL": 250.0},
                 # MISSING_IN_BOT case — IB has CW, bot won't render it.
                 {"symbol": "CW", "position": 24,
                  "avgCost": 746.0, "marketPrice": 750.0,
-                 "unrealizedPnL": 96.0},
+                 "unrealizedPNL": 96.0},
             ],
             "quotes": {},
         }
@@ -268,7 +268,8 @@ class TestPositionPnLAuditEndpoint:
         resp = await position_pnl_audit()
         joined = " | ".join(resp["actions"])
         assert "missing from the bot panel" in joined.lower()
-        assert "absent from IB" in joined.lower() or "PHANTOM" in joined.upper() or "absent" in joined.lower() or "phantom" in joined.lower()
+        assert ("absent from IB" in joined.lower() or "PHANTOM" in joined.upper()
+                or "absent" in joined.lower() or "phantom" in joined.lower())
         # Worst drift mentions TE specifically.
         assert "TE" in joined
 
@@ -281,3 +282,78 @@ class TestPositionPnLAuditEndpoint:
         by_sym = {r["symbol"]: r for r in resp["rows"]}
         assert by_sym["TE"]["verdict"] == "OK"
         assert by_sym["NVDA"]["verdict"] == "OK"
+
+
+class TestPusherStalenessFallback:
+    """When the IB pusher's updatePortfolio() lags, unrealizedPNL=0 for
+    every position. The audit must NOT report `ib_unrealized=$0` —
+    it must fall back to L1 quote + live_bar_cache for the IB side
+    too, and surface the staleness in the actions list."""
+
+    @pytest.fixture
+    def patched_stale(self, monkeypatch):
+        import sys
+        # All IB positions arrive with unrealizedPNL=0 and marketPrice=0
+        # — the worst-case "pusher portfolio_update never fired" scenario.
+        # But L1 quotes ARE flowing for TSLA.
+        fake_ib = type(sys)("routers.ib")
+        fake_ib._pushed_ib_data = {
+            "positions": [
+                {"symbol": "TSLA", "position": 100,
+                 "avgCost": 400.0, "marketPrice": 0,
+                 "unrealizedPNL": 0},
+                {"symbol": "OBSCURE", "position": -50,
+                 "avgCost": 10.0, "marketPrice": 0,
+                 "unrealizedPNL": 0},
+            ],
+            "quotes": {
+                "TSLA": {"last": 410.0, "bid": 409.5, "ask": 410.5},
+                # OBSCURE has no quote.
+            },
+        }
+        monkeypatch.setitem(sys.modules, "routers.ib", fake_ib)
+
+        class _FakeSvc:
+            async def get_our_positions(self):
+                return [
+                    {"symbol": "TSLA", "shares": 100,
+                     "pnl": 1000.0, "pnl_source": "quote_last",
+                     "source": "ib"},
+                    {"symbol": "OBSCURE", "shares": -50,
+                     "pnl": 0.0, "pnl_source": "unknown_no_mark",
+                     "source": "ib"},
+                ]
+        fake_svc_mod = type(sys)("services.sentcom_service")
+        fake_svc_mod.get_sentcom_service = lambda: _FakeSvc()
+        monkeypatch.setitem(sys.modules, "services.sentcom_service",
+                            fake_svc_mod)
+        from routers import diagnostic_router as dr
+        monkeypatch.setattr(dr, "_get_db", lambda: _DB())
+        return None
+
+    @pytest.mark.asyncio
+    async def test_ib_side_falls_back_to_quote_when_pusher_unrealized_is_zero(
+        self, patched_stale
+    ):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        by_sym = {r["symbol"]: r for r in resp["rows"]}
+        # TSLA — IB raw was 0, but quote_last gives (410-400)*100 = 1000.
+        # Bot also has 1000 → OK.
+        assert by_sym["TSLA"]["ib_unrealized"] == 1000.0
+        assert by_sym["TSLA"]["ib_pnl_source"] == "quote_last"
+        assert by_sym["TSLA"]["verdict"] == "OK"
+        # OBSCURE — no quote, no bar → ib_pnl_source = unknown_no_mark.
+        assert by_sym["OBSCURE"]["ib_pnl_source"] == "unknown_no_mark"
+        assert by_sym["OBSCURE"]["ib_unrealized"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_summary_surfaces_pusher_staleness_count(
+        self, patched_stale
+    ):
+        from routers.diagnostic_router import position_pnl_audit
+        resp = await position_pnl_audit()
+        # 2/2 positions had unrealizedPNL=0 in the pusher cache.
+        assert resp["summary"]["pusher_unrealized_missing"] == 2
+        joined = " | ".join(resp["actions"])
+        assert "pusher cache" in joined.lower() or "updatePortfolio" in joined
