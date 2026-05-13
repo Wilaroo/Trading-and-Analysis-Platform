@@ -2809,7 +2809,15 @@ async def position_pnl_audit(
             continue
         bot_by_symbol[sym] = {
             "qty": float(r.get("shares") or r.get("remaining_shares") or 0),
-            "unrealized": float(r.get("unrealized_pnl") or 0),
+            # The V5 panel field is `pnl` (set at sentcom_service line
+            # ~2246 for bot rows and ~2591 for IB-orphan rows). The
+            # `unrealized_pnl` key is a v19.34.142 fallback that wasn't
+            # actually plumbed through the existing rows.
+            "unrealized": float(
+                r.get("pnl")
+                if r.get("pnl") is not None
+                else (r.get("unrealized_pnl") or 0)
+            ),
             "pnl_source": r.get("pnl_source"),
             "source": r.get("source"),
         }

@@ -203,20 +203,20 @@ class TestPositionPnLAuditEndpoint:
                 return [
                     # TSLA — clean match.
                     {"symbol": "TSLA", "shares": 100,
-                     "unrealized_pnl": 1000.0,
+                     "pnl": 1000.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # TE — bot still showing $0 even after orphan fix
                     # somehow (simulate worst-case for the audit).
                     {"symbol": "TE", "shares": -7204,
-                     "unrealized_pnl": 0.0,
+                     "pnl": 0.0,
                      "pnl_source": "unknown_no_mark", "source": "ib"},
                     # NVDA — minor drift ($30).
                     {"symbol": "NVDA", "shares": 50,
-                     "unrealized_pnl": 220.0,
+                     "pnl": 220.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # PHANTOM_IN_BOT — bot tracks but IB doesn't have it.
                     {"symbol": "ZOMBIE", "shares": 1000,
-                     "unrealized_pnl": -50.0,
+                     "pnl": -50.0,
                      "pnl_source": "ib_unrealized", "source": "bot"},
                     # CW is absent here → MISSING_IN_BOT scenario.
                 ]
