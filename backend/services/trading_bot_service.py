@@ -4179,12 +4179,22 @@ class TradingBotService:
             result["skipped_reason"] = "no_trade_executor"
             return result
 
-        # Resolve IB connector — try common attribute names.
+        # Resolve IB connector — try common attribute names + the
+        # global pusher-routed service in routers.ib (used when the
+        # operator runs the Windows IB pusher; executor._ib_client
+        # stays None in that case).
         ib_conn = (
-            getattr(executor, "_ib_service", None)
+            getattr(executor, "_ib_client", None)
+            or getattr(executor, "_ib_service", None)
             or getattr(executor, "ib_service", None)
             or getattr(executor, "_ib_connector", None)
         )
+        if ib_conn is None:
+            try:
+                from routers import ib as _ib_router
+                ib_conn = getattr(_ib_router, "_ib_service", None)
+            except Exception:
+                ib_conn = None
         if ib_conn is None or not hasattr(ib_conn, "get_open_orders"):
             result["skipped_reason"] = "no_ib_connector"
             return result

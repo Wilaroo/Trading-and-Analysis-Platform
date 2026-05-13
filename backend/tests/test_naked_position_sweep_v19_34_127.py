@@ -65,7 +65,7 @@ async def test_sweep_detects_missing_stop_id():
     ib_conn.get_open_orders = AsyncMock(return_value=[])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock(
         return_value={
@@ -118,7 +118,7 @@ async def test_sweep_detects_stop_id_missing_from_ib():
     ])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock(
         return_value={"success": True, "stop_order_id": "STP-REISSUE",
@@ -152,7 +152,7 @@ async def test_sweep_no_reissue_when_stop_is_live():
     ])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock()
 
@@ -178,7 +178,7 @@ async def test_sweep_skipped_in_paper_mode():
     ib_conn.get_open_orders = AsyncMock()
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "PAPER"
 
     trade = _make_trade(tid="t1", symbol="AAPL", shares=100, stop_order_id=None)
@@ -212,7 +212,7 @@ async def test_sweep_handles_ib_outage():
     )
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
 
     trade = _make_trade(tid="t1", symbol="AAPL", shares=100, stop_order_id=None)
@@ -236,7 +236,7 @@ async def test_sweep_persists_event_on_reissue_failure():
     ib_conn.get_open_orders = AsyncMock(return_value=[])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock(
         return_value={"success": False, "error": "IB rejected: order limit"}
@@ -271,7 +271,7 @@ async def test_sweep_continues_after_per_trade_crash():
     ib_conn.get_open_orders = AsyncMock(return_value=[])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock(
         return_value={"success": True, "stop_order_id": "OK"}
@@ -310,7 +310,7 @@ async def test_sweep_ignores_zero_share_trades():
     ib_conn.get_open_orders = AsyncMock(return_value=[])
 
     executor = MagicMock()
-    executor._ib_service = ib_conn
+    executor._ib_client = ib_conn
     executor.mode = "LIVE"
     executor.attach_oca_stop_target = AsyncMock()
 
