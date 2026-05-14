@@ -21,6 +21,15 @@ import PreMarketModeBanner from './PreMarketModeBanner';
 import TradeStyleChip from './TradeStyleChip';
 // v19.34.113 — Rolling 30-day grade for the card's setup_type.
 import SetupGradeChip from './SetupGradeChip';
+// v19.34.29 (2026-05-14, mid-market) — Operator feedback: scanner cards
+// were showing only ONE Bot: line ("45sh · Holding ABNB @ ..."), no
+// scanner decision narrative. The v19.34.26 wiring already emits skip /
+// reject / trigger thoughts into the unified stream — they just weren't
+// being rendered HERE. Reuse the existing PositionThoughtsInline
+// component (already wired into V5 Open Positions tiles) so every
+// scanner card auto-fetches its own bot-thoughts strip from
+// `/api/sentcom/stream/history?symbol=X&minutes=60`.
+import PositionThoughtsInline from './PositionThoughtsInline';
 
 const STAGE_ORDER = ['scan', 'eval', 'order', 'manage', 'close'];
 const STAGE_CLASS = {
@@ -424,6 +433,26 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
           <span className={`${botColor} v5-bot-tag`}>Bot:</span>{' '}
           <span className="text-zinc-200">"{card.bot_text}"</span>
         </div>
+      )}
+
+      {/* v19.34.29 — Live scanner-thoughts strip per card. Auto-fetches
+          the last 5 reject / skip / trigger thoughts for this symbol
+          from /api/sentcom/stream/history. Same component the V5 Open
+          Positions tiles use, so behaviour stays consistent.
+
+          Render-gating: only mount the polling component for stages
+          where the bot has actually engaged (eval/order/manage/close).
+          Pure `scan` rows are high-volume scanner hits that haven't
+          collected any decision thoughts yet — mounting them all would
+          peg the backend at ~4 req/sec for no operator value (117 hits
+          × 30s poll). The scan-stage rows get a hint instead so the
+          operator knows thoughts are 1 stage away. */}
+      {card.symbol && card.stage && card.stage !== 'scan' && (
+        <PositionThoughtsInline
+          symbol={card.symbol}
+          limit={5}
+          minutes={60}
+        />
       )}
 
       {hasMetrics && (

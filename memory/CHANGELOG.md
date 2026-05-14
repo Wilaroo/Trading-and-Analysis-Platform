@@ -4,6 +4,35 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.29) — Bot-thoughts strip surfaced in scanner cards
+
+Operator feedback after v19.34.26: scanner panel cards still only showed
+one `Bot: "Xsh · Holding ..."` summary line. The richer skip / reject /
+trigger thought stream (RVOL gate, in-play strict-gate, dedup paths,
+trigger fires) was being emitted into `/api/sentcom/stream/history` but
+rendered only on the right-side V5 Open Positions tiles — never on the
+left scanner card grid where the operator spends most of their time.
+
+### Fix — `ScannerCardsV5.jsx`
+- Import and mount the existing `<PositionThoughtsInline />` component
+  inside the card body, right after the `Bot:` summary line.
+- Renders the last 5 thoughts for the card's symbol over the last 60m,
+  color-coded by kind (reject = rose, skip = amber, trigger = emerald).
+- **Render gating:** only mounts on cards whose stage is NOT `scan`. A
+  raw scan-stage card (highest-volume tier — 100+ per refresh) hasn't
+  generated decision thoughts yet, so polling for them would peg the
+  backend at ~4 req/sec for no operator value. Cards in `eval`,
+  `order`, `manage`, `close` stages all render the strip.
+
+### Net result
+Each open-position card now displays the same dense thought stream as
+the right-side Open Positions tile — operator can monitor scanner
+reasoning + position narratives without flicking eyes across the
+screen.
+
+
+
+
 ## 2026-05-14 (v19.34.28) — Mid-market hotfix: chat-AI move_stop silent failures
 
 Operator-observed 09:46 ET, live trading:
