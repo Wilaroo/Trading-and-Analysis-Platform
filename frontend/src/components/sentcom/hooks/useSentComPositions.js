@@ -36,6 +36,18 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
   const [totalPnlToday, setTotalPnlToday] = useState(
     cachedPositions?.data?.totalPnlToday ?? _empty.totalPnlToday
   );
+  // v19.34.27 — realized-PnL bifurcation: today (matches IB) +
+  // session-bookings (includes reconciler-stamped passenger closures)
+  // + diagnostic counters for the HUD tooltip.
+  const [totalRealizedPnlSession, setTotalRealizedPnlSession] = useState(
+    cachedPositions?.data?.totalRealizedPnlSession ?? 0
+  );
+  const [realizedPnlSyntheticCount, setRealizedPnlSyntheticCount] = useState(
+    cachedPositions?.data?.realizedPnlSyntheticCount ?? 0
+  );
+  const [realizedPnlSyntheticSum, setRealizedPnlSyntheticSum] = useState(
+    cachedPositions?.data?.realizedPnlSyntheticSum ?? 0
+  );
   const [closedToday, setClosedToday] = useState(cachedPositions?.data?.closedToday || _empty.closedToday);
   const [winsToday, setWinsToday] = useState(cachedPositions?.data?.winsToday ?? _empty.winsToday);
   const [lossesToday, setLossesToday] = useState(cachedPositions?.data?.lossesToday ?? _empty.lossesToday);
@@ -53,6 +65,10 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     setTotalPnlToday(
       data.total_pnl_today ?? ((data.total_unrealized_pnl ?? data.total_pnl ?? 0) + (data.total_realized_pnl ?? 0))
     );
+    // v19.34.27 — also pick up the bifurcation fields.
+    setTotalRealizedPnlSession(data.total_realized_pnl_session ?? data.total_realized_pnl ?? 0);
+    setRealizedPnlSyntheticCount(data.realized_pnl_synthetic_count ?? 0);
+    setRealizedPnlSyntheticSum(data.realized_pnl_synthetic_sum ?? 0);
     setClosedToday(Array.isArray(data.closed_today) ? data.closed_today : []);
     setWinsToday(data.wins_today ?? 0);
     setLossesToday(data.losses_today ?? 0);
@@ -64,6 +80,9 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
         totalUnrealizedPnl: data.total_unrealized_pnl ?? data.total_pnl ?? 0,
         totalRealizedPnl: data.total_realized_pnl ?? 0,
         totalPnlToday: data.total_pnl_today ?? 0,
+        totalRealizedPnlSession: data.total_realized_pnl_session ?? data.total_realized_pnl ?? 0,
+        realizedPnlSyntheticCount: data.realized_pnl_synthetic_count ?? 0,
+        realizedPnlSyntheticSum: data.realized_pnl_synthetic_sum ?? 0,
         closedToday: Array.isArray(data.closed_today) ? data.closed_today : [],
         winsToday: data.wins_today ?? 0,
         lossesToday: data.losses_today ?? 0,
@@ -93,6 +112,9 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
       setTotalUnrealizedPnl(cached.data.totalUnrealizedPnl ?? 0);
       setTotalRealizedPnl(cached.data.totalRealizedPnl ?? 0);
       setTotalPnlToday(cached.data.totalPnlToday ?? 0);
+      setTotalRealizedPnlSession(cached.data.totalRealizedPnlSession ?? 0);
+      setRealizedPnlSyntheticCount(cached.data.realizedPnlSyntheticCount ?? 0);
+      setRealizedPnlSyntheticSum(cached.data.realizedPnlSyntheticSum ?? 0);
       setClosedToday(cached.data.closedToday || []);
       setWinsToday(cached.data.winsToday ?? 0);
       setLossesToday(cached.data.lossesToday ?? 0);
@@ -122,6 +144,11 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     totalUnrealizedPnl,
     totalRealizedPnl,
     totalPnlToday,            // realized + unrealized = operator's day-PnL
+    // v19.34.27 — surface the realized-PnL bifurcation so the HUD
+    // tooltip can show today (matches IB) vs session-bookings.
+    totalRealizedPnlSession,
+    realizedPnlSyntheticCount,
+    realizedPnlSyntheticSum,
     closedToday,
     winsToday,
     lossesToday,

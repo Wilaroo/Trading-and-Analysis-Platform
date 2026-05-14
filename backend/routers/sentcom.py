@@ -490,6 +490,51 @@ async def get_positions():
         # close-specific extras. Skip `_id` is already excluded above.
         closed_today = []
         total_realized_pnl = 0.0
+        # v19.34.27 (2026-05-14) — Bifurcate realized PnL into two
+        # buckets so the HUD's "R" chip matches IB exactly.
+        #
+        # Problem: pre-v19.34.27 `total_realized_pnl` summed every
+        # bot_trade with `closed_at >= today_midnight_ET`. Trades the
+        # *reconciler* closes (status flip from open → closed because
+        # IB no longer holds the position — OCA fired externally,
+        # operator flattened in TWS, zombie cleanup, stale pending,
+        # consolidator merge) get `closed_at = NOW()` even though the
+        # *actual fill* in IB happened yesterday afternoon. Operator
+        # hit this 2026-05-14 morning: app `R −$2,056.86`, IB realized
+        # `−$272.82` — exactly the prior session's overnight passenger
+        # losses being booked as "today" because the reconciler
+        # discovered them on the 9:22 ET pre-market tick.
+        #
+        # Fix: split the aggregator into:
+        #   - total_realized_pnl_today    → REAL bot exits TODAY only
+        #     (target_hit / stop_loss / stop_hit / manual flatten of a
+        #     position the bot still owned, etc.). MATCHES IB.
+        #   - total_realized_pnl_session  → legacy behaviour (every
+        #     closed_at >= today_midnight). Preserved for the audit
+        #     drilldown so the operator can still see the full picture.
+        #
+        # Discriminator: `close_reason`. The set below enumerates every
+        # close_reason known to indicate a *passive / synthetic /
+        # reconciler-stamped* closure where the actual realized event
+        # was earlier than the closed_at timestamp.
+        SYNTHETIC_CLOSE_REASONS = {
+            "oca_closed_externally_v19_31",
+            "external_close_v19_34_15b",
+            "operator_external_flatten",
+            "operator_sync_external_close_v19_34_47",
+            "zombie_cleanup_v19_34_19",
+            "consolidated_v19_34_42",
+            "consolidated_in_flatten_v19_34_44",
+            "stale_pending_v19_34_78",
+            "stale_pending_cleared_v19_34_78",
+        }
+        # Some reconciler paths stamp the reason with a "phantom_close:" prefix
+        # (see position_reconciler._close_phantom_trade L665). Match by prefix
+        # so we catch every variation without enumerating each phantom-reason.
+        SYNTHETIC_CLOSE_PREFIXES = ("phantom_close:",)
+        total_realized_pnl_today = 0.0   # excludes synthetic — matches IB
+        synthetic_realized_count = 0     # for the tooltip breakdown
+        synthetic_realized_sum = 0.0     # historical bookings rolling in
         # 2026-02-13 (v19.34.141) — Dedup closed trades before summing.
         # The orphan reconciler, consolidator merge, and OCA-ext race
         # paths can each produce a SECOND `closed` row for the same
@@ -535,6 +580,19 @@ async def get_positions():
             _seen_keys.add(_key)
 
             total_realized_pnl += realized
+            # v19.34.27 — bucket by close_reason. Synthetic / passive
+            # reconciler-stamped closures don't contribute to "today
+            # realized" because their actual IB fill predates today.
+            _cr = (t.get("close_reason") or "").strip()
+            _is_synthetic = (
+                _cr in SYNTHETIC_CLOSE_REASONS
+                or any(_cr.startswith(p) for p in SYNTHETIC_CLOSE_PREFIXES)
+            )
+            if _is_synthetic:
+                synthetic_realized_count += 1
+                synthetic_realized_sum += realized
+            else:
+                total_realized_pnl_today += realized
             row_trade_type = t.get("trade_type")
             if not row_trade_type or row_trade_type == "unknown":
                 row_trade_type = _legacy_trade_type or "unknown"
@@ -577,8 +635,18 @@ async def get_positions():
             "total_pnl": round(total_unrealized_pnl, 2),
             # v19.31.7 explicit naming + new realized/total-today fields.
             "total_unrealized_pnl": round(total_unrealized_pnl, 2),
-            "total_realized_pnl": round(total_realized_pnl, 2),
-            "total_pnl_today": round(total_unrealized_pnl + total_realized_pnl, 2),
+            # v19.34.27 (2026-05-14) — `total_realized_pnl` now points to
+            # the IB-matching "today only, real bot exits" figure. The
+            # legacy "everything closed since midnight" total is exposed
+            # separately as `total_realized_pnl_session` so the audit
+            # drilldown + tooltip can still surface it. Operator-visible
+            # `R` chip uses `total_realized_pnl` (= today, matches IB).
+            "total_realized_pnl": round(total_realized_pnl_today, 2),
+            "total_realized_pnl_session": round(total_realized_pnl, 2),
+            # Diagnostics — used by the HUD tooltip + the audit drilldown.
+            "realized_pnl_synthetic_count": synthetic_realized_count,
+            "realized_pnl_synthetic_sum": round(synthetic_realized_sum, 2),
+            "total_pnl_today": round(total_unrealized_pnl + total_realized_pnl_today, 2),
             "total_market_value": round(total_market_value, 2),
             "total_cost_basis": round(total_cost_basis, 2),
             "total_today_change": round(total_today_change, 2),
@@ -605,6 +673,9 @@ async def get_positions():
             "total_pnl": 0,
             "total_unrealized_pnl": 0,
             "total_realized_pnl": 0,
+            "total_realized_pnl_session": 0,
+            "realized_pnl_synthetic_count": 0,
+            "realized_pnl_synthetic_sum": 0,
             "total_pnl_today": 0,
             "closed_today": [],
             "closed_today_count": 0,

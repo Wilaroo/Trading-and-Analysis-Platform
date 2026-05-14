@@ -107,6 +107,10 @@ const SentCom = ({ embedded = false }) => {
     totalUnrealizedPnl,
     totalRealizedPnl,
     totalPnlToday,
+    // v19.34.27 — realized PnL bifurcation for the HUD tooltip.
+    totalRealizedPnlSession,
+    realizedPnlSyntheticCount,
+    realizedPnlSyntheticSum,
     closedToday,
     winsToday,
     lossesToday,
@@ -403,6 +407,9 @@ const SentCom = ({ embedded = false }) => {
           totalUnrealizedPnl={totalUnrealizedPnl}
           totalRealizedPnl={totalRealizedPnl}
           totalPnlToday={totalPnlToday}
+          totalRealizedPnlSession={totalRealizedPnlSession}
+          realizedPnlSyntheticCount={realizedPnlSyntheticCount}
+          realizedPnlSyntheticSum={realizedPnlSyntheticSum}
           closedToday={closedToday}
           winsToday={winsToday}
           lossesToday={lossesToday}

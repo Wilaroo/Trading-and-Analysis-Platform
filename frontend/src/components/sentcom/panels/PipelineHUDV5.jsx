@@ -121,6 +121,10 @@ export const PipelineHUDV5 = ({
   totalUnrealizedPnl,
   totalRealizedPnl,
   totalPnlToday,
+  // v19.34.27 — realized PnL bifurcation for the HUD tooltip.
+  totalRealizedPnlSession,
+  realizedPnlSyntheticCount,
+  realizedPnlSyntheticSum,
   // v19.31.8 — drill-down props
   closedToday,
   winsToday,
@@ -290,9 +294,24 @@ export const PipelineHUDV5 = ({
               data-help-id="pipeline-pnl"
               className="flex flex-col items-end leading-tight"
               title={
+                /* v19.34.27 — Bifurcated tooltip. The `R` value in the
+                   chip is "today only, matches IB" (synthetic
+                   reconciler-stamped closures excluded). The tooltip
+                   surfaces the session-bookings figure + a
+                   per-passenger count so the operator can audit why
+                   the two might differ. */
                 `Day P&L: ${formatMoney(dayTotal)}\n` +
-                `  Realized:   ${formatMoney(realizedNum)}\n` +
-                `  Unrealized: ${formatMoney(unrealizedNum)}`
+                `  R (today, matches IB):   ${formatMoney(realizedNum)}\n` +
+                `  U (unrealized):          ${formatMoney(unrealizedNum)}\n` +
+                (realizedPnlSyntheticCount > 0
+                  ? (
+                      `\nSession bookings (incl. reconciler-stamped closures):\n` +
+                      `  R-session:               ${formatMoney(totalRealizedPnlSession ?? realizedNum)}\n` +
+                      `  + ${realizedPnlSyntheticCount} passenger closeout(s) totaling ` +
+                      `${formatMoney(realizedPnlSyntheticSum ?? 0)}\n` +
+                      `    (excluded from today R — IB realized these in prior sessions)`
+                    )
+                  : ``)
               }
             >
               <div className="flex items-baseline gap-1">
@@ -302,8 +321,21 @@ export const PipelineHUDV5 = ({
                 </span>
               </div>
               <div className="flex items-baseline gap-2 text-[13px] v5-mono">
-                <span data-testid="pipeline-pnl-realized" className={realizedColor}>
+                <span
+                  data-testid="pipeline-pnl-realized"
+                  data-realized-session={totalRealizedPnlSession ?? realizedNum}
+                  data-synthetic-count={realizedPnlSyntheticCount ?? 0}
+                  className={realizedColor}
+                >
                   R {formatMoney(realizedNum)}
+                  {/* v19.34.27 — small ° glyph appears when there ARE
+                      synthetic closures excluded from R-today. Signals
+                      to the operator: "I'm not just summing everything;
+                      hover for the breakdown." Subtle on purpose so it
+                      doesn't compete with the dollar value. */}
+                  {realizedPnlSyntheticCount > 0 && (
+                    <span className="text-zinc-500 ml-0.5" aria-hidden>°</span>
+                  )}
                 </span>
                 <span data-testid="pipeline-pnl-unrealized" className={unrealizedColor}>
                   U {formatMoney(unrealizedNum)}

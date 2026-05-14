@@ -223,6 +223,10 @@ export const SentComV5View = ({
   totalUnrealizedPnl,
   totalRealizedPnl,
   totalPnlToday,
+  // v19.34.27 — realized PnL bifurcation for the HUD tooltip.
+  totalRealizedPnlSession,
+  realizedPnlSyntheticCount,
+  realizedPnlSyntheticSum,
   closedToday,
   winsToday,
   lossesToday,
@@ -467,6 +471,9 @@ export const SentComV5View = ({
         totalUnrealizedPnl={totalUnrealizedPnl}
         totalRealizedPnl={totalRealizedPnl}
         totalPnlToday={totalPnlToday}
+        totalRealizedPnlSession={totalRealizedPnlSession}
+        realizedPnlSyntheticCount={realizedPnlSyntheticCount}
+        realizedPnlSyntheticSum={realizedPnlSyntheticSum}
         closedToday={closedToday}
         winsToday={winsToday}
         lossesToday={lossesToday}

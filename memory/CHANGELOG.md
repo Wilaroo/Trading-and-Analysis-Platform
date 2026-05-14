@@ -4,6 +4,63 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.27) — Realized PnL now matches IB (synthetic closures excluded)
+
+Operator-observed 09:13 ET pre-market: app showed `R −$2,056.86`
+while IB showed `Realized P&L −$272.82`. The $1,784 gap = yesterday's
+overnight passenger losses being booked as "today" because the
+reconciler discovered the orphan/reverse positions at 09:22 ET
+pre-market and stamped each bot_trade's `closed_at` with NOW(). The
+trades themselves had actually filled the day before.
+
+### Backend — `routers/sentcom.py::get_positions`
+- Bifurcated realized PnL aggregation into two buckets:
+  - `total_realized_pnl` → TODAY only, EXCLUDES synthetic /
+    reconciler-stamped closures. **Matches IB.** This is the value
+    surfaced as the HUD's `R` chip.
+  - `total_realized_pnl_session` → legacy behaviour, sums every
+    closed bot_trade with `closed_at >= today_midnight_ET`. Preserved
+    for the audit drilldown + tooltip.
+- Synthetic close_reasons recognised (denylist, set + prefix match):
+  `oca_closed_externally_v19_31`, `external_close_v19_34_15b`,
+  `operator_external_flatten`, `operator_sync_external_close_v19_34_47`,
+  `zombie_cleanup_v19_34_19`, `consolidated_v19_34_42`,
+  `consolidated_in_flatten_v19_34_44`, `stale_pending_v19_34_78`,
+  `stale_pending_cleared_v19_34_78`, and the `phantom_close:*` prefix.
+- New diagnostic fields on the response payload:
+  `realized_pnl_synthetic_count`, `realized_pnl_synthetic_sum`.
+- `total_pnl_today` re-anchored to use the new today-only realized.
+
+### Frontend — `PipelineHUDV5.jsx` tooltip overhaul
+- HUD's `R` chip still labelled `R` but now carries a subtle `°`
+  glyph when synthetic passenger closures exist (signals to operator:
+  "hover for the bifurcation").
+- Tooltip expanded:
+  ```
+  Day P&L: $XXX
+    R (today, matches IB):   $XXX
+    U (unrealized):          $XXX
+
+  Session bookings (incl. reconciler-stamped closures):
+    R-session:               $XXX
+    + N passenger closeout(s) totaling $XXX
+      (excluded from today R — IB realized these in prior sessions)
+  ```
+- Hook `useSentComPositions` extended with `totalRealizedPnlSession`,
+  `realizedPnlSyntheticCount`, `realizedPnlSyntheticSum`. Cache schema
+  bumped to persist all three across reloads.
+
+### Tests
+- `/app/backend/tests/test_realized_pnl_excludes_synthetic_closes_v19_34_27.py`
+  — 4 new tests covering: bifurcation correctness, default behaviour
+  for trades without `close_reason` (backward-compat), all-synthetic
+  fixture returns 0 today, response-shape invariant.
+- All 6 prior `test_closed_today_realized_pnl_v19_31_7.py` tests still
+  pass. Combined 10/10 green.
+
+
+
+
 ## 2026-05-14 (v19.34.26) — Bot thoughts wired across scanner + auto-visible on tiles
 
 Operator pipeline pickup from the previous fork: the `_emit_scanner_thought`
