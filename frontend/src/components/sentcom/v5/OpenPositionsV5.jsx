@@ -533,7 +533,8 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
 // v19.34.23 (2026-02-XX) — Per-row ORPHAN / PARTIAL / STALE-bot source
 // badges removed (operator feedback: contradictory + redundant once the
 // reconciler auto-heals these within the same tick). Aggregate counts
-// are now surfaced once in the panel header via `autoHealCounts`. The
+// are surfaced via the panel-header pill (now `driftFailureCounts` —
+// only renders on unresolved zombies, v19.34.24). The
 // `g.source` value is still used by the `Reconcile N` button to find
 // orphan + partial groups that need user action.
 
@@ -729,20 +730,33 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
 
   // v19.34.23 (2026-02-XX) — Aggregate auto-heal count surfaced ONCE in
   // the panel header (replaces per-row ORPHAN / STALE / RECONCILED
-  // badges). Counts positions the bot is actively healing without
-  // operator action: stale-bot phantom shares + reconciled-external
-  // adoptions. Excludes orphans/partials (those have the actionable
-  // `Reconcile N` button instead).
-  const autoHealCounts = useMemo(() => {
-    let stale = 0;
-    let adopted = 0;
+  // badges).
+  //
+  // v19.34.24 (May 2026) — Operator feedback: even the subtle "auto-heal · N"
+  // pill was visual noise because it lit up on EVERY routine heal (the bot
+  // adopts orphans + sweeps stale-bot phantoms within a single tick, so the
+  // pill was effectively a fixture). The pill now renders ONLY when an
+  // auto-heal has FAILED or remained UNRESOLVED — defined as one or more
+  // bot_trade "zombies" persisting across groups (status=OPEN but
+  // remaining_shares=0 → the bot thought it had shares, they're gone, and
+  // the reconciler couldn't close the gap on its own). That is the rare
+  // case where the operator genuinely needs to look. Routine adoptions
+  // (entered_by=reconciled_external) and in-flight stale-bot heals are
+  // intentionally NOT counted here — they have their own dedicated
+  // surfaces: prior_verdict_conflict CONFLICT chip + the expanded
+  // "Reconciled from IB orphan" callout for the former, and the
+  // Reconcile N button for orphan/partial groups that need user action.
+  const driftFailureCounts = useMemo(() => {
+    let zombies = 0;          // failed heals — bot has OPEN trade, 0 shares
+    let zombieSymbols = [];
     for (const g of groups) {
-      if (g.source === 'stale_bot') stale += 1;
-      // `entered_by` lives on the representative member after grouping.
-      const rep = g._members?.[0] || g;
-      if (rep?.entered_by === 'reconciled_external') adopted += 1;
+      const z = Number(g._zombie_members || 0);
+      if (z > 0) {
+        zombies += z;
+        zombieSymbols.push(`${g.symbol} (${z})`);
+      }
     }
-    return { stale, adopted, total: stale + adopted };
+    return { zombies, zombieSymbols, total: zombies };
   }, [groups]);
 
   const handleReconcile = async () => {
@@ -841,28 +855,30 @@ export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition
               {reconcileBusy ? 'Reconciling…' : `Reconcile ${reconcileCount}`}
             </button>
           )}
-          {/* v19.34.23 (2026-02-XX) — Subtle auto-heal pill. Replaces
-              the loud per-row ORPHAN / STALE / RECONCILED badges with a
-              single header indicator that only renders when the bot is
-              actively healing something. Stays invisible 99% of the
-              time; pulses zinc (not amber) so it doesn't compete with
-              the actionable `Reconcile N` button. Hover for breakdown. */}
-          {autoHealCounts.total > 0 && (
+          {/* v19.34.23 (2026-02-XX) — Subtle auto-heal pill that replaced
+              the loud per-row ORPHAN / STALE / RECONCILED badges.
+              v19.34.24 (May 2026) — Operator follow-up: the pill was still
+              firing on every routine heal (basically all the time). It now
+              renders ONLY when an auto-heal has FAILED — i.e. a bot_trade
+              zombie persists (status=OPEN, remaining_shares=0). Routine
+              healing is now silent; this pill is loud (amber + pulse)
+              because if it shows up, something the reconciler couldn't fix
+              on its own is sitting on the book. */}
+          {driftFailureCounts.total > 0 && (
             <span
-              data-testid="open-positions-auto-heal-pill"
-              data-stale={autoHealCounts.stale}
-              data-adopted={autoHealCounts.adopted}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[13px] uppercase tracking-wider rounded border border-zinc-700 bg-zinc-900/60 text-zinc-400 cursor-help"
+              data-testid="open-positions-drift-failure-pill"
+              data-zombies={driftFailureCounts.zombies}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[13px] uppercase tracking-wider rounded border border-amber-700/70 bg-amber-950/40 text-amber-300 font-semibold animate-pulse cursor-help"
               title={[
-                'Auto-healed by bot — no operator action needed.',
-                autoHealCounts.adopted > 0 && `· ${autoHealCounts.adopted} reconciled (adopted from IB orphan)`,
-                autoHealCounts.stale > 0    && `· ${autoHealCounts.stale} stale (phantom shares being swept)`,
+                '⚠ Auto-heal FAILED — reconciler could not close the gap on its own.',
+                `· ${driftFailureCounts.zombies} zombie bot_trade(s) (status=OPEN, remaining_shares=0)`,
+                driftFailureCounts.zombieSymbols.length > 0 && `· Symbols: ${driftFailureCounts.zombieSymbols.join(', ')}`,
                 '',
-                'Full provenance is preserved in each row\'s expanded detail.',
+                'Operator action: review the affected rows, close manually in TWS, or use Reconcile to materialize fresh state.',
               ].filter(Boolean).join('\n')}
             >
-              <span aria-hidden className="inline-block w-1.5 h-1.5 rounded-full bg-zinc-500" />
-              auto-heal · {autoHealCounts.total}
+              <span aria-hidden className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+              drift · {driftFailureCounts.total}
             </span>
           )}
         </div>

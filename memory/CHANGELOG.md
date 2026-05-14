@@ -4,6 +4,36 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.24) — UI badge cleanup: failure-only drift pill
+
+Operator follow-up after v19.34.22 / v19.34.23: the subtle "auto-heal · N"
+header pill was still firing on every routine adoption + stale-bot sweep,
+which made it effectively a permanent fixture. Per operator choice
+(suppress badges entirely + keep loud warning ONLY when auto-heal fails):
+
+### Changed — `OpenPositionsV5.jsx`
+- `autoHealCounts` → `driftFailureCounts`. Now counts ONLY bot_trade
+  zombies (status=OPEN, remaining_shares=0 — the bot thought it had
+  shares, they're gone, reconciler couldn't close the gap). Routine
+  adoptions (entered_by=reconciled_external) and in-flight stale-bot
+  heals are NO LONGER counted — they are silent.
+- Pill styling: zinc/subtle → amber + pulse, label `drift · N`,
+  testid `open-positions-drift-failure-pill`. Tooltip lists affected
+  symbols and recommended operator action (review row, close in TWS,
+  or fire Reconcile to materialize fresh state).
+- The pill is invisible 99.9% of the time. When it appears, it
+  indicates a real unresolved drift the bot couldn't self-heal.
+
+### Still present (intentionally)
+- `Reconcile N` button (actionable orphan/partial groups).
+- `⚠ CONFLICT` per-row chip (bot disagreed with adopted setup).
+- Expanded-row "Reconciled from IB orphan" callout (forensic detail,
+  one click away, no noise on the compact tile).
+- `QuoteFreshnessChip` (STALE/AMBER/UNKNOWN, hidden when FRESH).
+
+
+
+
 ## 2026-02-13 (v19.34.154) — P2: Scale-out tiles for winners
 
 Operator request: surface the existing `original_shares / remaining_shares /
