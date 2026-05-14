@@ -4,6 +4,56 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.31 — completion) — Patches B + C re-applied & PUSHED
+
+Sequel to the same-day Patches A + E re-ship. With `origin/main` now safe
+from `.bat` regressions, re-applied the two remaining defense-in-depth
+patches with verified anchor points. Commit `a76cada2`.
+
+### Patch B — `position_manager.close_trade` pre-close cancel ✅
+
+Inserted at `backend/services/position_manager.py:close_trade`,
+immediately before `bot._trade_executor.close_position(trade)`:
+- Reads `routers.ib._pushed_ib_data["orders"]`, filters by
+  `symbol.upper() == trade.symbol.upper()` and
+  `status in ("PreSubmitted", "Submitted")`.
+- For each match, calls `queue_cancellation(ib_order_id=int(oid),
+  reason=f"v19.34.31 Patch B: pre-close ({reason})",
+  requested_by="position_manager_close_trade_v19_34_31")`.
+- Wrapped in try/except — non-fatal, close MUST proceed.
+- Marker: `v19_34_31_PATCH_B_pre_close_cancel`.
+
+### Patch C — `position_reconciler.reconcile_orphan_positions` clean-slate cancel ✅
+
+Inserted at `backend/services/position_reconciler.py`, between
+`self._stamp_bracket_attach(trade.id)` and the inner `try:` block that
+calls `executor.attach_oca_stop_target(trade)`:
+- Same filter pattern as Patch B, but symbol scoped to `sym` (already
+  in scope in the reconcile loop).
+- `requested_by="position_reconciler_v19_34_31"`.
+- Non-fatal.
+- Marker: `v19_34_31_PATCH_C_pre_attach_cancel`.
+
+### Regression test — `backend/tests/test_patches_bc_v19_34_31.py`
+
+Three assertions (all PASS):
+1. Patch B marker + `queue_cancellation` + correct `requested_by` tag in `position_manager.py`.
+2. Patch C marker + `queue_cancellation` + correct `requested_by` tag in `position_reconciler.py`.
+3. Patch C textually precedes the `attach_oca_stop_target` call it protects (ordering check).
+
+### Final v19.34.31 patch set status
+
+| Patch | File                       | Marker                                     | Status |
+|-------|----------------------------|--------------------------------------------|--------|
+| A     | position_reconciler.py + trading_bot_service.py | `v19.34.30 Patch A`     | ✅ committed `327b2cf1` |
+| B     | position_manager.py        | `v19_34_31_PATCH_B_pre_close_cancel`       | ✅ committed `a76cada2` |
+| C     | position_reconciler.py     | `v19_34_31_PATCH_C_pre_attach_cancel`      | ✅ committed `a76cada2` |
+| E     | trading_bot_service.py     | `v19_34_31_PATCH_E_pusher_stale_guard`     | ✅ committed `327b2cf1` |
+
+6/6 regression pytests passing. All four files byte-compile clean.
+
+
+
 ## 2026-05-14 (v19.34.31 — re-shipped) — Patches A + E re-applied & PUSHED to origin/main
 
 Live-trading day after the initial v19.34.31 ship surfaced a regression: the

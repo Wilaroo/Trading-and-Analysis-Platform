@@ -3,47 +3,36 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 P0 — Re-apply Patches B + C (deferred from v19.34.31)
+## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + B + C + E (v19.34.31) COMPLETE
 
-Patches B (pre-close cancel) and C (clean-slate cancel before re-attach) were
-applied + wiped + lost in the 2026-05-14 regression window. Patch A alone
-caps `target_order_ids` at length 1, so the cascade is stopped at the
-bot-state level — but stale IB legs may accumulate slowly until orphan_gtc_
-reconciler sweeps them.
+All four order-management cascade-prevention patches are live in
+`origin/main`. Commits: `327b2cf1` (A + E), `9cb53b0c` (scripts),
+`a76cada2` (B + C). See `CHANGELOG.md`. Live state at end of session:
+- DGX local + origin/main fully synced; `.bat` `git checkout -- .` is harmless
+- 6/6 regression pytests passing across all four patches
+- 4-of-4 open positions (DKS/ALC/CHWY/MSTR) cleared of bloated `target_order_ids`
+- Git author identity + PAT credential helper configured on DGX
+- All four patch markers grep-verifiable: `v19.34.30 Patch A`,
+  `v19_34_31_PATCH_B_pre_close_cancel`, `v19_34_31_PATCH_C_pre_attach_cancel`,
+  `v19_34_31_PATCH_E_pusher_stale_guard`
 
-### Anchors to use when re-applying
+### ⚠️ Live-trading observation window before next account flip
 
-- **Patch B** in `backend/services/position_manager.py:close_trade`,
-  immediately before `bot._trade_executor.close_position(trade)`:
-  - Read `_pushed_ib_data["orders"]`, filter by `symbol == trade.symbol`
-    and `status in ("PreSubmitted","Submitted")`
-  - For each, `queue_cancellation(ib_order_id=int(oid), reason=f"v19.34.31 Patch B: pre-close ({reason})", requested_by="position_manager_close_trade_v19_34_31")`
-  - Wrap in try/except — non-fatal, close MUST proceed
-- **Patch C** in `backend/services/position_reconciler.py:reconcile_orphan_positions`,
-  immediately before `attach_oca_stop_target` is called:
-  - Same pattern, `requested_by="position_reconciler_v19_34_31"`
-  - Reason: `f"v19.34.31 Patch C: pre-attach {sym}"`
+Run `scripts/audit_brackets.py` at:
+- End of session day 1 (first live day after this complete patch set)
+- End of session day 2
 
-### Test coverage to add back
+Expected (Patch A enforces, Patches B/C provide IB-side cleanup):
+- `Total stacked target IDs across book` ≤ open_positions
+- Audit `stops` and `tgts` per symbol both ≤ 1
+- DB `bot_trades.target_order_ids` max length = 1 (forever)
+- Naked-sweep `pusher_snapshot_stale` skip events visible when pusher lags >45s
+  (Patch E telemetry — proves no false emergency reissues fire during stale windows)
 
-`backend/tests/test_patches_bc_v19_34_31.py` with two assertions:
-- `"v19.34.31 Patch B"` and `position_manager_close_trade_v19_34_31` in `position_manager.py`
-- `"v19.34.31 Patch C"` and `position_reconciler_v19_34_31` in `position_reconciler.py`
-- Both files use `queue_cancellation(`
-
----
-
-## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + E (v19.34.31)
-
-Two of four order-management cascade-prevention patches are live in
-`origin/main` (commits `327b2cf1`, `9cb53b0c`). See `CHANGELOG.md`. Live
-state at the end of the session:
-- DGX local has full content (123 KB / 165 KB / 220 KB) — restored from .bak
-- Patches A + E in origin/main, survive `.bat` `git checkout -- .` wipes
-- 3 regression pytests passing
-- DB-side cleanup: 4 open positions (DKS/ALC/CHWY/MSTR) cleared of bloated
-  `target_order_ids` arrays
-- Git author identity + credential helper configured on DGX
+If any of these creep above threshold, the next bug is in a THIRD
+attach-without-cancel path we haven't audited yet (candidates:
+`bracket_reissue_service._reissue`, scale-out flows, EOD-close
+`phantom_swept` paths in `routers/trading_bot.py`).
 
 ### ⚠️ Live-trading observation window before next account flip
 
