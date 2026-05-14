@@ -699,6 +699,12 @@ class EnhancedBackgroundScanner:
         self.db = db
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
+
+        # v19.34.155 — Throttle for scanner thoughts so we don't flood
+        # the stream during the noisy first scan tick of each cycle.
+        # Per-symbol+kind dedup with 30s TTL.
+        self._scanner_thought_dedup: Dict[Tuple[str, str], float] = {}
+        self._scanner_thought_dedup_ttl = 30.0
         
         # Optimized configuration for 200+ symbols
         self._scan_interval = 15  # Base interval between scan cycles (seconds)
@@ -2046,6 +2052,66 @@ class EnhancedBackgroundScanner:
     
     # ==================== LIFECYCLE ====================
     
+    async def _emit_scanner_thought(
+        self,
+        *,
+        symbol: str,
+        kind: str,
+        text: str,
+        setup_type: Optional[str] = None,
+        direction: Optional[str] = None,
+        **meta: Any,
+    ) -> None:
+        """v19.34.155 — surface scanner decisions to the bot-thoughts
+        stream so they show up in chart bubbles, scanner cards, and
+        open-position tiles.
+
+        Pre-fix: scanner had hundreds of `logger.info("Skipping ...")`
+        sites that went only to stderr — operator couldn't see any of
+        the bot's filtering work.
+
+        Scope (per operator pref, option B): EMIT ON
+          • `reject`   — DMA/RVOL/ADV/ATR filters that block a setup
+          • `skip`     — dedup losers, gate fails, mode locks
+          • `trigger`  — setup fires (matches existing alert pipeline)
+        Do NOT emit on every PASS — that'd 10× stream volume for
+        marginal operator value.
+
+        Dedup: per (symbol, kind) with 30s TTL, so we don't flood
+        on every 15s scan cycle.
+        """
+        try:
+            now = time.time()
+            key = (symbol.upper(), kind)
+            last_ts = self._scanner_thought_dedup.get(key, 0.0)
+            if now - last_ts < self._scanner_thought_dedup_ttl:
+                return
+            self._scanner_thought_dedup[key] = now
+            # Bound dedup map size; cheap cleanup.
+            if len(self._scanner_thought_dedup) > 5000:
+                cutoff = now - 60.0
+                self._scanner_thought_dedup = {
+                    k: v for k, v in self._scanner_thought_dedup.items()
+                    if v > cutoff
+                }
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "thought",
+                "event": f"scanner_{kind}",
+                "symbol": symbol.upper(),
+                "text": text,
+                "metadata": {
+                    "source": "enhanced_scanner",
+                    "kind": kind,
+                    "setup_type": setup_type,
+                    "direction": direction,
+                    **meta,
+                },
+            })
+        except Exception as e:
+            logger.debug(f"scanner thought emit failed ({kind}/{symbol}): {e}")
+
+
     async def start(self):
         """Start the background scanner"""
         if self._running:
@@ -6877,10 +6943,26 @@ class EnhancedBackgroundScanner:
                 if snapshot and hasattr(snapshot, 'ema_50') and snapshot.ema_50 > 0:
                     price = snapshot.last or alert.trigger_price
                     if direction == "long" and price < snapshot.ema_50:
-                        logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG swing — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}")
+                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG swing — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}"
+                        logger.info(msg)
+                        await self._emit_scanner_thought(
+                            symbol=alert.symbol, kind="reject",
+                            text=f"🚫 LONG {alert.setup_type} skipped — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}",
+                            setup_type=alert.setup_type, direction="long",
+                            filter="dma_ema50_long_swing",
+                            price=price, ema_50=snapshot.ema_50,
+                        )
                         return
                     elif direction == "short" and price > snapshot.ema_50:
-                        logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT swing — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}")
+                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT swing — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}"
+                        logger.info(msg)
+                        await self._emit_scanner_thought(
+                            symbol=alert.symbol, kind="reject",
+                            text=f"🚫 SHORT {alert.setup_type} skipped — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}",
+                            setup_type=alert.setup_type, direction="short",
+                            filter="dma_ema50_short_swing",
+                            price=price, ema_50=snapshot.ema_50,
+                        )
                         return
                 
                 # Investment: also check SMA200
@@ -6888,10 +6970,26 @@ class EnhancedBackgroundScanner:
                     if snapshot and hasattr(snapshot, 'sma_200') and snapshot.sma_200 > 0:
                         price = snapshot.last or alert.trigger_price
                         if direction == "long" and price < snapshot.sma_200:
-                            logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG investment — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}")
+                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG investment — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}"
+                            logger.info(msg)
+                            await self._emit_scanner_thought(
+                                symbol=alert.symbol, kind="reject",
+                                text=f"🚫 LONG investment skipped — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}",
+                                setup_type=alert.setup_type, direction="long",
+                                filter="dma_sma200_long_investment",
+                                price=price, sma_200=snapshot.sma_200,
+                            )
                             return
                         elif direction == "short" and price > snapshot.sma_200:
-                            logger.info(f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT investment — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}")
+                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT investment — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}"
+                            logger.info(msg)
+                            await self._emit_scanner_thought(
+                                symbol=alert.symbol, kind="reject",
+                                text=f"🚫 SHORT investment skipped — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}",
+                                setup_type=alert.setup_type, direction="short",
+                                filter="dma_sma200_short_investment",
+                                price=price, sma_200=snapshot.sma_200,
+                            )
                             return
         except Exception as e:
             logger.debug(f"DMA filter check: {e}")
