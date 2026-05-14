@@ -36,15 +36,67 @@ const TIMEFRAMES = [
 
 // Indicator overlays. `key` matches the backend `indicators` response map.
 // `pane` 0 = main price pane (sub-panes reserved for Stage 2e RSI/MACD).
+// `defaultColor` may be overridden by the user via the INDICATORS dropdown
+// color pickers (persisted to localStorage — see CHART_INDICATOR_STATE_KEY).
 const INDICATOR_SPECS = [
-  { key: 'vwap',      label: 'VWAP',   color: '#fbbf24', width: 2, dash: false, pane: 0 },
-  { key: 'ema_20',    label: 'EMA 20', color: '#06b6d4', width: 1, dash: false, pane: 0 },
-  { key: 'ema_50',    label: 'EMA 50', color: '#a855f7', width: 1, dash: false, pane: 0 },
-  { key: 'ema_200',   label: 'EMA 200',color: '#f43f5e', width: 1, dash: false, pane: 0 },
-  { key: 'bb_upper',  label: 'BB↑',    color: 'rgba(139, 92, 246, 0.45)', width: 1, dash: true,  pane: 0 },
-  { key: 'bb_middle', label: 'BB·',    color: 'rgba(139, 92, 246, 0.30)', width: 1, dash: true,  pane: 0 },
-  { key: 'bb_lower',  label: 'BB↓',    color: 'rgba(139, 92, 246, 0.45)', width: 1, dash: true,  pane: 0 },
+  { key: 'vwap',      label: 'VWAP',   defaultColor: '#fbbf24', width: 2, dash: false, pane: 0, group: 'pinned' },
+  { key: 'ema_9',     label: 'EMA 9',  defaultColor: '#f97316', width: 1, dash: false, pane: 0, group: 'mas' },
+  { key: 'ema_20',    label: 'EMA 20', defaultColor: '#06b6d4', width: 1, dash: false, pane: 0, group: 'mas' },
+  { key: 'ema_50',    label: 'EMA 50', defaultColor: '#a855f7', width: 1, dash: false, pane: 0, group: 'mas' },
+  { key: 'ema_200',   label: 'EMA 200',defaultColor: '#f43f5e', width: 1, dash: false, pane: 0, group: 'mas' },
+  { key: 'bb_upper',  label: 'BB↑',    defaultColor: 'rgba(139, 92, 246, 0.55)', width: 1, dash: true,  pane: 0, group: 'bb' },
+  { key: 'bb_middle', label: 'BB·',    defaultColor: 'rgba(139, 92, 246, 0.35)', width: 1, dash: true,  pane: 0, group: 'bb' },
+  { key: 'bb_lower',  label: 'BB↓',    defaultColor: 'rgba(139, 92, 246, 0.55)', width: 1, dash: true,  pane: 0, group: 'bb' },
 ];
+
+// v19.34.25 (May 2026) — Consolidated INDICATORS dropdown state. The
+// previous top-strip rendered 9+ separate pills (EMA 9/20/50/200, BB↑·↓,
+// S/R, VP, SR+) which dominated the chart header and required side-
+// scrolling on smaller laptops. Operator request: collapse everything
+// EXCEPT VWAP and Bot-thoughts into a single "INDICATORS" pill (those
+// two stay standalone because they get toggled the most often). Each
+// indicator row in the dropdown carries its own color picker so the
+// operator can recolor (e.g. swap EMA 200 from rose to teal). Visibility
+// + colors persist to localStorage so they survive reloads.
+const CHART_INDICATOR_STATE_KEY = 'sentcom.chart.indicators.v1';
+
+// Indicators included in the dropdown (everything except `vwap` which is
+// the always-on pinned pill).
+const DROPDOWN_INDICATOR_KEYS = INDICATOR_SPECS
+  .filter(s => s.group !== 'pinned')
+  .map(s => s.key);
+
+// Extra "non-series" toggleable layers that share the dropdown with the
+// INDICATOR_SPECS series — these are S/R, VP, Smart-S/R. Each has its own
+// state inside ChartPanel; the dropdown just surfaces the same toggle in
+// the consolidated popover instead of as a standalone pill.
+const DROPDOWN_LAYER_KEYS = ['sr', 'vp', 'sr_plus'];
+
+const LAYER_LABELS = {
+  sr:      { label: 'S/R',  defaultColor: '#f59e0b', desc: 'PDH / PDL / PMH / PML / PDC support-resistance lines' },
+  vp:      { label: 'VP',   defaultColor: '#06b6d4', desc: 'Side Volume Profile (Volume-at-Price histogram)' },
+  sr_plus: { label: 'SR+',  defaultColor: '#a855f7', desc: 'Smart S/R (VP + swing pivots + floor pivots)' },
+};
+
+// Load persisted state. Returns { visible: {...}, colors: {...} } with
+// sensible defaults if nothing has been saved yet.
+const loadChartIndicatorState = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(CHART_INDICATOR_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (_) { return null; }
+};
+
+const saveChartIndicatorState = (state) => {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(CHART_INDICATOR_STATE_KEY, JSON.stringify(state));
+  } catch (_) { /* quota / private-mode — fail silent */ }
+};
 
 // Parse any timestamp shape returned by hybrid_data_service into the
 // UTCTimestamp (seconds-since-epoch) that lightweight-charts v5 expects.
@@ -82,11 +134,34 @@ export const ChartPanel = ({
   // the user's pan/zoom position.
   const hasFittedRef = useRef(false);
   const [srLevels, setSrLevels] = useState(null);    // { pdh, pdl, pdc, pmh, pml }
-  const [showSrLevels, setShowSrLevels] = useState(true);
+  const [showSrLevels, setShowSrLevels] = useState(() => {
+    const persisted = loadChartIndicatorState();
+    return persisted?.layers?.sr !== false; // default ON
+  });
   const [smartLevels, setSmartLevels] = useState(null); // { support, resistance, sources }
-  const [showSmartLevels, setShowSmartLevels] = useState(true);
+  const [showSmartLevels, setShowSmartLevels] = useState(() => {
+    const persisted = loadChartIndicatorState();
+    return persisted?.layers?.sr_plus !== false; // default ON
+  });
   const smartLinesRef = useRef([]);                     // IPriceLine[] managed by smart-S/R effect
-  const [showVolumeProfile, setShowVolumeProfile] = useState(true);
+  const [showVolumeProfile, setShowVolumeProfile] = useState(() => {
+    const persisted = loadChartIndicatorState();
+    return persisted?.layers?.vp !== false; // default ON
+  });
+  // v19.34.25 — Left-edge labels stack. Operator request: stop cluttering
+  // the right price-scale with PDH / PDL / PDC / PMH / PML / Smart S/R /
+  // POC tags — the right side is reserved for live price + entry/SL/PT.
+  // Each effect that draws an S/R-style horizontal line pushes a
+  // descriptor `{ id, label, price, color, weight? }` into this stack;
+  // the SRLeftLabelsOverlay below renders the descriptors as absolutely-
+  // positioned HTML on the LEFT edge of the chart container, projecting
+  // y-coordinates via `candleSeries.priceToCoordinate()`.
+  const [leftLabels, setLeftLabels] = useState({
+    sr: [],       // PDH / PDL / PDC / PMH / PML
+    smart: [],    // Smart S/R (VP / HVN / SWING / PP / R1-3 / S1-3)
+    poc: [],      // Volume Profile Point-of-Control
+    avgCost: [],  // v19.34.25 — current weighted avg cost (updates on refresh)
+  });
   // 2026-05-01 v19.23 — Bot-thought bubbles overlay toggle. Renders
   // chat-bubble annotations sourced from `sentcom_thoughts` directly
   // over the chart so the operator sees the bot's reasoning AT the
@@ -127,15 +202,32 @@ export const ChartPanel = ({
   // cache or partial coverage so the user doesn't mistake old bars for live.
   const [staleInfo, setStaleInfo] = useState(null);  // { stale, reason, latest, partial, coverage }
   // Which overlays are visible. Default: VWAP + BB on, all EMAs off (less clutter).
-  const [visibleIndicators, setVisibleIndicators] = useState({
-    vwap: true,
-    ema_20: false,
-    ema_50: false,
-    ema_200: false,
-    bb_upper: true,
-    bb_middle: true,
-    bb_lower: true,
+  // v19.34.25 — hydrate from localStorage so the operator's last
+  // visible-set + color tweaks survive a reload. Schema below is the
+  // fallback when nothing has been persisted yet.
+  const [visibleIndicators, setVisibleIndicators] = useState(() => {
+    const persisted = loadChartIndicatorState();
+    const defaults = {
+      vwap: true,
+      ema_9: false,
+      ema_20: false,
+      ema_50: false,
+      ema_200: false,
+      bb_upper: true,
+      bb_middle: true,
+      bb_lower: true,
+    };
+    return { ...defaults, ...(persisted?.visible || {}) };
   });
+  // v19.34.25 — Per-indicator color overrides. Falls back to each
+  // INDICATOR_SPECS[i].defaultColor when nothing is set for a key.
+  const [indicatorColors, setIndicatorColors] = useState(() => {
+    const persisted = loadChartIndicatorState();
+    return persisted?.colors || {};
+  });
+  // v19.34.25 — Layer-level visibility (S/R, VP, SR+) is also persisted
+  // via the saveChartIndicatorState effect below; the persisted values
+  // are hydrated into each show* state's lazy initializer above.
 
   const active = useMemo(
     () => TIMEFRAMES.find(t => t.label === timeframe) ?? TIMEFRAMES[1],
@@ -228,10 +320,14 @@ export const ChartPanel = ({
     // Create one LineSeries per indicator overlay up front. Visibility is
     // toggled later via `applyOptions({ visible })` rather than add/remove,
     // so series order + colours stay stable.
+    // v19.34.25 — initial color reads from indicatorColors (user override)
+    // OR the spec's defaultColor. Color changes after mount are handled
+    // via a separate effect that calls applyOptions on each series.
     indicatorSeriesRef.current = {};
     for (const spec of INDICATOR_SPECS) {
+      const color = indicatorColors[spec.key] || spec.defaultColor;
       const s = chart.addSeries(LineSeries, {
-        color: spec.color,
+        color,
         lineWidth: spec.width,
         lineStyle: spec.dash ? 2 : 0, // 0 = solid, 2 = dashed
         priceLineVisible: false,
@@ -708,11 +804,40 @@ export const ChartPanel = ({
     }
     priceLinesRef.current = [];
 
-    if (!position) return undefined;
+    if (!position) {
+      setLeftLabels(prev => ({ ...prev, avgCost: [] }));
+      return undefined;
+    }
     const dir = (position.direction || position.side || '').toLowerCase();
     const specs = [];
     if (position.entry_price != null) {
-      specs.push({ price: Number(position.entry_price), color: '#eab308', title: `E ${Number(position.entry_price).toFixed(2)}`, lineStyle: 1 });
+      // v19.34.25 — Initial-entry line. Kept DASHED so it visually
+      // contrasts with the new SOLID "current weighted-avg cost" line
+      // drawn below (which only renders when avg_cost diverges from
+      // the initial entry — i.e. scaled-in positions).
+      specs.push({ price: Number(position.entry_price), color: '#eab308', title: `E ${Number(position.entry_price).toFixed(2)}`, lineStyle: 2 });
+    }
+    // v19.34.25 — Current weighted-average cost line. Pulled from
+    // `position.avg_cost` (IB account avg) with a fallback to
+    // `position.weighted_avg_entry` (bot-computed) so we work with
+    // whatever the upstream feeds. Renders only when the avg
+    // meaningfully differs from the initial entry (Δ > 0.5¢ on a
+    // sub-$100 stock or 0.1% otherwise) so single-fill positions
+    // don't paint two overlapping lines.
+    const avgCost = position.avg_cost != null
+      ? Number(position.avg_cost)
+      : (position.weighted_avg_entry != null ? Number(position.weighted_avg_entry) : null);
+    const entryPx = position.entry_price != null ? Number(position.entry_price) : null;
+    const avgDivergesFromEntry = Number.isFinite(avgCost) && Number.isFinite(entryPx)
+      && Math.abs(avgCost - entryPx) > Math.max(0.005, Math.abs(entryPx) * 0.001);
+    if (avgDivergesFromEntry) {
+      specs.push({
+        price: avgCost,
+        color: '#fbbf24',          // brighter amber than the dashed entry line
+        title: `AVG ${avgCost.toFixed(2)}`,
+        lineStyle: 0,              // SOLID — distinguishes it from the dashed initial entry
+        lineWidth: 2,
+      });
     }
     if (position.stop_price != null) {
       specs.push({ price: Number(position.stop_price), color: '#ef4444', title: `SL ${Number(position.stop_price).toFixed(2)}`, lineStyle: 2 });
@@ -737,13 +862,24 @@ export const ChartPanel = ({
         const line = series.createPriceLine({
           price: spec.price,
           color: spec.color,
-          lineWidth: 1,
+          lineWidth: spec.lineWidth || 1,
           lineStyle: spec.lineStyle,
           axisLabelVisible: true,
           title: spec.title,
         });
         priceLinesRef.current.push(line);
       } catch (_) { /* unsupported in this chart build */ }
+    }
+    // v19.34.25 — Surface the AVG line on the left overlay too so the
+    // operator can read it at a glance even when the right-side axis
+    // gets crowded.
+    if (avgDivergesFromEntry) {
+      setLeftLabels(prev => ({
+        ...prev,
+        avgCost: [{ id: 'avg-cost', label: 'AVG', price: avgCost, color: '#fbbf24', weight: 2 }],
+      }));
+    } else {
+      setLeftLabels(prev => ({ ...prev, avgCost: [] }));
     }
 
     return () => {
@@ -752,7 +888,7 @@ export const ChartPanel = ({
       }
       priceLinesRef.current = [];
     };
-  }, [position?.entry_price, position?.stop_price, position?.target_price, position?.target_prices, position?.direction, position?.side]);
+  }, [position?.entry_price, position?.avg_cost, position?.weighted_avg_entry, position?.stop_price, position?.target_price, position?.target_prices, position?.direction, position?.side]);
 
   // Stage 2e — fetch PDH / PDL / PDC / PMH / PML for the current symbol
   // and paint them as horizontal support/resistance price lines.
@@ -809,7 +945,10 @@ export const ChartPanel = ({
       try { series.removePriceLine(line); } catch (_) { /* noop */ }
     }
     srLinesRef.current = [];
-    if (!srLevels || !showSrLevels) return undefined;
+    if (!srLevels || !showSrLevels) {
+      setLeftLabels(prev => ({ ...prev, sr: [] }));
+      return undefined;
+    }
 
     const specs = [
       { key: 'pdh', label: 'PDH', color: 'rgba(239, 68, 68, 0.65)',  style: 3 }, // dotted red
@@ -830,12 +969,26 @@ export const ChartPanel = ({
           color: spec.color,
           lineWidth: 1,
           lineStyle: spec.style,
-          axisLabelVisible: true,
+          // v19.34.25 — right-axis label suppressed; rendered on the
+          // LEFT edge via SRLeftLabelsOverlay so the right price scale
+          // stays clean for live price + entry/SL/PT.
+          axisLabelVisible: false,
           title: `${spec.label} ${num.toFixed(2)}`,
         });
         srLinesRef.current.push(line);
       } catch (_) { /* noop */ }
     }
+    // v19.34.25 — register descriptors for the left overlay.
+    setLeftLabels(prev => ({
+      ...prev,
+      sr: specs
+        .map(s => {
+          const px = Number(srLevels[s.key]);
+          if (!Number.isFinite(px) || px <= 0) return null;
+          return { id: `sr-${s.key}`, label: s.label, price: px, color: s.color };
+        })
+        .filter(Boolean),
+    }));
 
     return () => {
       for (const line of srLinesRef.current) {
@@ -859,7 +1012,10 @@ export const ChartPanel = ({
       try { series.removePriceLine(line); } catch (_) { /* noop */ }
     }
     smartLinesRef.current = [];
-    if (!showSmartLevels || !smartLevels) return undefined;
+    if (!showSmartLevels || !smartLevels) {
+      setLeftLabels(prev => ({ ...prev, smart: [] }));
+      return undefined;
+    }
 
     const KIND_STYLE = {
       VP_POC:     { color: 'rgba(251, 191, 36, 0.95)', style: 2 },
@@ -879,6 +1035,7 @@ export const ChartPanel = ({
       ...(smartLevels.support    || []),
       ...(smartLevels.resistance || []),
     ];
+    const collected = [];
     for (const lv of all) {
       const sty = KIND_STYLE[lv.kind] || { color: 'rgba(148, 163, 184, 0.5)', style: 3 };
       const px  = Number(lv.price);
@@ -891,12 +1048,22 @@ export const ChartPanel = ({
           // always read heavier than SWING/floor-pivot R3/S3.
           lineWidth: lv.strength >= 0.7 ? 2 : 1,
           lineStyle: sty.style,
-          axisLabelVisible: true,
+          // v19.34.25 — right-axis label suppressed; surfaced via the
+          // left overlay so the right scale stays clean.
+          axisLabelVisible: false,
           title: `${lv.kind} ${px.toFixed(2)}`,
         });
         smartLinesRef.current.push(line);
+        collected.push({
+          id: `smart-${lv.kind}-${px.toFixed(2)}`,
+          label: lv.kind,
+          price: px,
+          color: sty.color,
+          weight: lv.strength >= 0.7 ? 2 : 1,
+        });
       } catch (_) { /* noop */ }
     }
+    setLeftLabels(prev => ({ ...prev, smart: collected }));
 
     return () => {
       for (const line of smartLinesRef.current) {
@@ -919,6 +1086,7 @@ export const ChartPanel = ({
       pocLineRef.current = null;
     }
     if (!showVolumeProfile || !Number.isFinite(pocPrice) || pocPrice <= 0) {
+      setLeftLabels(prev => ({ ...prev, poc: [] }));
       return undefined;
     }
     try {
@@ -927,9 +1095,19 @@ export const ChartPanel = ({
         color: 'rgba(251, 191, 36, 0.85)',  // amber, matches POC bin
         lineWidth: 1,
         lineStyle: 2,                       // dashed
-        axisLabelVisible: true,
+        // v19.34.25 — right-axis label suppressed; surfaced on the left.
+        axisLabelVisible: false,
         title: `POC ${Number(pocPrice).toFixed(2)}`,
       });
+      setLeftLabels(prev => ({
+        ...prev,
+        poc: [{
+          id: 'poc',
+          label: 'POC',
+          price: Number(pocPrice),
+          color: 'rgba(251, 191, 36, 0.95)',
+        }],
+      }));
     } catch (_) { /* unsupported in this chart build */ }
     return () => {
       if (pocLineRef.current) {
@@ -941,6 +1119,46 @@ export const ChartPanel = ({
 
   const toggleIndicator = useCallback((key) => {
     setVisibleIndicators(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // v19.34.25 — Persist indicator state (visibility + custom colors +
+  // layer toggles) to localStorage whenever any of them change. We run
+  // this in a single effect that watches every persisted field, so the
+  // operator's last view survives a reload. Saving is a synchronous
+  // setItem on a tiny JSON payload — no debounce needed.
+  useEffect(() => {
+    saveChartIndicatorState({
+      visible: visibleIndicators,
+      colors: indicatorColors,
+      layers: {
+        sr: showSrLevels,
+        sr_plus: showSmartLevels,
+        vp: showVolumeProfile,
+      },
+    });
+  }, [visibleIndicators, indicatorColors, showSrLevels, showSmartLevels, showVolumeProfile]);
+
+  // v19.34.25 — Re-paint each LineSeries when its color changes (user
+  // picked a new color from the dropdown). lightweight-charts mutates
+  // color via applyOptions; the series stays in place so the polyline
+  // doesn't redraw from scratch.
+  useEffect(() => {
+    for (const spec of INDICATOR_SPECS) {
+      const series = indicatorSeriesRef.current[spec.key];
+      if (!series) continue;
+      const color = indicatorColors[spec.key] || spec.defaultColor;
+      try { series.applyOptions({ color }); } catch (_) { /* noop */ }
+    }
+  }, [indicatorColors]);
+
+  const setIndicatorColor = useCallback((key, color) => {
+    setIndicatorColors(prev => ({ ...prev, [key]: color }));
+  }, []);
+
+  const toggleLayer = useCallback((layerKey) => {
+    if (layerKey === 'sr')      setShowSrLevels(v => !v);
+    if (layerKey === 'vp')      setShowVolumeProfile(v => !v);
+    if (layerKey === 'sr_plus') setShowSmartLevels(v => !v);
   }, []);
 
   return (
@@ -1013,15 +1231,25 @@ export const ChartPanel = ({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Indicator toggles */}
-          <div className="flex items-center gap-1" data-testid="chart-indicator-toggles">
-            {INDICATOR_SPECS.map((spec) => {
-              const on = !!visibleIndicators[spec.key];
+          {/* v19.34.25 — Consolidated indicator strip.
+              VWAP + Bot-thoughts remain pinned (most-toggled controls);
+              everything else (EMA 9/20/50/200, BB↑·↓, S/R, VP, SR+) is
+              collapsed into a single INDICATORS dropdown with per-row
+              color pickers, persisted to localStorage. */}
+          <div
+            className="flex items-center gap-1"
+            data-testid="chart-indicator-toggles"
+          >
+            {/* Pinned: VWAP (top series) */}
+            {(() => {
+              const spec = INDICATOR_SPECS.find(s => s.key === 'vwap');
+              if (!spec) return null;
+              const on = !!visibleIndicators.vwap;
+              const color = indicatorColors.vwap || spec.defaultColor;
               return (
                 <button
-                  key={spec.key}
-                  data-testid={`chart-indicator-${spec.key}`}
-                  onClick={() => toggleIndicator(spec.key)}
+                  data-testid="chart-indicator-vwap"
+                  onClick={() => toggleIndicator('vwap')}
                   title={`Toggle ${spec.label}`}
                   className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ${
                     on
@@ -1031,76 +1259,14 @@ export const ChartPanel = ({
                 >
                   <span
                     className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: spec.color, opacity: on ? 1 : 0.4 }}
+                    style={{ backgroundColor: color, opacity: on ? 1 : 0.4 }}
                   />
                   <span>{spec.label}</span>
-                  {on
-                    ? <Eye className="w-3 h-3 opacity-60" />
-                    : <EyeOff className="w-3 h-3 opacity-40" />}
+                  {on ? <Eye className="w-3 h-3 opacity-60" /> : <EyeOff className="w-3 h-3 opacity-40" />}
                 </button>
               );
-            })}
-            {/* Stage 2e — PDH/PDL/PML support/resistance toggle */}
-            <button
-              data-testid="chart-sr-toggle"
-              onClick={() => setShowSrLevels((v) => !v)}
-              title="Toggle PDH / PDL / PMH / PML support-resistance lines"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
-                showSrLevels
-                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: '#f59e0b', opacity: showSrLevels ? 1 : 0.4 }}
-              />
-              <span>S/R</span>
-              {showSrLevels
-                ? <Eye className="w-3 h-3 opacity-60" />
-                : <EyeOff className="w-3 h-3 opacity-40" />}
-            </button>
-            {/* 2026-04-28d — Side Volume Profile toggle */}
-            <button
-              data-testid="chart-volprof-toggle"
-              onClick={() => setShowVolumeProfile((v) => !v)}
-              title="Toggle Side Volume Profile (Volume-at-Price histogram)"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
-                showVolumeProfile
-                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: '#06b6d4', opacity: showVolumeProfile ? 1 : 0.4 }}
-              />
-              <span>VP</span>
-              {showVolumeProfile
-                ? <Eye className="w-3 h-3 opacity-60" />
-                : <EyeOff className="w-3 h-3 opacity-40" />}
-            </button>
-            {/* 2026-04-28e — Smart S/R toggle (VP + swings + pivots) */}
-            <button
-              data-testid="chart-smart-sr-toggle"
-              onClick={() => setShowSmartLevels((v) => !v)}
-              title="Toggle Smart Support/Resistance (Volume Profile + swing pivots + floor pivots)"
-              className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors ml-1 ${
-                showSmartLevels
-                  ? 'text-zinc-100 bg-white/5 ring-1 ring-white/10'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: '#a855f7', opacity: showSmartLevels ? 1 : 0.4 }}
-              />
-              <span>SR+</span>
-              {showSmartLevels
-                ? <Eye className="w-3 h-3 opacity-60" />
-                : <EyeOff className="w-3 h-3 opacity-40" />}
-            </button>
-            {/* 2026-05-01 v19.23 — Bot-thought bubbles toggle */}
+            })()}
+            {/* Pinned: Bot-thoughts overlay */}
             <button
               data-testid="chart-thoughts-toggle"
               onClick={() => setShowThoughtBubbles((v) => !v)}
@@ -1116,10 +1282,19 @@ export const ChartPanel = ({
                 style={{ backgroundColor: '#22d3ee', opacity: showThoughtBubbles ? 1 : 0.4 }}
               />
               <span>Bot</span>
-              {showThoughtBubbles
-                ? <Eye className="w-3 h-3 opacity-60" />
-                : <EyeOff className="w-3 h-3 opacity-40" />}
+              {showThoughtBubbles ? <Eye className="w-3 h-3 opacity-60" /> : <EyeOff className="w-3 h-3 opacity-40" />}
             </button>
+            {/* Consolidated INDICATORS dropdown (everything else) */}
+            <IndicatorsDropdown
+              visibleIndicators={visibleIndicators}
+              indicatorColors={indicatorColors}
+              toggleIndicator={toggleIndicator}
+              setIndicatorColor={setIndicatorColor}
+              showSrLevels={showSrLevels}
+              showVolumeProfile={showVolumeProfile}
+              showSmartLevels={showSmartLevels}
+              toggleLayer={toggleLayer}
+            />
           </div>
 
           {/* Timeframe + refresh */}
@@ -1202,6 +1377,18 @@ export const ChartPanel = ({
           candleSeriesRef={candleSeriesRef}
           bars={bars}
         />
+        {/* v19.34.25 — Left-edge label stack for S/R / Smart-S/R / POC /
+            AVG. Right-axis labels for these layers are suppressed
+            (axisLabelVisible:false) so the right scale stays uncluttered
+            for live price + entry/SL/PT. The overlay reads the
+            descriptor stack populated by each effect and projects each
+            price to a y-coordinate via candleSeries.priceToCoordinate. */}
+        <SRLeftLabelsOverlay
+          chartRef={chartRef}
+          candleSeriesRef={candleSeriesRef}
+          leftLabels={leftLabels}
+          bars={bars}
+        />
       </div>
 
       {/* Overlays: loading / empty / error states */}
@@ -1258,6 +1445,320 @@ export const ChartPanel = ({
 };
 
 export default ChartPanel;
+
+
+/**
+ * IndicatorsDropdown — v19.34.25 (May 2026)
+ * ----------------------------------------
+ * Consolidates the chart-header indicator clutter into a single pill-
+ * button → popover. Operator request: the previous 9-pill strip
+ * dominated the chart header on smaller laptops and forced horizontal
+ * scrolling. VWAP and Bot-thoughts stay pinned (most-toggled controls);
+ * everything else is collapsed here.
+ *
+ * Each row carries:
+ *   • visibility checkbox
+ *   • per-indicator color picker (HTML5 `<input type="color">`)
+ *   • label
+ *
+ * Visibility + colors are owned by ChartPanel state and persisted to
+ * localStorage so the operator's last view survives reloads.
+ */
+const IndicatorsDropdown = ({
+  visibleIndicators,
+  indicatorColors,
+  toggleIndicator,
+  setIndicatorColor,
+  showSrLevels,
+  showVolumeProfile,
+  showSmartLevels,
+  toggleLayer,
+}) => {
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Count how many overlays are currently visible (excl. VWAP — pinned).
+  const visibleCount = DROPDOWN_INDICATOR_KEYS.reduce(
+    (n, k) => n + (visibleIndicators[k] ? 1 : 0),
+    0,
+  ) + (showSrLevels ? 1 : 0) + (showVolumeProfile ? 1 : 0) + (showSmartLevels ? 1 : 0);
+
+  // Group the series-backed indicators visually inside the popover.
+  const masKeys = INDICATOR_SPECS.filter(s => s.group === 'mas').map(s => s.key);
+  const bbKeys  = INDICATOR_SPECS.filter(s => s.group === 'bb').map(s => s.key);
+
+  const renderSeriesRow = (key) => {
+    const spec = INDICATOR_SPECS.find(s => s.key === key);
+    if (!spec) return null;
+    const on = !!visibleIndicators[key];
+    const color = indicatorColors[key] || spec.defaultColor;
+    // For rgba() defaults (BB) <input type=color> can't represent alpha,
+    // so we surface the picker only for series whose default is a #hex.
+    const colorPickerAvailable = /^#[0-9a-fA-F]{3,8}$/.test(color);
+    return (
+      <li
+        key={key}
+        className="flex items-center justify-between gap-2 px-2 py-1 hover:bg-white/5 rounded"
+        data-testid={`chart-indicator-row-${key}`}
+      >
+        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+          <input
+            type="checkbox"
+            data-testid={`chart-indicator-check-${key}`}
+            checked={on}
+            onChange={() => toggleIndicator(key)}
+            className="w-3.5 h-3.5 accent-cyan-500"
+          />
+          <span
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: color, opacity: on ? 1 : 0.4 }}
+          />
+          <span className={`text-[13px] truncate ${on ? 'text-zinc-100' : 'text-zinc-400'}`}>
+            {spec.label}
+          </span>
+        </label>
+        {colorPickerAvailable && (
+          <input
+            type="color"
+            data-testid={`chart-indicator-color-${key}`}
+            value={color}
+            onChange={(e) => setIndicatorColor(key, e.target.value)}
+            title={`Color for ${spec.label}`}
+            className="w-5 h-5 rounded border-0 bg-transparent cursor-pointer shrink-0"
+            style={{ padding: 0 }}
+          />
+        )}
+      </li>
+    );
+  };
+
+  const renderLayerRow = (layerKey) => {
+    const meta = LAYER_LABELS[layerKey];
+    if (!meta) return null;
+    const on =
+      layerKey === 'sr'      ? showSrLevels :
+      layerKey === 'vp'      ? showVolumeProfile :
+      layerKey === 'sr_plus' ? showSmartLevels : false;
+    return (
+      <li
+        key={layerKey}
+        className="flex items-center justify-between gap-2 px-2 py-1 hover:bg-white/5 rounded"
+        data-testid={`chart-layer-row-${layerKey}`}
+        title={meta.desc}
+      >
+        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+          <input
+            type="checkbox"
+            data-testid={`chart-layer-check-${layerKey}`}
+            checked={on}
+            onChange={() => toggleLayer(layerKey)}
+            className="w-3.5 h-3.5 accent-cyan-500"
+          />
+          <span
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: meta.defaultColor, opacity: on ? 1 : 0.4 }}
+          />
+          <span className={`text-[13px] truncate ${on ? 'text-zinc-100' : 'text-zinc-400'}`}>
+            {meta.label}
+          </span>
+        </label>
+      </li>
+    );
+  };
+
+  return (
+    <div ref={wrapRef} className="relative inline-block ml-1">
+      <button
+        type="button"
+        data-testid="chart-indicators-toggle"
+        onClick={() => setOpen(v => !v)}
+        title="Open the indicators panel (toggles + color pickers)"
+        className={`flex items-center gap-1 px-1.5 py-0.5 text-[12px] rounded transition-colors uppercase tracking-wider ${
+          open
+            ? 'text-cyan-200 bg-cyan-950/40 ring-1 ring-cyan-700/50'
+            : 'text-zinc-300 bg-white/5 ring-1 ring-white/10 hover:text-zinc-100'
+        }`}
+      >
+        <TrendingUp className="w-3 h-3 opacity-70" />
+        <span>Indicators</span>
+        {visibleCount > 0 && (
+          <span className="px-1 py-px text-[10px] rounded bg-zinc-800/80 text-zinc-300">
+            {visibleCount}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          data-testid="chart-indicators-popover"
+          role="dialog"
+          className="absolute right-0 top-7 z-40 w-[260px] bg-zinc-950 border border-zinc-700 rounded-lg shadow-2xl"
+        >
+          <div className="px-3 py-2 border-b border-zinc-800 text-[12px] uppercase tracking-wider text-zinc-300 font-semibold">
+            Indicators
+          </div>
+          <div className="px-2 py-2 text-zinc-300 space-y-2 max-h-[60vh] overflow-y-auto">
+            <section>
+              <div className="px-2 text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Moving averages</div>
+              <ul className="space-y-px">
+                {masKeys.map(renderSeriesRow)}
+              </ul>
+            </section>
+            <section>
+              <div className="px-2 text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Bollinger bands</div>
+              <ul className="space-y-px">
+                {bbKeys.map(renderSeriesRow)}
+              </ul>
+            </section>
+            <section>
+              <div className="px-2 text-[11px] uppercase tracking-wider text-zinc-500 mb-1">Support / resistance + volume</div>
+              <ul className="space-y-px">
+                {DROPDOWN_LAYER_KEYS.map(renderLayerRow)}
+              </ul>
+            </section>
+          </div>
+          <div className="px-3 py-1.5 border-t border-zinc-800 text-[11px] text-zinc-500">
+            Persisted locally · VWAP + Bot pinned to the strip
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+/**
+ * SRLeftLabelsOverlay — v19.34.25 (May 2026)
+ * ------------------------------------------
+ * Renders S/R / Smart-S/R / POC / AVG-cost labels on the LEFT edge of
+ * the chart container instead of the right price scale. Right-axis
+ * labels for these layers are suppressed (axisLabelVisible:false on the
+ * underlying createPriceLine calls) so the right scale stays clean for
+ * live price + entry/SL/PT.
+ *
+ * Mechanism: takes `leftLabels` — an object keyed by layer name, each
+ * value being an array of `{ id, label, price, color, weight? }` — and
+ * projects every price to a y-coordinate via
+ * `candleSeries.priceToCoordinate()`. Re-positions on visible-time-range
+ * AND visible-logical-range changes (pan + zoom both shift the price
+ * scale extent) plus on every bars update (which triggers a re-fit).
+ *
+ * Returns null until the chart + at least one descriptor are available.
+ */
+const SRLeftLabelsOverlay = ({ chartRef, candleSeriesRef, leftLabels, bars }) => {
+  const [positions, setPositions] = React.useState([]);
+
+  React.useEffect(() => {
+    const chart = chartRef?.current;
+    const series = candleSeriesRef?.current;
+    if (!chart || !series) {
+      setPositions([]);
+      return undefined;
+    }
+
+    // Flatten the descriptor object into a single array with stable ids
+    // so the same key always maps to the same DOM node (no flicker on
+    // re-pos). Priority order: avgCost on top of poc on top of sr on
+    // top of smart — paint in reverse so the "important" ones win when
+    // y-coordinates overlap.
+    const flat = [
+      ...(leftLabels.smart   || []).map(d => ({ ...d, layer: 'smart' })),
+      ...(leftLabels.sr      || []).map(d => ({ ...d, layer: 'sr' })),
+      ...(leftLabels.poc     || []).map(d => ({ ...d, layer: 'poc' })),
+      ...(leftLabels.avgCost || []).map(d => ({ ...d, layer: 'avg' })),
+    ];
+    if (flat.length === 0) {
+      setPositions([]);
+      return undefined;
+    }
+
+    const recompute = () => {
+      try {
+        const next = [];
+        for (const d of flat) {
+          const y = series.priceToCoordinate(d.price);
+          if (y == null || !Number.isFinite(y)) continue;
+          next.push({ ...d, y });
+        }
+        // Sort by y so overlap collision-detection (below) is linear.
+        next.sort((a, b) => a.y - b.y);
+        // Collision: if two labels would render within 13px of each
+        // other, push the lower one down. Keeps labels from stacking
+        // illegibly on tightly clustered price levels.
+        const LABEL_HEIGHT = 14;
+        for (let i = 1; i < next.length; i++) {
+          if (next[i].y - next[i - 1].y < LABEL_HEIGHT) {
+            next[i].y = next[i - 1].y + LABEL_HEIGHT;
+          }
+        }
+        setPositions(next);
+      } catch (_) { /* chart torn down */ }
+    };
+
+    recompute();
+
+    let unsubTime = null;
+    let unsubLogical = null;
+    try {
+      const ts = chart.timeScale();
+      const tHandler = () => recompute();
+      const lHandler = () => recompute();
+      ts.subscribeVisibleTimeRangeChange(tHandler);
+      ts.subscribeVisibleLogicalRangeChange(lHandler);
+      unsubTime = () => {
+        try { ts.unsubscribeVisibleTimeRangeChange(tHandler); } catch (_) { /* noop */ }
+      };
+      unsubLogical = () => {
+        try { ts.unsubscribeVisibleLogicalRangeChange(lHandler); } catch (_) { /* noop */ }
+      };
+    } catch (_) { /* noop */ }
+
+    return () => {
+      if (unsubTime) unsubTime();
+      if (unsubLogical) unsubLogical();
+    };
+  }, [chartRef, candleSeriesRef, leftLabels, bars]);
+
+  if (!positions.length) return null;
+  return (
+    <div
+      data-testid="chart-sr-left-labels"
+      className="pointer-events-none absolute inset-0"
+    >
+      {positions.map((p) => (
+        <span
+          key={`${p.layer}-${p.id}`}
+          data-testid={`chart-sr-left-label-${p.id}`}
+          className="absolute left-1 -translate-y-1/2 px-1 py-px text-[10px] font-mono rounded-sm border whitespace-nowrap leading-none"
+          style={{
+            top: `${p.y}px`,
+            color: p.color,
+            borderColor: p.color,
+            backgroundColor: 'rgba(9, 9, 11, 0.78)',
+            // Boost weight visually for high-strength Smart S/R + AVG
+            fontWeight: p.weight && p.weight > 1 ? 600 : 400,
+          }}
+          title={`${p.label} ${Number(p.price).toFixed(2)}`}
+        >
+          {p.label} {Number(p.price).toFixed(2)}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 
 /**

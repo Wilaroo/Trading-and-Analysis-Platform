@@ -4,6 +4,58 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.25) — Chart UX overhaul: pills + S/R + AVG + markers
+
+Operator follow-up: chart header was cluttered with 9 separate indicator
+pills, S/R labels overlapped the right price scale, no current-avg-cost
+line, and entry markers used cyan/purple (which read as "exit colors").
+Pulled all four into one batch.
+
+### Frontend — `ChartPanel.jsx`
+- **Consolidated INDICATORS dropdown** (Variant ii). VWAP + Bot-thoughts
+  remain pinned to the top strip (most-toggled controls); everything else
+  (EMA 9 / 20 / 50 / 200, BB↑ / · / ↓, S/R, VP, SR+) collapsed into a
+  single `Indicators` pill → popover with per-row color pickers + a
+  visible-count badge. Persisted to `localStorage` under
+  `sentcom.chart.indicators.v1` so the operator's tweaks survive reload.
+- **New 9EMA indicator** added (`ema_9`, default color `#f97316`, off by default).
+- **Left-edge label stack**. New `SRLeftLabelsOverlay` renders S/R / Smart-S/R
+  / POC / AVG labels on the LEFT side of the chart container, projecting
+  each price via `series.priceToCoordinate`. Right-axis labels for those
+  layers suppressed (`axisLabelVisible: false`), keeping the right scale
+  clean for live price + entry/SL/PT. Includes 13px collision-detection
+  so dense level clusters stay legible.
+- **Current weighted-avg-cost line**. New SOLID amber line at
+  `position.avg_cost` / `position.weighted_avg_entry`. Renders only when
+  it diverges from the initial entry (single-fill positions stay quiet).
+  Initial entry line flipped from dotted to dashed for sharper contrast.
+
+### Backend — `routers/sentcom_chart.py::_fetch_trade_markers`
+- **Marker colors fixed**. Long entries now green ▲ `#10b981`; short entries
+  red ▼ `#f43f5e`. Replaces the old cyan/purple which read as exit colors.
+- **Exit semantics**. Stop-loss exits paint amber with `SL ...` tag;
+  winning exits paint cyan with `PT ...` tag; other losses paint rose
+  with `X ...` tag. Operator reads outcome at a glance.
+- **Partial-exit dots**. Each `partial_exits[]` entry paints a small
+  circle marker (no arrow / no on-chart label) on the bar of the
+  scale-out fill; details surface via hover tooltip. Colored by sign of
+  `partial_pnl`.
+- **Adopted-trade timing fix**. Entry timestamp now prefers `ib_fill_time`
+  / `filled_at` over `entry_at`, so adoptions land on the actual fill bar
+  rather than the bot's record-keeping moment (which often lags ~40s).
+- **Open trades paint entry markers**. Previously only closed trades did
+  (filter was `closed_at OR last_updated`). Now includes `entry_at` /
+  `entry_time` so live trades opened mid-window show their arrow.
+
+### Tests added
+- `/app/backend/tests/test_chart_markers_v19_34_25.py` — 8 unit tests
+  covering long/short entry colors, SL/PT/X exit semantics, partial-exit
+  circle dots (win + loss), `ib_fill_time` override, and open-trade
+  entry-marker emission. All passing.
+
+
+
+
 ## 2026-05-14 (v19.34.24) — UI badge cleanup: failure-only drift pill
 
 Operator follow-up after v19.34.22 / v19.34.23: the subtle "auto-heal · N"

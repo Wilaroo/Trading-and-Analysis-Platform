@@ -183,10 +183,22 @@ def _fetch_trade_markers(
 ) -> List[Dict[str, Any]]:
     """Return lightweight-charts marker objects for closed bot_trades.
 
-    Each closed trade emits UP TO two markers — one at entry, one at exit —
-    coloured by win/loss (R-multiple sign). Open trades produce an entry
-    marker only. If `_db` was not provided we return [] silently so the
-    chart still works in minimal environments.
+    v19.34.25 (May 2026) — Operator request: stop showing entry markers
+    in cyan/purple (which read as "exit" colors on every other trading
+    platform). New convention:
+
+      • LONG  entry → green `arrowUp`   (#10b981)
+      • SHORT entry → red   `arrowDown` (#f43f5e)
+      • Stop-loss exit (loss) → amber `arrowDown`/`arrowUp` with SL tag
+      • Target  exit (win)   → emerald `arrowDown`/`arrowUp` with PT tag
+      • Partial scale-out    → small circle dot (no text label — full
+        details surface via the lightweight-charts hover tooltip)
+
+    Each closed trade emits UP TO two arrow markers — one at entry, one
+    at the FINAL exit. Partial exits (scale-outs) each emit one dot
+    marker. Open trades produce an entry marker only. If `_db` was not
+    provided we return [] silently so the chart still works in minimal
+    environments.
     """
     if _db is None:
         return []
@@ -201,6 +213,13 @@ def _fetch_trade_markers(
                 "$or": [
                     {"closed_at": {"$gte": window_iso_start, "$lte": window_iso_end}},
                     {"last_updated": {"$gte": window_iso_start, "$lte": window_iso_end}},
+                    # v19.34.25 — include trades whose entry falls in the
+                    # window even if they're still open (no closed_at yet).
+                    # Pre-v19.34.25 these only matched when the trade closed
+                    # within the window, so live trades opened earlier in
+                    # the session never painted an entry arrow.
+                    {"entry_at":     {"$gte": window_iso_start, "$lte": window_iso_end}},
+                    {"entry_time":   {"$gte": window_iso_start, "$lte": window_iso_end}},
                 ],
             },
             {
@@ -210,6 +229,17 @@ def _fetch_trade_markers(
                 "r_multiple": 1, "pnl": 1,
                 "closed_at": 1, "last_updated": 1, "placed_at": 1,
                 "entry_at": 1, "entry_time": 1,
+                # v19.34.25 — fetch partial exits + exit reason so we can
+                # paint scale-out dots and color-code the final exit by
+                # cause (SL hit vs PT hit).
+                "partial_exits": 1, "exit_reason": 1, "close_reason": 1,
+                "scale_out_state": 1, "scale_out_config": 1,
+                # v19.34.25 — adopted-trade timing alignment. Original
+                # IB fill time is the gold standard; entry_at often lags
+                # because it's set when the bot records the trade, which
+                # for reconciled positions can be many seconds after the
+                # IB fill itself.
+                "ib_fill_time": 1, "filled_at": 1,
             },
         ).limit(500)
     except Exception as exc:  # pragma: no cover
@@ -224,33 +254,96 @@ def _fetch_trade_markers(
         if not (is_long or is_short):
             continue
 
+        # v19.34.25 — Prefer IB fill timestamp when present so adopted
+        # trades land on the bar where the actual fill happened (not the
+        # bot's record-keeping moment). Falls back through the prior
+        # timestamp chain so non-adopted bot trades still resolve.
         entry_ts = _to_utc_seconds(
-            doc.get("entry_at") or doc.get("entry_time") or doc.get("placed_at")
+            doc.get("ib_fill_time")
+            or doc.get("filled_at")
+            or doc.get("entry_at")
+            or doc.get("entry_time")
+            or doc.get("placed_at")
         )
         exit_ts = _to_utc_seconds(doc.get("closed_at") or doc.get("last_updated"))
         r = doc.get("r_multiple")
         pnl = doc.get("pnl")
         setup = doc.get("setup_type") or "trade"
 
-        # Entry marker
+        # Entry marker — v19.34.25 colors: green ▲ for long, red ▼ for
+        # short. Matches universal trading-chart convention so entries
+        # read at a glance.
         if entry_ts and start_ts <= entry_ts <= end_ts:
             markers.append({
                 "time": entry_ts,
                 "position": "belowBar" if is_long else "aboveBar",
                 "shape": "arrowUp" if is_long else "arrowDown",
-                "color": "#06b6d4" if is_long else "#a855f7",
+                "color": "#10b981" if is_long else "#f43f5e",
                 "text": f"{setup} entry @ {doc.get('entry_price')}",
             })
-        # Exit marker (only for closed trades with exit price)
+
+        # v19.34.25 — Partial-exit dots. Each entry in `partial_exits`
+        # paints a small circle marker (no text) on the bar where the
+        # scale-out fired. The lightweight-charts hover tooltip surfaces
+        # the full text on demand so we don't clutter the chart with
+        # labels for routine scale-outs.
+        partials = doc.get("partial_exits") or []
+        if isinstance(partials, list):
+            for pe in partials:
+                if not isinstance(pe, dict):
+                    continue
+                pe_ts = _to_utc_seconds(
+                    pe.get("exited_at") or pe.get("filled_at") or pe.get("time")
+                )
+                if not pe_ts or pe_ts < start_ts or pe_ts > end_ts:
+                    continue
+                pe_pnl = pe.get("partial_pnl") or pe.get("pnl") or 0
+                pe_color = "#10b981" if (isinstance(pe_pnl, (int, float)) and pe_pnl >= 0) else "#f43f5e"
+                target_idx = pe.get("target_idx")
+                tip = (
+                    f"scale-out{(' T' + str(target_idx + 1)) if isinstance(target_idx, int) else ''}"
+                    f" · {pe.get('shares_sold', '?')}sh @ {pe.get('fill_price', '?')}"
+                    + (f" · {float(pe_pnl):+.2f}" if isinstance(pe_pnl, (int, float)) else "")
+                )
+                markers.append({
+                    "time": pe_ts,
+                    "position": "aboveBar" if is_long else "belowBar",
+                    "shape": "circle",
+                    "color": pe_color,
+                    # No `text` field → lightweight-charts renders the
+                    # dot only; tooltip uses the title-like text below.
+                    "text": tip,
+                    # Custom field — frontend can read this to style the
+                    # marker as a "scale-out dot" if extended later.
+                    "size": 0,
+                })
+
+        # Final exit marker — v19.34.25 colors: amber ✕-style for stop
+        # exits (loss), emerald for target exits (win). The shape stays
+        # consistent (arrow against the position) so the operator reads
+        # direction instantly; color tells outcome.
         if exit_ts and doc.get("exit_price") is not None and start_ts <= exit_ts <= end_ts:
             is_win = (r is not None and r > 0) or (pnl is not None and pnl > 0)
+            exit_reason = (doc.get("exit_reason") or doc.get("close_reason") or "").lower()
+            is_stop_exit = any(
+                k in exit_reason for k in ("stop", "sl", "trail")
+            )
+            if is_stop_exit and not is_win:
+                exit_color = "#f59e0b"          # amber — stop hit
+                exit_tag = "SL"
+            elif is_win:
+                exit_color = "#22d3ee"          # cyan — winner (target / trail-out in profit)
+                exit_tag = "PT"
+            else:
+                exit_color = "#f43f5e"          # rose — manual close at a loss / other
+                exit_tag = "X"
             markers.append({
                 "time": exit_ts,
                 "position": "aboveBar" if is_long else "belowBar",
                 "shape": "arrowDown" if is_long else "arrowUp",
-                "color": "#10b981" if is_win else "#f43f5e",
+                "color": exit_color,
                 "text": (
-                    f"exit @ {doc.get('exit_price')}"
+                    f"{exit_tag} exit @ {doc.get('exit_price')}"
                     + (f" · {float(r):+.2f}R" if isinstance(r, (int, float)) else "")
                 ),
             })
