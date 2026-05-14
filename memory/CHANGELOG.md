@@ -4,6 +4,100 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+
+## 2026-05-14 (v19.34.30) — P0 Bracket-Stacking Cascade: Patch A + IB/DB cleanup
+
+### Incident summary
+
+During live (paper) trading the operator caught an ICLN reversal where the
+bot accumulated a ~$493K notional long position by stacking buy-stop legs
+without cancelling stale ones. Forensic audit revealed the bot's
+`bot_trades.target_order_ids` arrays had bloated to **2,654 stacked IDs
+across 17 symbols** (worst offender: KMB/ONON/SHLD/STZ at 187–222 IDs each),
+with **5 phantom DUP_ID rows** the position-reconciler had written twice.
+At IB, **~260 live OCA legs** were stacked across 13 symbols (ICLN alone
+had 9 stops covering 20,053 shares against a 2,103-share position — 9.5×
+leverage if any leg fired).
+
+### Root cause — `target_order_ids` APPEND not REPLACE
+
+Two reissue paths appended every newly-attached target ID onto the existing
+list instead of replacing it:
+
+- `backend/services/position_reconciler.py:1454` (RECONCILE-BRACKET attach)
+- `backend/services/trading_bot_service.py:4355` (v127 naked-sweep emergency)
+
+Every reconcile cycle therefore grew the array by one stale ID forever.
+
+### Patch A — REPLACE not APPEND  ✅
+
+Both call sites now do:
+```python
+trade.target_order_ids = [tgt_id]
+```
+…instead of `.append(tgt_id)`. After a successful OCA re-attach the new
+target is the only valid one — prior IDs are stale (filled, cancelled, or
+ghost orders at IB). Backups of both files kept as `*.v19_34_30.bak`.
+
+### Cleanup migration (one-time)
+
+- **IB side**: `POST /api/trading-bot/cancel-excess-bracket-legs` with
+  `target_qty=0` against 12 stacked symbols → **231 live legs cancelled**,
+  pusher queue drained to 0 in ~2 min. Subsequent sweep on LYFT (ghost
+  position, 5 stale stops on a closed trade) also cancelled.
+- **DB side** (`scripts/db_cleanup.py --execute`):
+  - 26 open rows: `target_order_ids = []`, `stop_order_id = null`,
+    `oca_group = null`
+  - 19 phantom DUP_ID rows archived to `bot_trades_archive_v19_34_30`
+    (5 within `status="open"`, 14 across all statuses)
+  - 1 zombie row (SMR, DB=+171 vs IB=0) marked `status="closed_zombie_v30"`
+  - Created unique index `id_unique_v19_34_30` on `bot_trades.id` to
+    prevent future phantom dup-writes at the DB layer.
+
+### Verification
+
+- `backend/tests/test_patch_a_target_ids_replace_v19_34_30.py` — 2 passed
+  - Static guard: forbids `target_order_ids.append` / `+=` re-appearing
+    in either file (regression-proof)
+  - Marker check: ensures the Patch A comment + replacement assignment
+    are present in both files
+- Post-restart live verification:
+  - DB: 16 open rows, max `target_order_ids` length = **1** ✅
+  - DB: no naked rows, unique index in place ✅
+- `scripts/audit_brackets.py` + `scripts/emergency_cleanup.sh` checked in
+  as reusable operator tooling.
+
+### Known follow-ups (Patches B–E, NOT in v19.34.30)
+
+The DB-side accumulation is architecturally killed by Patch A. However the
+live verification surfaced a related (smaller) bug: the reconciler attaches
+new OCA brackets without **actively cancelling** pre-existing legs at IB,
+so IB can still stack at +2 legs per reconcile cycle (vs. unbounded array
+growth pre-Patch-A). Bot was halted at end of session as a safety measure;
+positions are sitting naked at IB on the paper account.
+
+To be shipped before next live restart:
+- **Patch B** — `phantom_swept` / `close_trade`: actively RPC the pusher
+  to cancel `stop_order_id` + all `target_order_ids` at IB before DB-close
+- **Patch C** — `position_reconciler.reconcile_orphan_positions`: cancel
+  every existing OCA leg at IB BEFORE adopting an orphan / re-attaching
+- **Patch E** — `v127 naked-sweep`: guard against reissue when pusher
+  returns `live_orders=0` (treat as transient hiccup, not green light)
+
+### Files touched
+
+- `backend/services/position_reconciler.py` (Patch A)
+- `backend/services/trading_bot_service.py` (Patch A)
+- `backend/tests/test_patch_a_target_ids_replace_v19_34_30.py` (new)
+- `scripts/audit_brackets.py` (new — operator forensic tool)
+- `scripts/emergency_cleanup.sh` (new — IB cancel pipeline)
+- `scripts/db_cleanup.py` (new — DB hygiene migration)
+- MongoDB: new collection `bot_trades_archive_v19_34_30`, new index
+  `id_unique_v19_34_30` on `bot_trades.id`
+
+
+
+
 ## 2026-05-14 (v19.34.29) — Bot-thoughts strip surfaced in scanner cards
 
 Operator feedback after v19.34.26: scanner panel cards still only showed
