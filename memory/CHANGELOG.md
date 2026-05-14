@@ -5,6 +5,87 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.31) — Patches B + C + E: defense-in-depth for bracket lifecycle
+
+Sequel to v19.34.30 Patch A (which killed DB-side `target_order_ids` array
+accumulation). Live verification surfaced that the reconciler / naked-sweep
+still attached new OCA brackets without **actively cancelling** pre-existing
+legs at IB, allowing ~+2 legs per cycle of growth (vs. unbounded pre-Patch-A).
+The 2026-05-14 paper-side cleanup confirmed the failure mode. v19.34.31
+closes the three remaining gaps.
+
+### Patch B — `position_manager.close_trade` pre-close cancel ✅
+
+In `backend/services/position_manager.py:close_trade`, immediately before
+`bot._trade_executor.close_position(trade)`:
+- Read `_pushed_ib_data["orders"]`, filter by `symbol == trade.symbol` and
+  `status in ("PreSubmitted","Submitted")`.
+- Queue cancellation for every matching `int(order_id)` via the v19.34.88
+  `queue_cancellation` helper (same pattern `cancel-excess-bracket-legs`
+  uses; idempotent on `ib_order_id`).
+- Non-fatal failures are logged and swallowed — close MUST proceed.
+
+Rationale: IB's OCA-group auto-cancel can desync (proven during the
+v19.34.30 cascade where stale stops survived past `close_trade` calls
+and re-stacked). Belt-and-suspenders explicit cancel guarantees the legs
+can't fire during the close race.
+
+### Patch C — `position_reconciler` clean-slate cancel before re-attach ✅
+
+In `backend/services/position_reconciler.py` (inside the v19.34.111
+cooldown-passed branch, immediately before `await
+executor.attach_oca_stop_target(trade)`):
+- Same filter+cancel pattern as Patch B but scoped to `sym` (the symbol
+  the reconciler is about to attach a fresh OCA to).
+- `await asyncio.sleep(3.0)` after queueing so the pusher has time to
+  claim the cancels before our new submit hits IB.
+- Brief naked window of ~3s is acceptable (reconciler is only entered
+  when the symbol was already naked or being re-protected).
+
+Rationale: closes the IB-side accumulation path that survived Patch A.
+After Patch C, each reconciliation cycle should leave exactly 1 stop +
+1 target per symbol at IB (rather than +2 each cycle).
+
+### Patch E — naked-sweep no-panic guard ✅
+
+In `backend/services/trading_bot_service.py:_naked_position_sweep`,
+immediately after `ib_orders, source_info = await _fetch_ib_open_orders()`
+resolves a non-None empty list:
+- Compute `age_s` of `_pushed_ib_data["last_update"]` (treat as 9999.0
+  on parse failure).
+- Check if any open trade has a real `stop_order_id` (excludes
+  `SIM-*` / `ADOPT-STOP-*` placeholders).
+- If `age_s > 30` AND at least one tracked stop exists → skip with
+  `skipped_reason = "v19_34_31_patch_e_pusher_stale_zero_grace:age_s=N"`.
+
+Rationale: a brief pusher hiccup pre-patch nuked `live_order_ids` to
+the empty set, causing every tracked stop to look naked → emergency
+reissue cascade. This guard is the third leg of the trio (A killed
+DB-side bloat, B/C kill IB-side bloat, E prevents the cascade-trigger
+itself).
+
+### Verification
+
+- `backend/tests/test_patches_bce_v19_34_31.py` — **4 passed**:
+  1. Patch B: pre-close cancel block lives before `close_position`
+  2. Patch C: pre-attach cancel + `asyncio.sleep(3.0)` lives before `attach_oca_stop_target`
+  3. Patch E: 30s staleness threshold + tracked-stop check + skipped_reason wired in
+  4. All patches use the standard v88 `queue_cancellation` import path
+- `py_compile` clean on all three modified files
+- Live restart clean: services up, bot autonomous, 0 open trades, 0 IB orders
+- 17 zombie DB rows (operator-flattened in TWS) swept to `closed_zombie_v30`
+
+### Files touched
+
+- `backend/services/position_manager.py` (Patch B; backup: `.py.v19_34_31.bak`)
+- `backend/services/position_reconciler.py` (Patch C; backup: `.py.v19_34_31.bak`)
+- `backend/services/trading_bot_service.py` (Patch E; backup: `.py.v19_34_31.bak`)
+- `backend/tests/test_patches_bce_v19_34_31.py` (new)
+
+
+
+
+
 ## 2026-05-14 (v19.34.30) — P0 Bracket-Stacking Cascade: Patch A + IB/DB cleanup
 
 ### Incident summary

@@ -3,69 +3,32 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 P0 — Patches B / C / E (Active IB-side cancel before re-attach)  [BLOCKER for next live restart]
+## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + B/C/E (v19.34.31)
 
-Sequel to v19.34.30 Patch A (which killed the DB-side `target_order_ids`
-accumulation). The 2026-05-14 verification surfaced that the reconciler /
-naked-sweep still attach new OCA brackets without actively cancelling
-pre-existing legs at IB. Without these patches, IB-side leg count can
-still grow at ~+2 per reconcile cycle (vs. unbounded pre-Patch-A).
+All four order-management cascade-prevention patches are live. See
+`CHANGELOG.md` for the full v19.34.30 + v19.34.31 entries. Live state at
+the end of the session:
+- Services restarted clean, bot autonomous, 0 open trades, 0 IB orders
+- 17 zombie DB rows swept to `closed_zombie_v30`
+- 4-of-4 pytests passing across both versions
+- Unique index `id_unique_v19_34_30` on `bot_trades.id` in place
 
-**State at end of v19.34.30 session:** bot halted, 16 paper positions
-sitting naked at IB on `DUN615665`, DB clean (`max target_order_ids
-length = 1`, unique index in place), 448 historical rejections lingering
-in the local order queue. Do NOT restart the bot for live trading until
-B/C/E are in.
+### ⚠️ Live-trading observation window before next account flip
 
-### Patch B — `close_trade` / `phantom_swept` actively cancels at IB
-- `backend/routers/trading_bot.py` (phantom_swept handler) +
-  `backend/services/trading_bot_service.py` close paths
-- Before flipping `status="closed"`, enqueue cancellations via
-  `POST /api/ib/cancellations/queue` for `trade.stop_order_id` and every
-  id in `trade.target_order_ids`. Idempotent — pusher's `queue_cancellation`
-  is already dedup-safe on `ib_order_id`.
-- Acceptance: pytest stubbing `_pushed_ib_data["orders"]` shows zero
-  leftover legs after a simulated close.
+The first **live trading day after these patches** is the regression-watch
+window. Run `scripts/audit_brackets.py` (committed in v19.34.30) at:
+- End of session day 1
+- End of session day 2
 
-### Patch C — Clean-slate cancel before orphan adoption
-- `backend/services/position_reconciler.py` — in the orphan-adoption /
-  re-attach branch (~line 1442 area), before `executor.attach_oca_stop_target`,
-  iterate `_pushed_ib_data["orders"]` filtered to `symbol == sym &&
-  status in ("PreSubmitted","Submitted")` and queue cancellations for
-  every order_id whose `oca_group` is NOT the new one we're about to
-  attach.
-- Wait up to `cancel_wait_s` (use the v19.34.93 default, 15s) for the
-  cancellations to be claimed by the pusher before submitting the new
-  bracket. If the wait expires, log warning and continue (the new OCA
-  will at least win the race for protection).
-- Acceptance: replay the 2026-05-14 cleanup → after one reconcile cycle,
-  IB shows exactly 1 stop + 1 target per symbol (not 2+2).
+Expected:
+- `Total stacked target IDs across book` ≤ open_positions
+- Audit `stops` and `tgts` per symbol both ≤ 1
+- DB `bot_trades.target_order_ids` max length = 1 (forever)
 
-### Patch E — Naked-sweep no-panic guard
-- `backend/services/trading_bot_service.py` (v127 naked-sweep code path
-  around line 4338) — if pusher reports `live_orders == 0` for a symbol
-  whose DB row has `stop_order_id != null`, treat as transient pusher
-  hiccup (5s grace) instead of immediately calling
-  `attach_oca_stop_target` again. Emit a `sentcom_thoughts` entry of
-  kind `skip` with reason `pusher_zero_live_grace` for traceability.
-- Acceptance: simulated pusher snapshot with `orders=[]` does NOT trigger
-  reissue when DB has a tracked stop.
-
-### Patch D (deferred — already partly in place)
-The unique index `id_unique_v19_34_30` on `bot_trades.id` (shipped in
-v19.34.30) covers the original Patch D scope. No further action unless
-new dup-write paths surface in regression.
-
-### Recovery playbook (when ready to restart bot)
-1. Operator: flatten the 16 paper positions in TWS (or accept naked
-   open state).
-2. Apply Patches B + C + E with pytest coverage.
-3. Restart: `bash scripts/spark_stop.sh && bash scripts/spark_start.sh
-   --skip-build`.
-4. Bot will reconcile clean — expect exactly `2 × open_positions` legs
-   at IB and `1` per `target_order_ids` array.
-5. Re-audit with `scripts/audit_brackets.py` to confirm
-   `Total stacked target IDs across book` stays at `≤ open_positions`.
+If any of these creep above the threshold, the next bug is hiding in a
+THIRD attach-without-cancel path we haven't audited yet (candidates:
+`bracket_reissue_service._reissue`, scale-out flows, EOD-close
+`phantom_swept` paths in `routers/trading_bot.py`).
 
 ---
 
