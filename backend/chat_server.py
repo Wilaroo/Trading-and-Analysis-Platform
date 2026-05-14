@@ -1160,18 +1160,57 @@ def _check_mongo() -> bool:
 
 
 def _execute_trade_action(response_text: str) -> Optional[dict]:
-    """Parse and execute trade actions from LLM response."""
+    """Parse and execute trade actions from LLM response.
+
+    v19.34.28 (2026-05-14, mid-market hotfix) — Hardened two parse paths
+    after operator hit a silent move_stop failure on ONON during live
+    trading. Root causes were:
+
+      1. Regex `\\{.*?\\}` doesn't match newlines without `re.DOTALL`.
+         When the LLM emits the TRADE_ACTION marker with a newline
+         anywhere inside the JSON block (common with Claude's
+         long-response paragraphing) the marker survives intact in the
+         chat bubble AND no trade ever fires. Visible to the operator
+         as "bot acknowledged but stop didn't move."
+
+      2. The LLM occasionally emits Python-dict syntax (single quotes)
+         instead of strict JSON. `json.loads` rejects single quotes
+         and `_execute_trade_action` would return an error result.
+         ICLN succeeded with `"action": "move_stop"` but ONON failed
+         with `'action': 'move_stop'`.
+
+    Fixes:
+      • Switch `.` to `[\\s\\S]` in the inner regex so newlines pass.
+      • Fall back to `ast.literal_eval` when `json.loads` raises —
+        accepts both quote styles and is safe (no code execution).
+    """
     import re
     import requests
-    
-    match = re.search(r'<<<TRADE_ACTION:\s*(\{.*?\})\s*>>>', response_text)
+
+    # v19.34.28 — `[\s\S]` matches any char INCLUDING newlines.
+    match = re.search(r'<<<TRADE_ACTION:\s*(\{[\s\S]*?\})\s*>>>', response_text)
     if not match:
         return None
-    
+
+    raw = match.group(1)
     try:
-        action_data = json.loads(match.group(1))
+        action_data = json.loads(raw)
     except json.JSONDecodeError:
-        return {"success": False, "error": "Invalid trade action format"}
+        # v19.34.28 — single-quoted fallback. `literal_eval` parses
+        # Python dict / list / scalar literals safely (no exec, no
+        # imports). Catches the `'action': 'move_stop'` case that
+        # bit us on the ONON move at 09:46 ET.
+        try:
+            import ast
+            parsed = ast.literal_eval(raw)
+            if not isinstance(parsed, dict):
+                return {"success": False, "error": "trade action JSON must be a dict"}
+            action_data = parsed
+        except (ValueError, SyntaxError) as e:
+            logger.warning(
+                "trade_action parse failed for raw=%r (%s)", raw, e
+            )
+            return {"success": False, "error": f"Invalid trade action format: {e}"}
     
     action = action_data.get("action", "").lower()
     symbol = action_data.get("symbol", "").upper()
@@ -1495,9 +1534,13 @@ APP HELP / GLOSSARY:
     if "<<<TRADE_ACTION:" in response_content:
         trade_result = _execute_trade_action(response_content)
         trade_action_data = trade_result
-        # Clean the action block from the user-facing response
+        # Clean the action block from the user-facing response.
+        # v19.34.28 — `[\s\S]` (not `.*?`) so multi-line markers are
+        # also stripped. Without this, a newline-containing block stays
+        # visible in the chat bubble even after _execute_trade_action
+        # already executed (or errored on) the action.
         import re
-        response_content = re.sub(r'<<<TRADE_ACTION:.*?>>>', '', response_content).strip()
+        response_content = re.sub(r'<<<TRADE_ACTION:[\s\S]*?>>>', '', response_content).strip()
         if trade_result:
             if trade_result.get("success"):
                 response_content += f"\n\n✓ Order submitted: {trade_result.get('summary', 'Processing...')}"

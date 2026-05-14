@@ -4,6 +4,49 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.28) — Mid-market hotfix: chat-AI move_stop silent failures
+
+Operator-observed 09:46 ET, live trading:
+  - Asked bot to move ICLN stop → ✓ worked.
+  - Asked bot to move ONON stop → bot acknowledged in chat bubble but
+    the SL didn't move on the chart, AND the raw `<<<TRADE_ACTION: ...>>>`
+    marker leaked into the user-facing message. Same failure for DKS.
+
+Two compounding regex / parse bugs in `chat_server._execute_trade_action`
+and the marker-stripping path in the `/chat` endpoint:
+
+1. **Inner regex `\\{.*?\\}` doesn't span newlines.** Without
+   `re.DOTALL`, a single newline anywhere inside the LLM's emitted JSON
+   block makes the regex miss → no trade fires, marker leaks. Claude
+   sometimes paragraphs its tool-call JSON across lines on longer
+   responses, triggering exactly this.
+2. **`json.loads` rejects single-quoted "JSON".** The LLM occasionally
+   emits `{'action': 'move_stop', ...}` (Python-dict syntax). ICLN
+   succeeded because the LLM used double quotes; ONON failed because it
+   used single quotes — parse error → silent skip → marker leaks.
+
+### Fixes
+- Inner regex changed from `\\{.*?\\}` to `\\{[\\s\\S]*?\\}` — matches
+  any char incl. newlines without the global DOTALL flag.
+- New `ast.literal_eval` fallback after `json.loads`. Safe (no exec,
+  no imports — only handles literal dict / list / scalar). Captures
+  both single-quoted Python-dict emissions AND any non-strict-JSON
+  shape the LLM might emit.
+- Strip regex in the `/chat` handler also changed from `.*?` to
+  `[\\s\\S]*?` so multi-line markers are scrubbed from the
+  user-facing response.
+
+### Tests
+- `/app/backend/tests/test_chat_trade_action_parsing_v19_34_28.py` —
+  9 new tests covering: single-line + multi-line regex match;
+  double-quoted JSON (ICLN happy path); single-quoted Python dict (ONON
+  reproduction); multi-line marker execution; garbage-payload error
+  reporting; no-marker → None; strip-regex multi-line + single-quoted
+  variants. All passing.
+
+
+
+
 ## 2026-05-14 (v19.34.27) — Realized PnL now matches IB (synthetic closures excluded)
 
 Operator-observed 09:13 ET pre-market: app showed `R −$2,056.86`
