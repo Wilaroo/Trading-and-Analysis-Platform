@@ -3,6 +3,57 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🟢 P2 — Trade Journey Sparkline + Scale-Out Grade (planned 2026-02-13, post v19.34.154)
+
+Sequel to v19.34.154 scale-out tiles. Visualizes price journey through targets
+and grades how well the scale-out timing captured the move.
+
+**Locked operator preferences (2026-02-13):**
+- **Grade rubric:** all three, picked via toggle in V5 settings
+  - `hod_lod` — `realised / (HOD-entry × original_shares)` (penalizes leaving profit on the table)
+  - `target_hit` — `targets_hit / targets_planned` (pure execution score)
+  - `drawdown_adjusted` — blends HOD capture with max-drawdown-after-exit (rewards selling near peak)
+- **Render trigger:** on click → full modal (Recharts) with deeper detail
+- **Refresh cadence:** backend caches journey response for 30s; frontend refreshes when stale
+- **Scope:** **CLOSED TRADES ONLY** — no live-update plumbing needed
+
+**Backend (new):** `GET /api/trading-bot/trades/{trade_id}/journey`
+Response includes: bars (5-min granularity), entry/stop/target levels, partial-exit markers, HOD/LOD-during-trade, all three pre-computed grades + reasoning text. Reads bars from Mongo cache only — no live IB calls per render. Server-side 30s cache keyed by trade_id.
+
+**Frontend (new):** `<TradeJourneyModal tradeId={...} />`
+Opens on click of `<ScaleOutBadge />` (existing v19.34.154 component gains a click handler + grade letter chip 🅐🅑🅒🅓). Recharts `<LineChart>` with:
+- Bars as the price line
+- `<ReferenceLine>` for entry + stop + each target
+- `<ReferenceDot>` for each partial exit (color-coded green/amber by partial PnL sign)
+- Tooltip on hover: time/price/exit detail
+- Toggle (top-right): switch grade rubric live; all three grades displayed below the chart
+
+**Effort estimate (reduced from 8-11h due to scope cuts):**
+| Phase | Effort |
+|---|---|
+| Backend endpoint + 3 grade computations | 2-3 hrs |
+| Frontend modal + Recharts wiring | 3-4 hrs |
+| Edge cases (multi-day trades, stale bars, missing data) + tests | 1-2 hrs |
+| **Total** | **6-9 hrs** |
+
+**Open concerns to address during build:**
+1. Bar-time vs exit-time precision mismatch (5-min bars vs sub-second exit fills) → snap markers to nearest bar
+2. Multi-day swing trades → auto-collapse to 30-min or daily bars when trade spans >1 session
+3. Stale-bar fallback → if Mongo cache for symbol is >5min old, render grade-only (no sparkline) with "stale bars" hint
+4. After-hours bars → exclude (or gray) to keep visual clean
+
+**Pre-existing assets to leverage:**
+- `realtime_technical_service._get_intraday_bars_from_db` — 5-min bar reader
+- V5 `Sparkline` primitive (`OpenPositionsV5.jsx:145`) — basic shape; will likely use Recharts for the modal
+- v19.34.154 `<ScaleOutBadge />` — extension point for click handler + grade chip
+
+**Dependencies:** none (Recharts already in package.json).
+
+**When to build:** after the V6 UI Position Health Console / Safety Activity Stream items, OR when the operator wants post-session review tooling (CHANGELOG entry will probably bunch this with related post-mortem features).
+
+---
+
+
 ## 🟢 P2 — Audit `partial_close_detected` info line (saved 2026-02-13, post v19.34.145)
 
 After v19.34.145 fixed the false-positive KMB / ONON `QTY_MAGNITUDE_MISMATCH`,
