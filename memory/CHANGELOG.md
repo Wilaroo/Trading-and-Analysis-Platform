@@ -4,6 +4,73 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.31 — re-shipped) — Patches A + E re-applied & PUSHED to origin/main
+
+Live-trading day after the initial v19.34.31 ship surfaced a regression: the
+Windows startup `.bat` script executes `git checkout -- .` then `git pull
+origin main`. The original patches were on the DGX working tree but **never
+committed**, so the next `.bat` run wiped them and the bot reverted to buggy
+code mid-session (DKS visibly stacking to 6 target legs within minutes).
+
+This session re-applied the patches, locked them in, and pushed to GitHub.
+
+### What landed in origin/main (commits `327b2cf1` + `9cb53b0c`)
+
+- **Patch A** (`position_reconciler.py`, `trading_bot_service.py`): REPLACE
+  `target_order_ids` instead of append. Caps the array at length 1 and
+  stops the bracket-stacking cascade at the bot-state level.
+- **Patch E** (`trading_bot_service.py`): pusher-stale (>45s) no-panic
+  guard in `_naked_position_sweep`. When pusher snapshot is older than
+  `PUSHER_STALE_THRESHOLD_SEC`, the sweep returns
+  `skipped_reason=pusher_snapshot_stale:<age>s` instead of emergency-
+  re-attaching brackets on a stale order book.
+- 3 regression pytests (`test_patch_a_target_ids_replace_v19_34_30.py`,
+  `test_patch_e_pusher_stale_guard_v19_34_31.py`) — all green.
+- Diagnostic scripts: `scripts/db_cleanup.py`, `scripts/emergency_cleanup.sh`.
+
+### DB cleanup performed live
+
+4 open positions had bloated `target_order_ids` from the regression window
+(same id appended N times — exactly the Patch-A failure mode):
+- DKS: 9× `571a65c4`
+- ALC: 5× `ccf0bd24`
+- CHWY: 4× `e28d7da6`
+- MSTR: 3× `ec4d327b`
+
+All cleared to `[]` via `scripts/db_cleanup.py` style update; naked sweep
+will re-attach a single fresh bracket on next iteration.
+
+### ⚠️ Patches B & C deferred
+
+Patches B (pre-close cancel) and C (clean-slate cancel before re-attach)
+were applied earlier in the session but **wiped at 19:13** when the working
+tree got truncated by a stray bash redirection from a broken paste-back.
+No `.bak` survived with B/C applied (all backups predate them). They were
+intentionally NOT re-applied this session because we lacked verified anchor
+points in `close_trade` / `reconcile_orphan_positions`. Defense-in-depth
+loss is acceptable: Patch A alone caps array growth at length 1, and the
+existing `orphan_gtc_reconciler` cleans up any zombie legs at IB.
+
+### Anti-regression measures
+
+- Git author identity now configured on the DGX (`spark@dgx.local`).
+- Credential helper set to `store` — PAT cached for future pushes.
+- Patches A + E are in `origin/main` (commits `327b2cf1`, `9cb53b0c`),
+  so the `.bat`'s `git pull origin main` brings them back deterministically
+  even after `git checkout -- .`.
+
+### Files of reference for follow-up B+C reapplication
+
+- `/app/backend/services/position_manager.py` — Patch B anchor:
+  `close_trade` method, immediately before `bot._trade_executor.close_position(trade)`.
+- `/app/backend/services/position_reconciler.py` — Patch C anchor:
+  inside `reconcile_orphan_positions`, before `attach_oca_stop_target`.
+- Both must use `services.cancellation_queue.queue_cancellation()` with
+  `requested_by="position_manager_close_trade_v19_34_31"` /
+  `requested_by="position_reconciler_v19_34_31"` tags.
+
+
+
 
 ## 2026-05-14 (v19.34.31) — Patches B + C + E: defense-in-depth for bracket lifecycle
 

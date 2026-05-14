@@ -3,15 +3,47 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + B/C/E (v19.34.31)
+## 🔴 P0 — Re-apply Patches B + C (deferred from v19.34.31)
 
-All four order-management cascade-prevention patches are live. See
-`CHANGELOG.md` for the full v19.34.30 + v19.34.31 entries. Live state at
-the end of the session:
-- Services restarted clean, bot autonomous, 0 open trades, 0 IB orders
-- 17 zombie DB rows swept to `closed_zombie_v30`
-- 4-of-4 pytests passing across both versions
-- Unique index `id_unique_v19_34_30` on `bot_trades.id` in place
+Patches B (pre-close cancel) and C (clean-slate cancel before re-attach) were
+applied + wiped + lost in the 2026-05-14 regression window. Patch A alone
+caps `target_order_ids` at length 1, so the cascade is stopped at the
+bot-state level — but stale IB legs may accumulate slowly until orphan_gtc_
+reconciler sweeps them.
+
+### Anchors to use when re-applying
+
+- **Patch B** in `backend/services/position_manager.py:close_trade`,
+  immediately before `bot._trade_executor.close_position(trade)`:
+  - Read `_pushed_ib_data["orders"]`, filter by `symbol == trade.symbol`
+    and `status in ("PreSubmitted","Submitted")`
+  - For each, `queue_cancellation(ib_order_id=int(oid), reason=f"v19.34.31 Patch B: pre-close ({reason})", requested_by="position_manager_close_trade_v19_34_31")`
+  - Wrap in try/except — non-fatal, close MUST proceed
+- **Patch C** in `backend/services/position_reconciler.py:reconcile_orphan_positions`,
+  immediately before `attach_oca_stop_target` is called:
+  - Same pattern, `requested_by="position_reconciler_v19_34_31"`
+  - Reason: `f"v19.34.31 Patch C: pre-attach {sym}"`
+
+### Test coverage to add back
+
+`backend/tests/test_patches_bc_v19_34_31.py` with two assertions:
+- `"v19.34.31 Patch B"` and `position_manager_close_trade_v19_34_31` in `position_manager.py`
+- `"v19.34.31 Patch C"` and `position_reconciler_v19_34_31` in `position_reconciler.py`
+- Both files use `queue_cancellation(`
+
+---
+
+## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + E (v19.34.31)
+
+Two of four order-management cascade-prevention patches are live in
+`origin/main` (commits `327b2cf1`, `9cb53b0c`). See `CHANGELOG.md`. Live
+state at the end of the session:
+- DGX local has full content (123 KB / 165 KB / 220 KB) — restored from .bak
+- Patches A + E in origin/main, survive `.bat` `git checkout -- .` wipes
+- 3 regression pytests passing
+- DB-side cleanup: 4 open positions (DKS/ALC/CHWY/MSTR) cleared of bloated
+  `target_order_ids` arrays
+- Git author identity + credential helper configured on DGX
 
 ### ⚠️ Live-trading observation window before next account flip
 
