@@ -1440,6 +1440,35 @@ class PositionReconciler:
                             )
                         else:
                             self._stamp_bracket_attach(trade.id)
+                            # ─────────── v19.34.31 PATCH C ─────────── # v19_34_31_PATCH_C_pre_attach_cancel
+                            # Cancel any live IB bracket legs for `sym` BEFORE attaching
+                            # a fresh OCA. Stops zombie-leg accumulation at IB across
+                            # reconciliation cycles (defense-in-depth on top of Patch A).
+                            try:
+                                from routers.ib import _pushed_ib_data, queue_cancellation
+                                _sym_c = (sym or '').upper()
+                                _orders_c = (_pushed_ib_data or {}).get('orders') or []
+                                if isinstance(_orders_c, dict):
+                                    _orders_c = _orders_c.get('orders', [])
+                                for _oc in _orders_c:
+                                    try:
+                                        if str(_oc.get('symbol') or '').upper() != _sym_c:
+                                            continue
+                                        if (_oc.get('status') or '') not in ('PreSubmitted', 'Submitted'):
+                                            continue
+                                        _oid = _oc.get('order_id') or _oc.get('orderId')
+                                        if _oid is None:
+                                            continue
+                                        queue_cancellation(
+                                            ib_order_id=int(_oid),
+                                            reason=f'v19.34.31 Patch C: pre-attach {sym}',
+                                            requested_by='position_reconciler_v19_34_31',
+                                        )
+                                    except Exception:
+                                        continue
+                            except Exception as _pc:
+                                logger.warning(f'[v19.34.31 Patch C] {sym} pre-attach (non-fatal): {_pc}')
+                            # ─────────── /PATCH C ───────────
                             try:
                                 oca_result = await executor.attach_oca_stop_target(trade)
                                 if oca_result and oca_result.get("success"):

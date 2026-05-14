@@ -2144,6 +2144,35 @@ class PositionManager:
                 original_shares = trade.shares
                 trade.shares = shares_to_close
 
+# ─────────── v19.34.31 PATCH B ─────────── # v19_34_31_PATCH_B_pre_close_cancel
+                # Cancel any live IB bracket legs for this symbol BEFORE
+                # the close order goes out, so we never close on top of
+                # a live OCA leg (2026-05-14 bracket-stacking root cause).
+                try:
+                    from routers.ib import _pushed_ib_data, queue_cancellation
+                    _sym_b = (getattr(trade, "symbol", "") or "").upper()
+                    _orders_b = (_pushed_ib_data or {}).get("orders") or []
+                    if isinstance(_orders_b, dict):
+                        _orders_b = _orders_b.get("orders", [])
+                    for _ob in _orders_b:
+                        try:
+                            if str(_ob.get("symbol") or "").upper() != _sym_b:
+                                continue
+                            if (_ob.get("status") or "") not in ("PreSubmitted", "Submitted"):
+                                continue
+                            _oid = _ob.get("order_id") or _ob.get("orderId")
+                            if _oid is None:
+                                continue
+                            queue_cancellation(
+                                ib_order_id=int(_oid),
+                                reason=f"v19.34.31 Patch B: pre-close ({reason})",
+                                requested_by="position_manager_close_trade_v19_34_31",
+                            )
+                        except Exception:
+                            continue
+                except Exception as _pb:
+                    logger.warning(f"[v19.34.31 Patch B] pre-close (non-fatal): {_pb}")
+                # ─────────── /PATCH B ───────────
                 result = await bot._trade_executor.close_position(trade)
 
                 trade.shares = original_shares  # Restore
