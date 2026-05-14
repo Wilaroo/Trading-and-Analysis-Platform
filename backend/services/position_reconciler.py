@@ -1449,9 +1449,13 @@ class PositionReconciler:
                                         # BotTrade tracks targets as a list
                                         # (`target_order_ids`) since brackets
                                         # can scale out across multiple PTs.
-                                        if not hasattr(trade, "target_order_ids") or trade.target_order_ids is None:
-                                            trade.target_order_ids = []
-                                        trade.target_order_ids.append(tgt_id)
+                                        # v19.34.30 Patch A: REPLACE not append.
+                                        # After a successful OCA re-attach, any prior
+                                        # target_order_ids are stale (filled, cancelled,
+                                        # or ghost orders at IB). Appending grew arrays
+                                        # to 200+ ghost IDs across reissue cycles and
+                                        # caused the bracket-stacking cascade.
+                                        trade.target_order_ids = [tgt_id]
                                     trade.oca_group = oca_result.get("oca_group")
                                     # Re-persist so the order IDs land in bot_trades.
                                     await asyncio.to_thread(bot._persist_trade, trade)

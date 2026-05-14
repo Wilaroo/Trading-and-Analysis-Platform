@@ -4200,6 +4200,38 @@ class TradingBotService:
             return result
         result["source_tier"] = source_info.get("tier")
 
+        # ─────────── v19.34.31 PATCH E ─────────── # v19_34_31_PATCH_E_pusher_stale_guard
+        # If the pusher snapshot used to build live_order_ids is older
+        # than PUSHER_STALE_THRESHOLD_SEC, the snapshot is missing
+        # recently-issued OCA stop/target IDs — the naked sweep will
+        # then wrongly flag every active bracket as NAKED and trigger
+        # an emergency reissue cascade (bracket stacking).
+        PUSHER_STALE_THRESHOLD_SEC = 45.0
+        try:
+            if (source_info or {}).get("tier") == "pusher_orders_snapshot":
+                from routers.ib import _pushed_ib_data
+                from datetime import datetime, timezone
+                _lu = (_pushed_ib_data or {}).get("last_update")
+                if _lu:
+                    _last_dt = datetime.fromisoformat(str(_lu).replace("Z", "+00:00"))
+                    _age = (datetime.now(timezone.utc) - _last_dt).total_seconds()
+                    result["pusher_age_sec"] = _age
+                    if _age > PUSHER_STALE_THRESHOLD_SEC:
+                        result["skipped_reason"] = f"pusher_snapshot_stale:{_age:.1f}s"
+                        print(
+                            f"[v127 naked-sweep] SKIP — pusher snapshot is "
+                            f"{_age:.1f}s old (>{PUSHER_STALE_THRESHOLD_SEC}s). "
+                            f"Refusing to reissue brackets on a stale order book.",
+                            flush=True,
+                        )
+                        return result
+        except Exception as _stale_err:
+            print(
+                f"[v127 naked-sweep] pusher-stale check failed (continuing): "
+                f"{_stale_err}", flush=True,
+            )
+        # ─────────── /PATCH E ───────────
+
         # Skip if executor is in non-LIVE mode (simulator/paper has no
         # actual IB orders, though pusher-mode is also "LIVE").
         mode_str = (
@@ -4349,10 +4381,9 @@ class TradingBotService:
                     tgt_id = oca_result.get("target_order_id")
                     if tgt_id is not None:
                         trade.target_order_id = tgt_id
+                        # v19.34.30 Patch A: REPLACE not append.
                         try:
-                            if not getattr(trade, "target_order_ids", None):
-                                trade.target_order_ids = []
-                            trade.target_order_ids.append(tgt_id)
+                            trade.target_order_ids = [tgt_id]
                         except Exception:
                             pass
                     trade.oca_group = oca_result.get("oca_group")
