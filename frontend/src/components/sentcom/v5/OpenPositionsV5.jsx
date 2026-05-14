@@ -36,6 +36,11 @@ import BracketHistoryPanel from './BracketHistoryPanel';
 // original/closed/remaining + per-target partial PnL when a winner
 // has scaled out. Renders nothing for un-scaled positions.
 import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
+// v19.34.26 (May 2026) — Auto-visible bot-thoughts strip per Open
+// Position. Pulls the last N reject/skip/trigger emissions for the
+// position's symbol so the operator can see what the scanner is
+// thinking without having to expand the row.
+import PositionThoughtsInline from './PositionThoughtsInline';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -318,6 +323,11 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {trailLine}
         </div>
       )}
+
+      {/* v19.34.26 — Auto-visible bot-thoughts strip (last 5 thoughts in
+          the last 60m). Renders directly inside the compact row so the
+          operator never has to expand to see the scanner's reasoning. */}
+      <PositionThoughtsInline symbol={position.symbol} limit={5} minutes={60} />
 
       {/* Expanded panel */}
       {expanded && (

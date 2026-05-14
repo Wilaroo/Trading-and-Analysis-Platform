@@ -2915,6 +2915,15 @@ class EnhancedBackgroundScanner:
             # Skip low RVOL stocks (second filter after ADV)
             if snapshot.rvol < self._min_rvol_filter:
                 self._symbols_skipped_rvol += 1
+                # v19.34.26 — surface RVOL gating so the operator sees
+                # which symbols are being filtered out as illiquid (and
+                # can adjust `_min_rvol_filter` if the threshold is
+                # filtering too aggressively in slow tape regimes).
+                await self._emit_scanner_thought(
+                    symbol=symbol, kind="skip",
+                    text=f"🟤 {symbol} skipped — RVOL {snapshot.rvol:.2f}× below floor {self._min_rvol_filter:.2f}×",
+                    filter="rvol_min", rvol=snapshot.rvol, min_rvol=self._min_rvol_filter,
+                )
                 return
 
             # Update caches with fresh data
@@ -2940,6 +2949,15 @@ class EnhancedBackgroundScanner:
                 )
                 if ipsvc.is_strict_gate() and not in_play_qual.is_in_play:
                     self._symbols_skipped_in_play += 1
+                    # v19.34.26 — narrate the strict-gate rejection so
+                    # the operator knows it's the in-play scorer (not
+                    # RVOL/ADV) blocking this row.
+                    await self._emit_scanner_thought(
+                        symbol=symbol, kind="skip",
+                        text=f"🚪 {symbol} blocked by strict in-play gate — score {getattr(in_play_qual, 'score', 'n/a')}",
+                        filter="in_play_strict_gate",
+                        score=getattr(in_play_qual, 'score', None),
+                    )
                     return
             except Exception as e:
                 logger.debug(f"in_play scoring failed for {symbol}: {e}")
@@ -6891,6 +6909,15 @@ class EnhancedBackgroundScanner:
             if (existing.symbol == alert.symbol and 
                 existing.setup_type == alert.setup_type and
                 existing.status == "active"):
+                # v19.34.26 — surface the dedup skip so the operator
+                # sees WHY a fresh scan tick didn't produce a new alert
+                # (instead of silently dropping it).
+                await self._emit_scanner_thought(
+                    symbol=alert.symbol, kind="skip",
+                    text=f"🔁 {alert.symbol} {alert.setup_type} dedup — identical active alert already live",
+                    setup_type=alert.setup_type, direction=getattr(alert, 'direction_bias', None),
+                    filter="dedup_same_setup",
+                )
                 return
         
         # Per-symbol dedup: if another active alert exists for this symbol,
@@ -6909,11 +6936,35 @@ class EnhancedBackgroundScanner:
             existing_prio = priority_order.get(best_existing[1].priority, 4)
             if new_prio >= existing_prio:
                 # New alert is same or lower priority — skip it
+                # v19.34.26 — narrate why a fresh setup was suppressed
+                # (a higher-priority alert is already in flight).
+                await self._emit_scanner_thought(
+                    symbol=alert.symbol, kind="skip",
+                    text=(
+                        f"⏬ {alert.symbol} {alert.setup_type} dropped — "
+                        f"{best_existing[1].setup_type} already active at higher priority"
+                    ),
+                    setup_type=alert.setup_type, direction=getattr(alert, 'direction_bias', None),
+                    filter="dedup_priority_keep_existing",
+                    existing_setup=best_existing[1].setup_type,
+                )
                 return
             else:
                 # New alert is higher priority — replace the existing one
                 del self._live_alerts[best_existing[0]]
                 logger.info(f"Dedup: Replaced {best_existing[1].setup_type} with higher-priority {alert.setup_type} for {alert.symbol}")
+                # v19.34.26 — also narrate the upgrade so the timeline
+                # shows the priority swap.
+                await self._emit_scanner_thought(
+                    symbol=alert.symbol, kind="trigger",
+                    text=(
+                        f"⬆️ {alert.symbol} replaced {best_existing[1].setup_type} "
+                        f"→ {alert.setup_type} (higher priority)"
+                    ),
+                    setup_type=alert.setup_type, direction=getattr(alert, 'direction_bias', None),
+                    filter="dedup_priority_upgrade",
+                    replaced=best_existing[1].setup_type,
+                )
         
         # Update strategy stats
         base_setup = alert.setup_type.split("_long")[0].split("_short")[0]
@@ -7017,6 +7068,32 @@ class EnhancedBackgroundScanner:
         
         self._live_alerts[alert.id] = alert
         self._alerts_generated += 1
+
+        # v19.34.26 — surface the trigger event so the operator sees
+        # WHEN a setup actually fires (vs. the dozens of rejects + skips
+        # that flow above). Includes priority, R:R if computed, and the
+        # tape confirmation flag so the thoughts stream tells a clean
+        # story: "skipped … skipped … skipped … FIRED ✅ NVDA …".
+        try:
+            rr = getattr(alert, 'risk_reward_ratio', None)
+            tape_conf = bool(getattr(alert, 'tape_confirmation', False))
+            await self._emit_scanner_thought(
+                symbol=alert.symbol, kind="trigger",
+                text=(
+                    f"✅ {alert.symbol} {alert.setup_type} fired · "
+                    f"{getattr(alert.priority, 'value', alert.priority)} priority"
+                    + (f" · R:R {float(rr):.2f}" if isinstance(rr, (int, float)) else "")
+                    + (" · tape ✓" if tape_conf else "")
+                ),
+                setup_type=alert.setup_type,
+                direction=getattr(alert, 'direction_bias', None),
+                priority=getattr(alert.priority, 'value', str(alert.priority)),
+                rr=rr if isinstance(rr, (int, float)) else None,
+                tape_confirmation=tape_conf,
+                trigger_price=getattr(alert, 'trigger_price', None),
+            )
+        except Exception as _emit_err:
+            logger.debug(f"trigger-emit failed for {alert.symbol}: {_emit_err}")
         
         # === AUTO-POPULATE SMART WATCHLIST ===
         try:

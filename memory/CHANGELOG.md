@@ -4,6 +4,52 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-14 (v19.34.26) — Bot thoughts wired across scanner + auto-visible on tiles
+
+Operator pipeline pickup from the previous fork: the `_emit_scanner_thought`
+helper was wired into the DMA filter only — RVOL, in-play strict gate,
+dedup, and final trigger acceptance were still silent. The Open Positions
+tile also had no inline thoughts view. Both fixed.
+
+### Backend — `services/enhanced_scanner.py`
+- **RVOL skip** now emits a `kind=skip` thought (filter=`rvol_min`) with
+  the snapshot RVOL + the active floor so the operator sees which symbols
+  are being filtered out as illiquid.
+- **In-play strict gate** now emits a `kind=skip` thought
+  (filter=`in_play_strict_gate`) when the scorer blocks a row in strict
+  mode — distinguishing it from RVOL/ADV gating.
+- **`_process_new_alert` dedup paths** now emit thoughts on all three
+  branches:
+    - identical active alert (filter=`dedup_same_setup`)
+    - lower-priority drop (filter=`dedup_priority_keep_existing`)
+    - higher-priority upgrade (filter=`dedup_priority_upgrade`, kind=`trigger`)
+- **Final trigger emit** — when an alert clears every filter and lands in
+  `_live_alerts`, a `kind=trigger` thought now fires with priority, R:R,
+  tape-confirmation flag, and the trigger price. Closes the loop: the
+  unified stream now reads "skipped … skipped … FIRED ✅" instead of
+  silent successes.
+
+### Frontend — V5 Open Positions tile
+- **New `<PositionThoughtsInline />`** component (`/app/frontend/src/components/sentcom/v5/PositionThoughtsInline.jsx`).
+  Polls `/api/sentcom/stream/history?symbol=X&minutes=60&limit=5` every
+  30s; renders the last 5 bot thoughts for that symbol DIRECTLY in the
+  compact tile (auto-visible, no expand required, per operator pref).
+  Color-coded dots by kind (reject = rose, skip = amber, trigger =
+  emerald). Per-symbol cache prevents flicker between polls; loading +
+  empty + error states all handled.
+- Hooked into `PositionRow` in `OpenPositionsV5.jsx`, rendered between
+  the trail-line and the expanded panel so it sits above the fold.
+
+### Tests added
+- `/app/backend/tests/test_scanner_thought_emissions_v19_34_26.py` —
+  7 unit tests covering payload shape, dedup TTL semantics (same kind
+  suppressed, different kinds both fire, TTL expiry re-fires), RVOL
+  text format, trigger text format with R:R + tape, and dedup metadata.
+  All passing alongside the v19.34.25 chart-marker suite (15/15 total).
+
+
+
+
 ## 2026-05-14 (v19.34.25) — Chart UX overhaul: pills + S/R + AVG + markers
 
 Operator follow-up: chart header was cluttered with 9 separate indicator
