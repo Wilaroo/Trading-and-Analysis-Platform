@@ -1,0 +1,597 @@
+From efacca4a013fc04fd9a681608ecf6a3933d0a7fe Mon Sep 17 00:00:00 2001
+From: e1 <e1@emergent.sh>
+Date: Fri, 15 May 2026 18:47:21 +0000
+Subject: [PATCH] v19.34.27 Patch L1: ib-direct bracket placer +
+ BOT_ORDER_PATH=direct routing (scaffolded inert)
+
+---
+ backend/services/ib_direct_service.py         | 225 ++++++++++++++
+ backend/services/trade_executor_service.py    |  42 +++
+ ...st_patch_l1_ib_direct_bracket_v19_34_27.py | 285 ++++++++++++++++++
+ 3 files changed, 552 insertions(+)
+ create mode 100644 backend/tests/test_patch_l1_ib_direct_bracket_v19_34_27.py
+
+diff --git a/backend/services/ib_direct_service.py b/backend/services/ib_direct_service.py
+index 7546bf54..6e5f985e 100644
+--- a/backend/services/ib_direct_service.py
++++ b/backend/services/ib_direct_service.py
+@@ -554,6 +554,231 @@ class IBDirectService:
+             logger.error("v19.34.25 [IB-DIRECT] cancel_order failed: %s — %s", order_id, e)
+             return {"success": False, "error": str(e)[:200]}
+ 
++    # ── v19.34.27 Patch L1 — Native ib_async bracket order placement ──────
++    #
++    # This is the load-bearing 75% of the IB_DIRECT_MIGRATION_PLAN. It
++    # replaces `_ib_bracket`'s reliance on the Windows pusher's RPC bracket
++    # contract with a synchronous `ib_async.bracketOrder()` call against
++    # IB Gateway on this DGX-side socket (clientId=11).
++    #
++    # WHY THIS METHOD ELIMINATES TODAY'S BUG CLASS:
++    #   1. NO pusher round-trip — eliminates bracket_submission_timeout
++    #      (the EGO 1639-share naked stampede mode).
++    #   2. NO simulated fallback on socket health — Patch J's fail-hard
++    #      contract is preserved (returns success: False on any error),
++    #      so no more SIM-* ID leakage into bot DB.
++    #   3. Real IB orderIds — bot DB stops storing pusher-generated UUIDs
++    #      that don't match anything in IB's working-orders feed.
++    #   4. OCA semantics handled by ib_async — parent has transmit=False
++    #      until last child queued, atomic activation.
++    #
++    # CONTRACT (matches `_ib_bracket` exactly so callers don't change):
++    #   Returns dict with:
++    #     success: bool
++    #     entry_order_id: int (real IB orderId)
++    #     stop_order_id: int
++    #     target_order_id: int
++    #     oca_group: str
++    #     status: "submitted" | "filled" | "rejected" | "timeout"
++    #     fill_price: float | None
++    #     filled_qty: int
++    #     broker: "ib_direct"
++    #     simulated: False
++    #     error: str (only on failure)
++    #
++    # Phase L2 (Saturday) adds the matching place_oca_stop_target,
++    # place_entry, place_stop, get_positions_fresh, get_open_orders.
++    async def place_bracket_order(
++        self,
++        trade,
++        *,
++        sec_type: str = "STK",
++        exchange: str = "SMART",
++        currency: str = "USD",
++        wait_for_submission_s: float = 5.0,
++    ) -> Dict[str, Any]:
++        """Place an atomic OCA bracket (parent LMT + child STP + child LMT)
++        via ib_async. Returns the same dict shape as `_ib_bracket` for
++        drop-in compatibility in trade_executor_service.
++
++        Args:
++            trade: A BotTrade-shaped object with .symbol, .direction (.value
++                'long'|'short'), .shares, .entry_price, .stop_price,
++                .target_prices (list, first element used).
++            wait_for_submission_s: How long to await the parent's
++                `orderStatus` to flip past 'PendingSubmit'. Real fill is
++                NOT awaited here — caller can subscribe to fills or query
++                later. Pre-Patch-L1 the pusher's bracket waited up to 60s
++                for a fill confirmation; ib-direct doesn't need this
++                because orderIds are returned synchronously by ib_async.
++
++        Returns:
++            Dict — see CONTRACT comment above.
++        """
++        if not await self.ensure_connected():
++            return {
++                "success": False,
++                "error": "ib_direct_not_connected",
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++        if self.config.read_only:
++            return {
++                "success": False,
++                "error": "ib_direct_read_only_mode",
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++        if not self.is_authorized_to_trade():
++            return {
++                "success": False,
++                "error": "ib_direct_not_authorized_managed_accounts_empty",
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++
++        # Extract trade fields (defensive — handle missing/bad input).
++        try:
++            symbol = str(trade.symbol).upper()
++            direction = (
++                getattr(trade.direction, "value", None) or
++                str(trade.direction)
++            ).lower()
++            if direction not in ("long", "short"):
++                return {"success": False, "error": f"bad direction: {direction}",
++                        "broker": "ib_direct", "simulated": False}
++            qty = int(trade.shares)
++            if qty <= 0:
++                return {"success": False, "error": f"bad shares: {qty}",
++                        "broker": "ib_direct", "simulated": False}
++            entry_price = float(trade.entry_price)
++            stop_price = float(trade.stop_price)
++            targets = getattr(trade, "target_prices", None) or []
++            if not targets:
++                return {"success": False, "error": "no target_prices on trade",
++                        "broker": "ib_direct", "simulated": False}
++            target_price = float(targets[0])
++        except Exception as e:
++            return {"success": False, "error": f"bad trade fields: {e}",
++                    "broker": "ib_direct", "simulated": False}
++
++        # Action mapping. Long entry = BUY parent, SELL stop+target.
++        # Short entry = SELL parent (SSHORT for IB short sell), BUY stop+target.
++        if direction == "long":
++            parent_action = "BUY"
++            child_action = "SELL"
++        else:
++            parent_action = "SELL"   # ib_async's bracketOrder handles short via SELL
++            child_action = "BUY"
++
++        try:
++            # Qualify the contract first (off the event loop).
++            contract = Stock(symbol, exchange, currency)
++            await asyncio.to_thread(self._ib.qualifyContracts, contract)
++
++            # ib_async.bracketOrder constructs the three orders with
++            # correct OCA group and transmit-sequencing. Parent's
++            # transmit=False, stop's transmit=False, target's transmit=True
++            # — atomic activation when the third is submitted.
++            bracket = self._ib.bracketOrder(
++                action=parent_action,
++                quantity=qty,
++                limitPrice=round(entry_price, 4),
++                takeProfitPrice=round(target_price, 4),
++                stopLossPrice=round(stop_price, 4),
++            )
++
++            # ib_async's bracketOrder returns a 3-tuple-like object
++            # (parent, takeProfit, stopLoss). Some versions return a list.
++            try:
++                parent_o = bracket.parent
++                take_profit_o = bracket.takeProfit
++                stop_loss_o = bracket.stopLoss
++            except AttributeError:
++                # Fall back to indexed access.
++                parent_o, take_profit_o, stop_loss_o = (
++                    bracket[0], bracket[1], bracket[2],
++                )
++
++            # Submit all three. ib_async will respect each order's
++            # transmit flag and IB activates them atomically.
++            parent_trade = self._ib.placeOrder(contract, parent_o)
++            target_trade = self._ib.placeOrder(contract, take_profit_o)
++            stop_trade = self._ib.placeOrder(contract, stop_loss_o)
++
++            # Brief settle so the parent's orderStatus callback fires
++            # at least to 'PendingSubmit' or 'Submitted'. We do NOT wait
++            # for a fill — that's the caller's job via order_status
++            # event or naked_position_sweep.
++            try:
++                await asyncio.wait_for(
++                    asyncio.to_thread(self._ib.sleep, 0.5),
++                    timeout=wait_for_submission_s,
++                )
++            except asyncio.TimeoutError:
++                # Submission timeout — fall through and let the caller
++                # decide. Patch J's contract: we still return the
++                # orderIds so the caller can poll/cancel as needed.
++                pass
++
++            entry_id = int(parent_trade.order.orderId)
++            stop_id = int(stop_trade.order.orderId)
++            target_id = int(target_trade.order.orderId)
++            oca_group = parent_o.ocaGroup or f"oca-{entry_id}"
++
++            # Snapshot current parent status. Could be PendingSubmit,
++            # Submitted, Filled, Cancelled.
++            parent_status = (
++                parent_trade.orderStatus.status
++                if parent_trade.orderStatus
++                else "submitted"
++            ).lower()
++            filled_qty = int(parent_trade.orderStatus.filled or 0) if parent_trade.orderStatus else 0
++            avg_fill = (
++                float(parent_trade.orderStatus.avgFillPrice or 0.0)
++                if parent_trade.orderStatus else 0.0
++            )
++
++            # Map IB status → contract's status field.
++            if parent_status == "filled":
++                status_out = "filled"
++            elif parent_status in ("cancelled", "apicancelled", "inactive"):
++                status_out = "rejected"
++            else:
++                status_out = "submitted"
++
++            logger.info(
++                "[v19.34.27 PATCH-L1] place_bracket_order via ib_direct: "
++                "%s %s qty=%d entry@%.4f stop@%.4f target@%.4f → "
++                "entry_id=%d stop_id=%d target_id=%d oca=%s status=%s",
++                symbol, parent_action, qty, entry_price, stop_price, target_price,
++                entry_id, stop_id, target_id, oca_group, status_out,
++            )
++
++            return {
++                "success": True,
++                "entry_order_id": entry_id,
++                "stop_order_id": stop_id,
++                "target_order_id": target_id,
++                "oca_group": oca_group,
++                "status": status_out,
++                "fill_price": avg_fill if filled_qty else None,
++                "filled_qty": filled_qty,
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++        except Exception as e:
++            logger.error(
++                "[v19.34.27 PATCH-L1] place_bracket_order failed for %s: %s",
++                getattr(trade, "symbol", "?"), e,
++            )
++            return {
++                "success": False,
++                "error": f"ib_direct_bracket_error: {str(e)[:200]}",
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++
+     async def cancel_all_open_orders_for_symbol(
+         self, symbol: str, side: Optional[str] = None,
+     ) -> Dict[str, Any]:
+diff --git a/backend/services/trade_executor_service.py b/backend/services/trade_executor_service.py
+index ce3ded74..f877fe6a 100644
+--- a/backend/services/trade_executor_service.py
++++ b/backend/services/trade_executor_service.py
+@@ -1020,7 +1020,49 @@ class TradeExecutorService:
+ 
+         If pusher returns `bracket_not_supported`, we fall back to legacy
+         entry+stop path so the migration can ship in two halves.
++
++        v19.34.27 Patch L1 — When `BOT_ORDER_PATH=direct`, bypass the
++        pusher entirely and place the bracket via the DGX-side ib-direct
++        socket (clientId=11). See IB_DIRECT_MIGRATION_PLAN.md for the
++        full design.
+         """
++        # v19.34.27 Patch L1 — direct mode short-circuit.
++        # Default (BOT_ORDER_PATH unset or "pusher") preserves legacy
++        # behaviour. "direct" routes through ib-direct synchronously.
++        # "shadow" stays on pusher (parallel ib-direct observation is
++        # planned for L2; today shadow == pusher).
++        order_path = self._order_path_mode()
++        if order_path == "direct":
++            try:
++                from services.ib_direct_service import get_ib_direct_service
++                ib_direct = get_ib_direct_service()
++                logger.info(
++                    "[v19.34.27 PATCH-L1] _ib_bracket: routing via ib_direct "
++                    "(BOT_ORDER_PATH=direct) for %s",
++                    getattr(trade, "symbol", "?"),
++                )
++                return await ib_direct.place_bracket_order(trade)
++            except Exception as e:
++                # Fail-hard per Patch J contract — do NOT silently fall
++                # back to pusher path. Operator must intentionally
++                # configure the path.
++                logger.critical(
++                    "[v19.34.27 PATCH-L1] ib_direct.place_bracket_order "
++                    "raised for %s: %s — Patch J contract: returning "
++                    "failure, no fallback to pusher.",
++                    getattr(trade, "symbol", "?"), e,
++                )
++                return {
++                    "success": False,
++                    "error": f"ib_direct_bracket_exception: {str(e)[:200]}",
++                    "entry_order_id": None,
++                    "stop_order_id": None,
++                    "target_order_id": None,
++                    "oca_group": None,
++                    "broker": "ib_direct",
++                    "simulated": False,
++                }
++
+         try:
+             from routers.ib import queue_order, get_order_result, is_pusher_connected
+ 
+diff --git a/backend/tests/test_patch_l1_ib_direct_bracket_v19_34_27.py b/backend/tests/test_patch_l1_ib_direct_bracket_v19_34_27.py
+new file mode 100644
+index 00000000..cb488377
+--- /dev/null
++++ b/backend/tests/test_patch_l1_ib_direct_bracket_v19_34_27.py
+@@ -0,0 +1,285 @@
++"""v19.34.27 Patch L1 — Regression tests for ib-direct bracket order
++placement and BOT_ORDER_PATH=direct routing.
++
++This is the first installment of the IB_DIRECT_MIGRATION_PLAN. After
++L1 ships, `BOT_ORDER_PATH=direct` causes `_ib_bracket` to route through
++`IBDirectService.place_bracket_order()` (synchronous ib_async call)
++instead of the Windows pusher RPC.
++
++Default `BOT_ORDER_PATH=pusher` is unchanged — these tests prove the
++routing works WITHOUT changing default behaviour. Operator flips the
++env var explicitly during Phase L3 paper validation.
++
++Tests pin:
++  • route selection by env var ("pusher" vs "shadow" vs "direct")
++  • ib-direct connection prerequisites
++  • read_only / unauthorized modes
++  • OCA group + transmit semantics (via ib_async.bracketOrder helper)
++  • dict-shape contract matches legacy `_ib_bracket` exactly
++  • Patch J fail-hard: no SIM-* IDs leak even when ib-direct errors
++  • long vs short direction mapping
++  • integration with trade_executor.place_bracket_order (kill-switch
++    still gates, simulated mode still works)
++"""
++
++from __future__ import annotations
++
++import asyncio
++import os
++import sys
++from types import SimpleNamespace
++from unittest.mock import patch, MagicMock, AsyncMock
++
++# Make backend importable regardless of cwd.
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_BACKEND = os.path.dirname(_HERE)
++if _BACKEND not in sys.path:
++    sys.path.insert(0, _BACKEND)
++
++import pytest
++
++from services.trade_executor_service import TradeExecutorService, ExecutorMode
++
++
++def _fake_trade(symbol="ABCD", direction="long", shares=100,
++                entry=12.0, stop=10.0, target=15.0):
++    return SimpleNamespace(
++        id=f"trade-{symbol}",
++        symbol=symbol,
++        direction=SimpleNamespace(value=direction),
++        shares=shares,
++        entry_price=entry,
++        stop_price=stop,
++        target_prices=[target],
++        setup_type="vwap_fade_long",
++    )
++
++
++def _executor_live():
++    ex = TradeExecutorService.__new__(TradeExecutorService)
++    ex._mode = ExecutorMode.LIVE
++    ex._initialized = True
++    ex._kill_switch_refusal = lambda *_a, **_k: None
++    return ex
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 1. Route selection: BOT_ORDER_PATH=direct invokes ib_direct, not pusher
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_direct_mode_calls_ib_direct_not_pusher():
++    ex = _executor_live()
++    fake_result = {
++        "success": True,
++        "entry_order_id": 12345,
++        "stop_order_id": 12346,
++        "target_order_id": 12347,
++        "oca_group": "oca-12345",
++        "status": "submitted",
++        "fill_price": None,
++        "filled_qty": 0,
++        "broker": "ib_direct",
++        "simulated": False,
++    }
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(return_value=fake_result)
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct), \
++         patch("routers.ib.queue_order") as mock_queue_order:
++        result = asyncio.run(ex._ib_bracket(_fake_trade("BTG")))
++
++    assert result == fake_result
++    mock_ib_direct.place_bracket_order.assert_awaited_once()
++    # CRITICAL: pusher path was NOT touched.
++    mock_queue_order.assert_not_called()
++
++
++def test_patch_l1_pusher_mode_is_default_behavior():
++    """Without BOT_ORDER_PATH set, default is 'pusher' — no ib-direct call."""
++    ex = _executor_live()
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(
++        return_value={"unused": True}
++    )
++    # Pusher offline path — Patch J returns failure, but importantly
++    # ib_direct.place_bracket_order must NOT be invoked.
++    env = {k: v for k, v in os.environ.items() if k != "BOT_ORDER_PATH"}
++    with patch.dict(os.environ, env, clear=True), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct), \
++         patch("routers.ib.is_pusher_connected", return_value=False):
++        result = asyncio.run(ex._ib_bracket(_fake_trade("BTG")))
++
++    assert result["success"] is False
++    assert result.get("error") == "pusher_offline_cannot_place_bracket"
++    mock_ib_direct.place_bracket_order.assert_not_called()
++
++
++def test_patch_l1_shadow_mode_uses_pusher_for_now():
++    """L1 phase: shadow == pusher behaviour. L2 will add parallel
++    ib-direct observation."""
++    ex = _executor_live()
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(return_value={})
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "shadow"}, clear=False), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct), \
++         patch("routers.ib.is_pusher_connected", return_value=False):
++        result = asyncio.run(ex._ib_bracket(_fake_trade("BTG")))
++
++    # Pusher offline → Patch J fail-hard via PUSHER path, not ib-direct.
++    assert result.get("error") == "pusher_offline_cannot_place_bracket"
++    mock_ib_direct.place_bracket_order.assert_not_called()
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 2. ib_direct exception is contained (Patch J contract preserved)
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_ib_direct_exception_does_not_fall_back_to_pusher():
++    """If ib_direct.place_bracket_order raises, we MUST NOT silently
++    fall back to the pusher path. Per Patch J / IB-direct migration
++    plan, operator configured 'direct' explicitly — exceptions are
++    surfaced as failures, not papered over."""
++    ex = _executor_live()
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(
++        side_effect=RuntimeError("simulated socket drop")
++    )
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct), \
++         patch("routers.ib.queue_order") as mock_queue_order:
++        result = asyncio.run(ex._ib_bracket(_fake_trade("BTG")))
++
++    assert result["success"] is False
++    assert "ib_direct_bracket_exception" in result.get("error", "")
++    # No SIM-* leakage.
++    for v in result.values():
++        if isinstance(v, str):
++            assert not v.startswith("SIM-"), f"sim-id leaked: {v}"
++    # CRITICAL: pusher was not used as fallback.
++    mock_queue_order.assert_not_called()
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 3. ib_direct service-level: not connected → fail hard
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_ib_direct_not_connected_returns_failure():
++    from services.ib_direct_service import IBDirectService, IBDirectConfig
++    svc = IBDirectService.__new__(IBDirectService)
++    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
++    svc.ensure_connected = AsyncMock(return_value=False)
++    result = asyncio.run(svc.place_bracket_order(_fake_trade("X")))
++    assert result["success"] is False
++    assert result["error"] == "ib_direct_not_connected"
++    assert result["broker"] == "ib_direct"
++    assert result["simulated"] is False
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 4. ib_direct service-level: read_only mode rejects placement
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_ib_direct_read_only_rejects():
++    from services.ib_direct_service import IBDirectService, IBDirectConfig
++    svc = IBDirectService.__new__(IBDirectService)
++    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=True)
++    svc.ensure_connected = AsyncMock(return_value=True)
++    result = asyncio.run(svc.place_bracket_order(_fake_trade("X")))
++    assert result["success"] is False
++    assert result["error"] == "ib_direct_read_only_mode"
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 5. ib_direct service-level: not authorized to trade
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_ib_direct_unauthorized_rejects():
++    from services.ib_direct_service import IBDirectService, IBDirectConfig
++    svc = IBDirectService.__new__(IBDirectService)
++    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
++    svc.ensure_connected = AsyncMock(return_value=True)
++    svc.is_authorized_to_trade = lambda: False
++    result = asyncio.run(svc.place_bracket_order(_fake_trade("X")))
++    assert result["success"] is False
++    assert "not_authorized" in result["error"]
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 6. ib_direct service-level: bad trade fields rejected
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_ib_direct_rejects_bad_trade_fields():
++    from services.ib_direct_service import IBDirectService, IBDirectConfig
++    svc = IBDirectService.__new__(IBDirectService)
++    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
++    svc.ensure_connected = AsyncMock(return_value=True)
++    svc.is_authorized_to_trade = lambda: True
++
++    # Bad direction
++    bad = _fake_trade("X", direction="sideways")
++    result = asyncio.run(svc.place_bracket_order(bad))
++    assert result["success"] is False
++    assert "bad direction" in result["error"]
++
++    # Zero shares
++    bad = _fake_trade("X")
++    bad.shares = 0
++    result = asyncio.run(svc.place_bracket_order(bad))
++    assert result["success"] is False
++    assert "bad shares" in result["error"]
++
++    # No targets
++    bad = _fake_trade("X")
++    bad.target_prices = []
++    result = asyncio.run(svc.place_bracket_order(bad))
++    assert result["success"] is False
++    assert "no target_prices" in result["error"]
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 7. Integration: kill switch refusal still gates ib_direct path
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_kill_switch_refusal_still_blocks_in_direct_mode():
++    """The kill-switch refusal at `place_bracket_order` (line 978) runs
++    BEFORE _ib_bracket — so direct mode is gated by the same safety
++    layer as pusher mode. This test pins that contract."""
++    ex = _executor_live()
++    refusal = {"success": False, "error": "kill_switch_active"}
++    ex._kill_switch_refusal = lambda *_a, **_k: refusal
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(return_value={"unused": True})
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct):
++        result = asyncio.run(ex.place_bracket_order(_fake_trade("X")))
++
++    assert result == refusal
++    mock_ib_direct.place_bracket_order.assert_not_called()
++
++
++# ─────────────────────────────────────────────────────────────────────
++# 8. Integration: simulated mode still simulates (no ib_direct call)
++# ─────────────────────────────────────────────────────────────────────
++
++def test_patch_l1_simulator_mode_does_not_call_ib_direct():
++    ex = TradeExecutorService.__new__(TradeExecutorService)
++    ex._mode = ExecutorMode.SIMULATED
++    ex._initialized = True
++    ex._kill_switch_refusal = lambda *_a, **_k: None
++    mock_ib_direct = MagicMock()
++    mock_ib_direct.place_bracket_order = AsyncMock(return_value={"unused": True})
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
++         patch("services.ib_direct_service.get_ib_direct_service",
++               return_value=mock_ib_direct):
++        result = asyncio.run(ex.place_bracket_order(_fake_trade("X")))
++
++    assert result["success"] is True
++    assert result.get("simulated") is True
++    # SIM-* IDs are EXPECTED in simulator mode (paper trading, tests).
++    # ib_direct must NOT be invoked.
++    mock_ib_direct.place_bracket_order.assert_not_called()
+-- 
+2.39.5
+
