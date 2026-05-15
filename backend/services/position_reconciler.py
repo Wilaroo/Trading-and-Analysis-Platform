@@ -22,6 +22,56 @@ logger = logging.getLogger(__name__)
 # v19.34.15b — lazy idempotent index-ready flag for share_drift_events TTL.
 _share_drift_indexes_ready: bool = False
 
+
+# ── v19.34.28 Patch L2b — ib_direct fresh-positions helper ──
+# Used by reconcile_positions_with_ib + sync_position_from_ib. When
+# BOT_ORDER_PATH=direct, prefer the authoritative
+# cancelPositions+reqPositions round-trip on the DGX-side ib-direct
+# socket. Bypasses the stale event-driven cache the pusher relays.
+# Returns (positions, source_tier) — source_tier is "ib_direct_fresh"
+# on success, "pusher_snapshot" on fallback, "unavailable" when
+# neither source is reachable.
+async def _l2b_fetch_ib_positions(strict_direct: bool = False) -> tuple:
+    """v19.34.28 L2b — Fetch IB positions with ib-direct fast path.
+
+    When BOT_ORDER_PATH=direct, queries ib_direct.get_positions_fresh().
+    Falls back to the pusher's relayed snapshot on any error so the
+    caller never gets a hard failure from this helper.
+
+    Args:
+      strict_direct: If True, when BOT_ORDER_PATH=direct and ib_direct
+        is unreachable, return ([], "unavailable") instead of falling
+        through to pusher. Used by callers that need to know they're
+        getting fresh data (e.g. post-close drift verification).
+
+    Returns:
+      (positions: list of dicts, source_tier: str)
+    """
+    order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+    if order_path == "direct":
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None and ib_direct.is_connected():
+                fresh = await ib_direct.get_positions_fresh()
+                if fresh is not None:
+                    return fresh, "ib_direct_fresh"
+        except Exception as e:
+            logger.debug(
+                "[v19.34.28 L2b] ib_direct.get_positions_fresh failed, "
+                "falling back to pusher: %s", e,
+            )
+        if strict_direct:
+            return [], "unavailable"
+
+    try:
+        from routers.ib import _pushed_ib_data
+        return list(_pushed_ib_data.get("positions", []) or []), "pusher_snapshot"
+    except Exception:
+        return [], "unavailable"
+
+
+
 # v19.29 (2026-05-01) — Direction stability tracker for reconcile.
 # Operator caught SOFI being auto-reconciled as SHORT mid-flatten on
 # 2026-05-01 even though the position was actually LONG — the IB
@@ -420,7 +470,15 @@ class PositionReconciler:
                 report["error"] = "IB pusher not connected - cannot reconcile"
                 return report
 
-            ib_positions = _pushed_ib_data.get("positions", [])
+            # ── v19.34.28 Patch L2b — ib_direct fresh-positions fast path ──
+            # When BOT_ORDER_PATH=direct, queries the authoritative
+            # cancelPositions+reqPositions round-trip; falls back to
+            # the pusher snapshot on any failure so the reconciler
+            # never gets a hard failure from this fetch.
+            ib_positions, _src = await _l2b_fetch_ib_positions()
+            report["positions_source"] = _src
+            if not ib_positions:
+                ib_positions = _pushed_ib_data.get("positions", [])
 
             # Convert to comparable format
             ib_pos_map = {}
@@ -532,7 +590,10 @@ class PositionReconciler:
             if not is_pusher_connected():
                 return {"success": False, "error": "IB pusher not connected"}
 
-            ib_positions = _pushed_ib_data.get("positions", [])
+            # ── v19.34.28 Patch L2b — ib_direct fresh-positions fast path ──
+            ib_positions, _src = await _l2b_fetch_ib_positions()
+            if not ib_positions:
+                ib_positions = _pushed_ib_data.get("positions", [])
             ib_pos = None
 
             for pos in ib_positions:

@@ -3826,11 +3826,36 @@ class TradingBotService:
                 # source /api/ib/account/summary uses). Fall back to the
                 # direct-connected IBService status only if pusher is offline.
                 _current_acct = None
-                try:
-                    from routers.ib import get_pushed_account_id
-                    _current_acct = get_pushed_account_id()
-                except Exception:
-                    _current_acct = None
+                # ── v19.34.28 Patch L2b — ib_direct managedAccounts fast path ──
+                # When BOT_ORDER_PATH=direct, the operator has authorized
+                # ib-direct (clientId=11) as the canonical order socket.
+                # Its managedAccounts list is the most direct source of
+                # truth for "what account am I actually trading on" and
+                # eliminates the Patch I pusher-warmup race (managedAccounts
+                # is populated synchronously during IB Gateway handshake).
+                if (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower() == "direct":
+                    try:
+                        from services.ib_direct_service import get_ib_direct_service
+                        _ibd = get_ib_direct_service()
+                        if _ibd is not None and _ibd.is_connected() and _ibd.is_authorized_to_trade():
+                            _managed = _ibd._ib.managedAccounts() if _ibd._ib else []
+                            if _managed:
+                                _current_acct = next((a for a in _managed if a), None)
+                                logger.debug(
+                                    "[v19.34.28 L2b] account_guard using "
+                                    "ib_direct.managedAccounts: %s", _current_acct,
+                                )
+                    except Exception as _ibd_exc:
+                        logger.debug(
+                            "[v19.34.28 L2b] ib_direct account lookup "
+                            "failed (falling back to pusher): %s", _ibd_exc,
+                        )
+                if not _current_acct:
+                    try:
+                        from routers.ib import get_pushed_account_id
+                        _current_acct = get_pushed_account_id()
+                    except Exception:
+                        _current_acct = None
                 if not _current_acct:
                     try:
                         from services.ib_service import get_ib_service
