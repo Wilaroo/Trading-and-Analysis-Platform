@@ -163,10 +163,12 @@ A brief wedge (≤30s) during ib-direct's first connect when the old process is 
 ### 1.5 — Verify env actually loaded
 ```bash
 NEW_PID=$(pgrep -f "python server.py" | head -1)
-cat /proc/$NEW_PID/environ | tr '\0' '\n' | grep "^BOT_ORDER_PATH"
+strings /proc/$NEW_PID/environ | grep "^BOT_ORDER_PATH"
 # Expect: BOT_ORDER_PATH=direct
+# NOTE: use `strings`, NOT `cat ... | tr '\0' '\n'` — some terminals
+# eat the \0 escape on copy-paste and silently return empty.
 ```
-If this shows `pusher`, the wrong `.env` was edited. Check `backend/.env` (NOT repo root `.env`).
+If this shows `pusher` or empty, the wrong `.env` was edited. Check `backend/.env` (NOT repo root `.env`).
 
 ✅ **No wedge + env shows `direct` → proceed to Phase 2. Wedge or env wrong → ABORT.**
 
