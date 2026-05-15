@@ -3,6 +3,171 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-05-15 (v19.34.26 — Patch J) — Fail-Hard on Pusher-Offline (No Silent Simulated Brackets)
+
+### Context
+After Patches G/H/I shipped, the operator reset the kill switch and
+the bot opened 6 NAKED positions in 5 minutes (BTG, HMY, ONON, SWK,
+JBLU, MOD ≈ $300K). The new failure mode was unrelated to the
+startup races G/H/I fixed.
+
+Root cause via `/api/system/ib-direct/status`:
+```
+"shadow": { "order_path": "pusher" }     ← config
+"connected": true, "authorized_to_trade": true  ← ib-direct healthy
+```
+The pusher is one-way (market data IN, account/orders snapshot IN).
+It does NOT relay orders OUT. Four functions in
+`backend/services/trade_executor_service.py` silently fell back to
+simulated success when they detected pusher offline:
+
+| Function | Pre-J behavior |
+|---|---|
+| `execute_entry` | → `_simulate_entry` (fake fill, no IB order) |
+| `_ib_stop` | → `_simulate_stop` (`SIM-STOP-*`, naked) |
+| `_ib_bracket` | → `_simulate_bracket` (`SIM-*` parent+stop+target, naked) |
+| `attach_oca_stop_target` | returned `SIM-STP-*` / `SIM-TGT-*` IDs with success=True |
+
+Callers persisted the sim IDs as real, the trade record looked
+bracketed, the v127 naked-sweep "emergency re-issued" through the
+same broken path producing more sim IDs, and IB never saw a bracket.
+The position sat naked at IB while the bot's UI showed it as fully
+protected.
+
+### What Patch J does
+All four hot paths now return explicit `success: False`,
+`pusher_offline: True`, and a diagnostic error code
+(`pusher_offline_cannot_*`). Callers (trade_execution.execute_trade
+for entry path; naked_position_sweep + position_reconciler for
+post-fill attach path) treat non-success correctly — drop the trade
+or log critical + retry next scan. The bot CANNOT be silently lied
+to about IB state any more.
+
+`SIMULATED` mode is unchanged — paper trading and unit tests still
+intentionally use SIM-* IDs.
+
+### Files changed
+- `backend/services/trade_executor_service.py` (4 functions hardened)
+- `backend/tests/test_patch_j_no_simulated_brackets_v19_34_26.py` (6
+  regression tests, all green on DGX)
+
+### Deployment
+Committed as `4519f55d` on `origin/main`. 15/15 pytest passing on
+DGX (9 Patches G/H/I + 6 Patch J). Bot restarted via Windows `.bat`
+controller. Kill-switch reset → 5+ real entries fired with REAL
+(non-SIM) bracket IDs at IB.
+
+### Test outcome 2026-05-15 17:44-17:47 ET
+- ✅ No `SIM-*` IDs leaked into trade records when pusher was healthy
+- ✅ Naked-sweep correctly detected the one naked position (OTIS
+  1478-share adoption) without infinite looping
+- ✅ Patch J's explicit failure messages NOT triggered (pusher was
+  connected)
+- ⚠️ NEW bug surfaced: `bracket_submission_timeout` — pusher
+  accepts bracket but bot times out waiting for confirmation. Trade
+  stays in `pending` while real position exists at IB. See Patch K
+  entry below.
+
+### Aftermath
+Operator manually flattened 5 IB positions (CW, ONON, REGN, SMTC,
+OTIS) at ~13:25 ET. Bot DB cleaned (11 rows marked
+`closed_manual_v19_34_26_postj_cleanup`). Kill switch latched ON.
+Weekend-safe.
+
+
+## 2026-05-15 — Patch K IDENTIFIED (NOT YET FIXED) — Bracket Submission Timeout
+
+### Severity
+🟡 P1. With Patch J in place, this is no longer dangerous — naked
+positions are detected and flagged. But it's still wrong: real fills
+exist at IB while the bot thinks the trade is `pending` and won't
+manage it.
+
+### Root cause
+In `place_bracket_order` (trade_executor_service.py line ~895), the
+bracket payload is sent to the Windows pusher, which forwards to IB.
+The bot awaits the pusher's response with a timeout (~10-60s
+depending on setup type). When IB fills the parent fast (which is
+exactly what happens for liquid symbols in market hours), the
+pusher's confirmation message often lands AFTER the bot's wait
+window. The bot then sees:
+
+```
+{
+  "success": False,
+  "order_id": "...",        # pusher generated this
+  "fill_price": 721.35,     # pusher knows the fill price
+  "filled_qty": 0,          # but no quantity confirmed yet
+  "status": "timeout",
+  "error": "bracket_status_ambiguous_v19_34_15a" / "bracket_submission_timeout",
+  "stop_order_id": None,
+  "target_order_id": None,
+}
+```
+
+`trade_execution.execute_trade` correctly leaves the trade in
+`pending` (NOT marking OPEN with sim IDs — Patch J's contribution).
+But the real IB position is live. The naked-sweep can't help
+because it only scans `status=open` trades. Result: a real
+position the bot doesn't manage.
+
+### Test evidence 2026-05-15 17:44-17:47 ET
+5 IB positions opened (CW, ONON, REGN, SMTC, OTIS) per
+`/api/system/ib-direct/positions`. Bot DB at same time:
+- CW, ONON, SMTC, OTIS: status=`open` with real bracket IDs
+- REGN: status=`pending` (timeout)
+- + 4 other symbols (EGO, HMY, AA, RL) status=`pending` — pusher
+  may have submitted these too but bot doesn't know
+
+### Patch K design (two options)
+
+**Option A — Bot-side reconciler (preferred, no pusher changes)**:
+Extend `naked_position_sweep` to ALSO scan `status=pending` trades.
+For each:
+1. Look up the trade's `entry_order_id` in pusher's `orders` feed.
+2. If found AND filled → promote `pending → open`, run
+   `attach_oca_stop_target` if no stop/target IDs already.
+3. If found AND working → leave pending, retry next scan.
+4. If NOT found after N attempts (e.g. 5 minutes) → mark
+   `closed_orphan_no_ib_match` and alert.
+
+**Option B — Pusher-side faster response**:
+Modify `ib_data_pusher.py` (Windows) to send a synchronous ACK as
+soon as IB returns an `orderId` for parent/stop/target, even before
+the fill comes through. Bot's wait window then becomes "wait for
+order ACK" (fast, ~1s) instead of "wait for fill confirmation"
+(slow, fill-time-dependent).
+
+Option A is safer for production because pusher-side changes
+require restarting the Windows pusher (operator-touched), while
+A is pure bot-side and ships through the same `.bat` workflow.
+
+### Files to investigate
+- `backend/services/trading_bot_service.py` — `naked_position_sweep`
+  (search `v127 naked-sweep`)
+- `backend/services/trade_execution.py` line ~720 — the
+  `bracket_result` handling. Possibly add a "pending_confirmation"
+  status that the sweep can pick up.
+- `backend/services/trade_executor_service.py` — `_ib_bracket` →
+  timeout values. Maybe also add a "fire-and-forget plus polling"
+  mode.
+
+### Tests
+1. `naked_position_sweep` finds a `pending` trade whose
+   `entry_order_id` is present in pusher's orders feed → promotes
+   it to `open`.
+2. `naked_position_sweep` finds a `pending` trade whose
+   `entry_order_id` is NOT present in pusher's feed after 5min →
+   marks it `closed_orphan_no_ib_match`.
+3. Regression: existing Patches G/H/I/J tests still pass.
+
+### Status
+NOT STARTED. Account flat, kill switch ON, account is weekend-safe
+without K because Patch J prevents silent sim leakage. K is "make
+the bot not lose track of real positions" — annoying, not unsafe.
+
+
+
 ## 2026-05-15 (v19.34.25 — Patches G/H/I) — Startup Race & Account-Guard Warmup
 
 ### Context

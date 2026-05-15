@@ -3,7 +3,71 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 P0 — Patch J: order-path misconfiguration causing naked positions (2026-05-15)
+## 🟡 P1 — Patch K: `bracket_submission_timeout` leaves real positions in `pending` state (2026-05-15)
+
+**Discovered DURING Patch J testing.** With Patch J in place, the bot
+no longer silently lies with SIM-* IDs when paths fail — but the
+pusher's bracket-submission confirmation can arrive AFTER the bot's
+wait window expires. Result: a real IB position whose bot DB row is
+stuck at `status=pending`, never managed.
+
+### Test evidence (post-Patch-J session, 2026-05-15 17:44-17:47 ET)
+- 5 real IB positions: CW, ONON, REGN, SMTC, OTIS
+- Bot DB: CW/ONON/SMTC/OTIS were `open` with real bracket IDs ✅
+- REGN was stuck `pending` (pusher timeout while IB filled) ⚠️
+- 4 more symbols (EGO, HMY, AA, RL) stuck `pending` (likely same)
+
+### Patch K design — Option A (bot-side, preferred)
+Extend `v127 naked-sweep` to ALSO check `status=pending` trades. For each:
+1. Look up its `entry_order_id` in pusher's `orders` feed.
+2. Match found, filled → promote `pending → open`, run
+   `attach_oca_stop_target` if no stop/target.
+3. Match found, working → leave pending, retry next scan.
+4. NOT found after 5min → mark `closed_orphan_no_ib_match` + alert.
+
+### Why this is P1 not P0
+With Patch J: a stuck `pending` row corresponds to a real fill at
+IB whose brackets ALSO succeeded (or didn't — both visible in
+pusher's `orders` feed). The position is NOT silently naked
+anymore; the naked-sweep just doesn't promote pending → open.
+Annoying, not dangerous.
+
+### Files
+- `backend/services/trading_bot_service.py` (search `v127 naked-sweep`)
+- `backend/services/trade_execution.py` line ~720
+- `backend/services/trade_executor_service.py` `_ib_bracket` (~895)
+
+### Tests
+- Pending trade with matching pusher order → promoted to open
+- Pending trade with no match after 5min → closed_orphan_no_ib_match
+- Patches G/H/I/J regressions still green
+
+### Status
+NOT STARTED. Weekend-safe without K (Patch J prevents silent sim
+leakage). Pick up early next session.
+
+---
+
+
+
+## ✅ SHIPPED 2026-05-15 — Patch J (v19.34.26) — Fail-Hard on Pusher-Offline
+
+Commit `4519f55d` on `origin/main`. See `CHANGELOG.md` for full
+context. TL;DR: four functions in `trade_executor_service.py`
+(`execute_entry`, `_ib_stop`, `_ib_bracket`, `attach_oca_stop_target`)
+used to fall back to simulated success when the pusher was offline.
+Real positions sat naked at IB while the bot's DB showed SIM-* IDs.
+Patch J makes all four fail-hard with explicit `success: False`,
+`pusher_offline: True`, no SIM-* leakage to LIVE-mode callers.
+
+Test evidence: 15/15 regression tests passing on DGX (9 G/H/I + 6 J).
+Field validation 2026-05-15 17:44 ET: 5 real positions opened with
+REAL bracket IDs (no SIM-* leaks). Surfaced Patch K bug (see top of
+file).
+
+---
+
+
 
 **This is the actual root cause of every "naked positions" incident in
 this app, going back to the original 14-position stranding.** Patches
@@ -82,7 +146,8 @@ operator `curl + git apply` on DGX, run pytest, commit, push,
 restart, verify with kill switch ON, then unlock.
 
 ### Status
-NOT STARTED. Operator account currently flat, kill switch ON.
+SHIPPED as `4519f55d` on 2026-05-15. See CHANGELOG.md + Patch K
+entry at top of this file for follow-up work.
 
 ---
 
