@@ -554,6 +554,231 @@ class IBDirectService:
             logger.error("v19.34.25 [IB-DIRECT] cancel_order failed: %s — %s", order_id, e)
             return {"success": False, "error": str(e)[:200]}
 
+    # ── v19.34.27 Patch L1 — Native ib_async bracket order placement ──────
+    #
+    # This is the load-bearing 75% of the IB_DIRECT_MIGRATION_PLAN. It
+    # replaces `_ib_bracket`'s reliance on the Windows pusher's RPC bracket
+    # contract with a synchronous `ib_async.bracketOrder()` call against
+    # IB Gateway on this DGX-side socket (clientId=11).
+    #
+    # WHY THIS METHOD ELIMINATES TODAY'S BUG CLASS:
+    #   1. NO pusher round-trip — eliminates bracket_submission_timeout
+    #      (the EGO 1639-share naked stampede mode).
+    #   2. NO simulated fallback on socket health — Patch J's fail-hard
+    #      contract is preserved (returns success: False on any error),
+    #      so no more SIM-* ID leakage into bot DB.
+    #   3. Real IB orderIds — bot DB stops storing pusher-generated UUIDs
+    #      that don't match anything in IB's working-orders feed.
+    #   4. OCA semantics handled by ib_async — parent has transmit=False
+    #      until last child queued, atomic activation.
+    #
+    # CONTRACT (matches `_ib_bracket` exactly so callers don't change):
+    #   Returns dict with:
+    #     success: bool
+    #     entry_order_id: int (real IB orderId)
+    #     stop_order_id: int
+    #     target_order_id: int
+    #     oca_group: str
+    #     status: "submitted" | "filled" | "rejected" | "timeout"
+    #     fill_price: float | None
+    #     filled_qty: int
+    #     broker: "ib_direct"
+    #     simulated: False
+    #     error: str (only on failure)
+    #
+    # Phase L2 (Saturday) adds the matching place_oca_stop_target,
+    # place_entry, place_stop, get_positions_fresh, get_open_orders.
+    async def place_bracket_order(
+        self,
+        trade,
+        *,
+        sec_type: str = "STK",
+        exchange: str = "SMART",
+        currency: str = "USD",
+        wait_for_submission_s: float = 5.0,
+    ) -> Dict[str, Any]:
+        """Place an atomic OCA bracket (parent LMT + child STP + child LMT)
+        via ib_async. Returns the same dict shape as `_ib_bracket` for
+        drop-in compatibility in trade_executor_service.
+
+        Args:
+            trade: A BotTrade-shaped object with .symbol, .direction (.value
+                'long'|'short'), .shares, .entry_price, .stop_price,
+                .target_prices (list, first element used).
+            wait_for_submission_s: How long to await the parent's
+                `orderStatus` to flip past 'PendingSubmit'. Real fill is
+                NOT awaited here — caller can subscribe to fills or query
+                later. Pre-Patch-L1 the pusher's bracket waited up to 60s
+                for a fill confirmation; ib-direct doesn't need this
+                because orderIds are returned synchronously by ib_async.
+
+        Returns:
+            Dict — see CONTRACT comment above.
+        """
+        if not await self.ensure_connected():
+            return {
+                "success": False,
+                "error": "ib_direct_not_connected",
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        if self.config.read_only:
+            return {
+                "success": False,
+                "error": "ib_direct_read_only_mode",
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        if not self.is_authorized_to_trade():
+            return {
+                "success": False,
+                "error": "ib_direct_not_authorized_managed_accounts_empty",
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+
+        # Extract trade fields (defensive — handle missing/bad input).
+        try:
+            symbol = str(trade.symbol).upper()
+            direction = (
+                getattr(trade.direction, "value", None) or
+                str(trade.direction)
+            ).lower()
+            if direction not in ("long", "short"):
+                return {"success": False, "error": f"bad direction: {direction}",
+                        "broker": "ib_direct", "simulated": False}
+            qty = int(trade.shares)
+            if qty <= 0:
+                return {"success": False, "error": f"bad shares: {qty}",
+                        "broker": "ib_direct", "simulated": False}
+            entry_price = float(trade.entry_price)
+            stop_price = float(trade.stop_price)
+            targets = getattr(trade, "target_prices", None) or []
+            if not targets:
+                return {"success": False, "error": "no target_prices on trade",
+                        "broker": "ib_direct", "simulated": False}
+            target_price = float(targets[0])
+        except Exception as e:
+            return {"success": False, "error": f"bad trade fields: {e}",
+                    "broker": "ib_direct", "simulated": False}
+
+        # Action mapping. Long entry = BUY parent, SELL stop+target.
+        # Short entry = SELL parent (SSHORT for IB short sell), BUY stop+target.
+        if direction == "long":
+            parent_action = "BUY"
+            child_action = "SELL"
+        else:
+            parent_action = "SELL"   # ib_async's bracketOrder handles short via SELL
+            child_action = "BUY"
+
+        try:
+            # Qualify the contract first (off the event loop).
+            contract = Stock(symbol, exchange, currency)
+            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+
+            # ib_async.bracketOrder constructs the three orders with
+            # correct OCA group and transmit-sequencing. Parent's
+            # transmit=False, stop's transmit=False, target's transmit=True
+            # — atomic activation when the third is submitted.
+            bracket = self._ib.bracketOrder(
+                action=parent_action,
+                quantity=qty,
+                limitPrice=round(entry_price, 4),
+                takeProfitPrice=round(target_price, 4),
+                stopLossPrice=round(stop_price, 4),
+            )
+
+            # ib_async's bracketOrder returns a 3-tuple-like object
+            # (parent, takeProfit, stopLoss). Some versions return a list.
+            try:
+                parent_o = bracket.parent
+                take_profit_o = bracket.takeProfit
+                stop_loss_o = bracket.stopLoss
+            except AttributeError:
+                # Fall back to indexed access.
+                parent_o, take_profit_o, stop_loss_o = (
+                    bracket[0], bracket[1], bracket[2],
+                )
+
+            # Submit all three. ib_async will respect each order's
+            # transmit flag and IB activates them atomically.
+            parent_trade = self._ib.placeOrder(contract, parent_o)
+            target_trade = self._ib.placeOrder(contract, take_profit_o)
+            stop_trade = self._ib.placeOrder(contract, stop_loss_o)
+
+            # Brief settle so the parent's orderStatus callback fires
+            # at least to 'PendingSubmit' or 'Submitted'. We do NOT wait
+            # for a fill — that's the caller's job via order_status
+            # event or naked_position_sweep.
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._ib.sleep, 0.5),
+                    timeout=wait_for_submission_s,
+                )
+            except asyncio.TimeoutError:
+                # Submission timeout — fall through and let the caller
+                # decide. Patch J's contract: we still return the
+                # orderIds so the caller can poll/cancel as needed.
+                pass
+
+            entry_id = int(parent_trade.order.orderId)
+            stop_id = int(stop_trade.order.orderId)
+            target_id = int(target_trade.order.orderId)
+            oca_group = parent_o.ocaGroup or f"oca-{entry_id}"
+
+            # Snapshot current parent status. Could be PendingSubmit,
+            # Submitted, Filled, Cancelled.
+            parent_status = (
+                parent_trade.orderStatus.status
+                if parent_trade.orderStatus
+                else "submitted"
+            ).lower()
+            filled_qty = int(parent_trade.orderStatus.filled or 0) if parent_trade.orderStatus else 0
+            avg_fill = (
+                float(parent_trade.orderStatus.avgFillPrice or 0.0)
+                if parent_trade.orderStatus else 0.0
+            )
+
+            # Map IB status → contract's status field.
+            if parent_status == "filled":
+                status_out = "filled"
+            elif parent_status in ("cancelled", "apicancelled", "inactive"):
+                status_out = "rejected"
+            else:
+                status_out = "submitted"
+
+            logger.info(
+                "[v19.34.27 PATCH-L1] place_bracket_order via ib_direct: "
+                "%s %s qty=%d entry@%.4f stop@%.4f target@%.4f → "
+                "entry_id=%d stop_id=%d target_id=%d oca=%s status=%s",
+                symbol, parent_action, qty, entry_price, stop_price, target_price,
+                entry_id, stop_id, target_id, oca_group, status_out,
+            )
+
+            return {
+                "success": True,
+                "entry_order_id": entry_id,
+                "stop_order_id": stop_id,
+                "target_order_id": target_id,
+                "oca_group": oca_group,
+                "status": status_out,
+                "fill_price": avg_fill if filled_qty else None,
+                "filled_qty": filled_qty,
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.27 PATCH-L1] place_bracket_order failed for %s: %s",
+                getattr(trade, "symbol", "?"), e,
+            )
+            return {
+                "success": False,
+                "error": f"ib_direct_bracket_error: {str(e)[:200]}",
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+
     async def cancel_all_open_orders_for_symbol(
         self, symbol: str, side: Optional[str] = None,
     ) -> Dict[str, Any]:

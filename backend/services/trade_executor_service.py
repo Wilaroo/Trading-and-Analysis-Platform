@@ -1020,7 +1020,49 @@ class TradeExecutorService:
 
         If pusher returns `bracket_not_supported`, we fall back to legacy
         entry+stop path so the migration can ship in two halves.
+
+        v19.34.27 Patch L1 — When `BOT_ORDER_PATH=direct`, bypass the
+        pusher entirely and place the bracket via the DGX-side ib-direct
+        socket (clientId=11). See IB_DIRECT_MIGRATION_PLAN.md for the
+        full design.
         """
+        # v19.34.27 Patch L1 — direct mode short-circuit.
+        # Default (BOT_ORDER_PATH unset or "pusher") preserves legacy
+        # behaviour. "direct" routes through ib-direct synchronously.
+        # "shadow" stays on pusher (parallel ib-direct observation is
+        # planned for L2; today shadow == pusher).
+        order_path = self._order_path_mode()
+        if order_path == "direct":
+            try:
+                from services.ib_direct_service import get_ib_direct_service
+                ib_direct = get_ib_direct_service()
+                logger.info(
+                    "[v19.34.27 PATCH-L1] _ib_bracket: routing via ib_direct "
+                    "(BOT_ORDER_PATH=direct) for %s",
+                    getattr(trade, "symbol", "?"),
+                )
+                return await ib_direct.place_bracket_order(trade)
+            except Exception as e:
+                # Fail-hard per Patch J contract — do NOT silently fall
+                # back to pusher path. Operator must intentionally
+                # configure the path.
+                logger.critical(
+                    "[v19.34.27 PATCH-L1] ib_direct.place_bracket_order "
+                    "raised for %s: %s — Patch J contract: returning "
+                    "failure, no fallback to pusher.",
+                    getattr(trade, "symbol", "?"), e,
+                )
+                return {
+                    "success": False,
+                    "error": f"ib_direct_bracket_exception: {str(e)[:200]}",
+                    "entry_order_id": None,
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
+                    "broker": "ib_direct",
+                    "simulated": False,
+                }
+
         try:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
 
