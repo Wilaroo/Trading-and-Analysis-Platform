@@ -456,8 +456,10 @@ async def audit_orphan_gtc_orders(
         }
 
     # 2) IB positions — pusher snapshot is the canonical source for
-    # positions across the codebase.
-    ib_positions, src_positions = _fetch_ib_positions()
+    # positions across the codebase. v19.34.28 L2b-hotfix1: use the
+    # ASYNC helper here (we're inside `async def audit_orphan_gtc_orders`)
+    # to avoid the sync→async deadlock that wedged boot on 2026-05-15.
+    ib_positions, src_positions = await _fetch_ib_positions_async()
     data_sources["ib_positions"] = src_positions
 
     # 3) bot_trades — Mongo, via the bot's `_db` handle if available.
@@ -596,19 +598,29 @@ async def _fetch_ib_open_orders() -> Tuple[Optional[List[Dict[str, Any]]], Dict[
 def _fetch_ib_positions() -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     src: Dict[str, Any] = {"tier": None, "ok": False}
 
-    # ── v19.34.28 Patch L2b — ib_direct fresh-positions fast path ──
-    # When BOT_ORDER_PATH=direct, prefer the authoritative
-    # cancelPositions+reqPositions round-trip on the DGX-side ib-direct
-    # socket. Bypasses the stale event-driven cache the pusher relayed
-    # snapshot inherits. Falls through to the pusher snapshot on any
-    # error so the caller never gets a hard failure from this helper.
-    if (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower() == "direct":
+    # ── v19.34.28 Patch L2b-hotfix1 — ib_direct fresh-positions fast path ──
+    # NOTE: This helper is SYNCHRONOUS. The earlier L2b attempt tried to
+    # bridge sync→async via a ThreadPoolExecutor when called from inside
+    # a running event loop, but that deadlocks because ib_async's
+    # event loop is owned by the main thread and the child thread can't
+    # await on it. Real-world impact: backend wedged for 162s on
+    # _startup_orphan_gtc_audit on 2026-05-15.
+    #
+    # Correct behaviour: when called from sync code OUTSIDE a running
+    # loop (e.g. boot audit before the main loop starts, or pytest),
+    # we can briefly spin up an event loop to await ib_direct. When
+    # called from sync code INSIDE a running loop, we MUST NOT block —
+    # fall through to the pusher snapshot. The async callers
+    # (audit_orphan_gtc_orders, naked_position_sweep, position
+    # reconcilers) reach ib_direct through the async helper
+    # `position_reconciler._l2b_fetch_ib_positions` instead.
+    order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+    if order_path == "direct" and not _is_running_loop():
         try:
             from services.ib_direct_service import get_ib_direct_service
             ib_direct = get_ib_direct_service()
             if ib_direct is not None and ib_direct.is_connected():
-                fresh = asyncio.run(ib_direct.get_positions_fresh()) \
-                    if not _is_running_loop() else _await_in_loop(ib_direct.get_positions_fresh())
+                fresh = asyncio.run(ib_direct.get_positions_fresh())
                 if fresh:
                     src["tier"] = "ib_direct_fresh"
                     src["ok"] = True
@@ -640,21 +652,42 @@ def _is_running_loop() -> bool:
         return False
 
 
-def _await_in_loop(coro):
-    """Run `coro` to completion from sync context inside an event loop.
+async def _fetch_ib_positions_async() -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """v19.34.28 L2b-hotfix1 — async sibling of `_fetch_ib_positions`.
 
-    Used by `_fetch_ib_positions` when called from a coroutine — we can't
-    `asyncio.run()` (already in a loop). We can't `await` from sync
-    code either. Workaround: spawn a thread-pool worker that runs its
-    own event loop and execute the coroutine there.
+    Async callers (audit_orphan_gtc_orders, etc.) should use THIS helper
+    so the ib-direct fresh path can be awaited natively without the
+    sync→async deadlock that wedged the boot audit on 2026-05-15.
     """
-    import concurrent.futures
+    src: Dict[str, Any] = {"tier": None, "ok": False}
+    order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+    if order_path == "direct":
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None and ib_direct.is_connected():
+                fresh = await asyncio.wait_for(
+                    ib_direct.get_positions_fresh(), timeout=5.0,
+                )
+                if fresh:
+                    src["tier"] = "ib_direct_fresh"
+                    src["ok"] = True
+                    src["count"] = len(fresh)
+                    return fresh, src
+        except Exception as e:
+            src["ib_direct_error"] = f"{type(e).__name__}: {str(e)[:120]}"
 
-    def _runner():
-        return asyncio.run(coro)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_runner).result(timeout=10)
+    try:
+        from routers.ib import get_pushed_positions, is_pusher_connected
+        positions = get_pushed_positions() or []
+        src["tier"] = src.get("tier") or "pusher_snapshot"
+        src["ok"] = True
+        src["pusher_connected"] = bool(is_pusher_connected())
+        src["count"] = len(positions)
+        return positions, src
+    except Exception as e:
+        src["error"] = f"{type(e).__name__}: {e}"
+        return [], src
 
 
 def _fetch_bot_trades(bot) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:

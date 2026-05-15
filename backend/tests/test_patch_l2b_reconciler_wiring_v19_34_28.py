@@ -167,6 +167,57 @@ def test_l2b_orphan_gtc_fetch_positions_direct_socket_down_falls_back():
     assert positions == fake_pusher
 
 
+# ── L2b-hotfix1 — sync _fetch_ib_positions must NOT deadlock when called
+# from inside a running event loop. Before the hotfix, this scenario
+# wedged the backend boot for 162s because the helper spawned a thread
+# that tried to await ib_async on a loop owned by the parent thread.
+def test_l2b_hotfix1_sync_fetch_inside_event_loop_does_not_deadlock():
+    """Sync _fetch_ib_positions called from inside a running loop must
+    silently fall through to the pusher snapshot (no thread spawn, no
+    asyncio.run, no deadlock)."""
+    fake_pusher = [{"symbol": "SAFE", "position": 1.0}]
+    mock_ibd = MagicMock()
+    mock_ibd.is_connected.return_value = True
+    # If the hotfix regresses, the test will hang here for >5s. Wrap in
+    # asyncio.wait_for to fail fast instead of stalling the suite.
+    async def _runner():
+        return await asyncio.wait_for(
+            asyncio.to_thread(ogr._fetch_ib_positions), timeout=5.0,
+        )
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ibd), \
+         patch("routers.ib.get_pushed_positions", return_value=fake_pusher), \
+         patch("routers.ib.is_pusher_connected", return_value=True):
+        # Run the sync helper from a thread inside an event loop —
+        # the sync helper itself sees no running loop on its own
+        # thread, so the test must explicitly check the "inside-loop"
+        # branch by calling it on the loop thread.
+        async def _on_loop():
+            return ogr._fetch_ib_positions()
+        positions, src = asyncio.run(asyncio.wait_for(_on_loop(), timeout=5.0))
+    # Inside running loop → must NOT touch ib_direct → pusher fallback.
+    assert src["tier"] == "pusher_snapshot"
+    assert positions == fake_pusher
+    mock_ibd.get_positions_fresh.assert_not_called()
+
+
+def test_l2b_hotfix1_async_helper_returns_ib_direct_fresh_when_direct():
+    """The new _fetch_ib_positions_async should be used by async
+    callers — uses ib_direct fresh path safely with native await."""
+    fake = [{"symbol": "ASYNC", "position": 100.0, "fresh": True}]
+    mock_ibd = MagicMock()
+    mock_ibd.is_connected.return_value = True
+    mock_ibd.get_positions_fresh = AsyncMock(return_value=fake)
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ibd):
+        positions, src = asyncio.run(ogr._fetch_ib_positions_async())
+    assert src["tier"] == "ib_direct_fresh"
+    assert positions == fake
+    mock_ibd.get_positions_fresh.assert_awaited_once()
+
+
 # ─────────────────────────────────────────────────────────────────────
 # 3. position_reconciler.reconcile_positions_with_ib — direct mode path
 # ─────────────────────────────────────────────────────────────────────
