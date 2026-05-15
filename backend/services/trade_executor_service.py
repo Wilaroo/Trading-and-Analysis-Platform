@@ -502,8 +502,28 @@ class TradeExecutorService:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
             
             if not is_pusher_connected():
-                logger.warning("IB pusher not connected - falling back to simulation")
-                return await self._simulate_entry(trade)
+                # v19.34.26 Patch J — FAIL HARD when pusher offline.
+                # Pre-J the legacy entry path fell back to
+                # `_simulate_entry` which returned success=True with a
+                # SIM order_id. The trade was marked OPEN in the bot
+                # DB while nothing existed at IB; the next pusher
+                # reconnect would then snap a real position view that
+                # didn't match → orphan reconciler → stampede risk.
+                # In LIVE mode pusher-offline must be a hard fail.
+                logger.critical(
+                    "[v19.34.26 PATCH-J] execute_entry: pusher OFFLINE "
+                    "for %s — refusing to fall back to simulated entry. "
+                    "Trade dropped; no real order placed at IB.",
+                    trade.symbol,
+                )
+                return {
+                    "success": False,
+                    "error": "pusher_offline_cannot_place_entry",
+                    "order_id": None,
+                    "fill_price": None,
+                    "filled_qty": 0,
+                    "pusher_offline": True,
+                }
             
             action = "BUY" if trade.direction.value == "long" else "SELL"
             
@@ -670,8 +690,26 @@ class TradeExecutorService:
             from routers.ib import queue_order, is_pusher_connected
             
             if not is_pusher_connected():
-                logger.warning("IB pusher not connected - simulating stop order")
-                return await self._simulate_stop(trade)
+                # v19.34.26 Patch J — FAIL HARD when pusher offline.
+                # Pre-J this returned a simulated stop with
+                # `success: True` and `SIM-STOP-*` id. Callers (legacy
+                # entry+stop path, reconciler fallback) persisted that
+                # sim id as if real → naked position at IB. Now
+                # explicit failure; caller can retry, alert, or flatten.
+                logger.critical(
+                    "[v19.34.26 PATCH-J] _ib_stop: pusher OFFLINE for %s "
+                    "— refusing to return simulated stop. Position is "
+                    "unprotected at IB until pusher reconnects or "
+                    "operator intervenes.",
+                    trade.symbol,
+                )
+                return {
+                    "success": False,
+                    "error": "pusher_offline_cannot_place_stop",
+                    "order_id": None,
+                    "stop_price": trade.stop_price,
+                    "pusher_offline": True,
+                }
             
             # Stop order is opposite side
             action = "SELL" if trade.direction.value == "long" else "BUY"
@@ -770,17 +808,38 @@ class TradeExecutorService:
             import uuid as _uuid
 
             if not is_pusher_connected():
-                logger.warning(
-                    "attach_oca_stop_target: pusher offline for %s — "
-                    "returning simulated ids; reconciler will retry on next scan.",
+                # v19.34.26 Patch J — FAIL HARD when pusher offline.
+                # Pre-J this returned `success: True` + simulated IDs
+                # (`SIM-STP-*`, `SIM-TGT-*`). Callers persisted those
+                # sim IDs as if real, so the trade record looked
+                # bracketed while the position was NAKED at IB. The
+                # naked-sweep then "emergency re-issued" through this
+                # same path, getting more sim IDs, looping forever
+                # while the position sat unprotected. Real-world
+                # impact: 6 naked positions on 2026-05-15 12:41-12:46
+                # ET (BTG/HMY/ONON/SWK/JBLU/MOD ≈ $300K notional).
+                #
+                # New contract: explicit `success: False` with a
+                # diagnostic error. Callers (naked_position_sweep,
+                # position_reconciler._spawn_excess_slice / adoption
+                # paths) already handle non-success — they log a
+                # critical alert and retry on the next scan when the
+                # pusher reconnects. The position stays naked until
+                # then, but the BOT KNOWS it's naked instead of being
+                # silently lied to.
+                logger.critical(
+                    "[v19.34.26 PATCH-J] attach_oca_stop_target: pusher "
+                    "OFFLINE for %s — refusing to return simulated IDs. "
+                    "Position is unprotected at IB until pusher reconnects "
+                    "or operator intervenes.",
                     trade.symbol,
                 )
                 return {
-                    "success": True,
-                    "stop_order_id": f"SIM-STP-{trade.id}",
-                    "target_order_id": f"SIM-TGT-{trade.id}",
-                    "oca_group": f"SIM-OCA-{trade.id}",
-                    "simulated": True,
+                    "success": False,
+                    "error": "pusher_offline_cannot_attach_brackets",
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
                     "pusher_offline": True,
                 }
 
@@ -966,8 +1025,39 @@ class TradeExecutorService:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
 
             if not is_pusher_connected():
-                logger.warning("IB pusher not connected — falling back to simulation")
-                return await self._simulate_bracket(trade)
+                # v19.34.26 Patch J — FAIL HARD when pusher offline.
+                # Pre-J this fell back to `_simulate_bracket`, which
+                # returned `success: True, status: "filled"` with
+                # SIM-* IDs. The caller (trade_execution.execute_trade)
+                # then marked the trade OPEN in the bot DB even
+                # though nothing was placed at IB. If the pusher
+                # later reconnected and IB happened to fill a
+                # separate parent order from a different code path,
+                # the bot believed it had brackets when it had none
+                # — the exact failure mode for the 2026-05-15
+                # 12:41-12:46 stampede.
+                #
+                # New contract: explicit `success: False`. The
+                # caller's `use_legacy` branch is keyed off
+                # `bracket_result.get('error') in {...}` so we add a
+                # new error code; trade_execution.execute_trade
+                # currently leaves `result["success"] = False` and
+                # the trade is NOT marked OPEN. No phantom DB state.
+                logger.critical(
+                    "[v19.34.26 PATCH-J] _ib_bracket: pusher OFFLINE for %s "
+                    "— refusing to fall back to simulated bracket. Entry "
+                    "WILL NOT fire. Trade dropped; safe state preserved.",
+                    trade.symbol,
+                )
+                return {
+                    "success": False,
+                    "error": "pusher_offline_cannot_place_bracket",
+                    "entry_order_id": None,
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
+                    "pusher_offline": True,
+                }
 
             action = "BUY" if trade.direction.value == "long" else "SELL"
             child_action = "SELL" if action == "BUY" else "BUY"
