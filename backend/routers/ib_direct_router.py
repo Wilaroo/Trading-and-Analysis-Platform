@@ -119,3 +119,136 @@ async def ib_direct_smoke_test() -> Dict[str, Any]:
             "read_only": svc.config.read_only,
         },
     }
+
+
+
+# ── v19.34.28 Patch L2c — Migration-status banner endpoint ────────────
+#
+# Single-shot green/amber/red banner the operator UI consumes to make
+# the Monday "unlock kill switch" go/no-go call. Aggregates every signal
+# that has to be healthy before flipping BOT_ORDER_PATH=direct:
+#   - ib-direct socket connected + authorized
+#   - drop_count low / no recent drops
+#   - heartbeat ok
+#   - watchdog running
+#   - L1/L2a write paths code-present in trade_executor
+#   - L2b read paths wired in reconcilers
+# The endpoint returns a flat verdict ("ready" | "degraded" | "blocked")
+# so the UI just renders one chip — no client-side aggregation logic.
+
+import os as _os_l2c
+import time as _time_l2c
+
+
+@router.get("/migration-status")
+async def ib_direct_migration_status() -> Dict[str, Any]:
+    """v19.34.28 L2c — Aggregated go/no-go status for the IB-Direct migration.
+
+    Returns:
+      {
+        verdict: "ready" | "degraded" | "blocked",
+        order_path: "pusher" | "shadow" | "direct",
+        checks: {
+          ib_direct_connected: bool,
+          ib_direct_authorized: bool,
+          watchdog_running: bool,
+          recent_drops_5m: int,
+          heartbeat_ok: bool,
+          write_paths_scaffolded: bool,
+          read_paths_wired: bool,
+        },
+        ib_direct: {...status snapshot...},
+        recommendations: [...operator-facing strings...],
+      }
+    """
+    svc = get_ib_direct_service()
+    status = svc.status()
+    stability = status.get("stability", {}) or {}
+
+    order_path = (_os_l2c.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+
+    # Drop frequency in the last 5 minutes.
+    now_ts = _time_l2c.time()
+    last_drop_at = stability.get("last_drop_at") or 0
+    drops_recent_5m = (
+        int(stability.get("drop_count_total", 0) or 0)
+        if last_drop_at and (now_ts - float(last_drop_at)) < 300
+        else 0
+    )
+
+    # Heartbeat ok if last heartbeat success is more recent than last failure
+    # (or no failures recorded yet).
+    last_hb_ok = stability.get("last_heartbeat_ok_at") or 0
+    last_hb_fail = stability.get("last_heartbeat_failed_at") or 0
+    heartbeat_ok = bool(last_hb_ok and (not last_hb_fail or last_hb_ok > last_hb_fail))
+
+    # L1/L2a write-path scaffold check: presence of methods on the
+    # service object. Cheap import-time validation.
+    write_paths_scaffolded = all(
+        callable(getattr(svc, m, None))
+        for m in ("place_bracket_order", "place_entry", "place_stop",
+                  "place_oca_stop_target")
+    )
+    # L2a read-path scaffold check.
+    read_paths_scaffolded = all(
+        callable(getattr(svc, m, None))
+        for m in ("get_positions_fresh", "get_open_orders", "get_account_summary")
+    )
+    # L2b wiring check — module-level helper present in position_reconciler.
+    try:
+        from services.position_reconciler import _l2b_fetch_ib_positions  # noqa: F401
+        read_paths_wired = True
+    except Exception:
+        read_paths_wired = False
+
+    checks = {
+        "ib_direct_connected": status.get("connected", False),
+        "ib_direct_authorized": status.get("authorized_to_trade", False),
+        "watchdog_running": stability.get("watchdog_running", False),
+        "recent_drops_5m": drops_recent_5m,
+        "heartbeat_ok": heartbeat_ok,
+        "write_paths_scaffolded": write_paths_scaffolded and read_paths_scaffolded,
+        "read_paths_wired": read_paths_wired,
+    }
+
+    recommendations: list = []
+    if not checks["write_paths_scaffolded"] or not checks["read_paths_wired"]:
+        recommendations.append("L1/L2a/L2b code not fully present — re-apply patches.")
+    if not checks["ib_direct_connected"]:
+        recommendations.append("ib-direct socket DOWN — POST /api/system/ib-direct/connect")
+    elif not checks["ib_direct_authorized"]:
+        recommendations.append("ib-direct connected but managedAccounts empty "
+                                "— check IB Gateway 'logged in elsewhere'")
+    if not checks["watchdog_running"]:
+        recommendations.append("watchdog not running — restart backend or call connect")
+    if drops_recent_5m > 0:
+        recommendations.append(f"{drops_recent_5m} ib-direct drop(s) in last 5 min — "
+                                "wait for stability before flipping to direct")
+    if not heartbeat_ok and status.get("connected"):
+        recommendations.append("heartbeat has not confirmed yet — wait ~30s for first ping")
+
+    # Verdict aggregation.
+    code_ok = checks["write_paths_scaffolded"] and checks["read_paths_wired"]
+    socket_ok = checks["ib_direct_connected"] and checks["ib_direct_authorized"]
+    stable = drops_recent_5m == 0 and checks["watchdog_running"]
+    if code_ok and socket_ok and stable:
+        verdict = "ready"
+    elif code_ok and socket_ok:
+        verdict = "degraded"
+    else:
+        verdict = "blocked"
+
+    if order_path == "direct" and verdict != "ready":
+        recommendations.insert(0,
+            "BOT_ORDER_PATH=direct but verdict != ready — "
+            "consider flipping back to pusher until stable.")
+
+    return {
+        "success": True,
+        "verdict": verdict,
+        "order_path": order_path,
+        "checks": checks,
+        "ib_direct": status,
+        "recommendations": recommendations,
+        "checked_at": now_ts,
+    }

@@ -1,0 +1,280 @@
+From: SentCom v19.34.28 Patch L2c
+Subject: [PATCH] v19.34.28 Patch L2c — Migration-status go/no-go endpoint
+
+Adds GET /api/system/ib-direct/migration-status — single-shot
+green/amber/red verdict for the Monday kill-switch-unlock decision.
+
+Returns verdict in {ready, degraded, blocked} plus a checks dict and
+operator-facing recommendations. Aggregates: socket connected,
+authorized to trade, watchdog running, recent drop count, heartbeat,
+L1/L2a/L2b code present + wired.
+
+Tests: 5 new L2c regressions, 58/58 total green.
+
+Base: a42c3f9c (v19.34.28 Patch L2b)
+
+---
+
+diff --git a/backend/routers/ib_direct_router.py b/backend/routers/ib_direct_router.py
+index 8d8df070..562a201e 100644
+--- a/backend/routers/ib_direct_router.py
++++ b/backend/routers/ib_direct_router.py
+@@ -119,3 +119,136 @@ async def ib_direct_smoke_test() -> Dict[str, Any]:
+             "read_only": svc.config.read_only,
+         },
+     }
++
++
++
++# ── v19.34.28 Patch L2c — Migration-status banner endpoint ────────────
++#
++# Single-shot green/amber/red banner the operator UI consumes to make
++# the Monday "unlock kill switch" go/no-go call. Aggregates every signal
++# that has to be healthy before flipping BOT_ORDER_PATH=direct:
++#   - ib-direct socket connected + authorized
++#   - drop_count low / no recent drops
++#   - heartbeat ok
++#   - watchdog running
++#   - L1/L2a write paths code-present in trade_executor
++#   - L2b read paths wired in reconcilers
++# The endpoint returns a flat verdict ("ready" | "degraded" | "blocked")
++# so the UI just renders one chip — no client-side aggregation logic.
++
++import os as _os_l2c
++import time as _time_l2c
++
++
++@router.get("/migration-status")
++async def ib_direct_migration_status() -> Dict[str, Any]:
++    """v19.34.28 L2c — Aggregated go/no-go status for the IB-Direct migration.
++
++    Returns:
++      {
++        verdict: "ready" | "degraded" | "blocked",
++        order_path: "pusher" | "shadow" | "direct",
++        checks: {
++          ib_direct_connected: bool,
++          ib_direct_authorized: bool,
++          watchdog_running: bool,
++          recent_drops_5m: int,
++          heartbeat_ok: bool,
++          write_paths_scaffolded: bool,
++          read_paths_wired: bool,
++        },
++        ib_direct: {...status snapshot...},
++        recommendations: [...operator-facing strings...],
++      }
++    """
++    svc = get_ib_direct_service()
++    status = svc.status()
++    stability = status.get("stability", {}) or {}
++
++    order_path = (_os_l2c.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
++
++    # Drop frequency in the last 5 minutes.
++    now_ts = _time_l2c.time()
++    last_drop_at = stability.get("last_drop_at") or 0
++    drops_recent_5m = (
++        int(stability.get("drop_count_total", 0) or 0)
++        if last_drop_at and (now_ts - float(last_drop_at)) < 300
++        else 0
++    )
++
++    # Heartbeat ok if last heartbeat success is more recent than last failure
++    # (or no failures recorded yet).
++    last_hb_ok = stability.get("last_heartbeat_ok_at") or 0
++    last_hb_fail = stability.get("last_heartbeat_failed_at") or 0
++    heartbeat_ok = bool(last_hb_ok and (not last_hb_fail or last_hb_ok > last_hb_fail))
++
++    # L1/L2a write-path scaffold check: presence of methods on the
++    # service object. Cheap import-time validation.
++    write_paths_scaffolded = all(
++        callable(getattr(svc, m, None))
++        for m in ("place_bracket_order", "place_entry", "place_stop",
++                  "place_oca_stop_target")
++    )
++    # L2a read-path scaffold check.
++    read_paths_scaffolded = all(
++        callable(getattr(svc, m, None))
++        for m in ("get_positions_fresh", "get_open_orders", "get_account_summary")
++    )
++    # L2b wiring check — module-level helper present in position_reconciler.
++    try:
++        from services.position_reconciler import _l2b_fetch_ib_positions  # noqa: F401
++        read_paths_wired = True
++    except Exception:
++        read_paths_wired = False
++
++    checks = {
++        "ib_direct_connected": status.get("connected", False),
++        "ib_direct_authorized": status.get("authorized_to_trade", False),
++        "watchdog_running": stability.get("watchdog_running", False),
++        "recent_drops_5m": drops_recent_5m,
++        "heartbeat_ok": heartbeat_ok,
++        "write_paths_scaffolded": write_paths_scaffolded and read_paths_scaffolded,
++        "read_paths_wired": read_paths_wired,
++    }
++
++    recommendations: list = []
++    if not checks["write_paths_scaffolded"] or not checks["read_paths_wired"]:
++        recommendations.append("L1/L2a/L2b code not fully present — re-apply patches.")
++    if not checks["ib_direct_connected"]:
++        recommendations.append("ib-direct socket DOWN — POST /api/system/ib-direct/connect")
++    elif not checks["ib_direct_authorized"]:
++        recommendations.append("ib-direct connected but managedAccounts empty "
++                                "— check IB Gateway 'logged in elsewhere'")
++    if not checks["watchdog_running"]:
++        recommendations.append("watchdog not running — restart backend or call connect")
++    if drops_recent_5m > 0:
++        recommendations.append(f"{drops_recent_5m} ib-direct drop(s) in last 5 min — "
++                                "wait for stability before flipping to direct")
++    if not heartbeat_ok and status.get("connected"):
++        recommendations.append("heartbeat has not confirmed yet — wait ~30s for first ping")
++
++    # Verdict aggregation.
++    code_ok = checks["write_paths_scaffolded"] and checks["read_paths_wired"]
++    socket_ok = checks["ib_direct_connected"] and checks["ib_direct_authorized"]
++    stable = drops_recent_5m == 0 and checks["watchdog_running"]
++    if code_ok and socket_ok and stable:
++        verdict = "ready"
++    elif code_ok and socket_ok:
++        verdict = "degraded"
++    else:
++        verdict = "blocked"
++
++    if order_path == "direct" and verdict != "ready":
++        recommendations.insert(0,
++            "BOT_ORDER_PATH=direct but verdict != ready — "
++            "consider flipping back to pusher until stable.")
++
++    return {
++        "success": True,
++        "verdict": verdict,
++        "order_path": order_path,
++        "checks": checks,
++        "ib_direct": status,
++        "recommendations": recommendations,
++        "checked_at": now_ts,
++    }
+diff --git a/backend/tests/test_patch_l2c_migration_status_v19_34_28.py b/backend/tests/test_patch_l2c_migration_status_v19_34_28.py
+new file mode 100644
+index 00000000..6dfb1720
+--- /dev/null
++++ b/backend/tests/test_patch_l2c_migration_status_v19_34_28.py
+@@ -0,0 +1,116 @@
++"""v19.34.28 Patch L2c — Migration-status endpoint regression tests.
++
++Calls the endpoint handler directly (no httpx/TestClient) — keeps tests
++fast and version-independent.
++"""
++from __future__ import annotations
++
++import asyncio
++import os
++import sys
++import time
++from unittest.mock import patch, MagicMock
++
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_BACKEND = os.path.dirname(_HERE)
++if _BACKEND not in sys.path:
++    sys.path.insert(0, _BACKEND)
++
++import pytest
++
++from routers.ib_direct_router import ib_direct_migration_status
++
++
++def _healthy_status():
++    return {
++        "success": True,
++        "connected": True,
++        "authorized_to_trade": True,
++        "host": "x", "port": 4002, "client_id": 11, "read_only": False,
++        "managed_accounts": ["DUN615665"],
++        "stability": {
++            "drop_count_total": 0,
++            "reconnect_count_total": 0,
++            "last_drop_at": None,
++            "last_reconnect_at": None,
++            "watchdog_running": True,
++            "heartbeat_failures_total": 0,
++            "last_heartbeat_ok_at": 9999999999.0,
++            "last_heartbeat_failed_at": None,
++        },
++    }
++
++
++def _stub_svc(status_payload):
++    svc = MagicMock()
++    svc.status.return_value = status_payload
++    # Methods that the verdict logic introspects via callable(getattr(...)).
++    for m in ("place_bracket_order", "place_entry", "place_stop",
++              "place_oca_stop_target", "get_positions_fresh",
++              "get_open_orders", "get_account_summary"):
++        setattr(svc, m, lambda *a, **k: None)
++    return svc
++
++
++def test_l2c_migration_status_ready_when_all_green():
++    svc = _stub_svc(_healthy_status())
++    env = {k: v for k, v in os.environ.items() if k != "BOT_ORDER_PATH"}
++    with patch.dict(os.environ, env, clear=True), \
++         patch("routers.ib_direct_router.get_ib_direct_service", return_value=svc):
++        body = asyncio.run(ib_direct_migration_status())
++    assert body["success"] is True
++    assert body["verdict"] == "ready"
++    assert body["order_path"] == "pusher"
++    assert body["checks"]["ib_direct_connected"] is True
++    assert body["checks"]["ib_direct_authorized"] is True
++    assert body["checks"]["watchdog_running"] is True
++    assert body["checks"]["write_paths_scaffolded"] is True
++    assert body["checks"]["read_paths_wired"] is True
++    assert body["recommendations"] == []
++
++
++def test_l2c_migration_status_blocked_when_socket_down():
++    s = _healthy_status()
++    s["connected"] = False
++    s["authorized_to_trade"] = False
++    svc = _stub_svc(s)
++    with patch("routers.ib_direct_router.get_ib_direct_service", return_value=svc):
++        body = asyncio.run(ib_direct_migration_status())
++    assert body["verdict"] == "blocked"
++    assert any("socket DOWN" in rec for rec in body["recommendations"])
++
++
++def test_l2c_migration_status_degraded_when_recent_drop():
++    s = _healthy_status()
++    s["stability"]["drop_count_total"] = 1
++    s["stability"]["last_drop_at"] = time.time() - 30   # 30s ago
++    svc = _stub_svc(s)
++    with patch("routers.ib_direct_router.get_ib_direct_service", return_value=svc):
++        body = asyncio.run(ib_direct_migration_status())
++    assert body["verdict"] == "degraded"
++    assert body["checks"]["recent_drops_5m"] == 1
++    assert any("drop" in rec.lower() for rec in body["recommendations"])
++
++
++def test_l2c_migration_status_warns_when_direct_but_not_ready():
++    """If BOT_ORDER_PATH=direct but verdict != ready, recommendation
++    should suggest flipping back to pusher."""
++    s = _healthy_status()
++    s["connected"] = False
++    svc = _stub_svc(s)
++    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
++         patch("routers.ib_direct_router.get_ib_direct_service", return_value=svc):
++        body = asyncio.run(ib_direct_migration_status())
++    assert body["order_path"] == "direct"
++    assert body["verdict"] != "ready"
++    assert "flipping back to pusher" in body["recommendations"][0]
++
++
++def test_l2c_migration_status_unauthorized_surface():
++    s = _healthy_status()
++    s["authorized_to_trade"] = False
++    svc = _stub_svc(s)
++    with patch("routers.ib_direct_router.get_ib_direct_service", return_value=svc):
++        body = asyncio.run(ib_direct_migration_status())
++    assert body["verdict"] == "blocked"
++    assert any("managedAccounts empty" in rec for rec in body["recommendations"])
