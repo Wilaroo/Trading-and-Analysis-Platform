@@ -30,6 +30,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ def check_account_match(
     current_account_id: Optional[str],
     expectation: Optional[AccountExpectation] = None,
     ib_connected: Optional[bool] = None,
+    pusher_first_seen_at: Optional[datetime] = None,
 ) -> Tuple[bool, str]:
     """Compare the pusher's current account_id against any authorised alias.
 
@@ -116,6 +118,17 @@ def check_account_match(
     is wrong because it's just an absence of data, not a drift. When the
     caller passes `ib_connected=False`, we soften the verdict to a neutral
     'pending' state so the UI chip doesn't go red while the market is closed.
+
+    `pusher_first_seen_at` (v19.34.25 Patch I) — when the pusher just
+    connected, the IB Gateway `reqAccountSummary` call typically lands
+    AFTER the first positions/orders push. During that window the
+    account_id is legitimately unknown even though `ib_connected=True`.
+    Pre-I we tripped the guard immediately, which (combined with the
+    Patch G race) left a stampede of 7 entries naked when the guard
+    finally fired. Now: if the caller passes the timestamp of the
+    pusher's first POST AND less than ACCOUNT_GUARD_WARMUP_SECONDS
+    (default 60s) have elapsed, treat missing account_id as
+    'pending — warming up' (same OK semantics as the offline case).
     """
     exp = expectation or load_account_expectation()
 
@@ -128,6 +141,26 @@ def check_account_match(
                 f"pending — IB Gateway disconnected, no account snapshot from pusher "
                 f"(expected {'/'.join(exp.expected_aliases)} once IB connects)"
             )
+        # v19.34.25 Patch I — warmup window for fresh pusher
+        # connections. The pusher pushes positions/orders before
+        # reqAccountSummary lands; without this grace, the bot would
+        # trip the kill switch on a healthy pusher that just hadn't
+        # finished its initial account snapshot yet.
+        if pusher_first_seen_at is not None:
+            import os as _os_pi
+            warmup_seconds = float(_os_pi.environ.get(
+                "ACCOUNT_GUARD_WARMUP_SECONDS", "60",
+            ))
+            if warmup_seconds > 0:
+                elapsed = (
+                    datetime.now(timezone.utc) - pusher_first_seen_at
+                ).total_seconds()
+                if elapsed < warmup_seconds:
+                    return True, (
+                        f"pending — pusher account snapshot warming up "
+                        f"({elapsed:.0f}s / {warmup_seconds:.0f}s, expected "
+                        f"{'/'.join(exp.expected_aliases)} ({exp.active_mode}))"
+                    )
         return False, (
             f"no account reported by pusher; expected "
             f"{'/'.join(exp.expected_aliases)} ({exp.active_mode})"

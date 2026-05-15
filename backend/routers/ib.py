@@ -140,7 +140,11 @@ _pushed_ib_data = {
     "news": {},  # News data by symbol
     "news_providers": [],  # Available news providers
     "orders": [],  # v19.34.85 — open orders snapshot from pusher
-    "connected": False
+    "connected": False,
+    # v19.34.25 Patch I — first-POST timestamp used by account_guard
+    # to apply a warmup window before tripping on missing account_id.
+    # Stays None until the first push lands; reset on disconnect.
+    "first_pushed_at": None,
 }
 
 # Heartbeat tracking (Feb-2026): rolling deque of recent push timestamps so
@@ -762,6 +766,16 @@ async def receive_pushed_ib_data(request: IBPushDataRequest, response: Response)
         # (IB Pusher sends local time, but staleness checks compare with UTC)
         _pushed_ib_data["last_update"] = datetime.now(timezone.utc).isoformat()
         _pushed_ib_data["connected"] = True
+
+        # v19.34.25 Patch I — stamp first-POST timestamp once.
+        # account_guard.check_account_match uses this to apply a
+        # warmup window (ACCOUNT_GUARD_WARMUP_SECONDS, default 60s)
+        # before tripping on a missing account_id. The pusher
+        # typically pushes positions/orders/quotes BEFORE its
+        # reqAccountSummary callback lands; pre-I the guard tripped
+        # the kill switch during that window.
+        if _pushed_ib_data.get("first_pushed_at") is None:
+            _pushed_ib_data["first_pushed_at"] = _pushed_ib_data["last_update"]
 
         # Heartbeat: append push timestamp + bump counter (read by
         # /api/ib/pusher-health → PusherHeartbeatTile).
