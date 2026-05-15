@@ -3,6 +3,76 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+
+## 2026-02-XX (v19.34.28 — Patch L2a) — IB-Direct Order Family Scaffold (inert)
+
+### Context
+L1 shipped `IBDirectService.place_bracket_order` + `BOT_ORDER_PATH=direct`
+routing in `_ib_bracket`. L2a is the next slice of the
+IB_DIRECT_MIGRATION_PLAN — scaffolds the remaining write paths and the
+fresh-state read paths so L2b (reconciler / guard wiring) and the L3
+Monday runbook can flip from pusher to ib-direct cleanly.
+
+### What changed
+`backend/services/ib_direct_service.py` — six new methods, all inert
+until `BOT_ORDER_PATH=direct` is set:
+  - `place_entry(trade, *, order_type, limit_price, time_in_force, ...)`
+    — single LMT/MKT entry order (mirrors legacy `_ib_entry`).
+  - `place_stop(trade, *, time_in_force, ...)` — standalone STP
+    (mirrors legacy `_ib_stop`).
+  - `place_oca_stop_target(trade, *, time_in_force, outside_rth, ...)`
+    — atomic OCA STP+LMT pair sharing one `ocaGroup` and
+    `ocaType=1 (CANCEL_WITH_BLOCK)`. STP failure aborts target submit
+    (one-sided exposure prohibited). STP-only-survived path returns
+    `partial=True` so operator knows the target is missing.
+  - `get_positions_fresh()` — `cancelPositions()` + `reqPositionsAsync()`
+    round-trip to bypass the stale event-driven cache (Bug #3 from the
+    migration plan).
+  - `get_open_orders()` — `reqAllOpenOrders()` + flat dict per active
+    trade. Drop-in replacement for `_pushed_ib_data["orders"]`.
+  - `get_account_summary()` — direct `accountSummaryAsync()` read.
+    Numeric tags parsed to float, others left as strings.
+
+`backend/services/trade_executor_service.py` — direct-mode short-circuits
+in three call sites (mirror of L1's `_ib_bracket` pattern):
+  - `_ib_entry` — pre-computes order params then routes to
+    `ib_direct.place_entry` when `BOT_ORDER_PATH=direct`.
+  - `_ib_stop` — routes to `ib_direct.place_stop`.
+  - `attach_oca_stop_target` — routes to
+    `ib_direct.place_oca_stop_target` (TIF/outside_rth derived from
+    trade_style via `bracket_tif`).
+  - All three preserve the Patch J fail-hard contract: any exception
+    in the direct path returns `success: False` with a diagnostic
+    error — no silent fallback to the pusher.
+
+### Tests
+`backend/tests/test_patch_l2a_ib_direct_v19_34_28.py` — 27 regressions:
+  - Connection / read-only / unauthorized gates (3 per write method)
+  - place_entry MKT vs LMT, missing-limit rejection
+  - place_stop long→SELL / short→BUY action mapping
+  - place_oca_stop_target OCA group shared, ocaType=1, STP-fail-aborts
+    contract, STP-OK-LMT-fail partial=True, missing-targets rejected
+  - get_positions_fresh cancels-then-reqs, returns empty when disconnected
+  - get_open_orders filters inactive trades, returns empty when disconnected
+  - get_account_summary parses numeric fields, fails clean when disconnected
+  - Executor routing: BOT_ORDER_PATH=direct invokes ib-direct, default
+    "pusher" path untouched
+  - Patch J contract preserved across all three new wirings
+  - Simulated mode untouched (SIM- IDs still legitimate there)
+27/27 passing locally. L1 (8) + Patch J (8) regress green (43/43 total).
+
+### Outcome
+Code lands on `origin/main` doing nothing until the operator sets
+`BOT_ORDER_PATH=direct` (planned for the L3 Monday paper-validation
+runbook). Phase L2b (account_guard / naked_position_sweep /
+position_reconciler / orphan_gtc_reconciler wiring) is a follow-up
+patch.
+
+Patch served as `frontend/public/v19_34_28_patch_l2a.patch`. Operator
+pulls via `curl <preview-url>/v19_34_28_patch_l2a.patch`, applies via
+`git apply`, runs pytest, commits to `origin/main`.
+
+
 ## 2026-05-15 (v19.34.26 — Patch J) — Fail-Hard on Pusher-Offline (No Silent Simulated Brackets)
 
 ### Context

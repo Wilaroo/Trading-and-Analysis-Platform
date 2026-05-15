@@ -3,6 +3,37 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🔴 P0 — Patch L2b: Reconciler / Guard Wiring through `BOT_ORDER_PATH=direct`
+
+**Status**: NOT STARTED. L2a (write paths + read paths) shipped 2026-02.
+L2b is the follow-up that points the read consumers at the new
+authoritative sources when the env var is flipped.
+
+### Scope
+- `backend/services/account_guard.py` — when `BOT_ORDER_PATH=direct`,
+  read `managedAccounts` directly from ib-direct (eliminates the Patch I
+  warmup-window dependency on the pusher).
+- `backend/services/trading_bot_service.py` `naked_position_sweep` —
+  fetch fresh working-orders list via `ib_direct.get_open_orders()`
+  when path=direct. Reissue path goes through `place_oca_stop_target`.
+- `backend/services/position_reconciler.py` — use
+  `ib_direct.get_positions_fresh()` for the authoritative side of
+  the drift comparison.
+- `backend/services/orphan_gtc_reconciler.py` — boot-time GTC cancels
+  go through ib-direct's `cancel_order` when path=direct.
+
+### Tests
+- `backend/tests/test_patch_l2b_reconciler_wiring_v19_34_28.py`
+  (~8 regressions: each consumer's env-var branch, each fail-hard
+  contract preserved, each existing test green when path=pusher).
+
+### Out of scope (deferred)
+- Shadow-mode parallel-observation logic (would be L2c).
+- Account-update-event-based fresh positions (R1 mitigation, deferred
+  to L3 if `cancelPositions/reqPositions` proves insufficient).
+
+
+
 ## 🟡 P1 — Patch K: `bracket_submission_timeout` leaves real positions in `pending` state (2026-05-15)
 
 **Discovered DURING Patch J testing.** With Patch J in place, the bot

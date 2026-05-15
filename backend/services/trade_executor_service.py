@@ -497,10 +497,83 @@ class TradeExecutorService:
         - Swing/position: DAY LIMIT at ask + wider buffer
         
         All orders use IB SMART routing for best execution.
+
+        v19.34.28 Patch L2a — When `BOT_ORDER_PATH=direct`, bypass the
+        pusher entirely and place the entry via the DGX-side ib-direct
+        socket (clientId=11). Default path "pusher" unchanged.
         """
         try:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
             
+            # Determine order type based on setup
+            setup_type = getattr(trade, 'setup_type', '').lower() if hasattr(trade, 'setup_type') else ''
+            scalp_setups = {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
+            is_scalp = any(s in setup_type for s in scalp_setups)
+            
+            # Calculate limit price with buffer
+            entry_price = trade.entry_price
+            action = "BUY" if trade.direction.value == "long" else "SELL"
+            if entry_price and entry_price > 0:
+                if is_scalp:
+                    # Tight buffer for scalps — 0.02% above ask
+                    buffer = max(entry_price * 0.0002, 0.01)
+                    order_type = "LMT"
+                    time_in_force = "IOC"  # Immediate or Cancel for scalps
+                else:
+                    # Standard buffer — 0.05% above ask
+                    buffer = max(entry_price * 0.0005, 0.01)
+                    order_type = "LMT"
+                    time_in_force = "DAY"
+                
+                if action == "BUY":
+                    limit_price = round(entry_price + buffer, 2)
+                else:
+                    limit_price = round(entry_price - buffer, 2)
+            else:
+                # Fallback to market order if no price
+                order_type = "MKT"
+                limit_price = None
+                time_in_force = "DAY"
+
+            # ── v19.34.28 Patch L2a — direct-mode short-circuit ──
+            # Mirrors the L1 pattern in `_ib_bracket`. Operator must
+            # have set BOT_ORDER_PATH=direct explicitly. On any
+            # exception we fail-hard per Patch J contract — no
+            # silent fallback to the pusher.
+            order_path = self._order_path_mode()
+            if order_path == "direct":
+                try:
+                    from services.ib_direct_service import get_ib_direct_service
+                    ib_direct = get_ib_direct_service()
+                    logger.info(
+                        "[v19.34.28 PATCH-L2a] _ib_entry: routing via ib_direct "
+                        "(BOT_ORDER_PATH=direct) for %s",
+                        getattr(trade, "symbol", "?"),
+                    )
+                    timeout = 10.0 if is_scalp else 60.0
+                    return await ib_direct.place_entry(
+                        trade,
+                        order_type=order_type,
+                        limit_price=limit_price,
+                        time_in_force=time_in_force,
+                        wait_for_fill_s=timeout,
+                    )
+                except Exception as e:
+                    logger.critical(
+                        "[v19.34.28 PATCH-L2a] ib_direct.place_entry raised "
+                        "for %s: %s — Patch J contract: failure, no fallback.",
+                        getattr(trade, "symbol", "?"), e,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"ib_direct_entry_exception: {str(e)[:200]}",
+                        "order_id": None,
+                        "fill_price": None,
+                        "filled_qty": 0,
+                        "broker": "ib_direct",
+                        "simulated": False,
+                    }
+
             if not is_pusher_connected():
                 # v19.34.26 Patch J — FAIL HARD when pusher offline.
                 # Pre-J the legacy entry path fell back to
@@ -524,37 +597,6 @@ class TradeExecutorService:
                     "filled_qty": 0,
                     "pusher_offline": True,
                 }
-            
-            action = "BUY" if trade.direction.value == "long" else "SELL"
-            
-            # Determine order type based on setup
-            setup_type = getattr(trade, 'setup_type', '').lower() if hasattr(trade, 'setup_type') else ''
-            scalp_setups = {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
-            is_scalp = any(s in setup_type for s in scalp_setups)
-            
-            # Calculate limit price with buffer
-            entry_price = trade.entry_price
-            if entry_price and entry_price > 0:
-                if is_scalp:
-                    # Tight buffer for scalps — 0.02% above ask
-                    buffer = max(entry_price * 0.0002, 0.01)
-                    order_type = "LMT"
-                    time_in_force = "IOC"  # Immediate or Cancel for scalps
-                else:
-                    # Standard buffer — 0.05% above ask
-                    buffer = max(entry_price * 0.0005, 0.01)
-                    order_type = "LMT"
-                    time_in_force = "DAY"
-                
-                if action == "BUY":
-                    limit_price = round(entry_price + buffer, 2)
-                else:
-                    limit_price = round(entry_price - buffer, 2)
-            else:
-                # Fallback to market order if no price
-                order_type = "MKT"
-                limit_price = None
-                time_in_force = "DAY"
             
             order_id = queue_order({
                 "symbol": trade.symbol,
@@ -685,7 +727,38 @@ class TradeExecutorService:
         }
     
     async def _ib_stop(self, trade) -> Dict[str, Any]:
-        """Place stop via IB using order queue"""
+        """Place stop via IB using order queue.
+
+        v19.34.28 Patch L2a — When `BOT_ORDER_PATH=direct`, bypass the
+        pusher and place the stop via the DGX-side ib-direct socket.
+        Default path "pusher" unchanged.
+        """
+        # ── v19.34.28 Patch L2a — direct-mode short-circuit ──
+        order_path = self._order_path_mode()
+        if order_path == "direct":
+            try:
+                from services.ib_direct_service import get_ib_direct_service
+                ib_direct = get_ib_direct_service()
+                logger.info(
+                    "[v19.34.28 PATCH-L2a] _ib_stop: routing via ib_direct "
+                    "(BOT_ORDER_PATH=direct) for %s",
+                    getattr(trade, "symbol", "?"),
+                )
+                return await ib_direct.place_stop(trade)
+            except Exception as e:
+                logger.critical(
+                    "[v19.34.28 PATCH-L2a] ib_direct.place_stop raised "
+                    "for %s: %s — Patch J contract: failure, no fallback.",
+                    getattr(trade, "symbol", "?"), e,
+                )
+                return {
+                    "success": False,
+                    "error": f"ib_direct_stop_exception: {str(e)[:200]}",
+                    "order_id": None,
+                    "stop_price": getattr(trade, "stop_price", None),
+                    "broker": "ib_direct",
+                    "simulated": False,
+                }
         try:
             from routers.ib import queue_order, is_pusher_connected
             
@@ -802,6 +875,45 @@ class TradeExecutorService:
                 "errors": [] if stop.get("success") else [stop.get("error", "stop-only-fallback")],
                 "fallback": "stop_only_non_live",
             }
+
+        # ── v19.34.28 Patch L2a — direct-mode short-circuit ──
+        # Operator-set BOT_ORDER_PATH=direct routes adoption brackets
+        # through ib-direct, bypassing the pusher's queue_order RPC.
+        order_path = self._order_path_mode()
+        if order_path == "direct":
+            try:
+                from services.ib_direct_service import get_ib_direct_service
+                ib_direct = get_ib_direct_service()
+                # TIF per trade style: GTC for swing, DAY for intraday.
+                leg_tif, leg_outside_rth = bracket_tif(
+                    getattr(trade, "trade_style", None),
+                    getattr(trade, "timeframe", None),
+                )
+                logger.info(
+                    "[v19.34.28 PATCH-L2a] attach_oca_stop_target: routing via "
+                    "ib_direct (BOT_ORDER_PATH=direct) for %s",
+                    getattr(trade, "symbol", "?"),
+                )
+                return await ib_direct.place_oca_stop_target(
+                    trade,
+                    time_in_force=leg_tif,
+                    outside_rth=leg_outside_rth,
+                )
+            except Exception as e:
+                logger.critical(
+                    "[v19.34.28 PATCH-L2a] ib_direct.place_oca_stop_target "
+                    "raised for %s: %s — Patch J: failure, no fallback.",
+                    getattr(trade, "symbol", "?"), e,
+                )
+                return {
+                    "success": False,
+                    "error": f"ib_direct_oca_exception: {str(e)[:200]}",
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
+                    "broker": "ib_direct",
+                    "simulated": False,
+                }
 
         try:
             from routers.ib import queue_order, is_pusher_connected

@@ -1,0 +1,543 @@
+"""v19.34.28 Patch L2a — Regression tests for the rest of the ib-direct
+order family (entry / stop / OCA-attach) and the read paths
+(get_positions_fresh / get_open_orders / get_account_summary).
+
+L1 shipped `place_bracket_order` + `_ib_bracket` routing under
+BOT_ORDER_PATH=direct. L2a adds the same env-var-gated routing for
+`execute_entry`, `_ib_stop`, `attach_oca_stop_target`, and exposes
+fresh / authoritative state queries that callers (naked sweep, account
+guard, reconciler) will adopt in L2b.
+
+Default BOT_ORDER_PATH=pusher is unchanged — these tests prove the new
+methods + routing work WITHOUT changing default behaviour.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock, AsyncMock
+
+# Make backend importable regardless of cwd.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_BACKEND = os.path.dirname(_HERE)
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+
+import pytest
+
+from services.trade_executor_service import TradeExecutorService, ExecutorMode
+from services.ib_direct_service import IBDirectService, IBDirectConfig
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────
+
+def _fake_trade(symbol="ABCD", direction="long", shares=100,
+                entry=12.0, stop=10.0, target=15.0, setup_type="vwap_fade_long"):
+    return SimpleNamespace(
+        id=f"trade-{symbol}",
+        symbol=symbol,
+        direction=SimpleNamespace(value=direction),
+        shares=shares,
+        entry_price=entry,
+        stop_price=stop,
+        target_prices=[target],
+        setup_type=setup_type,
+        trade_style="intraday",
+        timeframe="5m",
+    )
+
+
+def _executor_live():
+    ex = TradeExecutorService.__new__(TradeExecutorService)
+    ex._mode = ExecutorMode.LIVE
+    ex._initialized = True
+    ex._kill_switch_refusal = lambda *_a, **_k: None
+    return ex
+
+
+def _svc_ready(read_only=False, authorized=True):
+    """Inert IBDirectService with mocked connect/auth state for unit testing."""
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=read_only)
+    svc.ensure_connected = AsyncMock(return_value=True)
+    svc.is_authorized_to_trade = lambda: authorized
+    svc._ib = MagicMock()
+    return svc
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 1. place_entry — connection / auth / read-only gates
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_place_entry_not_connected_fails():
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
+    svc.ensure_connected = AsyncMock(return_value=False)
+    r = asyncio.run(svc.place_entry(_fake_trade(), limit_price=12.0))
+    assert r["success"] is False
+    assert r["error"] == "ib_direct_not_connected"
+    assert r["broker"] == "ib_direct"
+    assert r["simulated"] is False
+
+
+def test_l2a_place_entry_read_only_rejects():
+    svc = _svc_ready(read_only=True)
+    r = asyncio.run(svc.place_entry(_fake_trade(), limit_price=12.0))
+    assert r["success"] is False
+    assert r["error"] == "ib_direct_read_only_mode"
+
+
+def test_l2a_place_entry_unauthorized_rejects():
+    svc = _svc_ready(authorized=False)
+    r = asyncio.run(svc.place_entry(_fake_trade(), limit_price=12.0))
+    assert r["success"] is False
+    assert "not_authorized" in r["error"]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 2. place_entry — happy path returns IB-shaped dict (no SIM- leakage)
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_place_entry_lmt_returns_ib_shaped_dict():
+    svc = _svc_ready()
+    mock_status = MagicMock(status="Submitted", filled=0, avgFillPrice=0.0)
+    mock_order = MagicMock(orderId=98765)
+    mock_trade = MagicMock(order=mock_order, orderStatus=mock_status)
+    svc._ib.placeOrder = MagicMock(return_value=mock_trade)
+    svc._ib.sleep = MagicMock()
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.LimitOrder", return_value=MagicMock(tif="DAY")):
+        r = asyncio.run(svc.place_entry(_fake_trade("XYZ"), limit_price=12.0))
+    assert r["success"] is True
+    assert r["order_id"] == 98765
+    assert r["status"] == "submitted"
+    assert r["broker"] == "ib_direct"
+    assert r["simulated"] is False
+    # No SIM-* leakage anywhere in the result.
+    for v in r.values():
+        if isinstance(v, str):
+            assert not v.startswith("SIM-"), f"sim id leaked: {v}"
+
+
+def test_l2a_place_entry_mkt_needs_no_limit_price():
+    svc = _svc_ready()
+    svc._ib.placeOrder = MagicMock(return_value=MagicMock(
+        order=MagicMock(orderId=1), orderStatus=MagicMock(status="Submitted", filled=0, avgFillPrice=0.0)))
+    svc._ib.sleep = MagicMock()
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.MarketOrder", return_value=MagicMock(tif="DAY")):
+        r = asyncio.run(svc.place_entry(_fake_trade(), order_type="MKT"))
+    assert r["success"] is True
+    assert r["order_type"] == "MKT"
+
+
+def test_l2a_place_entry_lmt_missing_price_rejected():
+    svc = _svc_ready()
+    r = asyncio.run(svc.place_entry(_fake_trade(), order_type="LMT", limit_price=None))
+    assert r["success"] is False
+    assert "limit_price required" in r["error"]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 3. place_stop — connection gates + happy path
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_place_stop_not_connected_fails():
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
+    svc.ensure_connected = AsyncMock(return_value=False)
+    r = asyncio.run(svc.place_stop(_fake_trade()))
+    assert r["success"] is False
+    assert r["error"] == "ib_direct_not_connected"
+
+
+def test_l2a_place_stop_long_position_uses_sell_action():
+    svc = _svc_ready()
+    captured = {}
+    def _capture(action, qty, px):
+        captured["action"] = action
+        captured["qty"] = qty
+        captured["px"] = px
+        return MagicMock()
+    svc._ib.placeOrder = MagicMock(return_value=MagicMock(order=MagicMock(orderId=42)))
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.StopOrder", side_effect=_capture):
+        r = asyncio.run(svc.place_stop(_fake_trade("ABC", direction="long")))
+    assert r["success"] is True
+    assert captured["action"] == "SELL"   # long → SELL to stop
+    assert r["order_id"] == 42
+    assert r["broker"] == "ib_direct"
+
+
+def test_l2a_place_stop_short_position_uses_buy_action():
+    svc = _svc_ready()
+    captured = {}
+    def _capture(action, qty, px):
+        captured["action"] = action
+        return MagicMock()
+    svc._ib.placeOrder = MagicMock(return_value=MagicMock(order=MagicMock(orderId=43)))
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.StopOrder", side_effect=_capture):
+        r = asyncio.run(svc.place_stop(_fake_trade("ABC", direction="short")))
+    assert r["success"] is True
+    assert captured["action"] == "BUY"    # short → BUY to stop
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 4. place_oca_stop_target — OCA semantics + STP-fail-abort contract
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_place_oca_stop_target_happy_path_shares_oca_group():
+    svc = _svc_ready()
+    captured_orders = []
+
+    class _StopMock:
+        def __init__(self, *a, **k):
+            self.tif = None
+            self.ocaGroup = None
+            self.ocaType = None
+            captured_orders.append(("STP", self))
+
+    class _LmtMock:
+        def __init__(self, *a, **k):
+            self.tif = None
+            self.ocaGroup = None
+            self.ocaType = None
+            captured_orders.append(("LMT", self))
+
+    place_calls = []
+    def _place(contract, order):
+        place_calls.append(order)
+        return MagicMock(order=MagicMock(orderId=100 + len(place_calls)))
+
+    svc._ib.placeOrder = _place
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.StopOrder", _StopMock), \
+         patch("services.ib_direct_service.LimitOrder", _LmtMock):
+        r = asyncio.run(svc.place_oca_stop_target(_fake_trade("ABC")))
+
+    assert r["success"] is True
+    assert r["stop_order_id"] == 101
+    assert r["target_order_id"] == 102
+    assert r["partial"] is False
+    # Both legs must carry the SAME oca_group string.
+    stp = next(o for kind, o in captured_orders if kind == "STP")
+    lmt = next(o for kind, o in captured_orders if kind == "LMT")
+    assert stp.ocaGroup == lmt.ocaGroup
+    assert r["oca_group"] == stp.ocaGroup
+    # ocaType=1 (CANCEL_WITH_BLOCK) so IB auto-cancels survivor on fill.
+    assert stp.ocaType == 1
+    assert lmt.ocaType == 1
+
+
+def test_l2a_place_oca_stop_target_stp_failure_aborts_target():
+    """STP failure → target NOT submitted (one-sided exposure prohibited)."""
+    svc = _svc_ready()
+    placed = []
+    def _place(contract, order):
+        if isinstance(order, MagicMock) and "Stop" in str(type(order)):
+            raise RuntimeError("STP rejected by IB")
+        placed.append(order)
+        return MagicMock(order=MagicMock(orderId=1))
+
+    # Force STP construction OK but placeOrder to raise on the stop.
+    raise_on_first = {"n": 0}
+    def _place_raises(contract, order):
+        raise_on_first["n"] += 1
+        if raise_on_first["n"] == 1:
+            raise RuntimeError("STP rejected by IB")
+        placed.append(order)
+        return MagicMock(order=MagicMock(orderId=999))
+
+    svc._ib.placeOrder = _place_raises
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.StopOrder", return_value=MagicMock()), \
+         patch("services.ib_direct_service.LimitOrder", return_value=MagicMock()):
+        r = asyncio.run(svc.place_oca_stop_target(_fake_trade("ABC")))
+
+    assert r["success"] is False
+    assert "stop_submit_failed" in r["error"]
+    assert r["target_order_id"] is None
+    assert placed == []  # target never submitted
+
+
+def test_l2a_place_oca_stop_target_partial_on_lmt_failure():
+    """STP succeeded, LMT failed → partial=True so caller / operator knows."""
+    svc = _svc_ready()
+    call_count = {"n": 0}
+    def _place(contract, order):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return MagicMock(order=MagicMock(orderId=500))  # STP OK
+        raise RuntimeError("LMT outside RTH rejection")
+    svc._ib.placeOrder = _place
+    svc._ib.qualifyContracts = MagicMock()
+    with patch("services.ib_direct_service.Stock", return_value=MagicMock()), \
+         patch("services.ib_direct_service.StopOrder", return_value=MagicMock()), \
+         patch("services.ib_direct_service.LimitOrder", return_value=MagicMock()):
+        r = asyncio.run(svc.place_oca_stop_target(_fake_trade("ABC")))
+    assert r["success"] is True   # STP is live
+    assert r["partial"] is True
+    assert r["stop_order_id"] == 500
+    assert r["target_order_id"] is None
+    assert len(r["errors"]) == 1
+
+
+def test_l2a_place_oca_stop_target_no_targets_rejected():
+    svc = _svc_ready()
+    t = _fake_trade("X")
+    t.target_prices = []
+    r = asyncio.run(svc.place_oca_stop_target(t))
+    assert r["success"] is False
+    assert "no target_prices" in r["error"]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 5. get_positions_fresh — force-refresh round-trip
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_get_positions_fresh_calls_cancel_then_req():
+    svc = _svc_ready()
+    fake_pos = SimpleNamespace(
+        account="DUN615665",
+        contract=SimpleNamespace(symbol="ABC", secType="STK", exchange="SMART"),
+        position=100.0, avgCost=12.34,
+    )
+    svc._ib.cancelPositions = MagicMock()
+    svc._ib.reqPositionsAsync = AsyncMock(return_value=[fake_pos])
+    out = asyncio.run(svc.get_positions_fresh())
+    svc._ib.cancelPositions.assert_called_once()
+    svc._ib.reqPositionsAsync.assert_awaited_once()
+    assert len(out) == 1
+    assert out[0]["symbol"] == "ABC"
+    assert out[0]["position"] == 100.0
+    assert out[0]["fresh"] is True
+
+
+def test_l2a_get_positions_fresh_returns_empty_when_disconnected():
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
+    svc.ensure_connected = AsyncMock(return_value=False)
+    out = asyncio.run(svc.get_positions_fresh())
+    assert out == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 6. get_open_orders — filters inactive, returns flat dict shape
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_get_open_orders_filters_inactive_trades():
+    svc = _svc_ready()
+    active = MagicMock(
+        order=SimpleNamespace(orderId=1, permId=10, action="BUY", totalQuantity=100,
+                              orderType="LMT", lmtPrice=12.0, auxPrice=0.0,
+                              tif="DAY", ocaGroup="oca-1"),
+        orderStatus=SimpleNamespace(status="Submitted", filled=0, remaining=100),
+        contract=SimpleNamespace(symbol="AAA", secType="STK"),
+        isActive=lambda: True,
+    )
+    filled = MagicMock(
+        order=SimpleNamespace(orderId=2, permId=11, action="SELL", totalQuantity=50,
+                              orderType="STP", lmtPrice=0.0, auxPrice=10.0,
+                              tif="GTC", ocaGroup=None),
+        orderStatus=SimpleNamespace(status="Filled", filled=50, remaining=0),
+        contract=SimpleNamespace(symbol="BBB", secType="STK"),
+        isActive=lambda: False,
+    )
+    svc._ib.reqAllOpenOrders = MagicMock()
+    svc._ib.trades = MagicMock(return_value=[active, filled])
+    out = asyncio.run(svc.get_open_orders())
+    assert len(out) == 1
+    assert out[0]["symbol"] == "AAA"
+    assert out[0]["order_id"] == 1
+    assert out[0]["order_type"] == "LMT"
+    assert out[0]["oca_group"] == "oca-1"
+
+
+def test_l2a_get_open_orders_empty_when_disconnected():
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
+    svc.ensure_connected = AsyncMock(return_value=False)
+    out = asyncio.run(svc.get_open_orders())
+    assert out == []
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 7. get_account_summary — flat dict keyed by IB tag
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_get_account_summary_parses_numeric_fields():
+    svc = _svc_ready()
+    svc._ib.managedAccounts = MagicMock(return_value=["DUN615665"])
+    rows = [
+        SimpleNamespace(tag="NetLiquidation", value="123456.78"),
+        SimpleNamespace(tag="BuyingPower", value="200000.00"),
+        SimpleNamespace(tag="AccountType", value="UNIVERSAL"),
+    ]
+    svc._ib.accountSummaryAsync = AsyncMock(return_value=rows)
+    out = asyncio.run(svc.get_account_summary())
+    assert out["success"] is True
+    assert out["account"] == "DUN615665"
+    assert out["fields"]["NetLiquidation"] == 123456.78
+    assert out["fields"]["BuyingPower"] == 200000.00
+    assert out["fields"]["AccountType"] == "UNIVERSAL"  # non-numeric stays string
+
+
+def test_l2a_get_account_summary_disconnected_returns_failure():
+    svc = IBDirectService.__new__(IBDirectService)
+    svc.config = IBDirectConfig(host="x", port=1, client_id=11, read_only=False)
+    svc.ensure_connected = AsyncMock(return_value=False)
+    out = asyncio.run(svc.get_account_summary())
+    assert out["success"] is False
+    assert out["error"] == "ib_direct_not_connected"
+    assert out["fields"] == {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 8. Executor routing: BOT_ORDER_PATH=direct invokes ib-direct
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_executor_ib_entry_direct_mode_calls_ib_direct():
+    ex = _executor_live()
+    fake = {"success": True, "order_id": 1234, "fill_price": None, "filled_qty": 0,
+            "status": "submitted", "broker": "ib_direct", "simulated": False}
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_entry = AsyncMock(return_value=fake)
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex._ib_entry(_fake_trade("XYZ")))
+    assert r == fake
+    mock_ib_direct.place_entry.assert_awaited_once()
+    mock_queue_order.assert_not_called()   # pusher path UNTOUCHED
+
+
+def test_l2a_executor_ib_entry_pusher_default_does_not_call_ib_direct():
+    ex = _executor_live()
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_entry = AsyncMock(return_value={"unused": True})
+    env = {k: v for k, v in os.environ.items() if k != "BOT_ORDER_PATH"}
+    with patch.dict(os.environ, env, clear=True), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.is_pusher_connected", return_value=False):
+        r = asyncio.run(ex._ib_entry(_fake_trade("XYZ")))
+    assert r["success"] is False
+    assert r.get("error") == "pusher_offline_cannot_place_entry"
+    mock_ib_direct.place_entry.assert_not_called()
+
+
+def test_l2a_executor_ib_stop_direct_mode_calls_ib_direct():
+    ex = _executor_live()
+    fake = {"success": True, "order_id": 555, "stop_price": 10.0,
+            "broker": "ib_direct", "simulated": False}
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_stop = AsyncMock(return_value=fake)
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex._ib_stop(_fake_trade("ABC")))
+    assert r == fake
+    mock_ib_direct.place_stop.assert_awaited_once()
+    mock_queue_order.assert_not_called()
+
+
+def test_l2a_executor_attach_oca_direct_mode_calls_ib_direct():
+    ex = _executor_live()
+    fake = {"success": True, "stop_order_id": 700, "target_order_id": 701,
+            "oca_group": "ADOPT-OCA-foo", "broker": "ib_direct", "simulated": False,
+            "partial": False, "errors": []}
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_oca_stop_target = AsyncMock(return_value=fake)
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex.attach_oca_stop_target(_fake_trade("ABC")))
+    assert r == fake
+    mock_ib_direct.place_oca_stop_target.assert_awaited_once()
+    mock_queue_order.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 9. Patch J contract preserved: exceptions surface as failures, no pusher fallback
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_executor_ib_entry_direct_exception_does_not_fall_back():
+    ex = _executor_live()
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_entry = AsyncMock(side_effect=RuntimeError("socket drop"))
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex._ib_entry(_fake_trade("XYZ")))
+    assert r["success"] is False
+    assert "ib_direct_entry_exception" in r["error"]
+    for v in r.values():
+        if isinstance(v, str):
+            assert not v.startswith("SIM-")
+    mock_queue_order.assert_not_called()
+
+
+def test_l2a_executor_ib_stop_direct_exception_does_not_fall_back():
+    ex = _executor_live()
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_stop = AsyncMock(side_effect=RuntimeError("socket drop"))
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex._ib_stop(_fake_trade("ABC")))
+    assert r["success"] is False
+    assert "ib_direct_stop_exception" in r["error"]
+    mock_queue_order.assert_not_called()
+
+
+def test_l2a_executor_attach_oca_direct_exception_does_not_fall_back():
+    ex = _executor_live()
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_oca_stop_target = AsyncMock(side_effect=RuntimeError("rejected"))
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct), \
+         patch("routers.ib.queue_order") as mock_queue_order:
+        r = asyncio.run(ex.attach_oca_stop_target(_fake_trade("ABC")))
+    assert r["success"] is False
+    assert "ib_direct_oca_exception" in r["error"]
+    mock_queue_order.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 10. Simulated mode untouched — direct path NOT invoked
+# ─────────────────────────────────────────────────────────────────────
+
+def test_l2a_simulated_mode_does_not_call_ib_direct_entry():
+    """ExecutorMode.SIMULATED routes to _simulate_entry; SIM- IDs are
+    expected there but ib-direct must NEVER be invoked."""
+    ex = TradeExecutorService.__new__(TradeExecutorService)
+    ex._mode = ExecutorMode.SIMULATED
+    ex._initialized = True
+    ex._kill_switch_refusal = lambda *_a, **_k: None
+    mock_ib_direct = MagicMock()
+    mock_ib_direct.place_entry = AsyncMock(return_value={"unused": True})
+    with patch.dict(os.environ, {"BOT_ORDER_PATH": "direct"}, clear=False), \
+         patch("services.ib_direct_service.get_ib_direct_service",
+               return_value=mock_ib_direct):
+        r = asyncio.run(ex.execute_entry(_fake_trade("X")))
+    assert r["success"] is True
+    assert r.get("simulated") is True
+    mock_ib_direct.place_entry.assert_not_called()
