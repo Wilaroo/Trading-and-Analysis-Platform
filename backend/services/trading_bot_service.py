@@ -846,7 +846,25 @@ class TradingBotService:
         self._mode = BotMode.AUTONOMOUS  # Start in autonomous mode for auto-trading
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
-        
+
+        # v19.34.25 — Patches G/H/I (post-2026-02-bot-stampede-disaster).
+        # These three timestamps + flag coordinate the startup-gate trio:
+        #   • _started_at — moment start() fires; STARTUP_GRACE_SECONDS
+        #     (default 60s) of cool-down blocks new entries even though
+        #     the scan loop is alive. Lets pre-market staged signals
+        #     stale-expire instead of cascading into a stampede at the
+        #     instant the operator flips the kill switch.
+        #   • _patch_f_audit_complete — set True once the v19.34.24
+        #     orphan-GTC tripwire has actually run. Pre-G the audit had
+        #     a 25s asyncio.sleep before its first audit while the
+        #     scan loop began firing at t+1s, so the bot raced past
+        #     its own protection.
+        #   • _patch_f_audit_started_at — used to detect tripwire
+        #     wedge and force-clear after N seconds of stuck "running".
+        self._started_at: Optional[datetime] = None
+        self._patch_f_audit_complete: bool = False
+        self._patch_f_audit_started_at: Optional[datetime] = None
+
         # Risk parameters
         self.risk_params = RiskParameters()
         
@@ -2008,6 +2026,13 @@ class TradingBotService:
             return
         
         self._running = True
+        # v19.34.25 Patch H — stamp startup time so _execute_trade can
+        # enforce STARTUP_GRACE_SECONDS before firing any new entries.
+        # Also reset Patch F audit flag so a fresh start() correctly
+        # gates the first audit cycle.
+        self._started_at = datetime.now(timezone.utc)
+        self._patch_f_audit_complete = False
+        self._patch_f_audit_started_at = None
         self._mode = BotMode.AUTONOMOUS if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
         # v19.34.123 — Continuous real-time kill-switch monitor.
@@ -2107,8 +2132,25 @@ class TradingBotService:
             #      investigating a specific zombie set you want to
             #      inspect manually first.
             async def _startup_orphan_gtc_audit():
+                # v19.34.25 Patch G — flag the audit as STARTED before
+                # anything else. _execute_trade can use this to
+                # distinguish "audit will eventually run" (allow normal
+                # waiting behaviour) from "audit never even started"
+                # (something is wrong, hard-block the bot).
+                self._patch_f_audit_started_at = datetime.now(timezone.utc)
                 try:
-                    await asyncio.sleep(25)  # pusher snapshot warm-up
+                    # v19.34.25 — shrunk from 25s → configurable (default
+                    # 10s, env: PATCH_F_AUDIT_SLEEP_SECONDS). The
+                    # _execute_trade gate now blocks entries until the
+                    # audit completes, so the sleep no longer needs to
+                    # be the operator's primary safety margin.
+                    import os as _os_sleep
+                    _audit_sleep = float(
+                        _os_sleep.environ.get(
+                            "PATCH_F_AUDIT_SLEEP_SECONDS", "10",
+                        )
+                    )
+                    await asyncio.sleep(_audit_sleep)
                     from services.orphan_gtc_reconciler import (
                         VERDICT_NAKED_NO_POSITION,
                         VERDICT_ORPHAN_NO_TRADE,
@@ -2262,6 +2304,18 @@ class TradingBotService:
                     logger.warning(
                         "[v19.34.66 ORPHAN-GTC BOOT] tripwire crashed "
                         "(non-fatal): %s", e,
+                    )
+                finally:
+                    # v19.34.25 Patch G — ALWAYS mark complete, even on
+                    # crash/timeout/early-return. The _execute_trade
+                    # gate is "audit has run at least once"; we don't
+                    # want a tripwire bug to brick all entries forever.
+                    # If the audit failed, the periodic reconciler will
+                    # retry every 30s — that's the real safety net.
+                    self._patch_f_audit_complete = True
+                    logger.info(
+                        "[v19.34.25 PATCH-G GATE] Patch F audit done "
+                        "— _execute_trade gate is now open"
                     )
             asyncio.create_task(_startup_orphan_gtc_audit())
 
@@ -3707,6 +3761,57 @@ class TradingBotService:
         Unified Stream shows why the bot refused to take it.
         """
         try:
+            # ── v19.34.25 PATCH-G + PATCH-H — Startup gates ─────────
+            # Hard fences before ANY entry can fire. These exist
+            # because the 2026-02 stampede disaster showed that:
+            #   (1) the bot's scan loop fires within 1-2s of start(),
+            #   (2) Patch F's orphan-GTC audit had a 25s sleep before
+            #       it could run, so the scan loop raced past its own
+            #       boot protection,
+            #   (3) staged pre-market signals + a freshly-flipped
+            #       kill switch produced 7 simultaneous market-orders
+            #       that filled instantly, leaving the account naked
+            #       when the account guard tripped seconds later.
+            #
+            # Gate H (startup grace) — refuse to fire entries for the
+            # first STARTUP_GRACE_SECONDS (default 60s) after start().
+            # This lets stale pre-market signals expire instead of
+            # cascading, and gives Patch F time to complete its audit.
+            # Operator can override via env to 0 if they want the old
+            # zero-grace behaviour back.
+            #
+            # Gate G (Patch F audit) — refuse to fire entries until
+            # the orphan-GTC audit has completed at least once. The
+            # tripwire ALWAYS sets _patch_f_audit_complete=True in its
+            # finally block, so a crashed/timed-out audit doesn't
+            # brick entries indefinitely.
+            import os as _os_gate
+            from datetime import datetime as _dt_gate, timezone as _tz_gate
+            grace_seconds = int(_os_gate.environ.get(
+                "STARTUP_GRACE_SECONDS", "60",
+            ))
+            if self._started_at is not None and grace_seconds > 0:
+                elapsed = (_dt_gate.now(_tz_gate.utc) - self._started_at).total_seconds()
+                if elapsed < grace_seconds:
+                    logger.warning(
+                        "[v19.34.25 PATCH-H GATE] entry SKIPPED for %s "
+                        "%s — bot in startup grace (%.1fs / %ds). "
+                        "Set STARTUP_GRACE_SECONDS=0 to disable.",
+                        getattr(trade, "symbol", "?"),
+                        getattr(trade, "direction", "?"),
+                        elapsed, grace_seconds,
+                    )
+                    return
+            if not self._patch_f_audit_complete:
+                logger.warning(
+                    "[v19.34.25 PATCH-G GATE] entry SKIPPED for %s %s "
+                    "— Patch F audit has not yet run. Bot will retry "
+                    "on next scan tick.",
+                    getattr(trade, "symbol", "?"),
+                    getattr(trade, "direction", "?"),
+                )
+                return
+
             from services.safety_guardrails import get_safety_guardrails
             guard = get_safety_guardrails()
 
@@ -3735,6 +3840,29 @@ class TradingBotService:
                     except Exception:
                         _current_acct = None
                 _ok, _reason = check_account_match(_current_acct)
+                # v19.34.25 Patch I — if the first check failed because
+                # account_id is None, retry with the pusher's
+                # first-POST timestamp so the warmup window applies.
+                # Only kicks in for the missing-account branch; a true
+                # mismatch (paper-vs-live drift) still fails fast.
+                if not _ok and not _current_acct:
+                    try:
+                        from routers.ib import _pushed_ib_data as _pid
+                        from datetime import datetime as _dt_ag, timezone as _tz_ag
+                        _first_ts = _pid.get("first_pushed_at")
+                        if _first_ts:
+                            _first_seen_dt = _dt_ag.fromisoformat(
+                                _first_ts.replace("Z", "+00:00")
+                            )
+                            _ok, _reason = check_account_match(
+                                _current_acct,
+                                pusher_first_seen_at=_first_seen_dt,
+                            )
+                    except Exception as _warmup_exc:
+                        logger.debug(
+                            "[v19.34.25 PATCH-I] warmup lookup skipped: %s",
+                            _warmup_exc,
+                        )
                 if not _ok:
                     logger.critical(f"[ACCOUNT GUARD] {_reason} — tripping kill-switch")
                     try:
