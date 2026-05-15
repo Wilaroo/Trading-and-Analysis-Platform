@@ -4,6 +4,70 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.28 — Patch L2b) — Reconciler / Account-Guard Wiring through ib-direct
+
+### Context
+L2a scaffolded the new `IBDirectService` methods + executor routing.
+L2b completes Phase L2 of the migration plan by wiring the read
+consumers (position reconciler, orphan-GTC positions fetch, account
+guard lookup) at the new authoritative sources when
+`BOT_ORDER_PATH=direct`.
+
+### What changed (all env-var gated, no behavior change at default)
+- `backend/services/orphan_gtc_reconciler.py` —
+  `_fetch_ib_positions()` now consults `ib_direct.get_positions_fresh()`
+  first when `BOT_ORDER_PATH=direct`. Falls back to the pusher snapshot
+  on any error. New `source.tier` = `"ib_direct_fresh"` for operator
+  visibility.
+- `backend/services/position_reconciler.py` — new module-level helper
+  `_l2b_fetch_ib_positions(strict_direct: bool)` wraps the same fast
+  path. Wired into:
+  - `reconcile_positions_with_ib()` — adds `report["positions_source"]`
+    so the audit trail records which feed was used.
+  - `sync_position_from_ib()` — pulls fresh positions when path=direct.
+- `backend/services/trading_bot_service.py` — account-guard lookup
+  (the recurring loop at line ~3824) now queries
+  `ib_direct._ib.managedAccounts()` first when `BOT_ORDER_PATH=direct`.
+  This eliminates the Patch I warmup-window dependency: `managedAccounts`
+  is populated synchronously during IB Gateway handshake on
+  clientId=11, so no race against the pusher's `reqAccountSummary`
+  arrival.
+
+### Already on ib-direct BEFORE L2b (no work needed)
+- `cancel_orphan_gtc_orders` already uses `ib_direct.cancel_order` as
+  primary with cancel-queue fallback.
+- `_fetch_ib_open_orders` already has a 3-tier resolver with ib_direct
+  as tier 1.
+- `naked_position_sweep` reissue path uses `attach_oca_stop_target`,
+  which L2a wired to `ib_direct.place_oca_stop_target` under the same
+  env var.
+
+### Tests
+`backend/tests/test_patch_l2b_reconciler_wiring_v19_34_28.py` — 10
+regressions covering:
+- env-var gate on `_l2b_fetch_ib_positions` (direct vs pusher vs
+  default)
+- strict-direct mode returns `"unavailable"` on socket miss
+- non-strict mode falls through to pusher on ib-direct exception
+- `orphan_gtc_reconciler._fetch_ib_positions` tier reporting
+- direct-mode socket-down falls back to pusher
+- `reconcile_positions_with_ib` records `positions_source` in report
+- default-mode behaviour unchanged
+
+10/10 passing. Combined regression: Patch J (8) + L1 (8) + L2a (27) +
+L2b (10) = **53/53 green**.
+
+### Outcome
+Phase L2 is COMPLETE. All write paths (L2a) and read consumers (L2b)
+are env-var gated through ib-direct. Code lives on `origin/main`
+doing nothing until the operator flips `BOT_ORDER_PATH=direct` in
+`.env` per the L3 Monday paper-validation runbook documented in
+`/app/memory/IB_DIRECT_MIGRATION_PLAN.md`.
+
+Patch served as `frontend/public/v19_34_28_patch_l2b.patch`.
+
+
+
 ## 2026-02-XX (v19.34.28 — Patch L2a) — IB-Direct Order Family Scaffold (inert)
 
 ### Context
