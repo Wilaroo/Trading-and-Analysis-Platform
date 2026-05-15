@@ -101,14 +101,22 @@ const humanizeStyle = (raw) => {
 
 // Derive the visible "tier chip" text from the position. Mirrors the
 // mockup: SCALP long, SHORT_REV, DAY long, SWING short, etc.
+// v19.34.32 — When backend stamps trade_style="trade_2_hold" (the
+// generic intraday fallback), prefer the setup-derived horizon so a
+// daily_squeeze stops reading as "DAY 2 short" / "INTRA".
+const GENERIC_TRADE_STYLE_KEYS = new Set(['trade_2_hold']);
 const tierLabel = (pos) => {
   const dir = (pos.direction || pos.side || '').toLowerCase();
   const dirText = dir === 'short' ? 'short' : 'long';
+  const rawTs = String(pos.trade_style || '').trim().toLowerCase();
+  const isGenericTs = GENERIC_TRADE_STYLE_KEYS.has(rawTs);
   // trade_style is set by the bot when a setup is taken (e.g. "scalp",
   // "swing", "day", "position"). scan_tier is the universe-level tier
-  // (intraday/swing/position/investment). Prefer trade_style; fall back
-  // to scan_tier; finally, timeframe.
-  const style = humanizeStyle(pos.trade_style)
+  // (intraday/swing/position/investment). Prefer trade_style unless
+  // it's the generic "trade_2_hold" fallback; then fall through to
+  // setup-derived label.
+  const style = (!isGenericTs && humanizeStyle(pos.trade_style))
+    || humanizeStyle(pos.setup_type)
     || humanizeStyle(pos.scan_tier)
     || humanizeStyle(pos.timeframe);
   if (!style) return dirText.toUpperCase();
@@ -117,14 +125,19 @@ const tierLabel = (pos) => {
 
 // Synthesize a "model trail / why" sub-line from whatever the bot wrote
 // onto the trade. Mirrors the mockup line:
-//   "TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull"
+//   "Entry $228.20 → Last $225.53 · SL $229.59 · PT $205.37 · 15sh · SMB B"
+// v19.34.32 — entry/last lead the line so the operator's most-asked-for
+// reference price (entry) is the first thing visible after the symbol.
 const modelTrailLine = (pos) => {
   const parts = [];
-  // 2026-05-01 v19.23.1 — operator wants share size visible on every
-  // row at-a-glance. Lead with `Nsh` so the position size is the first
-  // thing the eye picks up after the symbol+pnl.
-  const sh = pos.shares ?? pos.quantity;
-  if (sh != null) parts.push(`${Math.round(Math.abs(Number(sh)))}sh`);
+  // Lead with Entry → Last so the operator's anchor price is prominent.
+  if (pos.entry_price != null) {
+    let head = `Entry $${formatPx(pos.entry_price)}`;
+    if (pos.current_price != null) {
+      head += ` → Last $${formatPx(pos.current_price)}`;
+    }
+    parts.push(head);
+  }
   const trail = pos.trailing_stop_state || {};
   if (trail.enabled && trail.current_stop) {
     const mode = (trail.mode || 'trail').toUpperCase();
@@ -135,6 +148,9 @@ const modelTrailLine = (pos) => {
   const pt = pos.target_price
     ?? (Array.isArray(pos.target_prices) ? pos.target_prices[0] : null);
   if (pt != null) parts.push(`PT $${formatPx(pt)}`);
+  // Share size next — operator's second most-asked-for reference.
+  const sh = pos.shares ?? pos.quantity;
+  if (sh != null) parts.push(`${Math.round(Math.abs(Number(sh)))}sh`);
   // Reasoning first bullet (often the model that fired the trade)
   const reasoning = Array.isArray(pos.reasoning) ? pos.reasoning : [];
   if (reasoning.length > 0) {
@@ -222,11 +238,14 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           <span className={`v5-chip ${chipClass}`}>{tier}</span>
           {/* v19.34.99 — trade-style + time-horizon chip. Always present
               even when trade_style is missing (falls back to setup-derived
-              style via SETUP_TO_STYLE). Hover for full horizon text. */}
+              style via SETUP_TO_STYLE). Hover for full horizon text.
+              v19.34.32 — showSetup=true so the actual setup name
+              (Daily Squeeze, Accumulation Entry, Fashionably Late, …)
+              is visible at a glance instead of just the horizon code. */}
           <TradeStyleChip
             row={position}
             compact={true}
-            showSetup={false}
+            showSetup={true}
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
