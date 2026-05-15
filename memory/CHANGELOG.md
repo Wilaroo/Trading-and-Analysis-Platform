@@ -3,6 +3,134 @@
 Reverse-chronological log of shipped work. Newest first.
 
 
+## 2026-05-15 (v19.34.25 — Patches G/H/I) — Startup Race & Account-Guard Warmup
+
+### Context
+After Patch F shipped, the first time the operator flipped the kill
+switch OFF caused a 7-position naked stampede because three race
+conditions compounded:
+- The scan loop fired entries within 1-2s of `start()`, but Patch F's
+  orphan-GTC audit had a hard-coded 25s sleep — the bot raced past its
+  own boot protection.
+- No startup grace window meant stale pre-market staged signals
+  cascaded into 7 simultaneous market orders.
+- `account_guard.check_account_match` tripped the kill switch the
+  instant pusher data arrived without an `account_id`, but the pusher
+  pushes positions/orders BEFORE its `reqAccountSummary` callback
+  lands — leaving the new 7 entries naked when the guard finally fired.
+
+### What Patches G/H/I do
+- **Gate G** — `_execute_trade` refuses entries until
+  `_patch_f_audit_complete=True`. The orphan-GTC tripwire ALWAYS sets
+  the flag in its `finally:` block so a crashed audit doesn't brick
+  entries indefinitely. Reduces the historical 25s audit sleep to a
+  configurable default of 10s (`PATCH_F_AUDIT_SLEEP_SECONDS`).
+- **Gate H** — 60-second startup grace window after `start()` blocks
+  entries via `STARTUP_GRACE_SECONDS`. Operator can set =0 to bypass.
+- **Gate I** — `account_guard.check_account_match` accepts an optional
+  `pusher_first_seen_at`; if missing-account is reported within
+  `ACCOUNT_GUARD_WARMUP_SECONDS` (default 60) the guard returns
+  `(True, "pending — warming up")` instead of tripping. True
+  mismatches (wrong account_id) still fail fast.
+
+### Files changed
+- `backend/services/trading_bot_service.py` (Gates G + H, startup
+  timestamp, audit completion flag)
+- `backend/services/account_guard.py` (Gate I warmup branch)
+- `backend/routers/ib.py` (stamp `first_pushed_at` on first POST)
+- `backend/tests/test_patches_ghi_startup_gates_v19_34_25.py` (9
+  regression tests, all green on DGX)
+
+### Deployment
+Committed and pushed as `2ec19198` on `origin/main`. 9/9 pytest passing
+on DGX. Bot restarted via Windows `.bat` controller at 16:34 ET.
+Kill-switch correctly inherited from prior trip; manual reset at 16:44
+ET let the bot resume trading without account_guard re-tripping —
+confirming Patch I worked end-to-end.
+
+### Outcome & follow-up
+Patches G/H/I behaved as designed. However, the operator immediately
+hit a different (pre-existing) bug — see Patch J below.
+
+
+## 2026-05-15 — Patch J IDENTIFIED (NOT YET FIXED) — Order-Path Misconfiguration
+
+### Severity
+🔴 P0. Cannot safely run the bot until fixed.
+
+### Root cause
+`/api/system/ib-direct/status` reports:
+```
+"shadow": { "order_path": "pusher" }   ← WRONG
+"connected": true, "authorized_to_trade": true, "managed_accounts": ["DUN615665"]
+```
+The bot's outbound `order_path` is `"pusher"`, but the IB pusher is
+ONE-WAY (IB → bot, market data only). It cannot relay orders OUT to
+IB. When `attach_oca_stop_target` runs, it routes through the pusher
+path, the pusher correctly reports "offline for outbound", and the
+bot falls back to **simulated stop IDs** (`SIM-STP-*`, `SIM-STOP-*`).
+The entry market order succeeds (via some other internal IB path), but
+the OCA bracket NEVER reaches IB.
+
+### Evidence
+- Logs after every entry: `attach_oca_stop_target: pusher offline for
+  {SYMBOL} — returning simulated ids; reconciler will retry on next
+  scan.`
+- v127 naked-sweep runs every cycle, detects all positions as naked
+  because `SIM-STP-*` doesn't match any live IB order, then "emergency
+  re-issues" through the same broken `attach_oca_stop_target` path,
+  which returns more simulated IDs. Infinite loop.
+- `ib-direct` connection is healthy and authorized to trade
+  (`clientId=11`, port 4002, `read_only=false`). The correct path
+  exists but isn't being used.
+
+### Real-world impact this session
+On 2026-05-15 ~12:41–12:46 ET, bot opened 6 NAKED positions:
+- BTG (10,762 sh @ $4.89 ≈ $52K)
+- HMY (3,332 sh @ $15.77 ≈ $52.5K)
+- ONON (281 sh @ $37.48)
+- SWK (100 sh @ $75.08)
+- JBLU (700 sh @ $4.70)
+- MOD (qty unknown @ market)
+Operator manually flattened all in TWS at ~13:02 ET. Bot DB synced via
+`POST /api/safety/flatten-all?confirm=FLATTEN`. Kill switch latched
+ON.
+
+### Patch J design (TODO)
+Option A (preferred): Change order_path default to `"ib-direct"` and
+audit every call site of `attach_oca_stop_target` to use ib-direct
+when ib-direct.connected=true. If both paths fail, FAIL HARD — refuse
+to send entry instead of fallback-to-simulated.
+
+Option B (belt+suspenders): Add a pre-flight check in `_execute_trade`
+that calls `_can_route_brackets()` BEFORE placing entry; if False,
+SKIP entry with `[v19.34.26 PATCH-J GATE]` warning. No naked positions
+possible by construction.
+
+### Files to investigate
+- Wherever `attach_oca_stop_target` is defined (search backend for
+  function name; likely in `bracket_reissue_service.py`,
+  `bot_persistence.py`, or `trading_bot_service.py`).
+- The "shadow" stats block in ib_direct router — that's where
+  `order_path` is set and read.
+- `_execute_trade` in trading_bot_service.py — needs a Gate J before
+  the entry market-order call.
+
+### Test plan
+1. Unit test: `attach_oca_stop_target` returns FAIL (not simulated) if
+   neither pusher nor ib-direct can route.
+2. Unit test: when ib-direct is connected, `attach_oca_stop_target`
+   prefers it over pusher.
+3. Integration test: `_execute_trade` Gate J skips entry if
+   `_can_route_brackets()` is False, logs `[PATCH-J GATE]`.
+4. Regression: confirm Patches G/H/I still pass.
+
+### Status
+NOT STARTED. Operator kill switch ON. Account flat. Patch J is the
+next P0 work item.
+
+
+
 
 ## 2026-02-XX (v19.34.24 — Patch F) — Boot-time IB Zombie Order Flush
 

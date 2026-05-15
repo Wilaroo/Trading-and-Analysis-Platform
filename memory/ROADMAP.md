@@ -3,6 +3,90 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🔴 P0 — Patch J: order-path misconfiguration causing naked positions (2026-05-15)
+
+**This is the actual root cause of every "naked positions" incident in
+this app, going back to the original 14-position stranding.** Patches
+A/B/C/E/F/G/H/I all addressed downstream/timing symptoms; J is the
+real fix.
+
+### Bug
+`shadow.order_path` is set to `"pusher"`, but the pusher is one-way
+(market data IN). It cannot relay orders OUT. Every call to
+`attach_oca_stop_target` routes through pusher → "offline for
+outbound" → falls back to simulated stop IDs (`SIM-STP-*`,
+`SIM-STOP-*`) that exist only in the bot's DB. IB sees the entry
+market-order fill but NEVER sees the bracket. The v127 naked-sweep
+detects the position as naked and "emergency re-issues" through the
+same broken path, producing more sim IDs. Infinite naked loop.
+
+Meanwhile `/api/system/ib-direct/status` shows ib-direct
+fully healthy: `connected: true, authorized_to_trade: true,
+managed_accounts: ["DUN615665"], host: 192.168.50.1:4002,
+read_only: false`. That's the path that should be used.
+
+### Live impact 2026-05-15
+6 naked positions opened 12:41–12:46 ET (BTG, HMY, ONON, SWK, JBLU,
+MOD). Operator manually flattened in TWS at 13:02 ET. Kill switch ON.
+Account flat.
+
+### Patch J design
+**Gate J in `_execute_trade`** (preferred — fail closed, by
+construction can't go naked):
+
+```
+if not self._can_route_brackets():
+    logger.warning("[v19.34.26 PATCH-J GATE] entry SKIPPED for %s %s — "
+                   "neither pusher nor ib-direct can route brackets",
+                   trade.symbol, trade.direction)
+    return
+```
+
+`_can_route_brackets()` should:
+1. Check if ib-direct is connected and authorized_to_trade.
+2. Return True only if a bracket attach would succeed.
+3. NOT return True if the only path is the (one-way) pusher.
+
+**Plus** in `attach_oca_stop_target`:
+- When the configured `order_path` can't route, FAIL HARD (raise) — do
+  NOT silently return simulated IDs. Simulated IDs are a footgun.
+- Optionally: auto-prefer ib-direct when ib-direct.connected=true,
+  regardless of `order_path` config.
+
+### Files to investigate
+- Search backend for `def attach_oca_stop_target` — likely in
+  `bracket_reissue_service.py`, `bot_persistence.py`, or wherever
+  brackets get sent.
+- The `shadow.order_path` field — find where it's set and why it
+  defaults to "pusher". Is there a config flag? Env var?
+- `_execute_trade` in `trading_bot_service.py` — add Gate J pre-flight
+  before market-order placement.
+- `v127 naked-sweep` (search `naked-sweep` in backend) — its
+  "emergency re-issue" path also needs to fail-hard if no real
+  bracket route exists.
+
+### Tests
+1. `attach_oca_stop_target` raises (not returns sim IDs) when no
+   real path available.
+2. `_can_route_brackets()` returns False when pusher=connected,
+   ib-direct=disconnected.
+3. `_can_route_brackets()` returns True when ib-direct=connected.
+4. `_execute_trade` skips with `PATCH-J GATE` log when route check
+   fails.
+5. Regression: existing Patches G/H/I tests still green.
+
+### Deployment plan
+Same as Patches G/H/I: develop in Emergent sandbox, publish patch via
+`https://orphan-reconciler-v6.preview.emergentagent.com/<patchfile>`,
+operator `curl + git apply` on DGX, run pytest, commit, push,
+restart, verify with kill switch ON, then unlock.
+
+### Status
+NOT STARTED. Operator account currently flat, kill switch ON.
+
+---
+
+
 ## ✅ SHIPPED 2026-02-XX — Patch F (v19.34.24) — Boot-time IB Zombie Flush
 
 Closes the gap exposed by the 2026-02 market-open zombie disaster: pre-F,
