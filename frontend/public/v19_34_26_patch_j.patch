@@ -1,0 +1,363 @@
+From 65db1ace51c13ff2c07093878746099de16b3e43 Mon Sep 17 00:00:00 2001
+From: e1 <e1@emergent.sh>
+Date: Fri, 15 May 2026 17:21:23 +0000
+Subject: [PATCH] v19.34.26 Patch J: fail-hard on pusher-offline (no more
+ silent simulated brackets)
+
+---
+ backend/services/trade_executor_service.py    | 118 +++++++++--
+ ...patch_j_no_simulated_brackets_v19_34_26.py | 189 ++++++++++++++++++
+ 2 files changed, 293 insertions(+), 14 deletions(-)
+ create mode 100644 backend/tests/test_patch_j_no_simulated_brackets_v19_34_26.py
+
+diff --git a/backend/services/trade_executor_service.py b/backend/services/trade_executor_service.py
+index a80487df..ce3ded74 100644
+--- a/backend/services/trade_executor_service.py
++++ b/backend/services/trade_executor_service.py
+@@ -502,8 +502,28 @@ class TradeExecutorService:
+             from routers.ib import queue_order, get_order_result, is_pusher_connected
+             
+             if not is_pusher_connected():
+-                logger.warning("IB pusher not connected - falling back to simulation")
+-                return await self._simulate_entry(trade)
++                # v19.34.26 Patch J — FAIL HARD when pusher offline.
++                # Pre-J the legacy entry path fell back to
++                # `_simulate_entry` which returned success=True with a
++                # SIM order_id. The trade was marked OPEN in the bot
++                # DB while nothing existed at IB; the next pusher
++                # reconnect would then snap a real position view that
++                # didn't match → orphan reconciler → stampede risk.
++                # In LIVE mode pusher-offline must be a hard fail.
++                logger.critical(
++                    "[v19.34.26 PATCH-J] execute_entry: pusher OFFLINE "
++                    "for %s — refusing to fall back to simulated entry. "
++                    "Trade dropped; no real order placed at IB.",
++                    trade.symbol,
++                )
++                return {
++                    "success": False,
++                    "error": "pusher_offline_cannot_place_entry",
++                    "order_id": None,
++                    "fill_price": None,
++                    "filled_qty": 0,
++                    "pusher_offline": True,
++                }
+             
+             action = "BUY" if trade.direction.value == "long" else "SELL"
+             
+@@ -670,8 +690,26 @@ class TradeExecutorService:
+             from routers.ib import queue_order, is_pusher_connected
+             
+             if not is_pusher_connected():
+-                logger.warning("IB pusher not connected - simulating stop order")
+-                return await self._simulate_stop(trade)
++                # v19.34.26 Patch J — FAIL HARD when pusher offline.
++                # Pre-J this returned a simulated stop with
++                # `success: True` and `SIM-STOP-*` id. Callers (legacy
++                # entry+stop path, reconciler fallback) persisted that
++                # sim id as if real → naked position at IB. Now
++                # explicit failure; caller can retry, alert, or flatten.
++                logger.critical(
++                    "[v19.34.26 PATCH-J] _ib_stop: pusher OFFLINE for %s "
++                    "— refusing to return simulated stop. Position is "
++                    "unprotected at IB until pusher reconnects or "
++                    "operator intervenes.",
++                    trade.symbol,
++                )
++                return {
++                    "success": False,
++                    "error": "pusher_offline_cannot_place_stop",
++                    "order_id": None,
++                    "stop_price": trade.stop_price,
++                    "pusher_offline": True,
++                }
+             
+             # Stop order is opposite side
+             action = "SELL" if trade.direction.value == "long" else "BUY"
+@@ -770,17 +808,38 @@ class TradeExecutorService:
+             import uuid as _uuid
+ 
+             if not is_pusher_connected():
+-                logger.warning(
+-                    "attach_oca_stop_target: pusher offline for %s — "
+-                    "returning simulated ids; reconciler will retry on next scan.",
++                # v19.34.26 Patch J — FAIL HARD when pusher offline.
++                # Pre-J this returned `success: True` + simulated IDs
++                # (`SIM-STP-*`, `SIM-TGT-*`). Callers persisted those
++                # sim IDs as if real, so the trade record looked
++                # bracketed while the position was NAKED at IB. The
++                # naked-sweep then "emergency re-issued" through this
++                # same path, getting more sim IDs, looping forever
++                # while the position sat unprotected. Real-world
++                # impact: 6 naked positions on 2026-05-15 12:41-12:46
++                # ET (BTG/HMY/ONON/SWK/JBLU/MOD ≈ $300K notional).
++                #
++                # New contract: explicit `success: False` with a
++                # diagnostic error. Callers (naked_position_sweep,
++                # position_reconciler._spawn_excess_slice / adoption
++                # paths) already handle non-success — they log a
++                # critical alert and retry on the next scan when the
++                # pusher reconnects. The position stays naked until
++                # then, but the BOT KNOWS it's naked instead of being
++                # silently lied to.
++                logger.critical(
++                    "[v19.34.26 PATCH-J] attach_oca_stop_target: pusher "
++                    "OFFLINE for %s — refusing to return simulated IDs. "
++                    "Position is unprotected at IB until pusher reconnects "
++                    "or operator intervenes.",
+                     trade.symbol,
+                 )
+                 return {
+-                    "success": True,
+-                    "stop_order_id": f"SIM-STP-{trade.id}",
+-                    "target_order_id": f"SIM-TGT-{trade.id}",
+-                    "oca_group": f"SIM-OCA-{trade.id}",
+-                    "simulated": True,
++                    "success": False,
++                    "error": "pusher_offline_cannot_attach_brackets",
++                    "stop_order_id": None,
++                    "target_order_id": None,
++                    "oca_group": None,
+                     "pusher_offline": True,
+                 }
+ 
+@@ -966,8 +1025,39 @@ class TradeExecutorService:
+             from routers.ib import queue_order, get_order_result, is_pusher_connected
+ 
+             if not is_pusher_connected():
+-                logger.warning("IB pusher not connected — falling back to simulation")
+-                return await self._simulate_bracket(trade)
++                # v19.34.26 Patch J — FAIL HARD when pusher offline.
++                # Pre-J this fell back to `_simulate_bracket`, which
++                # returned `success: True, status: "filled"` with
++                # SIM-* IDs. The caller (trade_execution.execute_trade)
++                # then marked the trade OPEN in the bot DB even
++                # though nothing was placed at IB. If the pusher
++                # later reconnected and IB happened to fill a
++                # separate parent order from a different code path,
++                # the bot believed it had brackets when it had none
++                # — the exact failure mode for the 2026-05-15
++                # 12:41-12:46 stampede.
++                #
++                # New contract: explicit `success: False`. The
++                # caller's `use_legacy` branch is keyed off
++                # `bracket_result.get('error') in {...}` so we add a
++                # new error code; trade_execution.execute_trade
++                # currently leaves `result["success"] = False` and
++                # the trade is NOT marked OPEN. No phantom DB state.
++                logger.critical(
++                    "[v19.34.26 PATCH-J] _ib_bracket: pusher OFFLINE for %s "
++                    "— refusing to fall back to simulated bracket. Entry "
++                    "WILL NOT fire. Trade dropped; safe state preserved.",
++                    trade.symbol,
++                )
++                return {
++                    "success": False,
++                    "error": "pusher_offline_cannot_place_bracket",
++                    "entry_order_id": None,
++                    "stop_order_id": None,
++                    "target_order_id": None,
++                    "oca_group": None,
++                    "pusher_offline": True,
++                }
+ 
+             action = "BUY" if trade.direction.value == "long" else "SELL"
+             child_action = "SELL" if action == "BUY" else "BUY"
+diff --git a/backend/tests/test_patch_j_no_simulated_brackets_v19_34_26.py b/backend/tests/test_patch_j_no_simulated_brackets_v19_34_26.py
+new file mode 100644
+index 00000000..4b41558b
+--- /dev/null
++++ b/backend/tests/test_patch_j_no_simulated_brackets_v19_34_26.py
+@@ -0,0 +1,189 @@
++"""v19.34.26 Patch J — regression tests for fail-hard order paths.
++
++Pre-Patch-J, four hot paths in `trade_executor_service.py` silently
++fell back to simulated success when the IB pusher was offline:
++
++  • `execute_entry`          → `_simulate_entry`     (fake fill, no IB order)
++  • `_ib_stop`               → `_simulate_stop`      (fake stop, naked position)
++  • `_ib_bracket`            → `_simulate_bracket`   (fake bracket, naked position)
++  • `attach_oca_stop_target` → returns SIM-* IDs     (fake bracket, naked position)
++
++Real-world impact on 2026-05-15 12:41-12:46 ET: 6 naked positions
++opened (BTG, HMY, ONON, SWK, JBLU, MOD ≈ $300K notional) while the
++bot's DB recorded them as fully bracketed via SIM-* IDs.
++
++Patch J makes all four paths return an explicit failure dict
++(`success: False`, `error: "pusher_offline_cannot_*"`, `pusher_offline:
++True`) so callers can:
++
++  • drop the trade entirely (entry / bracket parent path), or
++  • log a critical alert and retry next scan (post-fill attach path),
++
++without ever silently lying about IB state.
++
++These tests pin all four contracts. They MUST NEVER be relaxed back to
++returning simulated success on pusher-offline.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import os
++import sys
++from types import SimpleNamespace
++from unittest.mock import patch
++
++# Make backend importable regardless of cwd.
++_HERE = os.path.dirname(os.path.abspath(__file__))
++_BACKEND = os.path.dirname(_HERE)
++if _BACKEND not in sys.path:
++    sys.path.insert(0, _BACKEND)
++
++import pytest
++
++from services.trade_executor_service import TradeExecutorService, ExecutorMode
++
++
++def _fake_trade(symbol="ABCD", direction="long", stop=10.0, target=15.0, entry=12.0):
++    """Minimal trade-like object that satisfies attribute access."""
++    return SimpleNamespace(
++        id=f"trade-{symbol}",
++        symbol=symbol,
++        direction=SimpleNamespace(value=direction),
++        shares=100,
++        entry_price=entry,
++        stop_price=stop,
++        target_prices=[target],
++        setup_type="vwap_fade_long",
++    )
++
++
++def _executor_live():
++    """A TradeExecutorService pinned to LIVE mode, no broker init required for
++    these tests because we mock the pusher gate to fail BEFORE any
++    queue_order call."""
++    ex = TradeExecutorService.__new__(TradeExecutorService)
++    ex._mode = ExecutorMode.LIVE
++    ex._initialized = True
++    ex._kill_switch_refusal = lambda *_a, **_k: None  # disable
++    return ex
++
++
++# ─────────────────────────────────────────────────────────────────────────
++# 1. execute_entry — fail hard, no SIM order
++# ─────────────────────────────────────────────────────────────────────────
++
++def test_patch_j_execute_entry_fails_hard_on_pusher_offline():
++    ex = _executor_live()
++    with patch("routers.ib.is_pusher_connected", return_value=False), \
++         patch("routers.ib.queue_order") as mock_queue:
++        result = asyncio.run(ex.execute_entry(_fake_trade("SWK")))
++
++    assert result["success"] is False
++    assert result["error"] == "pusher_offline_cannot_place_entry"
++    assert result["pusher_offline"] is True
++    assert result["order_id"] is None
++    # CRITICAL: zero queue_order calls (no IB order attempted).
++    mock_queue.assert_not_called()
++    # CRITICAL: no "SIM-*" leakage in any field.
++    for v in result.values():
++        if isinstance(v, str):
++            assert not v.startswith("SIM-"), f"sim-id leaked: {v}"
++
++
++# ─────────────────────────────────────────────────────────────────────────
++# 2. _ib_stop — fail hard, no SIM stop
++# ─────────────────────────────────────────────────────────────────────────
++
++def test_patch_j_ib_stop_fails_hard_on_pusher_offline():
++    ex = _executor_live()
++    with patch("routers.ib.is_pusher_connected", return_value=False), \
++         patch("routers.ib.queue_order") as mock_queue:
++        result = asyncio.run(ex._ib_stop(_fake_trade("HMY")))
++
++    assert result["success"] is False
++    assert result["error"] == "pusher_offline_cannot_place_stop"
++    assert result["pusher_offline"] is True
++    assert result["order_id"] is None
++    mock_queue.assert_not_called()
++    for v in result.values():
++        if isinstance(v, str):
++            assert not v.startswith("SIM-"), f"sim-id leaked: {v}"
++
++
++# ─────────────────────────────────────────────────────────────────────────
++# 3. _ib_bracket — fail hard, no SIM bracket
++# ─────────────────────────────────────────────────────────────────────────
++
++def test_patch_j_ib_bracket_fails_hard_on_pusher_offline():
++    ex = _executor_live()
++    with patch("routers.ib.is_pusher_connected", return_value=False), \
++         patch("routers.ib.queue_order") as mock_queue:
++        result = asyncio.run(ex._ib_bracket(_fake_trade("BTG")))
++
++    assert result["success"] is False
++    assert result["error"] == "pusher_offline_cannot_place_bracket"
++    assert result["pusher_offline"] is True
++    assert result.get("entry_order_id") is None
++    assert result.get("stop_order_id") is None
++    assert result.get("target_order_id") is None
++    mock_queue.assert_not_called()
++    for v in result.values():
++        if isinstance(v, str):
++            assert not v.startswith("SIM-"), f"sim-id leaked: {v}"
++
++
++def test_patch_j_ib_bracket_failure_does_not_trigger_legacy_fallback():
++    """trade_execution.execute_trade computes `use_legacy` based on
++    bracket_result.error. Patch J's error code MUST NOT match any
++    legacy-fallback trigger, otherwise the bot would fall through to
++    execute_entry and re-attempt with the same broken pusher path."""
++    legacy_triggers = {
++        "bracket_not_supported",
++        "alpaca_bracket_not_implemented",
++        "bracket_missing_stop_or_target",
++    }
++    assert "pusher_offline_cannot_place_bracket" not in legacy_triggers
++
++
++# ─────────────────────────────────────────────────────────────────────────
++# 4. attach_oca_stop_target — fail hard, no SIM bracket attach
++# ─────────────────────────────────────────────────────────────────────────
++
++def test_patch_j_attach_oca_stop_target_fails_hard_on_pusher_offline():
++    ex = _executor_live()
++    trade = _fake_trade("ONON")
++    with patch("routers.ib.is_pusher_connected", return_value=False), \
++         patch("routers.ib.queue_order") as mock_queue:
++        result = asyncio.run(ex.attach_oca_stop_target(trade))
++
++    assert result["success"] is False
++    assert result["error"] == "pusher_offline_cannot_attach_brackets"
++    assert result["pusher_offline"] is True
++    assert result["stop_order_id"] is None
++    assert result["target_order_id"] is None
++    assert result["oca_group"] is None
++    mock_queue.assert_not_called()
++    for v in result.values():
++        if isinstance(v, str):
++            assert not v.startswith("SIM-"), f"sim-id leaked: {v}"
++
++
++# ─────────────────────────────────────────────────────────────────────────
++# Defense-in-depth: simulated entries from EXPLICIT simulator mode are
++# still allowed (so paper trading & unit tests keep working). Patch J
++# only kills the LIVE-mode-falls-back-to-sim behaviour.
++# ─────────────────────────────────────────────────────────────────────────
++
++def test_patch_j_simulator_mode_still_returns_sim_ids():
++    """Sanity: when MODE=SIMULATED the simulator path is intentional
++    (paper trading, tests). Patch J does NOT touch this."""
++    ex = TradeExecutorService.__new__(TradeExecutorService)
++    ex._mode = ExecutorMode.SIMULATED
++    ex._initialized = True
++    ex._kill_switch_refusal = lambda *_a, **_k: None
++    result = asyncio.run(ex._simulate_entry(_fake_trade("PAPER")))
++    assert result["success"] is True
++    assert result.get("simulated") is True
++    # SIM- prefix is fine here — caller knows it's a simulator.
++    assert str(result.get("order_id", "")).startswith("SIM-")
+-- 
+2.39.5
+
