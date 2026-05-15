@@ -3,6 +3,39 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## ✅ SHIPPED 2026-02-XX — Patch F (v19.34.24) — Boot-time IB Zombie Flush
+
+Closes the gap exposed by the 2026-02 market-open zombie disaster: pre-F,
+the v19.34.66 boot tripwire (a) ignored DAY orders (`only_gtc=True`
+default), and (b) only logged — auto-cancel was deferred to the
+v19.34.89 periodic loop (60s warm-up + 30s tick). At market open that
+~90s window IS the disaster. Patch F audits ALL TIFs at boot and
+immediately auto-cancels SAFE verdicts via the v19.34.88 cancel queue
+before the bot ever enters its scan loop. Gated by
+`PATCH_F_AUTO_FLUSH_ON_BOOT` env var (default ON). Audit trail in
+`share_drift_events` collection. 6/6 pytest regressions passing.
+
+### ⚠️ Validation window before next live-trading session
+
+Before re-enabling the bot for live trading, ALSO confirm:
+
+1. **Pusher → backend data path healthy** — `/api/ib-data` returns
+   non-None `last_push` and a positions snapshot reflecting TWS state.
+   Pre-F + recovery context: pusher was alive on Windows but
+   `last_push: None` on DGX backend, meaning the POST loop wasn't
+   reaching backend. Likely root cause: IB Gateway wedge (every
+   `reqHistoricalData` was timing out + `Error 200: No security
+   definition` for ALC, DKS, INCY, SHLD). Restart .bat resolves.
+2. **Boot flush smoke test** — start backend, watch logs for
+   `[v19.34.24 PATCH-F BOOT]` markers within first 30s. Clean account
+   should log `clean — tracked=N`. Non-clean account should log
+   `FOUND naked=N orphan=N mismatch=N at IB` followed by
+   `auto-flushing N zombie order(s)` then `flush complete`.
+3. **Mongo audit trail check** —
+   `db.share_drift_events.find({event_type: "patch_f_boot_zombie_flush_v19_34_24"})`
+   should have one row per backend boot where zombies were found
+   (none expected on a clean boot).
+
 ## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + B + C + E (v19.34.31) COMPLETE
 
 All four order-management cascade-prevention patches are live in

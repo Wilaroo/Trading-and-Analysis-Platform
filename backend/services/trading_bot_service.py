@@ -2076,14 +2076,36 @@ class TradingBotService:
             # for 5 days) was the canary.
             #
             # Fires ONCE at boot (after pusher has had ~25s to publish a
-            # fresh position snapshot) AND every 90s thereafter via the
-            # periodic loop below. Logs ERROR per orphan found, with
-            # ib_order_id + symbol + verdict — searchable by `grep
-            # v19.34.66 ORPHAN-GTC` on operator-side log analysis.
+            # fresh position snapshot) AND every 30s thereafter via the
+            # periodic loop below.
             #
-            # NEVER auto-cancels. Surfacing only. The operator decides
-            # via the V5 UI's "Cancel all confirmed orphans" button or
-            # via TWS directly.
+            # ── v19.34.24 / "Patch F" (Feb-2026) — Boot-time IB zombie flush ──
+            # The 2026-02 market-open zombie disaster: backend was
+            # restarted overnight with fresh patches A/B/C/E applied,
+            # but old DAY orders from the buggy session before the
+            # restart were still alive at IB. At 9:30:00 ET those
+            # zombie orders triggered, creating a -$482K SHLD short
+            # and other massive unauthorised positions before the
+            # operator could intervene.
+            #
+            # Pre-F: this boot tripwire (a) only audited GTC orders
+            # (`only_gtc=True` by default — DAY zombies invisible),
+            # and (b) only LOGGED. Even after v19.34.89 enabled
+            # auto-sweep, the cancel didn't fire until the periodic
+            # loop's 60s warm-up + 30s tick = up to 90s after boot.
+            # At market-open that window is the entire disaster.
+            #
+            # Patch F changes:
+            #   1. Audit ALL TIFs (`only_gtc=False`) so DAY zombies
+            #      are caught.
+            #   2. Immediately auto-cancel SAFE verdicts
+            #      (NAKED_NO_POSITION, ORPHAN_NO_TRADE) right here at
+            #      boot, before the bot enters its scan loop and
+            #      before the periodic loop kicks in.
+            #   3. Gated by `PATCH_F_AUTO_FLUSH_ON_BOOT` env var
+            #      (default ENABLED). Set to "false" only when
+            #      investigating a specific zombie set you want to
+            #      inspect manually first.
             async def _startup_orphan_gtc_audit():
                 try:
                     await asyncio.sleep(25)  # pusher snapshot warm-up
@@ -2091,9 +2113,17 @@ class TradingBotService:
                         VERDICT_NAKED_NO_POSITION,
                         VERDICT_ORPHAN_NO_TRADE,
                         VERDICT_MISMATCHED_SIZE,
+                        SAFE_TO_AUTO_CANCEL,
+                        OrderVerdict,
                         audit_orphan_gtc_orders,
+                        cancel_orphan_gtc_orders,
                     )
-                    audit = await audit_orphan_gtc_orders(bot=self)
+                    # Patch F: include DAY orders. DAY zombies left over
+                    # from a pre-restart session are the exact failure
+                    # mode this guards against.
+                    audit = await audit_orphan_gtc_orders(
+                        bot=self, only_gtc=False,
+                    )
                     if not audit.get("success"):
                         logger.warning(
                             "[v19.34.66 ORPHAN-GTC BOOT] audit could not run "
@@ -2126,6 +2156,101 @@ class TradingBotService:
                                 v.get("status"), v.get("verdict"),
                                 v.get("ib_position_size"),
                                 v.get("reasons"),
+                            )
+
+                        # Patch F: immediate auto-flush of SAFE
+                        # verdicts. Gated by env var so the operator
+                        # can disable for investigation runs.
+                        import os as _os
+                        flush_enabled = _os.environ.get(
+                            "PATCH_F_AUTO_FLUSH_ON_BOOT", "true",
+                        ).strip().lower() in ("1", "true", "yes", "on")
+                        if not flush_enabled:
+                            logger.warning(
+                                "[v19.34.24 PATCH-F BOOT] auto-flush "
+                                "DISABLED via PATCH_F_AUTO_FLUSH_ON_BOOT — "
+                                "leaving %d safe zombies in place for "
+                                "manual review", n_naked + n_orphan,
+                            )
+                            return
+
+                        # Rehydrate raw verdict dicts → OrderVerdict
+                        # objects, filtering to safe set only.
+                        safe_to_cancel = []
+                        for raw in audit.get("verdicts") or []:
+                            if not isinstance(raw, dict):
+                                continue
+                            if raw.get("verdict") not in SAFE_TO_AUTO_CANCEL:
+                                continue
+                            try:
+                                safe_to_cancel.append(OrderVerdict(
+                                    ib_order_id=int(raw.get("ib_order_id") or 0),
+                                    perm_id=raw.get("perm_id"),
+                                    symbol=raw.get("symbol") or "",
+                                    action=raw.get("action") or "",
+                                    quantity=int(raw.get("quantity") or 0),
+                                    order_type=raw.get("order_type") or "",
+                                    limit_price=raw.get("limit_price"),
+                                    stop_price=raw.get("stop_price"),
+                                    time_in_force=raw.get("time_in_force") or "",
+                                    status=raw.get("status") or "",
+                                    verdict=raw.get("verdict") or "",
+                                    reasons=list(raw.get("reasons") or []),
+                                    bot_trade_id=raw.get("bot_trade_id"),
+                                    ib_position_size=raw.get("ib_position_size"),
+                                    submitted_at=raw.get("submitted_at"),
+                                ))
+                            except (TypeError, ValueError) as _rehyd_exc:
+                                logger.warning(
+                                    "[v19.34.24 PATCH-F BOOT] could not "
+                                    "rehydrate verdict %s: %s",
+                                    raw, _rehyd_exc,
+                                )
+                        if not safe_to_cancel:
+                            logger.warning(
+                                "[v19.34.24 PATCH-F BOOT] %d dangerous "
+                                "verdicts but none in SAFE_TO_AUTO_CANCEL "
+                                "set — leaving for operator review",
+                                n_naked + n_orphan + n_mismatch,
+                            )
+                            return
+                        logger.warning(
+                            "[v19.34.24 PATCH-F BOOT] auto-flushing %d "
+                            "zombie order(s) at IB before bot enters "
+                            "scan loop", len(safe_to_cancel),
+                        )
+                        cancel_report = await cancel_orphan_gtc_orders(
+                            verdicts_to_cancel=safe_to_cancel,
+                        )
+                        n_cancelled = len(cancel_report.get("cancelled") or [])
+                        n_errors = len(cancel_report.get("errors") or [])
+                        logger.warning(
+                            "[v19.34.24 PATCH-F BOOT] flush complete — "
+                            "cancelled=%d errors=%d (full report in "
+                            "share_drift_events)",
+                            n_cancelled, n_errors,
+                        )
+                        # Audit-trail write so the operator can grep
+                        # the boot flush after the fact.
+                        try:
+                            db = getattr(self, "_db", None)
+                            if db is None:
+                                from database import get_database
+                                db = get_database()
+                            if db is not None:
+                                db["share_drift_events"].insert_one({
+                                    "event_type": "patch_f_boot_zombie_flush_v19_34_24",
+                                    "started_at": cancel_report.get("started_at"),
+                                    "completed_at": cancel_report.get("completed_at"),
+                                    "requested": cancel_report.get("requested"),
+                                    "cancelled": cancel_report.get("cancelled"),
+                                    "errors": cancel_report.get("errors"),
+                                    "audit_summary": summary,
+                                })
+                        except Exception as _audit_exc:
+                            logger.debug(
+                                "[v19.34.24 PATCH-F BOOT] audit write "
+                                "skipped: %s", _audit_exc,
                             )
                     else:
                         logger.info(

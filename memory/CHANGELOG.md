@@ -4,6 +4,83 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.24 — Patch F) — Boot-time IB Zombie Order Flush
+
+### Context
+
+Sequel to Patches A/B/C/E (`v19.34.30`–`v19.34.31`). Those patches stop
+*new* bracket stacking but cannot help if a previous (buggy) session has
+already left zombie orders living at IB. The 2026-02 market-open
+disaster: backend was restarted overnight with fresh patches applied,
+but **DAY** STP orders from the buggy pre-restart session were still
+alive at IB. At 9:30:00 ET those zombies triggered, creating a -$482K
+SHLD short and other massive unauthorised positions before the operator
+could intervene. Operator manually cancelled all working orders in TWS
+("Cancel All"), then manually flattened the 14 legit positions
+(`closed_manual_v19_34_23`) so the account had zero exposure for the
+rebuild.
+
+### What Patch F does
+
+Modifies the existing v19.34.66 boot-time orphan-GTC tripwire in
+`trading_bot_service._startup_orphan_gtc_audit`:
+
+1. **Audits ALL TIFs** (`only_gtc=False`) — pre-F default `only_gtc=True`
+   made DAY zombies invisible at boot. The DAY-vs-GTC distinction is
+   exactly what let the SHLD zombie escape every prior reconciler.
+2. **Immediate auto-flush** of `SAFE_TO_AUTO_CANCEL` verdicts
+   (`NAKED_NO_POSITION`, `ORPHAN_NO_TRADE`, `EOD_INTRADAY_ENTRY`)
+   via `cancel_orphan_gtc_orders` → v19.34.88 cancel queue → pusher
+   → IB. Pre-F, the boot tripwire only LOGGED; auto-cancel was
+   deferred to the v19.34.89 periodic loop which had ~90s warm-up.
+   At market open, that 90s window IS the disaster.
+3. **`MISMATCHED_SIZE` still NEVER auto-cancelled** — could be a
+   legitimate partial scale-out the bot reduced. Operator review only.
+4. **Gated by `PATCH_F_AUTO_FLUSH_ON_BOOT`** env var (default ON).
+   Set to "false" to disable for a single boot when investigating a
+   specific zombie set manually.
+5. **Audit trail**: every boot flush writes one
+   `share_drift_events` document with
+   `event_type: "patch_f_boot_zombie_flush_v19_34_24"`,
+   `cancelled[]`, `errors[]`, and the full audit summary. Grep
+   `share_drift_events` to forensic-trace any boot.
+
+### Regression coverage
+
+`backend/tests/test_patch_f_boot_zombie_flush_v19_34_24.py` — 6 pure-Python
+tests:
+- `test_patch_f_audits_day_orders_not_just_gtc` — DAY zombies are visible
+- `test_patch_f_auto_flush_cancels_safe_verdicts_via_queue` — safe verdicts
+  enqueue to the v19.34.88 cancel queue (pusher path)
+- `test_patch_f_refuses_mismatched_size_verdict` — never cancels mismatched
+- `test_patch_f_empty_audit_is_noop` — empty list short-circuits
+- `test_patch_f_env_var_disable_flag_is_respected` — truthy/falsy parse
+- `test_patch_f_zombie_disaster_repro_2026_02` — end-to-end SHLD+MSTR repro
+
+All 6 pass.
+
+### Files touched
+
+- `backend/services/trading_bot_service.py` (replaced `_startup_orphan_gtc_audit`)
+- `backend/tests/test_patch_f_boot_zombie_flush_v19_34_24.py` (new)
+
+### Operator-facing log markers
+
+- `[v19.34.24 PATCH-F BOOT] auto-flushing N zombie order(s) at IB before bot enters scan loop`
+- `[v19.34.24 PATCH-F BOOT] flush complete — cancelled=N errors=N`
+- `[v19.34.24 PATCH-F BOOT] auto-flush DISABLED via PATCH_F_AUTO_FLUSH_ON_BOOT`
+
+### Recovery context (DB state at time of Patch F)
+
+The user's `bot_trades` had 14 status=open rows at the time of the
+disaster. After manual flatten in TWS, those 14 were marked
+`closed_manual_v19_34_23` with reason
+`manual_flatten_after_zombie_bracket_emergency_v19_34_23` via a one-shot
+Mongo update. Post-cleanup, `bot_trades` had 0 `bot_fired status=open`
+rows — clean slate for Patch F validation.
+
+
+
 ## 2026-05-14 (v19.34.31 — completion) — Patches B + C re-applied & PUSHED
 
 Sequel to the same-day Patches A + E re-ship. With `origin/main` now safe
