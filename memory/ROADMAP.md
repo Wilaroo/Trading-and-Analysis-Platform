@@ -27,6 +27,9 @@ banner is now expected behaviour — that's a UX bug, not a real alert.
 | **L4c** | Silence the orange "Spark→pusher RPC blocked" banner when `BOT_ORDER_PATH=direct`. Replace with a subtle "RPC channel: deprecated (direct mode)" chip. | `backend/services/health.py` + frontend banner | 
 | **L4d** | Add a backend probe `/api/system/pusher-rpc/expected-state` that returns `expected: "offline (direct mode)"` so the operator (and any external monitoring) sees the RPC offline status is intentional. | `backend/routers/`+ health subsystem |
 
+### Enhancements queued
+- **`useSystemHealth()` shared React hook** — Promote the `/api/system/health` poll out of `HealthChip.jsx` and `BracketsPathPill.jsx` (and any future HUD pills) into one shared hook with a single 20s timer. Halves HUD HTTP traffic, simplifies future pill additions (scanner-health, kill-switch, etc.). Bundle in with L4d or L4a refactor pass.
+
 ### Acceptance criteria
 - Pusher restart + bot reconnect: bot continues to receive data
   pushes; no order-write path attempts to call out to the pusher.
