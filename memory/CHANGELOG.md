@@ -4,6 +4,37 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — L4b) — Brackets path HUD pill
+
+### Context
+Operator can't visually distinguish whether bracket orders are flowing
+via the native `ib_direct_service` or the legacy Windows pusher. With
+L3/L4c.1 stabilised, we need a permanent at-a-glance indicator in the
+HUD strip.
+
+### Patch
+* New component: `frontend/src/components/sentcom/v5/BracketsPathPill.jsx`
+  - Polls `/api/system/health` every 20s, reads `ib_gateway.metrics`.
+  - Renders one of:
+      ● BRACKETS · IB-DIRECT     (emerald, `via_ib_direct: true`)
+      ● BRACKETS · IB-DIRECT ⚠   (amber, direct mode but disconnected)
+      ● BRACKETS · PUSHER        (zinc, `via_pusher: true`)
+      ● BRACKETS · —             (zinc dim, unknown/loading)
+  - Tooltip surfaces the full `ib_gateway.detail` string.
+  - Pure read-only, no extra endpoints, no extra polling overhead beyond
+    the existing health endpoint (in fact reuses a request HealthChip
+    already makes — could be deduped later via a shared hook).
+* `frontend/src/components/sentcom/SentComV5View.jsx` — added import
+  and mounted `<BracketsPathPill />` adjacent to `<HealthChip />` in
+  the HUD chip row.
+
+### Verification
+* `yarn build` succeeded (bundle +367 B). No new lint warnings.
+* Live UI verified by operator on DGX: pill renders emerald
+  `BRACKETS · IB-DIRECT` next to `ALL SYSTEMS` chip.
+
+
+
 ## 2026-05-18 (v19.34.28 — L4c.1) — ib-direct awareness in system health check
 
 ### Context
