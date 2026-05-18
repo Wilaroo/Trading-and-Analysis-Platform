@@ -4,6 +4,41 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — L4c.1) — ib-direct awareness in system health check
+
+### Context
+After L4c suppressed the orange "Spark→pusher RPC blocked" banner under
+direct mode, a secondary yellow banner remained:
+
+    ! Some subsystems are degraded · ib_gateway: no IB path:
+      ib_service not registered and pusher unreachable
+
+Root cause: `services/system_health_service.py::_check_ib_gateway()` only
+knew about the legacy `ib_service` registration and the pusher channel.
+Under `BOT_ORDER_PATH=direct`, orders + position/account reads flow via
+`ib_direct_service`, so a fresh-boot pusher RPC blip (very common with
+Windows firewall asymmetry) produced a false-alarm "no IB path" yellow
+even though IB was fully reachable directly.
+
+### Patch
+`backend/services/system_health_service.py::_check_ib_gateway()` —
+inserted an ib-direct probe branch that runs BEFORE the pusher fallback:
+
+* `BOT_ORDER_PATH=direct` AND `ib_direct_service.is_connected()` → GREEN
+  ("ib-direct deployment — orders/reads via ib_direct, pusher used for
+   data push only")
+* `BOT_ORDER_PATH=direct` AND ib_direct disconnected → YELLOW (legit)
+* `BOT_ORDER_PATH=pusher` paths unchanged (regression-safe)
+
+### Verification
+* Regression test: `backend/tests/test_l4c_health_ib_direct_aware_v19_34_28.py`
+  (4 cases, all pass).
+* Live DGX verification: `/api/system/health` → overall green, 7/7
+  subsystems green, `ib_gateway` reports `via_ib_direct: True`.
+* UI yellow banner cleared.
+
+
+
 ## 2026-05-18 (v19.34.28 — L3 SOFT PASS + L3-hotfix1 / hotfix2 / hotfix3) — Event-loop wedge series, ib-direct live-paper validation
 
 ### Context
