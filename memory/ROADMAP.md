@@ -81,6 +81,30 @@ issues were found and three patched. Live verification pending.
     (e.g. 60s with no broker ack). Prevents Bug-Y-class hangs from
     re-creating zombie blockers.
 
+- 🔴 **Bug C — Position sizer overshoots `max_notional_per_trade` cap** (NEW, P0)
+  - Symptom: trades like RIVN ($104,940) and COIN ($104,725) being
+    blocked by `safety_guardrail/symbol_exposure` because the sizer
+    allocated ~5% over the configured $100k cap. The notional check
+    correctly catches it but the sizer should clamp earlier.
+  - Likely a `floor` vs `ceil` mistake or post-rounding inflation in
+    position-size calculation.
+  - Files to check: `services/trade_executor_service.py` /
+    `services/risk_caps_service.py` / wherever `notional = entry_price *
+    shares` is computed before guardrail.
+
+- 🔴 **Bug E — Scanner top-movers discovery silent** (NEW, P0)
+  - Symptom: DGX live_subscription_manager only asking pusher for ~48
+    symbols (the static watchlist + open positions feed). Normally
+    250–300+ symbols when top-movers discovery is healthy. Cap was
+    lifted to 400 in `.env` — confirmed not the bottleneck.
+  - Pusher is fine: pushes everything DGX requests (74 quotes/sec across
+    48 symbols midday = ~1.5 ticks/sym/sec, normal). `push_age_s: 2.3,
+    fresh: true`.
+  - First investigation step: find what subscribes top-movers. Likely
+    `services/market_scanner_service.py` (`symbol_universe_size` /
+    `_universe_cache_ttl: 604800` 7-day cache could be stale).
+  - Acceptance: subscription count climbs from 48 → 200+ during RTH.
+
 ### Acceptance criteria
 - Pusher restart + bot reconnect: bot continues to receive data
   pushes; no order-write path attempts to call out to the pusher.
