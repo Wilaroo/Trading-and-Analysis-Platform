@@ -435,6 +435,22 @@ class TradeExecution:
                 atr_14 = getattr(trade, "atr_14", None)
                 if atr_14 is None and hasattr(bot, "_atr_cache"):
                     atr_14 = bot._atr_cache.get(trade.symbol)
+                # v19.34.28 Bug X (2026-05-18) — opportunity_evaluator stamps
+                # atr/atr_percent into trade.entry_context but never onto
+                # trade.atr_14 or bot._atr_cache. Pre-fix every entry hit
+                # the guardrail's "no ATR available" branch (0.10% × entry
+                # fallback) which vetoed nearly every signal as
+                # `stop_too_tight_pct`. Read from entry_context as a 3rd
+                # fallback before declaring ATR unavailable.
+                if atr_14 is None:
+                    try:
+                        ec = getattr(trade, "entry_context", None) or {}
+                        if isinstance(ec, dict):
+                            _atr = ec.get("atr") or (ec.get("technicals") or {}).get("atr")
+                            if _atr and float(_atr) > 0:
+                                atr_14 = float(_atr)
+                    except Exception:
+                        pass
 
                 account_equity = None
                 try:

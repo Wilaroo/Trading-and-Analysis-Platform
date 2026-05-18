@@ -622,6 +622,85 @@ def system_health_v2():
 # /api/system/morning-readiness. See morning_readiness_service.py for the
 # 5 individual checks.
 
+# ---- 2026-05-18 v19.34.28 L4d — Pusher RPC expected-state observability ----
+@router.get("/api/system/pusher-rpc/expected-state")
+def pusher_rpc_expected_state():
+    """Returns whether the pusher RPC channel is expected to be online.
+    Under BOT_ORDER_PATH=direct, RPC failures are intentional and should
+    not trigger external alerts. See v19.34.28 L4d for the design notes.
+    """
+    import time as _time
+    order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+    if order_path not in ("direct", "pusher"):
+        order_path = "pusher"
+
+    rpc_payload = {"enabled": False, "url": None, "consecutive_failures": None, "last_success_age_s": None}
+    push_payload = {"age_s": None, "fresh": False}
+    actual_state = "unknown"
+
+    try:
+        from services.ib_pusher_rpc import get_pusher_rpc_client
+        client = get_pusher_rpc_client()
+        s = client.status() or {}
+        rpc_payload["enabled"] = bool(s.get("enabled"))
+        rpc_payload["url"] = s.get("url")
+        rpc_payload["consecutive_failures"] = int(s.get("consecutive_failures") or 0)
+        last_ok = s.get("last_success_ts")
+        if last_ok:
+            rpc_payload["last_success_age_s"] = round(_time.time() - float(last_ok), 1)
+    except Exception:
+        pass
+
+    try:
+        import routers.ib as ib_module
+        pushed = getattr(ib_module, "_pushed_ib_data", None) or {}
+        last_update = pushed.get("last_update")
+        if last_update:
+            from datetime import datetime as _dt
+            if isinstance(last_update, str):
+                s_clean = last_update.rstrip("Z").replace("Z", "")
+                dt = _dt.fromisoformat(s_clean)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                push_payload["age_s"] = round((_dt.now(dt.tzinfo) - dt).total_seconds(), 2)
+                push_payload["fresh"] = push_payload["age_s"] < 60.0
+    except Exception:
+        pass
+
+    rpc_failing = (rpc_payload["consecutive_failures"] or 0) >= 5
+    if push_payload["fresh"] and not rpc_failing:
+        actual_state = "healthy"
+    elif push_payload["fresh"] and rpc_failing:
+        actual_state = "rpc_blocked"
+    elif not push_payload["fresh"] and rpc_failing:
+        actual_state = "fully_dead"
+    else:
+        actual_state = "unknown"
+
+    if order_path == "direct":
+        expected_state = "offline_ok"
+        expected_label = ("RPC channel is not required under BOT_ORDER_PATH=direct — "
+                          "orders and reads flow via ib_direct_service. RPC failures "
+                          "here are expected and should not trigger alerts.")
+        intentional = actual_state in ("healthy", "rpc_blocked", "unknown")
+    else:
+        expected_state = "online_required"
+        expected_label = ("RPC channel is the active IB path under BOT_ORDER_PATH=pusher — "
+                          "RPC must be reachable for orders and on-demand bar fetches.")
+        intentional = actual_state == "healthy"
+
+    return {
+        "order_path": order_path,
+        "expected_state": expected_state,
+        "expected_label": expected_label,
+        "actual_state": actual_state,
+        "intentional": intentional,
+        "rpc": rpc_payload,
+        "push": push_payload,
+        "as_of": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+
 @router.get("/api/system/morning-readiness")
 def morning_readiness():
     """Morning go/no-go check for autopilot trading.

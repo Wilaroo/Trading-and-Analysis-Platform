@@ -467,22 +467,38 @@ async def get_positions():
 
         closed_today_raw = []
         try:
-            cursor = _db["bot_trades"].find(
-                {
-                    "status": "closed",
-                    "$or": [
-                        {"closed_at": {"$gte": cutoff_iso}},
-                        # `executed_at` fallback for trades with no
-                        # closed_at field (legacy, or where the close
-                        # path skipped stamping it).
-                        {"closed_at": None, "executed_at": {"$gte": cutoff_iso}},
-                    ],
-                },
-                {"_id": 0},
-                sort=[("closed_at", -1)],
-                limit=200,
-            )
-            closed_today_raw = list(cursor)
+            # v19.34.28 L3-hotfix2 (2026-05-18) — Materialize the cursor in a
+            # worker thread, mirroring the v19.30 fix already in place in
+            # `get_thoughts` (line ~190 above). Pre-hotfix2, this sync pymongo
+            # `list(cursor)` ran on the asyncio main loop and blocked on
+            # `socket.recv_into` whenever Mongo took >5s to respond (busy load
+            # or cold-cache scan over the `bot_trades` collection). That
+            # triggered the wedge watchdog and stalled EVERYTHING — including
+            # the trading bot's scan loop — for the duration of the block.
+            # Forensic capture 2026-05-18: the watchdog dump pinned the main
+            # thread inside `sentcom.py:485 list(cursor)` -> `pymongo/network.py:
+            # _receive_data_on_socket` -> blocking `recv_into`. The frontend
+            # polls `/api/sentcom/positions` on every dashboard tick so this
+            # bug fired N times per minute under any Mongo latency.
+            import asyncio as _asyncio_l3h2
+            def _materialize_closed_today():
+                _cur = _db["bot_trades"].find(
+                    {
+                        "status": "closed",
+                        "$or": [
+                            {"closed_at": {"$gte": cutoff_iso}},
+                            # `executed_at` fallback for trades with no
+                            # closed_at field (legacy, or where the close
+                            # path skipped stamping it).
+                            {"closed_at": None, "executed_at": {"$gte": cutoff_iso}},
+                        ],
+                    },
+                    {"_id": 0},
+                    sort=[("closed_at", -1)],
+                    limit=200,
+                )
+                return list(_cur)
+            closed_today_raw = await _asyncio_l3h2.to_thread(_materialize_closed_today)
         except Exception as e:
             logger.warning(f"closed_today lookup failed (non-fatal): {e}")
 

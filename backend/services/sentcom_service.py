@@ -2133,7 +2133,22 @@ class SentComService:
         try:
             from services.account_guard import classify_account_id as _classify
             from services.ib_pusher_rpc import get_account_snapshot as _gas
-            _snap = _gas()
+            # v19.34.28 L3-hotfix3 (2026-05-18) — `_gas()` is a SYNCHRONOUS
+            # HTTP call to the Windows pusher's /rpc/account-snapshot. Under
+            # `BOT_ORDER_PATH=direct` the pusher RPC channel is intentionally
+            # offline (orders go via ib_direct), so this call blocks on
+            # `socket.connect()` until the 5s timeout fires. Pre-hotfix3 this
+            # blocked the asyncio event loop because we awaited it directly,
+            # tripping the wedge watchdog on every `/api/sentcom/positions`
+            # tick. Forensic capture 2026-05-18: watchdog dump pinned the
+            # main thread inside `sentcom_service.py:2136 _gas()` ->
+            # `requests/sessions.py:589` -> `urllib3.create_connection ->
+            # sock.connect(sa)`. Fix: hop to a worker thread via
+            # asyncio.to_thread so the slow/dead-pusher HTTP call cannot
+            # stall the loop. The except already silently degrades to no
+            # legacy chip on failure, so unreachable pusher = no chip,
+            # which is the correct behaviour anyway.
+            _snap = await asyncio.to_thread(_gas)
             _legacy_account_id = (_snap or {}).get("account_id") or None
             if _legacy_account_id:
                 _legacy_trade_type = _classify(_legacy_account_id)

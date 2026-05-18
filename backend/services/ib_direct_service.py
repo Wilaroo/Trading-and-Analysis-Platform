@@ -518,7 +518,13 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
+            await self._ib.qualifyContractsAsync(contract)
             order = MarketOrder(action.upper(), int(quantity))
             trade = self._ib.placeOrder(contract, order)
             return {
@@ -674,12 +680,23 @@ class IBDirectService:
         try:
             # Qualify the contract first (off the event loop).
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            import time as _bug_y_t
+            _t0 = _bug_y_t.monotonic()
+            print(f"[BUG-Y INSTR] {symbol} step1 qualifyContracts START t=0.000", flush=True)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
+            await self._ib.qualifyContractsAsync(contract)
+            print(f"[BUG-Y INSTR] {symbol} step1 qualifyContracts DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
             # ib_async.bracketOrder constructs the three orders with
             # correct OCA group and transmit-sequencing. Parent's
             # transmit=False, stop's transmit=False, target's transmit=True
             # — atomic activation when the third is submitted.
+            print(f"[BUG-Y INSTR] {symbol} step2 bracketOrder START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             bracket = self._ib.bracketOrder(
                 action=parent_action,
                 quantity=qty,
@@ -700,27 +717,40 @@ class IBDirectService:
                     bracket[0], bracket[1], bracket[2],
                 )
 
+            print(f"[BUG-Y INSTR] {symbol} step2 bracketOrder DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             # Submit all three. ib_async will respect each order's
             # transmit flag and IB activates them atomically.
+            print(f"[BUG-Y INSTR] {symbol} step3 placeOrder(parent) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             parent_trade = self._ib.placeOrder(contract, parent_o)
+            print(f"[BUG-Y INSTR] {symbol} step3 placeOrder(parent) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step4 placeOrder(target) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             target_trade = self._ib.placeOrder(contract, take_profit_o)
+            print(f"[BUG-Y INSTR] {symbol} step4 placeOrder(target) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step5 placeOrder(stop) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             stop_trade = self._ib.placeOrder(contract, stop_loss_o)
+            print(f"[BUG-Y INSTR] {symbol} step5 placeOrder(stop) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
             # Brief settle so the parent's orderStatus callback fires
             # at least to 'PendingSubmit' or 'Submitted'. We do NOT wait
             # for a fill — that's the caller's job via order_status
             # event or naked_position_sweep.
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._ib.sleep, 0.5),
-                    timeout=wait_for_submission_s,
-                )
-            except asyncio.TimeoutError:
-                # Submission timeout — fall through and let the caller
-                # decide. Patch J's contract: we still return the
-                # orderIds so the caller can poll/cancel as needed.
-                pass
+            #
+            # v19.34.28 L3-hotfix1 (2026-05-18) — replaced
+            # asyncio.to_thread(self._ib.sleep, 0.5) with plain
+            # asyncio.sleep(0.5). ib_async's IB.sleep() internally
+            # calls loop.run_until_complete(...) on the MAIN event loop.
+            # Running it from a worker thread (via asyncio.to_thread)
+            # caused wedge-watchdog trips: the worker tried to drive a
+            # loop the main thread owns. Plain asyncio.sleep is the
+            # correct cooperative yield. Forensic fingerprint that pinned
+            # the bug: wedge duration == wait_for_submission_s (5.0s)
+            # exactly — i.e. the wait_for timeout itself was the longest
+            # the main loop could stay un-pumped.
+            print(f"[BUG-Y INSTR] {symbol} step6 settle-sleep START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            await asyncio.sleep(0.5)
+            print(f"[BUG-Y INSTR] {symbol} step6 settle-sleep DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
+            print(f"[BUG-Y INSTR] {symbol} step7 read orderIds+orderStatus START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             entry_id = int(parent_trade.order.orderId)
             stop_id = int(stop_trade.order.orderId)
             target_id = int(target_trade.order.orderId)
@@ -755,6 +785,8 @@ class IBDirectService:
                 entry_id, stop_id, target_id, oca_group, status_out,
             )
 
+            print(f"[BUG-Y INSTR] {symbol} step7 read orderIds+orderStatus DONE t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step8 RETURN success t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             return {
                 "success": True,
                 "entry_order_id": entry_id,
@@ -847,7 +879,13 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
+            await self._ib.qualifyContractsAsync(contract)
 
             if order_type_u == "MKT":
                 order = MarketOrder(action, qty)
@@ -866,13 +904,10 @@ class IBDirectService:
 
             # Brief wait for `orderStatus` callback. We don't loop on fill —
             # the caller's manage loop will pick it up if it's still working.
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._ib.sleep, 0.5),
-                    timeout=wait_for_fill_s,
-                )
-            except asyncio.TimeoutError:
-                pass
+            # v19.34.28 L3-hotfix1 (2026-05-18) — same fix as place_bracket_order:
+            # replaced asyncio.to_thread(self._ib.sleep, ...) wedge with
+            # plain asyncio.sleep. See place_bracket_order for full rationale.
+            await asyncio.sleep(0.5)
 
             status_obj = entry_trade.orderStatus
             ib_order_id = int(entry_trade.order.orderId)
@@ -966,7 +1001,13 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
+            await self._ib.qualifyContractsAsync(contract)
             order = StopOrder(action, qty, round(stop_px, 4))
             try:
                 order.tif = (time_in_force or "GTC").upper()
@@ -1059,7 +1100,13 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
+            await self._ib.qualifyContractsAsync(contract)
 
             # 1) STP first. Refuse to submit target if stop fails — one-sided
             # exposure (target only, no stop) can flip the position on fill.

@@ -3538,3 +3538,4 @@ credentials.json
 *.pem
 *.key
 .credentials
+*.bak.v19_34_28_*

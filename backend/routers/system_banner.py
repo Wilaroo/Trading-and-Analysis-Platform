@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -158,6 +159,22 @@ async def get_system_banner() -> Dict[str, Any]:
         _red_since_ts["pusher_rpc_partial"] = None
         sub_key = None
         level = None
+
+    if sub_key is not None and level is not None:
+        # v19.34.28 L4c (2026-05-18) — Under BOT_ORDER_PATH=direct, the
+        # pusher's RPC channel is INTENTIONALLY deprecated (orders bypass
+        # the pusher via ib_direct). Consecutive RPC failures and the
+        # `pusher_rpc_blocked` sub_key are now the *expected* steady state,
+        # not an alert condition. Suppress that banner; keep the rarer
+        # `pusher_rpc_dead` banner (push channel ALSO down = real outage
+        # because we still depend on push for quotes/positions/account
+        # fan-out) and `pusher_rpc_partial` (uncertain state still worth
+        # surfacing) untouched.
+        _order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+        if _order_path == "direct" and sub_key == "pusher_rpc_blocked":
+            _red_since_ts["pusher_rpc_blocked"] = None
+            sub_key = None
+            level = None
 
     if sub_key is not None and level is not None:
         # Reset the OTHER trackers so we don't carry stale "since" counts.

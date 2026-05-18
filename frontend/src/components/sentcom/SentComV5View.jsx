@@ -30,6 +30,7 @@ import { DeepFeedV5 } from './v5/DeepFeedV5';
 import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
 import { EodCountdownBannerV5 } from './v5/EodCountdownBannerV5';
 import { HealthChip } from './v5/HealthChip';
+import { BracketsPathPill } from './v5/BracketsPathPill';  // v19.34.28 L4b
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
@@ -513,6 +514,7 @@ export const SentComV5View = ({
               <span className="opacity-60">search</span>
             </button>
             <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
+            <BracketsPathPill />
             <ConnectivityCheck />
             <ScannerCoverageAuditPanel />
             {/* v19.34.13 (2026-05-06) — `<PusherHealthChip />` removed
