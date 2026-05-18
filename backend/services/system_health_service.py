@@ -265,8 +265,50 @@ def _check_ib_gateway() -> SubsystemHealth:
         from services.service_registry import get_service_optional
         ib = get_service_optional("ib_service")
         if ib is None:
-            # No direct IB. Check if pusher is the IB path (the SentCom
-            # standard deployment).
+            # No direct IB via the legacy ib_service registration.
+            # v19.34.28 L4c (2026-05-18) — Before checking the pusher,
+            # see if `ib_direct_service` is the active IB path. Under
+            # `BOT_ORDER_PATH=direct` (the L3 deployment), order writes
+            # AND position/account reads go via ib_direct, NOT the
+            # pusher. The pusher is then a pure-data publisher whose
+            # transient unreachability does NOT mean "no IB path" — IB
+            # is reachable directly. Pre-L4c the health check only
+            # knew about ib_service + pusher, so on every cold boot
+            # under direct mode (pusher not yet pushing data) the
+            # operator saw a false-alarm "no IB path" yellow banner.
+            try:
+                import os
+                _order_path = (os.environ.get("BOT_ORDER_PATH", "pusher") or "pusher").strip().lower()
+                if _order_path == "direct":
+                    from services.ib_direct_service import get_ib_direct_service
+                    _ibd = get_ib_direct_service()
+                    if _ibd is not None and _ibd.is_connected():
+                        return SubsystemHealth(
+                            name="ib_gateway",
+                            status="green",
+                            detail="ib-direct deployment — orders/reads via ib_direct, pusher used for data push only",
+                            metrics={
+                                "connected": True,
+                                "via_ib_direct": True,
+                                "via_pusher": False,
+                            },
+                        )
+                    # direct mode but ib_direct down = genuine yellow
+                    return SubsystemHealth(
+                        name="ib_gateway",
+                        status="yellow",
+                        detail="ib-direct mode but ib_direct_service is not connected",
+                        metrics={
+                            "connected": False,
+                            "via_ib_direct": False,
+                            "via_pusher": False,
+                        },
+                    )
+            except Exception:
+                pass
+
+            # Check if pusher is the IB path (the SentCom standard
+            # deployment under BOT_ORDER_PATH=pusher).
             pusher_reachable = False
             try:
                 from services.ib_pusher_rpc import get_pusher_rpc_client
