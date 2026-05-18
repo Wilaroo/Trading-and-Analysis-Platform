@@ -20,8 +20,10 @@ AI trading platform running across DGX Spark (Linux) + Windows PC (IB Gateway). 
 ## Architecture
 - **DGX Spark (Linux, 192.168.50.2)**: Backend FastAPI :8001, Chat :8002, MongoDB :27017, Frontend React :3000, Ollama :11434, worker, Blackwell GPU
 - **Windows PC (192.168.50.1)**: IB Gateway :4002, IB Data Pusher (client 15), 4 Turbo Collectors (clients 16–19)
-- Orders flow: Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`
-- Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server)
+- Orders flow (**`BOT_ORDER_PATH=direct`, L3 soft-passed 2026-05-18 — default in production**):
+  Spark backend → `services/ib_direct_service.IBDirectService.place_bracket_order()` → `ib_async` socket on clientId=11 → IB Gateway :4002. No pusher round-trip. Cancel + OCA attach also via ib_direct. See `CHANGELOG.md` 2026-05-18 for the L3 wedge series and validation.
+- Orders flow (legacy `BOT_ORDER_PATH=pusher`, **deprecated**): Spark backend `/api/ib/orders/queue` → Mongo `order_queue` → Windows pusher polls `/api/ib/orders/pending` → submits to IB → reports via `/api/ib/orders/result`. Scheduled for removal in Patch L4 (see `L4_PLAN.md`).
+- Position/quotes flow: IB Gateway → pusher → `POST /api/ib/push-data` → in-memory `_pushed_ib_data` (+ Mongo snapshot for chat_server). **Pusher remains the canonical data publisher even under direct mode** — only its write/RPC surface is being retired.
 
 
 

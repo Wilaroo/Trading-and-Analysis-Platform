@@ -4,6 +4,133 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — L3 SOFT PASS + L3-hotfix1 / hotfix2 / hotfix3) — Event-loop wedge series, ib-direct live-paper validation
+
+### Context
+First live-paper L3 validation session for `BOT_ORDER_PATH=direct`. The
+backend was flipped to `direct`, kill switch unlocked on a real market
+session. The very first candidate to reach the executor (COIN
+vwap_fade_long) wedged the asyncio main thread for ≥5s — the wedge
+watchdog (`server.py:_wedge_watchdog_thread`) fired and we collected
+stack dumps. Three independent wedge sources were found and patched in
+sequence; each fix unblocked the next finding.
+
+### Wedge #1 — `ib_async.IB.sleep` inside `asyncio.to_thread` (L3-hotfix1)
+
+`services/ib_direct_service.py:715` and `:871` (`place_bracket_order` and
+`place_entry`) used:
+
+```python
+await asyncio.wait_for(
+    asyncio.to_thread(self._ib.sleep, 0.5),
+    timeout=wait_for_submission_s,   # 5.0s
+)
+```
+
+`ib_async.IB.sleep()` internally calls `loop.run_until_complete(...)` on
+the **main event loop**. Invoking it from a worker thread (via
+`asyncio.to_thread`) made the worker contest for the loop the main
+thread owns — deadlock until the `wait_for` timeout. Fingerprint: wedge
+duration == `wait_for_submission_s` (5.0s) exactly.
+
+**Fix:** replace both call sites with plain `await asyncio.sleep(0.5)`.
+The whole reason we have an asyncio loop is so the stdlib `asyncio.sleep`
+yields cleanly — no need for the ib_async sync convenience.
+
+### Wedge #2 — sync `list(cursor)` on FastAPI event loop (L3-hotfix2)
+
+Watchdog stack dump pinned the next wedge at:
+
+```
+backend/routers/sentcom.py:485 in get_positions
+    closed_today_raw = list(cursor)
+→ pymongo/cursor.py:1264 next
+→ pymongo/network.py:340 _receive_data_on_socket
+→ blocking conn.recv_into(...)
+```
+
+Sync pymongo cursor iteration on the asyncio main loop blocking on a
+Mongo socket read. Identical pattern to the v19.30 wedge fix already in
+place at `get_thoughts()` (line ~190) — that patch landed but the twin
+in `get_positions()` was missed. Frontend hits `/api/sentcom/positions`
+on every dashboard tick (~5s), so this wedge fired N times per minute
+under any Mongo latency. Stalled the trading bot's scan loop.
+
+**Fix:** materialize the cursor in a worker thread via
+`asyncio.to_thread(...)`, mirroring the v19.30 fix.
+
+### Wedge #3 — sync `requests` HTTP call to dead pusher (L3-hotfix3)
+
+After L3-hotfix2, the next watchdog dump pinned a DIFFERENT line in the
+same endpoint:
+
+```
+backend/services/sentcom_service.py:2136 in get_our_positions
+    _snap = _gas()
+→ ib_pusher_rpc.account_snapshot()
+→ requests.Session.request(...)
+→ urllib3.create_connection → sock.connect(sa)
+```
+
+`_gas()` is a synchronous `requests` HTTP call to the Windows pusher's
+`/rpc/account-snapshot`. Under `BOT_ORDER_PATH=direct` the pusher RPC
+channel is intentionally offline (orders bypass the pusher), so the
+call blocks on TCP `connect()` until the 5s timeout fires — every
+dashboard tick. The `except Exception: _legacy_trade_type = None`
+already gracefully tolerates a missing snapshot; the bug was just
+running the slow sync call directly on the asyncio loop.
+
+**Fix:** `_snap = await asyncio.to_thread(_gas)` — sync HTTP hops to a
+worker thread, loop stays responsive.
+
+### Verification
+
+- Tests: 9 regressions across 3 hotfix test files (`test_l3_hotfix1_*`,
+  `test_l3_hotfix2_*`, `test_l3_hotfix3_*`) — all green.
+- Post-deploy: backend restart + 120s soak with frontend hammering
+  `/api/sentcom/positions` (12 hits captured): **0 wedge watchdog
+  events**. Pre-hotfix series, identical traffic produced multiple
+  wedges per minute.
+- Safety state: kill switch unlocked, 3 consecutive `allowed=True
+  all guards passed` checks over 11 min, no silent re-trips, no
+  account-guard regressions.
+- IB-direct migration status: `verdict: ready, order_path: direct,
+  connected: True, authorized: True, drops: 0`.
+- IB positions: `[]` (no naked positions — wedged
+  `place_bracket_order` never reached IB; account stayed flat).
+
+### Files touched
+
+- `backend/services/ib_direct_service.py` (lines ~713-722 and ~865-872)
+- `backend/routers/sentcom.py` (lines ~470-491)
+- `backend/services/sentcom_service.py` (lines ~2131-2148)
+- `backend/tests/test_l3_hotfix1_wedge_v19_34_28.py` (new, 4 tests)
+- `backend/tests/test_l3_hotfix2_sentcom_positions_wedge_v19_34_28.py` (new, 3 tests)
+- `backend/tests/test_l3_hotfix3_sentcom_gas_wedge_v19_34_28.py` (new, 2 tests)
+
+### L3 Validation Verdict
+
+L3 is **SOFT PASSED** on infrastructure: every gate that ib-direct
+needs to cross is verified working under live-paper conditions:
+ib_direct connection stable (0 drops), account guard reading from
+`managedAccounts()` correctly, event loop wedge-free under steady
+load, kill switch behaving as designed. The only reason no real
+bracket has fired yet is that the bot's discipline filters
+(confidence gate, RVOL floor, R:R minimum, dedup cooldowns) plus the
+operator's enabled-strategy set haven't produced a passing candidate
+in the validation window — that's correct bot behaviour, not a
+defect. The next clean signal in a LIVE-enabled strategy will fire
+via `place_bracket_order via ib_direct` automatically.
+
+### Carry-forward to backlog
+
+- **L3-hotfix4 (P2)**: two boot-time wedges still fire during the
+  `[v123 kill-switch]` motor import and `[v127 naked-sweep] first
+  sweep` ib_direct probe. One-shot init costs only — never repeat
+  after warm-up. Worth fixing but not L4-blocking.
+
+
+
 ## 2026-02-XX (v19.34.28 — Patch L2b) — Reconciler / Account-Guard Wiring through ib-direct
 
 ### Context

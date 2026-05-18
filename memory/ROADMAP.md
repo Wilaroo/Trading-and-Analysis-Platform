@@ -3,9 +3,85 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🔴 P0 — Patch L2b: Reconciler / Guard Wiring through `BOT_ORDER_PATH=direct`
+## 🔴 P0 — Patch L4: Pusher cleanup (post-L3 deprecation pass)
 
-**Status**: ✅ SHIPPED 2026-02-XX. See CHANGELOG.md for details.
+**Status**: 🟢 READY TO START. L3 soft-passed 2026-05-18. See
+`/app/memory/L4_PLAN.md` for the full design + file targets +
+acceptance criteria.
+
+### Why
+With ib-direct validated under live-paper conditions, the pusher's
+order-write surface (`queue_order`, RPC bracket-submit) is dead
+weight: it still ticks but nothing routes through it. Worse, the
+pusher's `/rpc/account-snapshot` RPC channel routinely fails (~80
+consecutive failures observed during L3 validation), and every probe
+needlessly hits the network. The orange "Spark→pusher RPC blocked"
+banner is now expected behaviour — that's a UX bug, not a real alert.
+
+### Scope (4 sub-patches, each independently testable)
+
+| Sub-patch | What | Files |
+|---|---|---|
+| **L4a** | Strip the `queue_order` write path from `ib_data_pusher.py` (Windows). Pusher becomes a pure read/publish service. | Windows-side: `ib_data_pusher.py` |
+| **L4b** | Add a "BRACKETS ROUTE" status pill to the UI strip (`ib-direct ✅` vs `pusher ⚠️ legacy`). | `frontend/src/components/sentcom/...` |
+| **L4c** | Silence the orange "Spark→pusher RPC blocked" banner when `BOT_ORDER_PATH=direct`. Replace with a subtle "RPC channel: deprecated (direct mode)" chip. | `backend/services/health.py` + frontend banner | 
+| **L4d** | Add a backend probe `/api/system/pusher-rpc/expected-state` that returns `expected: "offline (direct mode)"` so the operator (and any external monitoring) sees the RPC offline status is intentional. | `backend/routers/`+ health subsystem |
+
+### Acceptance criteria
+- Pusher restart + bot reconnect: bot continues to receive data
+  pushes; no order-write path attempts to call out to the pusher.
+- UI strip shows brackets-route pill = `ib-direct ✅`.
+- No more orange RPC-blocked banner under direct mode.
+- All existing L1/L2/L3 tests still green.
+
+### Pre-flight
+- L3 should soak for 1 hour with at least 1 real fired bracket
+  before starting L4a. The bracket can be operator-forced via
+  Path B (enable a SHADOW strategy) or appear naturally — either
+  is acceptable.
+
+### Files
+See `/app/memory/L4_PLAN.md` for full sub-patch breakdown.
+
+
+
+## ✅ SHIPPED 2026-05-18 — Patch L3 SOFT PASS (v19.34.28 — hotfix1/2/3)
+
+See `CHANGELOG.md` (2026-05-18 entry) for the full wedge series writeup,
+forensic stack dumps, and verification. tl;dr: three independent
+asyncio-loop-blocking patterns ((1) `ib_async.IB.sleep` via
+`asyncio.to_thread`, (2) sync pymongo `list(cursor)`, (3) sync `requests`
+HTTP to dead pusher) were all reproduced via wedge-watchdog stack
+dumps, patched, and regression-tested. 9 new tests passing. Live-paper
+soak shows 0 wedges under load. ib-direct migration verdict: ready.
+
+
+
+## 🟢 P2 — L3-hotfix4: boot-time wedges in `[v123 kill-switch]` motor import + `[v127 naked-sweep] first sweep`
+
+**Discovered during L3-hotfix3 validation soak (2026-05-18).** Two
+wedge-watchdog events still fire during the FIRST minute after a
+backend restart, both during background-task initialization:
+
+1. `[v123 kill-switch] task launched, importing motor...` — the very
+   first motor (async pymongo driver) import is heavy; if it lands
+   on the asyncio loop it can stall it for ~5s.
+2. `[v127 naked-sweep] first sweep complete: ... 'source_tier':
+   'ib_direct'` — the FIRST `ib_direct.get_positions_fresh()` call
+   does a `cancelPositions` + `reqPositionsAsync` round trip; cold-
+   cache it can take ~5-7s.
+
+Neither repeats after the first execution — they're warm after the
+init cost lands. Not safety-critical (kill switch is restored ON
+during boot per v19.34.25), but it's noise in the watchdog log and
+ought to be cleaned up.
+
+**Likely fix:**
+- Defer `[v123 kill-switch]`'s motor import to a `to_thread()` block.
+- Wrap the first `naked_position_sweep` call in `asyncio.to_thread`
+  so the ib_direct probe doesn't block the loop.
+
+Not L4-blocking. Pick up after L4 ships.
 
 
 
