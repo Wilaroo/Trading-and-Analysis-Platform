@@ -4,6 +4,47 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — Bug X fix) — ATR forwarded to pre-execution guardrail
+
+### Context
+After clearing the stale kill-switch DB record, the bot still took zero
+trades — every signal silently vetoed with
+`stop_too_tight_pct: distance=X < 0.10% of entry (Y) — no ATR available`.
+Root cause: `trade_execution.py:433-437` looked for `atr_14` on
+`trade.atr_14` and `bot._atr_cache.get(symbol)`, but neither was ever
+populated. The ATR data was actually being computed (or fallback-set) in
+`opportunity_evaluator.py:412-417` and stamped into `trade.entry_context`
+— just never surfaced to the guardrail caller.
+
+Effect of "no ATR available": guardrail fell back to `min_pct × entry`
+(0.10% of entry → ~$0.20 on a $200 stock). Many setups (vwap_fade_long,
+mean reversion) legitimately use sub-$0.20 stops on liquid names, so
+nearly every signal was vetoed.
+
+### Patch
+* `backend/services/trade_execution.py:433-454` — added a third fallback:
+  read `trade.entry_context.get("atr")` (or
+  `entry_context["technicals"]["atr"]`) when both `trade.atr_14` and
+  `bot._atr_cache` are empty. Atomic, defensive, no behavior change on
+  the happy paths.
+
+### Verification
+* DGX backend restart + scanner cycle:
+  - Pre-patch grep: dozens of `🛡️ [Guardrail VETO] ... stop_too_tight_pct`
+    lines per minute.
+  - Post-patch grep: ZERO `Guardrail VETO` lines; trades now log
+    `📤 [_execute_trade] Calling trade_executor.place_bracket_order...`
+    confirming the guardrail is allowing them through.
+
+### Residual issue — Bug Y still blocks live execution
+Even with Bug X resolved, `place_bracket_order` inside
+`ib_direct_service` hangs (no `Result: {...}` log, no
+`[v19.34.27 PATCH-L1] place_bracket_order via ib_direct` logger.info).
+Likely another sync wedge in the order path. Queued as P0 for the next
+session.
+
+
+
 ## 2026-05-18 (v19.34.28 — L4d) — Pusher RPC expected-state observability endpoint
 
 ### Context

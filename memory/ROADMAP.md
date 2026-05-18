@@ -31,31 +31,23 @@ banner is now expected behaviour — that's a UX bug, not a real alert.
 - **`useSystemHealth()` shared React hook** — Promote the `/api/system/health` poll out of `HealthChip.jsx` and `BracketsPathPill.jsx` (and any future HUD pills) into one shared hook with a single 20s timer. Halves HUD HTTP traffic, simplifies future pill additions (scanner-health, kill-switch, etc.). Bundle in with L4d or L4a refactor pass.
 - **"Why isn't the bot trading?" dashboard tile** — One-glance V5 panel that aggregates the top 3 trade-drop reasons in the last 60 min from `[TRADE_DROP]` log lines (e.g. "stop_too_tight × 47", "kill_switch × 0", "dedup × 3"). Backend: counter aggregator endpoint reading recent `bot_trades` rows with `status=VETOED/REJECTED` and grouping by `reason`. Frontend: small tile with rank-ordered reasons + sparkline. Prevents future "bot quiet for hours" mysteries from taking an hour to root-cause.
 
-### 🔴 P0 NEW — 0-trades root-cause hunt (discovered 2026-05-18)
+### 🔴 P0 NEW — 0-trades root-cause hunt (discovered + partially fixed 2026-05-18)
 
 After clearing the stale kill-switch DB record, the bot still takes
-zero trades. Two distinct downstream bugs identified:
+zero trades. Two distinct downstream bugs identified — **Bug X is now
+fixed**; Bug Y remains.
 
-- **Bug X — Silent guardrail VETO from missing ATR** (HIGHEST impact)
-  - Symptom: every signal vetoed `stop_too_tight_pct` because the
-    bot's fallback default stop is microscopic (~14 cents) when ATR
-    isn't available.
-  - Evidence: `QCOM: stop_too_tight_pct: distance=0.1400 < 0.10% of
-    entry (0.1989) — no ATR available`.
-  - Files to investigate:
-    * `services/safety_guardrails.py` — find the `stop_too_tight_pct`
-      check and the ATR lookup path.
-    * Historical data pipeline — why is ATR null/missing? Is the
-      `historical_data_requests` queue draining? Is ATR computed at
-      request-completion or lazily on demand?
-    * `services/trading_bot_service.py` — where does the trade's
-      `stop_price` get set? Is it falling back to a hardcoded default
-      when ATR lookup returns None?
-  - Acceptance: signals for at-least 3 random symbols compute stops
-    using real ATR and pass the `stop_too_tight_pct` guardrail in paper
-    mode.
+- ✅ **Bug X — Silent guardrail VETO from missing ATR** (SHIPPED 2026-05-18)
+  - Was: every signal vetoed `stop_too_tight_pct: ... — no ATR available`.
+  - Root cause: `trade_execution.py` only checked `trade.atr_14` and
+    `bot._atr_cache`, neither populated. ATR data already lived in
+    `trade.entry_context` via `opportunity_evaluator.py:412-417`.
+  - Fix: added third fallback in `trade_execution.py:438-454` reading
+    `trade.entry_context.get("atr")`.
+  - Verified: zero VETO lines post-restart; trades now reach
+    `place_bracket_order`.
 
-- **Bug Y — `place_bracket_order` hangs (no Result line)**
+- 🔴 **Bug Y — `place_bracket_order` hangs (no Result line)** (CURRENT P0)
   - Symptom: `Calling trade_executor.place_bracket_order...` logged at
     `trade_execution.py:658`, no matching `Result: ...` log at
     `trade_execution.py:749`, no `[v19.34.27 PATCH-L1] place_bracket_order
@@ -72,6 +64,10 @@ zero trades. Two distinct downstream bugs identified:
     * `parent_trade.orderStatus.status` access after `await asyncio.sleep(0.5)`.
   - Acceptance: a paper trade that passes the guardrails reaches the
     `Result: {...}` log line in `_execute_trade`.
+  - **First diagnostic step next session**: add wedge instrumentation
+    around each sync call in `place_bracket_order` (timestamps + flush
+    print before/after) to identify the blocking site, then patch with
+    `asyncio.to_thread` wrapper or async equivalent.
 
 - **Bug Z — `safety_state` Mongo collection has 2 docs sharing one
   collection** (low priority but real)
