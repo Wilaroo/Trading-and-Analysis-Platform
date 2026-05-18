@@ -2613,7 +2613,31 @@ class IBDataPusher:
             logger.error(f"[OrderQueue] Poll error: {e}")
     
     def _execute_queued_order(self, order: dict):
-        """Execute a single queued order via IB Gateway"""
+        """Execute a single queued order via IB Gateway.
+
+        ⚠️ DEPRECATED (v19.34.X Feb 2026 — Phase L4a). The DGX migrated
+        order execution to `ib_direct_service.place_bracket_order` which
+        talks to IB Gateway directly from the Linux box. The pusher's
+        order-write path is now legacy dead weight and should not see
+        any traffic under `BOT_ORDER_PATH=direct`.
+
+        This warning lets the operator confirm zero usage in pusher logs
+        before deleting the whole `_execute_queued_order`,
+        `_execute_queued_cancellation`, and order-polling loop branch.
+        Once you see no `[L4a-DEPRECATED]` warnings in pusher logs for
+        a full trading week, the dead code can be ripped out safely.
+        """
+        try:
+            logger.warning(
+                "[L4a-DEPRECATED] pusher._execute_queued_order called for "
+                "order_id=%s symbol=%s — this path should be IDLE under "
+                "ib-direct routing. If you see this in logs, the DGX is "
+                "still emitting queue_order RPC. Investigate before "
+                "deleting the legacy branch.",
+                order.get("order_id"), order.get("symbol"),
+            )
+        except Exception:
+            pass
         order_id = order.get("order_id")
         symbol = order.get("symbol")
         action = order.get("action")  # BUY or SELL

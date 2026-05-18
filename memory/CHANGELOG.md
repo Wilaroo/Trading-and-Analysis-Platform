@@ -4,6 +4,90 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.30 — Next-action sweep: B / A-2 / Y-full / pusher-deprecation / UI variant precedence)
+
+### Bug B — TREND_CONTINUATION XGBoost crash (FIXED)
+`predict_for_setup` in `ai_modules/timeseries_service.py` called
+`model._model.predict(ndarray)` directly. Sklearn-style wrappers
+(XGBClassifier, RandomForest) accept ndarray; raw `xgb.Booster` objects
+(TREND_CONTINUATION's setup-specific model) require a DMatrix.
+Crash: `('Expecting data to be a DMatrix object, got: ', <class 'numpy.ndarray'>)`.
+
+Fix: detect `xgb.Booster` and wrap features in `xgb.DMatrix(...)` before
+predict. Sklearn-style wrappers still get the ndarray path.
+
+Tests: `tests/test_bug_b_trend_continuation_dmatrix_v19_34_X.py`.
+
+### Bug A-2 — Stale PENDING-row auto-reaper (SHIPPED)
+Background loop in `trading_bot_service.py` scans every 60s for
+`bot_trades` rows with `status=pending` + `pre_submit_at` older than
+`PENDING_REAPER_MAX_AGE_S` (default 300s) + no `executed_at`. Marks them
+`status=rejected`, `close_reason=stale_pending_auto_reaper`, evicts
+from in-memory `_pending_trades` cache, and emits a Unified Stream
+alert. Idempotent: a slow-but-successful fill cannot be clobbered
+because `executed_at` would already be set.
+
+Env knobs:
+- `PENDING_REAPER_ENABLED` (default `true`)
+- `PENDING_REAPER_INTERVAL_S` (default 60)
+- `PENDING_REAPER_MAX_AGE_S` (default 300)
+
+Prevents Bug-Y-class hangs from re-creating the 7 zombie rows the
+operator hand-cleaned on 2026-05-18.
+
+Tests: `tests/test_stale_pending_reaper_v19_34_X.py`.
+
+### Bug Y follow-through — qualifyContractsAsync everywhere
+The handoff noted the place_bracket_order site was patched on the DGX
+local clone but the Emergent platform repo still had 5 sites using
+`asyncio.to_thread(self._ib.qualifyContracts, contract)`. Same deadlock
+pattern as L3-hotfix1: `qualifyContracts` internally calls
+`loop.run_until_complete()` on ib_async's main event loop. Running it
+from a worker thread tries to drive a loop the main thread owns → wedge.
+
+Swept all 5 sites in `ib_direct_service.py` to use the proper
+`await self._ib.qualifyContractsAsync(contract)`. The platform repo
+now matches the DGX state.
+
+### Phase L4a — Windows pusher `queue_order` deprecation
+`ib_data_pusher.py:_execute_queued_order` now emits an `[L4a-DEPRECATED]`
+WARN log on every invocation. Under `BOT_ORDER_PATH=direct`, this path
+must be IDLE. Operator: once you see no `[L4a-DEPRECATED]` warnings in
+pusher logs for a full trading week, the legacy branch
+(`_execute_queued_order`, `_execute_queued_cancellation`, and the order-
+polling loop) can be ripped out safely.
+
+Did NOT remove the code yet — verify-before-delete is safer than
+blind-delete on a path that may still receive stragglers.
+
+### UI Setup Name Precedence (Layer 1 + 2)
+`setup_variant` (granular SMB name, e.g. `spencer_scalp`,
+`weekly_breakout`) now wins over the broader `setup_type` (e.g.
+`SCALP`, `INVESTMENT`) in both:
+- `OpenPositionsV5.jsx` → `tierLabel` precedence chain
+- `utils/tradeStyleMeta.js` → `resolveTradeStyle` precedence chain
+
+Without this, every scalp variant collapsed to a generic "SCALP long"
+pill, and operator couldn't tell `vwap_bounce` from `rubber_band_long`
+at a glance. Smoke test extended from 20 → 22 cases (all passing).
+
+### Files touched
+- `backend/services/ai_modules/timeseries_service.py` (+22 lines)
+- `backend/services/trading_bot_service.py` (+118 lines, reaper loop)
+- `backend/services/ib_direct_service.py` (5x in-line swap)
+- `documents/scripts/ib_data_pusher.py` (+18 lines, deprecation warn)
+- `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx` (+5 lines)
+- `frontend/src/utils/tradeStyleMeta.js` (+5 lines)
+- `frontend/src/utils/__tests__/tradeStyleMeta.smoke.js` (+4 cases)
+- `backend/tests/test_bug_b_trend_continuation_dmatrix_v19_34_X.py` (NEW)
+- `backend/tests/test_stale_pending_reaper_v19_34_X.py` (NEW)
+
+### Test status
+33 pytest cases pass (sizer-sync + Bug B + reaper + pre-existing notional-clamp + safety-guardrails). 22 frontend smoke cases pass. No regressions.
+
+
+
+
 ## 2026-02-XX (v19.34.29 — Bug C: Sizer ↔ Execution Guardrail sync)
 
 ### What was broken

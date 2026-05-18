@@ -165,7 +165,11 @@ export const resolveTradeStyle = (row = {}) => {
     return null;
   };
   // v19.34.32 — setup-type wins over the generic `trade_2_hold` default.
-  const setupKey = row.setup_type ? SETUP_TO_STYLE[norm(row.setup_type)] : null;
+  // v19.34.X (Feb 2026) — setup_variant (granular SMB name) preferred
+  // over the broader setup_type when both are present.
+  const variantKey = row.setup_variant ? SETUP_TO_STYLE[norm(row.setup_variant)] : null;
+  const setupKey = variantKey
+    || (row.setup_type ? SETUP_TO_STYLE[norm(row.setup_type)] : null);
   const tradeStyleNorm = norm(row.trade_style);
   if (setupKey && GENERIC_TRADE_STYLES.has(tradeStyleNorm)) {
     return setupKey;

@@ -51,6 +51,11 @@ const cases = [
   [{ setup_type: 'golden_cross_filtered' }, 'position'],
   [{ setup_type: 'two_hundred_day_reclaim' }, 'position'],
 
+  // v19.34.X (Feb 2026) — setup_variant wins over setup_type
+  [{ setup_variant: 'rubber_band', setup_type: 'SCALP' }, 'scalp'],
+  // generic trade_style + setup_variant → use setup_variant
+  [{ trade_style: 'TRADE_2_HOLD', setup_variant: 'weekly_breakout' }, 'investment'],
+
   // unknown returns "unknown" not null/undefined
   [{}, 'unknown'],
   [{ setup_type: 'nonexistent_setup_42' }, 'unknown'],

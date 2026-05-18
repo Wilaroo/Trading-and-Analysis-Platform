@@ -22,7 +22,7 @@ banner is now expected behaviour — that's a UX bug, not a real alert.
 
 | Sub-patch | What | Files |
 |---|---|---|
-| **L4a** | Strip the `queue_order` write path from `ib_data_pusher.py` (Windows). Pusher becomes a pure read/publish service. | Windows-side: `ib_data_pusher.py` |
+| **L4a** | Strip the `queue_order` write path from `ib_data_pusher.py` (Windows). Pusher becomes a pure read/publish service. **v19.34.30: deprecation warn shipped — once pusher logs are clean of `[L4a-DEPRECATED]` for a full trading week, delete the legacy branch.** | Windows-side: `ib_data_pusher.py` |
 | **L4b** | Add a "BRACKETS ROUTE" status pill to the UI strip (`ib-direct ✅` vs `pusher ⚠️ legacy`). | `frontend/src/components/sentcom/...` |
 | **L4c** | Silence the orange "Spark→pusher RPC blocked" banner when `BOT_ORDER_PATH=direct`. Replace with a subtle "RPC channel: deprecated (direct mode)" chip. | `backend/services/health.py` + frontend banner | 
 | **L4d** | Add a backend probe `/api/system/pusher-rpc/expected-state` that returns `expected: "offline (direct mode)"` so the operator (and any external monitoring) sees the RPC offline status is intentional. | `backend/routers/`+ health subsystem |
@@ -49,25 +49,17 @@ issues were found and three patched. Live verification pending.
   - One-shot cleanup: 7 zombie rows marked REJECTED. Restart rebuilt
     cache empty. Zero `duplicate_open_position` blocks post-restart.
 
-- 🟡 **Bug Y — `qualifyContracts` deadlock** (PATCHED, AWAITING LIVE VERIFY)
-  - Wedge site identified via the BUG-Y INSTR instrumentation:
-    `await asyncio.to_thread(self._ib.qualifyContracts, contract)` in
-    `ib_direct_service.place_bracket_order` — same L3-hotfix1 deadlock
-    pattern (ib_async internally calls `loop.run_until_complete` on
-    the main loop).
-  - Fix: replaced with `await self._ib.qualifyContractsAsync(contract)`.
-  - Verification status: PATCH APPLIED, awaiting first post-cooldown
-    trade attempt. BUG-Y INSTR trace remains in code for next session
-    to confirm/diagnose.
+- ✅ **Bug Y — `qualifyContracts` deadlock** (RESOLVED v19.34.30 — Feb 2026)
+  - DGX clone was patched 2026-05-18 (place_bracket_order site only).
+  - v19.34.30: swept all 5 `qualifyContracts` sites in
+    `ib_direct_service.py` to `qualifyContractsAsync`. Platform repo
+    now matches DGX state.
 
-- 🔴 **Bug B — TREND_CONTINUATION model crash** (NEW, P1)
-  - `Expecting DMatrix object, got numpy.ndarray`. XGBoost predict()
-    call passes numpy when it should pass `xgb.DMatrix(numpy_array)`.
-  - Result: every TREND_CONTINUATION setup silently fails its model
-    prediction step (SCHX, VT, etc.).
-  - Fix: wrap input in `xgb.DMatrix(...)` at the predict call site in
-    the setup-model dispatch (probably `services/ai_modules/setup_models.py`
-    or wherever TREND_CONTINUATION model.predict is called).
+- ✅ **Bug B — TREND_CONTINUATION model crash** (RESOLVED v19.34.30 — Feb 2026)
+  - `ai_modules/timeseries_service.predict_for_setup` now detects raw
+    `xgb.Booster` and wraps features in `xgb.DMatrix(...)` before
+    `predict()`. Sklearn-style wrappers still pass ndarray.
+  - Regression: `tests/test_bug_b_trend_continuation_dmatrix_v19_34_X.py`.
 
 - 🟡 **Bug Z — `safety_state` Mongo collection has 2 docs sharing one
   collection** (low priority but real)
@@ -76,11 +68,12 @@ issues were found and three patched. Live verification pending.
   - Fix: either split into 2 collections, or document the contract and
     add idempotent upsert guards in `safety_guardrails.py`.
 
-- 🟡 **Bug A-2 — Pending-row auto-reaper** (NEW, P1)
-  - Add a background sweep that auto-rejects `bot_trades` rows with
-    `status=PENDING` and `executed_at IS NULL` older than N seconds
-    (e.g. 60s with no broker ack). Prevents Bug-Y-class hangs from
-    re-creating zombie blockers.
+- ✅ **Bug A-2 — Pending-row auto-reaper** (RESOLVED v19.34.30 — Feb 2026)
+  - Background loop in `trading_bot_service.py` reaps `bot_trades` rows
+    with `status=pending` + `pre_submit_at` older than 300s + no
+    `executed_at`. Marks REJECTED, evicts in-memory `_pending_trades`,
+    emits Unified Stream alert. Tunable via `PENDING_REAPER_*` env vars.
+  - Regression: `tests/test_stale_pending_reaper_v19_34_X.py`.
 
 - ✅ **Bug C — Position sizer overshoots `max_notional_per_trade` cap** (RESOLVED v19.34.29 — Feb 2026)
   - Root cause: sizer had no awareness of `execution_guardrails`

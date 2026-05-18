@@ -104,6 +104,11 @@ const humanizeStyle = (raw) => {
 // v19.34.32 — When backend stamps trade_style="trade_2_hold" (the
 // generic intraday fallback), prefer the setup-derived horizon so a
 // daily_squeeze stops reading as "DAY 2 short" / "INTRA".
+// v19.34.X (Feb 2026) — setup_variant (granular SMB name, e.g.
+// "spencer_scalp") wins over the broader setup_type ("SCALP") when
+// present. Without this, every scalp variant collapsed to a generic
+// "SCALP long" pill — operator couldn't tell vwap_bounce from
+// rubber_band_long at a glance.
 const GENERIC_TRADE_STYLE_KEYS = new Set(['trade_2_hold']);
 const tierLabel = (pos) => {
   const dir = (pos.direction || pos.side || '').toLowerCase();
@@ -114,8 +119,9 @@ const tierLabel = (pos) => {
   // "swing", "day", "position"). scan_tier is the universe-level tier
   // (intraday/swing/position/investment). Prefer trade_style unless
   // it's the generic "trade_2_hold" fallback; then fall through to
-  // setup-derived label.
+  // setup_variant (granular SMB name) → setup_type → scan_tier → timeframe.
   const style = (!isGenericTs && humanizeStyle(pos.trade_style))
+    || humanizeStyle(pos.setup_variant)
     || humanizeStyle(pos.setup_type)
     || humanizeStyle(pos.scan_tier)
     || humanizeStyle(pos.timeframe);

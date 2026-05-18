@@ -518,7 +518,7 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            await self._ib.qualifyContractsAsync(contract)
             order = MarketOrder(action.upper(), int(quantity))
             trade = self._ib.placeOrder(contract, order)
             return {
@@ -674,7 +674,7 @@ class IBDirectService:
         try:
             # Qualify the contract first (off the event loop).
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            await self._ib.qualifyContractsAsync(contract)
 
             # ib_async.bracketOrder constructs the three orders with
             # correct OCA group and transmit-sequencing. Parent's
@@ -850,7 +850,7 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            await self._ib.qualifyContractsAsync(contract)
 
             if order_type_u == "MKT":
                 order = MarketOrder(action, qty)
@@ -966,7 +966,7 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            await self._ib.qualifyContractsAsync(contract)
             order = StopOrder(action, qty, round(stop_px, 4))
             try:
                 order.tif = (time_in_force or "GTC").upper()
@@ -1059,7 +1059,7 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
-            await asyncio.to_thread(self._ib.qualifyContracts, contract)
+            await self._ib.qualifyContractsAsync(contract)
 
             # 1) STP first. Refuse to submit target if stop fails — one-sided
             # exposure (target only, no stop) can flip the position on fill.
