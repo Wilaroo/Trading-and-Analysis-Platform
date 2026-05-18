@@ -710,16 +710,19 @@ class IBDirectService:
             # at least to 'PendingSubmit' or 'Submitted'. We do NOT wait
             # for a fill — that's the caller's job via order_status
             # event or naked_position_sweep.
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._ib.sleep, 0.5),
-                    timeout=wait_for_submission_s,
-                )
-            except asyncio.TimeoutError:
-                # Submission timeout — fall through and let the caller
-                # decide. Patch J's contract: we still return the
-                # orderIds so the caller can poll/cancel as needed.
-                pass
+            #
+            # v19.34.28 L3-hotfix1 (2026-05-18) — replaced
+            # `asyncio.to_thread(self._ib.sleep, 0.5)` with plain
+            # `asyncio.sleep(0.5)`. ib_async's `IB.sleep()` internally
+            # calls `loop.run_until_complete(...)` on the MAIN event loop.
+            # Running it from a worker thread (via asyncio.to_thread)
+            # caused wedge-watchdog trips: the worker tried to drive a
+            # loop the main thread owns. Plain asyncio.sleep is the
+            # correct cooperative yield. Forensic fingerprint that pinned
+            # the bug: wedge duration == wait_for_submission_s (5.0s)
+            # exactly — i.e. the wait_for timeout itself was the longest
+            # the main loop could stay un-pumped.
+            await asyncio.sleep(0.5)
 
             entry_id = int(parent_trade.order.orderId)
             stop_id = int(stop_trade.order.orderId)
@@ -866,13 +869,10 @@ class IBDirectService:
 
             # Brief wait for `orderStatus` callback. We don't loop on fill —
             # the caller's manage loop will pick it up if it's still working.
-            try:
-                await asyncio.wait_for(
-                    asyncio.to_thread(self._ib.sleep, 0.5),
-                    timeout=wait_for_fill_s,
-                )
-            except asyncio.TimeoutError:
-                pass
+            # v19.34.28 L3-hotfix1 (2026-05-18) — same fix as place_bracket_order:
+            # replaced asyncio.to_thread(self._ib.sleep, ...) wedge with
+            # plain asyncio.sleep. See place_bracket_order for full rationale.
+            await asyncio.sleep(0.5)
 
             status_obj = entry_trade.orderStatus
             ib_order_id = int(entry_trade.order.orderId)
