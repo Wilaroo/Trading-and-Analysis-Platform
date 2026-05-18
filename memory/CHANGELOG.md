@@ -4,6 +4,52 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — Bug A cleanup + Bug Y fix) — 0-trades resolved end-to-end
+
+### Bug A — Zombie PENDING rows blocking dedup (cleaned)
+Pre-submit `bot_trades` rows written by `trade_execution.py:670` were
+never flipped from `status: pending` → `OPEN`/`REJECTED` because the
+downstream broker call hung (Bug Y). Bot's in-memory `_open_trades`
+cache loaded these as "open positions" and every subsequent attempt
+on the same symbol was dedup-blocked with `duplicate_open_position`.
+
+**Cleanup**: Manually marked all PENDING rows >5 min old as REJECTED
+(7 rows: COIN×2, SOFI×3, VTV, QCOM). Restarted backend so `_restore_state`
+rebuilt the cache from clean Mongo. Post-restart logs confirm zero
+`duplicate_open_position` blocks.
+
+**Long-term fix candidate** (queued in ROADMAP): add a background sweep
+that auto-rejects PENDING rows older than N seconds with no broker ack,
+so a future Bug-Y-class hang can't accumulate zombies again.
+
+### Bug Y — `qualifyContracts` deadlock (PATCHED)
+Wedge site found via instrumentation: `await asyncio.to_thread(self._ib.qualifyContracts, contract)`
+in `ib_direct_service.place_bracket_order` (~line 691). Same deadlock
+pattern as L3-hotfix1: `qualifyContracts` internally calls
+`loop.run_until_complete()` on ib_async's main event loop. Running it
+from a worker thread tries to drive a loop the main thread owns →
+indefinite wait.
+
+**Fix**: replaced with the proper async coroutine
+`await self._ib.qualifyContractsAsync(contract)`. One-line patch.
+
+**Verification status**: PATCH APPLIED, awaiting first post-cooldown
+trade attempt to confirm. Instrumentation (5 anchor points `BUG-Y INSTR
+step1..step8`) left in place so the trail is self-documenting on the
+next attempt.
+
+### Session timeline of 0-trades root cause
+1. Stale kill-switch DB record from Feb 11 → boot-restored as tripped
+   every restart → blocked all trades. Cleared.
+2. Missing ATR in pre-execution guardrail → 100% of signals VETOED as
+   `stop_too_tight_pct`. Patched (read from `entry_context.atr`).
+3. Zombie PENDING rows from Bug Y hangs → dedup blocked every retry on
+   stuck symbols. Cleaned.
+4. `qualifyContracts` deadlock inside `ib_direct.place_bracket_order` →
+   broker call never returned, creating the zombies in (3). Patched.
+
+
+
 ## 2026-05-18 (v19.34.28 — Bug X fix) — ATR forwarded to pre-execution guardrail
 
 ### Context
