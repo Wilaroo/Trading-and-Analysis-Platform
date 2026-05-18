@@ -29,6 +29,7 @@ banner is now expected behaviour — that's a UX bug, not a real alert.
 
 ### Enhancements queued
 - **`useSystemHealth()` shared React hook** — Promote the `/api/system/health` poll out of `HealthChip.jsx` and `BracketsPathPill.jsx` (and any future HUD pills) into one shared hook with a single 20s timer. Halves HUD HTTP traffic, simplifies future pill additions (scanner-health, kill-switch, etc.). Bundle in with L4d or L4a refactor pass.
+- **"Why isn't the bot trading?" dashboard tile** — One-glance V5 panel that aggregates the top 3 trade-drop reasons in the last 60 min from `[TRADE_DROP]` log lines (e.g. "stop_too_tight × 47", "kill_switch × 0", "dedup × 3"). Backend: counter aggregator endpoint reading recent `bot_trades` rows with `status=VETOED/REJECTED` and grouping by `reason`. Frontend: small tile with rank-ordered reasons + sparkline. Prevents future "bot quiet for hours" mysteries from taking an hour to root-cause.
 
 ### 🔴 P0 NEW — 0-trades root-cause hunt (discovered 2026-05-18)
 
