@@ -4,6 +4,81 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-18 (v19.34.28 — L4d) — Pusher RPC expected-state observability endpoint
+
+### Context
+External monitoring (and the V5 banner layer) needed a machine-readable
+way to express "the pusher's RPC channel is intentionally offline under
+direct mode" so an `rpc_blocked` actual_state doesn't trigger pages.
+
+### Patch
+* `backend/routers/system_router.py` — new endpoint
+  `GET /api/system/pusher-rpc/expected-state` returning:
+  ```
+  {
+    "order_path": "direct" | "pusher",
+    "expected_state": "offline_ok" | "online_required",
+    "expected_label": "<human explanation>",
+    "actual_state": "healthy" | "rpc_blocked" | "fully_dead" | "unknown",
+    "intentional": bool,
+    "rpc": {enabled, url, consecutive_failures, last_success_age_s},
+    "push": {age_s, fresh},
+    "as_of": ISO8601
+  }
+  ```
+* Alert rule for downstream monitoring: fire only when `intentional=false`.
+* Direct mode `rpc_blocked` is now declared `intentional: true`
+  (matches the documented L3 steady state).
+
+### Verification
+* Regression test: `backend/tests/test_l4d_pusher_rpc_expected_state_v19_34_28.py`
+  — 6/6 pass (covers all 4 cells of the state matrix + shape invariants).
+* Live verified on DGX:
+  `{order_path: direct, expected_state: offline_ok, actual_state: healthy,
+    intentional: true}`.
+
+---
+
+## 2026-05-18 — Kill-switch unstuck (stale persistence — non-code fix)
+
+### Context
+Despite L4c.1 clearing the false yellow banner, the bot had taken zero
+trades all day. Investigation traced this NOT to a wedge, but to a stale
+Mongo record in the `safety_state` collection. A prior debugging session
+(stamp 1779119144 = 2026-02-11 19:25 UTC) had manually tripped the
+kill switch with reason `"second wedge site — investigating"` via the
+operator API. The `_id: "kill_switch"` document persisted `active: true`
+to Mongo, and `safety_guardrails._restore_from_db` resurrected it on
+every backend boot. Operator API resets cleared the in-memory latch but
+the Mongo row continued to hand the bot a tripped state on the next
+boot.
+
+### Fix
+* Manually cleared `safety_state` (kill_switch + scanner_toggle docs) to
+  `active: false, reason: null, tripped_at: null`. `/api/safety/status`
+  now reports `kill_switch_active: false` and the recent safety checks
+  show 4 consecutive `allowed: true · all guards passed`.
+* No code change shipped — root cause was data, not logic.
+
+### Latent bugs surfaced (queued for ROADMAP, not yet patched)
+1. **Bug X** — Silent guardrail VETO on `stop_too_tight_pct` due to
+   missing ATR. Log evidence: `QCOM: stop_too_tight_pct:
+   distance=0.1400 < 0.10% of entry (0.1989) — no ATR available`.
+   Root cause: historical-data pipeline (ATR feed) is not providing
+   ATR values to the trade-stop computation, so every signal falls back
+   to a tiny default stop that the guardrail correctly rejects. This
+   means trades NEVER reach the broker for symbols without ATR.
+2. **Bug Y** — `ib_direct_service.place_bracket_order` hang for symbols
+   that DO pass the guardrail (e.g., SOFI). Log shows `Calling
+   trade_executor.place_bracket_order...` with no matching `Result: ...`
+   line and no PATCH-L1 logger.info — the await never returns.
+3. **Bug Z** — `safety_state` collection has 2 documents (`kill_switch`
+   + `scanner_toggle`). They use different schemas but both look like
+   singletons sharing a collection. Add a unique index on `_id` (or
+   migrate to one doc per concern) to prevent future drift.
+
+
+
 ## 2026-05-18 (v19.34.28 — L4b) — Brackets path HUD pill
 
 ### Context

@@ -30,6 +30,55 @@ banner is now expected behaviour — that's a UX bug, not a real alert.
 ### Enhancements queued
 - **`useSystemHealth()` shared React hook** — Promote the `/api/system/health` poll out of `HealthChip.jsx` and `BracketsPathPill.jsx` (and any future HUD pills) into one shared hook with a single 20s timer. Halves HUD HTTP traffic, simplifies future pill additions (scanner-health, kill-switch, etc.). Bundle in with L4d or L4a refactor pass.
 
+### 🔴 P0 NEW — 0-trades root-cause hunt (discovered 2026-05-18)
+
+After clearing the stale kill-switch DB record, the bot still takes
+zero trades. Two distinct downstream bugs identified:
+
+- **Bug X — Silent guardrail VETO from missing ATR** (HIGHEST impact)
+  - Symptom: every signal vetoed `stop_too_tight_pct` because the
+    bot's fallback default stop is microscopic (~14 cents) when ATR
+    isn't available.
+  - Evidence: `QCOM: stop_too_tight_pct: distance=0.1400 < 0.10% of
+    entry (0.1989) — no ATR available`.
+  - Files to investigate:
+    * `services/safety_guardrails.py` — find the `stop_too_tight_pct`
+      check and the ATR lookup path.
+    * Historical data pipeline — why is ATR null/missing? Is the
+      `historical_data_requests` queue draining? Is ATR computed at
+      request-completion or lazily on demand?
+    * `services/trading_bot_service.py` — where does the trade's
+      `stop_price` get set? Is it falling back to a hardcoded default
+      when ATR lookup returns None?
+  - Acceptance: signals for at-least 3 random symbols compute stops
+    using real ATR and pass the `stop_too_tight_pct` guardrail in paper
+    mode.
+
+- **Bug Y — `place_bracket_order` hangs (no Result line)**
+  - Symptom: `Calling trade_executor.place_bracket_order...` logged at
+    `trade_execution.py:658`, no matching `Result: ...` log at
+    `trade_execution.py:749`, no `[v19.34.27 PATCH-L1] place_bracket_order
+    via ib_direct: ...` logger.info either. The await never returns.
+  - Suspected location: `services/ib_direct_service.py::place_bracket_order`
+    lines ~691–745. Possible sync calls that may block on the main loop:
+    * `self._ib.qualifyContracts(contract)` (currently wrapped in
+      `asyncio.to_thread` — verify this isn't the L3-hotfix1 deadlock
+      pattern repeating for `qualifyContracts`).
+    * `self._ib.bracketOrder(...)` sync construction (line ~696).
+    * Three sync `self._ib.placeOrder(...)` calls (lines ~707-709) —
+      these are normally non-blocking but if IB Gateway is in a weird
+      state, can stall.
+    * `parent_trade.orderStatus.status` access after `await asyncio.sleep(0.5)`.
+  - Acceptance: a paper trade that passes the guardrails reaches the
+    `Result: {...}` log line in `_execute_trade`.
+
+- **Bug Z — `safety_state` Mongo collection has 2 docs sharing one
+  collection** (low priority but real)
+  - `_id: "kill_switch"` (singleton for kill-switch) +
+    `_id: "scanner_toggle"` (singleton for scanner). Different schemas.
+  - Fix: either split into 2 collections, or document the contract and
+    add idempotent upsert guards in `safety_guardrails.py`.
+
 ### Acceptance criteria
 - Pusher restart + bot reconnect: bot continues to receive data
   pushes; no order-write path attempts to call out to the pusher.
