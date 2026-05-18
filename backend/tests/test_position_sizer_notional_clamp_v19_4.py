@@ -126,10 +126,16 @@ def test_risk_clamp_wins_when_stop_is_wide():
 # 4. Disabling the clamp (set to 0) restores prior two-clamp behaviour
 # --------------------------------------------------------------------------
 
-def test_clamp_disabled_when_zero():
+def test_clamp_disabled_when_zero(monkeypatch):
     """When max_notional_per_trade=0, the sizer falls back to the older
     risk + capital two-clamp logic, so legacy setups don't unexpectedly
-    tighten."""
+    tighten. v19.34.X: also disable the execution-guardrail pre-clamp so
+    THIS test only covers the operator-facing hard cap.
+    """
+    # v19.34.X — the new sizer-guardrail sync would otherwise pre-clamp
+    # to 40%×equity=$100k. Disable it (set pct=0) so this test isolates
+    # the original `max_notional_per_trade=0` fallback behaviour.
+    monkeypatch.setenv("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", "0")
     rp = _RP(max_notional_per_trade=0.0, max_position_pct=80.0)  # capital cap $200k
     bot = _Bot(rp)
     evaluator = _make_evaluator()

@@ -82,16 +82,15 @@ issues were found and three patched. Live verification pending.
     (e.g. 60s with no broker ack). Prevents Bug-Y-class hangs from
     re-creating zombie blockers.
 
-- 🔴 **Bug C — Position sizer overshoots `max_notional_per_trade` cap** (NEW, P0)
-  - Symptom: trades like RIVN ($104,940) and COIN ($104,725) being
-    blocked by `safety_guardrail/symbol_exposure` because the sizer
-    allocated ~5% over the configured $100k cap. The notional check
-    correctly catches it but the sizer should clamp earlier.
-  - Likely a `floor` vs `ceil` mistake or post-rounding inflation in
-    position-size calculation.
-  - Files to check: `services/trade_executor_service.py` /
-    `services/risk_caps_service.py` / wherever `notional = entry_price *
-    shares` is computed before guardrail.
+- ✅ **Bug C — Position sizer overshoots `max_notional_per_trade` cap** (RESOLVED v19.34.29 — Feb 2026)
+  - Root cause: sizer had no awareness of `execution_guardrails`
+    `MAX_POSITION_NOTIONAL_PCT × equity` ceiling (40% by default).
+    When `max_notional_per_trade=0` or set above that pct-ceiling,
+    sizer produced notional > guardrail cap → 100% veto rate.
+  - Fix shipped: sizer now pre-clamps using
+    `execution_guardrails.effective_notional_cap`, guardrail honors a
+    0.5% tolerance band (`EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE`).
+  - Regression tests: `tests/test_sizer_guardrail_sync_v19_34_X.py`.
 
 - 🔴 **Bug E — Scanner top-movers discovery silent** (NEW, P0)
   - Symptom: DGX live_subscription_manager only asking pusher for ~48

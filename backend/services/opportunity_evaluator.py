@@ -1090,6 +1090,44 @@ class OpportunityEvaluator:
         else:
             shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
 
+        # v19.34.X (Feb 2026) — Sync sizer with execution_guardrails cap.
+        # The downstream `check_max_position_notional` guardrail enforces
+        # an INDEPENDENT ceiling (`EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT`
+        # × live account equity, default 40%). When `max_notional_per_trade`
+        # is disabled (0) or set higher than that pct-ceiling — or when
+        # equity drifts down — the sizer would produce notional ABOVE the
+        # guardrail → trade vetoed with `notional_over_cap`. Bot logs all
+        # day with $0 P&L (operator-observed 2026-02). Pre-clamp here so
+        # both ceilings agree. The 0.5% tolerance band matches the
+        # guardrail's own tolerance for integer-share rounding edges.
+        # Env is re-read at call-time so hot config tweaks take effect
+        # without a backend restart.
+        try:
+            import os as _os
+            def _envf(k, d):
+                v = _os.environ.get(k)
+                try:
+                    return float(v) if v not in (None, "") else d
+                except (TypeError, ValueError):
+                    return d
+            _guard_pct = _envf("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
+            _guard_tol = _envf("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
+            _equity_for_guard = float(
+                getattr(bot.risk_params, "starting_capital", 0) or 0
+            )
+            if (
+                _guard_pct > 0
+                and _equity_for_guard > 0
+                and entry_price > 0
+            ):
+                _guard_cap = _guard_pct * _equity_for_guard * (1.0 + _guard_tol)
+                _max_shares_by_guard = int(_guard_cap / entry_price)
+                if _max_shares_by_guard > 0:
+                    shares = max(min(shares, _max_shares_by_guard), 1)
+        except Exception as _ge:
+            # Never let the guardrail-sync lookup break sizing.
+            logger.debug(f"execution-guardrail sizer pre-clamp skipped: {_ge}")
+
         # 2026-05-01 v19.20 — Safety-cap-aware sizing (operator request).
         # The opportunity sizer and the downstream SafetyGuardrails had two
         # independent ceilings (max_position_pct=50% vs max_symbol_exposure_usd=$15k)

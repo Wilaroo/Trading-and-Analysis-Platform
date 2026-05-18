@@ -4,6 +4,58 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.29 — Bug C: Sizer ↔ Execution Guardrail sync)
+
+### What was broken
+Position sizer in `opportunity_evaluator.py:calculate_position_size`
+clamped by `max_notional_per_trade` (operator hard cap) and
+`max_position_pct × starting_capital`, but had **no awareness of the
+`execution_guardrails.check_max_position_notional` ceiling** (40% × live
+account equity by default). When `max_notional_per_trade` was disabled
+(=0) or set higher than that pct-ceiling — or when live equity drifted
+down from starting_capital — the sizer would happily produce a $105k
+notional on a $250k account → `check_max_position_notional` vetoed
+every trade with `notional_over_cap`. Bot logs all day, $0 fills.
+
+### Fix
+1. **`execution_guardrails.py`**: Added 0.5% tolerance band
+   (`EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE`) to
+   `check_max_position_notional` so integer-share rounding edges don't
+   trip the veto when the sizer DOES try to respect the cap. Exposed
+   `effective_notional_cap()` helper as the single source of truth.
+
+2. **`opportunity_evaluator.py`**: Added a pre-clamp using the same
+   `MAX_POSITION_NOTIONAL_PCT × equity × (1 + tol)` ceiling immediately
+   after the existing `max_shares_by_notional` clamp. Env vars are
+   re-read at call-time so hot config tweaks take effect without a
+   backend restart.
+
+### User-approved approach
+Tolerance band (option B), default 0.5%. Tunable via
+`EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE` env var. Operator's hard
+cap (`max_notional_per_trade`) still wins when stricter than the
+guardrail ceiling.
+
+### Tests
+- `tests/test_sizer_guardrail_sync_v19_34_X.py` — 5 new cases:
+  sizer clamps to guard cap, hard cap still wins when stricter, tolerance
+  allows tiny overshoot, blocks 2%+ overshoot, `effective_notional_cap`
+  math.
+- `tests/test_position_sizer_notional_clamp_v19_4.py` — updated
+  `test_clamp_disabled_when_zero` to disable the new guardrail sync
+  via env var so the test isolates the original two-clamp fallback.
+- All 12 sizer-related tests passing locally. 17 `test_safety_guardrails`
+  tests still passing (no regression).
+
+### Files touched
+- `backend/services/execution_guardrails.py` (+31 lines)
+- `backend/services/opportunity_evaluator.py` (+39 lines)
+- `backend/tests/test_sizer_guardrail_sync_v19_34_X.py` (NEW)
+- `backend/tests/test_position_sizer_notional_clamp_v19_4.py` (env-isolate)
+
+
+
+
 ## 2026-05-18 (v19.34.28 — Bug A cleanup + Bug Y fix) — 0-trades resolved end-to-end
 
 ### Bug A — Zombie PENDING rows blocking dedup (cleaned)
