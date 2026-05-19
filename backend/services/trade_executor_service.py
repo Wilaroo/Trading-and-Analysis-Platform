@@ -1777,13 +1777,112 @@ class TradeExecutorService:
         try:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
 
+            # v19.34.40 — Direct IB close path (no pusher dependency).
+            # Mirrors the entry-side Patch J / L2a contract:
+            #   1. When BOT_ORDER_PATH=direct, route the close MKT through
+            #      `IBDirectService.place_close_market` so EOD/manual/safety
+            #      flattens succeed even with the Windows pusher offline.
+            #   2. Cancel bracket children BEFORE the close MKT (race guard
+            #      preserved from v19.13).
+            #   3. NEVER silent-simulate in LIVE mode — pre-v19.34.40 a
+            #      pusher-offline state returned success=True/simulated=True
+            #      and the bot would book the trade CLOSED locally while IB
+            #      still held the position overnight. Now we hard-fail; the
+            #      caller (EOD closer, safety flatten) retries on the next
+            #      manage-loop tick.
+            order_path = self._order_path_mode()
+            if order_path == "direct":
+                try:
+                    # v19.13 — cancel bracket children first (best-effort).
+                    # Same race-guard rationale as the legacy path.
+                    await self._cancel_ib_bracket_orders(trade)
+                except Exception as cancel_err:
+                    logger.warning(
+                        "[v19.34.40] bracket-children cancel before direct "
+                        "close failed for %s (non-fatal): %s",
+                        trade.symbol, cancel_err,
+                    )
+
+                try:
+                    from services.ib_direct_service import get_ib_direct_service
+                    ib_direct = get_ib_direct_service()
+                    logger.info(
+                        "[v19.34.40] _ib_close_position: routing via ib_direct "
+                        "(BOT_ORDER_PATH=direct) for %s qty=%d",
+                        trade.symbol, getattr(trade, "shares", 0),
+                    )
+                    direct_result = await ib_direct.place_close_market(
+                        trade, wait_for_fill_s=15.0,
+                    )
+
+                    if direct_result.get("success") and direct_result.get("status") == "filled":
+                        closing_action = "SELL" if trade.direction.value == "long" else "BUY"
+                        signed_delta = (
+                            -int(trade.shares) if closing_action == "SELL"
+                            else int(trade.shares)
+                        )
+                        self._maybe_schedule_shadow_observe(
+                            trade,
+                            {
+                                "success": True,
+                                "order_id": direct_result.get("order_id"),
+                                "fill_price": direct_result.get("fill_price")
+                                              or trade.current_price,
+                                "broker": "ib_direct",
+                            },
+                            action=closing_action, intent="close",
+                            expected_signed_delta=signed_delta,
+                        )
+                        return {
+                            "success": True,
+                            "order_id": direct_result.get("order_id"),
+                            "fill_price": direct_result.get("fill_price")
+                                          or trade.current_price,
+                            "broker": "ib_direct",
+                        }
+                    # Non-filled (submitted/partial/rejected) — surface so
+                    # the manage loop retries on next tick. The order may
+                    # still fill at IB; the phantom-share clamp short-
+                    # circuits to a no-op close if it does.
+                    return {
+                        "success": False,
+                        "error": direct_result.get("error")
+                                 or f"ib_direct_close_{direct_result.get('status')}",
+                        "order_id": direct_result.get("order_id"),
+                        "broker": "ib_direct",
+                        "ib_direct_status": direct_result.get("status"),
+                        "filled_qty": direct_result.get("filled_qty", 0),
+                    }
+                except Exception as e:
+                    logger.critical(
+                        "[v19.34.40] ib_direct.place_close_market raised "
+                        "for %s: %s — failing hard, no pusher fallback.",
+                        trade.symbol, e,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"ib_direct_close_exception: {str(e)[:200]}",
+                        "broker": "ib_direct",
+                    }
+
+            # Legacy pusher path (BOT_ORDER_PATH=pusher|shadow).
             if not is_pusher_connected():
-                logger.warning("IB pusher not connected - simulating close")
+                # v19.34.40 — HARD FAIL on pusher-offline. Pre-v40 we
+                # silently returned simulated=True here, causing the bot
+                # to book trades CLOSED locally while IB held them
+                # overnight. Mirror Patch J's entry-side contract.
+                logger.critical(
+                    "[v19.34.40 EOD-SAFETY] _ib_close_position: pusher "
+                    "OFFLINE for %s and BOT_ORDER_PATH != direct — "
+                    "refusing silent simulate. Trade stays OPEN; manage "
+                    "loop will retry next tick. Set BOT_ORDER_PATH=direct "
+                    "to route closes natively over the DGX ib_async "
+                    "socket.", trade.symbol,
+                )
                 return {
-                    "success": True,
-                    "order_id": f"SIM-CLOSE-{trade.id}",
-                    "fill_price": trade.current_price,
-                    "simulated": True
+                    "success": False,
+                    "error": "pusher_offline_cannot_close_in_live_mode",
+                    "pusher_offline": True,
                 }
 
             # v19.13 — cancel bracket children first. Best-effort; we

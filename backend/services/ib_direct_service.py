@@ -535,6 +535,144 @@ class IBDirectService:
                          action, quantity, symbol, e)
             return {"success": False, "error": str(e)[:200]}
 
+    # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
+    async def place_close_market(
+        self,
+        trade,
+        *,
+        wait_for_fill_s: float = 10.0,
+        sec_type: str = "STK",
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Dict[str, Any]:
+        """v19.34.40 — Native MKT-close on the DGX-side ib_async socket.
+
+        Direct replacement for the legacy `_ib_close_position` pusher-queue
+        path. Submits an opposite-side MarketOrder for the trade's remaining
+        shares and polls `orderStatus` until filled (or `wait_for_fill_s`).
+
+        Why this exists:
+          The EOD closer used to route every close MKT through the Windows
+          pusher's `queue_order`. When the pusher was offline, the legacy
+          path silently returned `{"success": True, "simulated": True}` —
+          the bot booked the trade CLOSED locally while IB still held the
+          position overnight. Same failure class Patch J killed for entries.
+          This method gives the EOD closer (and any other close caller) a
+          pusher-independent path that hard-fails when the direct socket
+          isn't there.
+
+        Returns shape compatible with `_ib_close_position`:
+          {success, order_id, fill_price, broker, simulated, status,
+           filled_qty, remaining_qty, error?}
+        """
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected",
+                    "broker": "ib_direct", "simulated": False}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode",
+                    "broker": "ib_direct", "simulated": False}
+        if not self.is_authorized_to_trade():
+            return {"success": False,
+                    "error": "ib_direct_not_authorized_managed_accounts_empty",
+                    "broker": "ib_direct", "simulated": False}
+
+        try:
+            symbol = str(trade.symbol).upper()
+            direction = (getattr(trade.direction, "value", None)
+                         or str(trade.direction)).lower()
+            qty = int(getattr(trade, "remaining_shares", 0) or trade.shares)
+            if qty <= 0:
+                return {"success": False, "error": f"bad shares: {qty}",
+                        "broker": "ib_direct", "simulated": False}
+            action = "SELL" if direction == "long" else "BUY"
+        except Exception as e:
+            return {"success": False, "error": f"bad trade fields: {e}",
+                    "broker": "ib_direct", "simulated": False}
+
+        try:
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            order = MarketOrder(action, qty)
+            try:
+                # DAY TIF — close MKT should not survive the session.
+                order.tif = "DAY"
+            except Exception:
+                pass
+
+            close_trade = self._ib.placeOrder(contract, order)
+            ib_order_id = int(close_trade.order.orderId)
+
+            # Poll orderStatus up to wait_for_fill_s. MKTs typically fill
+            # in 200-800ms; we sample every 250ms for ~40 ticks at 10s.
+            deadline = asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
+            poll_iv = 0.25
+            ib_status = "submitted"
+            filled_qty = 0
+            avg_fill = 0.0
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(poll_iv)
+                status_obj = close_trade.orderStatus
+                if status_obj is None:
+                    continue
+                ib_status = (status_obj.status or "submitted").lower()
+                filled_qty = int(status_obj.filled or 0)
+                avg_fill = float(status_obj.avgFillPrice or 0.0)
+                if ib_status in ("filled", "cancelled", "apicancelled",
+                                 "inactive", "rejected"):
+                    break
+                if filled_qty >= qty:
+                    ib_status = "filled"
+                    break
+
+            if ib_status == "filled":
+                status_out = "filled"
+                success = True
+            elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
+                status_out = "rejected"
+                success = False
+            elif 0 < filled_qty < qty:
+                status_out = "partial"
+                success = True  # caller decides whether to retry remainder
+            else:
+                status_out = "submitted"
+                # Order is working but not filled yet — surface as
+                # non-success so the manage loop retries next tick.
+                # The order itself is alive at IB so a real fill may
+                # arrive shortly; the retry will short-circuit via the
+                # phantom-share clamp when IB shows position=0.
+                success = False
+
+            fill_price = avg_fill if filled_qty > 0 else None
+
+            logger.info(
+                "[v19.34.40 IB-DIRECT close] %s %s qty=%d → order_id=%d "
+                "status=%s filled=%d avg=%.4f",
+                symbol, action, qty, ib_order_id, status_out,
+                filled_qty, avg_fill,
+            )
+
+            return {
+                "success": success,
+                "order_id": ib_order_id,
+                "ib_order_id": ib_order_id,
+                "fill_price": fill_price,
+                "filled_qty": filled_qty,
+                "remaining_qty": max(0, qty - filled_qty),
+                "status": status_out,
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.40 IB-DIRECT close] place_close_market failed for "
+                "%s: %s", getattr(trade, "symbol", "?"), e,
+            )
+            return {"success": False,
+                    "error": f"ib_direct_close_error: {str(e)[:200]}",
+                    "broker": "ib_direct", "simulated": False}
+
+
+
     async def cancel_order(self, order_id: int) -> Dict[str, Any]:
         """Cancel a working order by IB orderId."""
         if not await self.ensure_connected():

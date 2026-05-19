@@ -1,0 +1,271 @@
+diff --git a/backend/services/ib_direct_service.py b/backend/services/ib_direct_service.py
+index b9a888e2..3d924c77 100644
+--- a/backend/services/ib_direct_service.py
++++ b/backend/services/ib_direct_service.py
+@@ -535,6 +535,144 @@ class IBDirectService:
+                          action, quantity, symbol, e)
+             return {"success": False, "error": str(e)[:200]}
+ 
++    # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
++    async def place_close_market(
++        self,
++        trade,
++        *,
++        wait_for_fill_s: float = 10.0,
++        sec_type: str = "STK",
++        exchange: str = "SMART",
++        currency: str = "USD",
++    ) -> Dict[str, Any]:
++        """v19.34.40 — Native MKT-close on the DGX-side ib_async socket.
++
++        Direct replacement for the legacy `_ib_close_position` pusher-queue
++        path. Submits an opposite-side MarketOrder for the trade's remaining
++        shares and polls `orderStatus` until filled (or `wait_for_fill_s`).
++
++        Why this exists:
++          The EOD closer used to route every close MKT through the Windows
++          pusher's `queue_order`. When the pusher was offline, the legacy
++          path silently returned `{"success": True, "simulated": True}` —
++          the bot booked the trade CLOSED locally while IB still held the
++          position overnight. Same failure class Patch J killed for entries.
++          This method gives the EOD closer (and any other close caller) a
++          pusher-independent path that hard-fails when the direct socket
++          isn't there.
++
++        Returns shape compatible with `_ib_close_position`:
++          {success, order_id, fill_price, broker, simulated, status,
++           filled_qty, remaining_qty, error?}
++        """
++        if not await self.ensure_connected():
++            return {"success": False, "error": "ib_direct_not_connected",
++                    "broker": "ib_direct", "simulated": False}
++        if self.config.read_only:
++            return {"success": False, "error": "ib_direct_read_only_mode",
++                    "broker": "ib_direct", "simulated": False}
++        if not self.is_authorized_to_trade():
++            return {"success": False,
++                    "error": "ib_direct_not_authorized_managed_accounts_empty",
++                    "broker": "ib_direct", "simulated": False}
++
++        try:
++            symbol = str(trade.symbol).upper()
++            direction = (getattr(trade.direction, "value", None)
++                         or str(trade.direction)).lower()
++            qty = int(getattr(trade, "remaining_shares", 0) or trade.shares)
++            if qty <= 0:
++                return {"success": False, "error": f"bad shares: {qty}",
++                        "broker": "ib_direct", "simulated": False}
++            action = "SELL" if direction == "long" else "BUY"
++        except Exception as e:
++            return {"success": False, "error": f"bad trade fields: {e}",
++                    "broker": "ib_direct", "simulated": False}
++
++        try:
++            contract = Stock(symbol, exchange, currency)
++            await self._ib.qualifyContractsAsync(contract)
++            order = MarketOrder(action, qty)
++            try:
++                # DAY TIF — close MKT should not survive the session.
++                order.tif = "DAY"
++            except Exception:
++                pass
++
++            close_trade = self._ib.placeOrder(contract, order)
++            ib_order_id = int(close_trade.order.orderId)
++
++            # Poll orderStatus up to wait_for_fill_s. MKTs typically fill
++            # in 200-800ms; we sample every 250ms for ~40 ticks at 10s.
++            deadline = asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
++            poll_iv = 0.25
++            ib_status = "submitted"
++            filled_qty = 0
++            avg_fill = 0.0
++            while asyncio.get_event_loop().time() < deadline:
++                await asyncio.sleep(poll_iv)
++                status_obj = close_trade.orderStatus
++                if status_obj is None:
++                    continue
++                ib_status = (status_obj.status or "submitted").lower()
++                filled_qty = int(status_obj.filled or 0)
++                avg_fill = float(status_obj.avgFillPrice or 0.0)
++                if ib_status in ("filled", "cancelled", "apicancelled",
++                                 "inactive", "rejected"):
++                    break
++                if filled_qty >= qty:
++                    ib_status = "filled"
++                    break
++
++            if ib_status == "filled":
++                status_out = "filled"
++                success = True
++            elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
++                status_out = "rejected"
++                success = False
++            elif 0 < filled_qty < qty:
++                status_out = "partial"
++                success = True  # caller decides whether to retry remainder
++            else:
++                status_out = "submitted"
++                # Order is working but not filled yet — surface as
++                # non-success so the manage loop retries next tick.
++                # The order itself is alive at IB so a real fill may
++                # arrive shortly; the retry will short-circuit via the
++                # phantom-share clamp when IB shows position=0.
++                success = False
++
++            fill_price = avg_fill if filled_qty > 0 else None
++
++            logger.info(
++                "[v19.34.40 IB-DIRECT close] %s %s qty=%d → order_id=%d "
++                "status=%s filled=%d avg=%.4f",
++                symbol, action, qty, ib_order_id, status_out,
++                filled_qty, avg_fill,
++            )
++
++            return {
++                "success": success,
++                "order_id": ib_order_id,
++                "ib_order_id": ib_order_id,
++                "fill_price": fill_price,
++                "filled_qty": filled_qty,
++                "remaining_qty": max(0, qty - filled_qty),
++                "status": status_out,
++                "broker": "ib_direct",
++                "simulated": False,
++            }
++        except Exception as e:
++            logger.error(
++                "[v19.34.40 IB-DIRECT close] place_close_market failed for "
++                "%s: %s", getattr(trade, "symbol", "?"), e,
++            )
++            return {"success": False,
++                    "error": f"ib_direct_close_error: {str(e)[:200]}",
++                    "broker": "ib_direct", "simulated": False}
++
++
++
+     async def cancel_order(self, order_id: int) -> Dict[str, Any]:
+         """Cancel a working order by IB orderId."""
+         if not await self.ensure_connected():
+diff --git a/backend/services/trade_executor_service.py b/backend/services/trade_executor_service.py
+index 631624f1..3c9d16d8 100644
+--- a/backend/services/trade_executor_service.py
++++ b/backend/services/trade_executor_service.py
+@@ -1777,13 +1777,112 @@ class TradeExecutorService:
+         try:
+             from routers.ib import queue_order, get_order_result, is_pusher_connected
+ 
++            # v19.34.40 — Direct IB close path (no pusher dependency).
++            # Mirrors the entry-side Patch J / L2a contract:
++            #   1. When BOT_ORDER_PATH=direct, route the close MKT through
++            #      `IBDirectService.place_close_market` so EOD/manual/safety
++            #      flattens succeed even with the Windows pusher offline.
++            #   2. Cancel bracket children BEFORE the close MKT (race guard
++            #      preserved from v19.13).
++            #   3. NEVER silent-simulate in LIVE mode — pre-v19.34.40 a
++            #      pusher-offline state returned success=True/simulated=True
++            #      and the bot would book the trade CLOSED locally while IB
++            #      still held the position overnight. Now we hard-fail; the
++            #      caller (EOD closer, safety flatten) retries on the next
++            #      manage-loop tick.
++            order_path = self._order_path_mode()
++            if order_path == "direct":
++                try:
++                    # v19.13 — cancel bracket children first (best-effort).
++                    # Same race-guard rationale as the legacy path.
++                    await self._cancel_ib_bracket_orders(trade)
++                except Exception as cancel_err:
++                    logger.warning(
++                        "[v19.34.40] bracket-children cancel before direct "
++                        "close failed for %s (non-fatal): %s",
++                        trade.symbol, cancel_err,
++                    )
++
++                try:
++                    from services.ib_direct_service import get_ib_direct_service
++                    ib_direct = get_ib_direct_service()
++                    logger.info(
++                        "[v19.34.40] _ib_close_position: routing via ib_direct "
++                        "(BOT_ORDER_PATH=direct) for %s qty=%d",
++                        trade.symbol, getattr(trade, "shares", 0),
++                    )
++                    direct_result = await ib_direct.place_close_market(
++                        trade, wait_for_fill_s=15.0,
++                    )
++
++                    if direct_result.get("success") and direct_result.get("status") == "filled":
++                        closing_action = "SELL" if trade.direction.value == "long" else "BUY"
++                        signed_delta = (
++                            -int(trade.shares) if closing_action == "SELL"
++                            else int(trade.shares)
++                        )
++                        self._maybe_schedule_shadow_observe(
++                            trade,
++                            {
++                                "success": True,
++                                "order_id": direct_result.get("order_id"),
++                                "fill_price": direct_result.get("fill_price")
++                                              or trade.current_price,
++                                "broker": "ib_direct",
++                            },
++                            action=closing_action, intent="close",
++                            expected_signed_delta=signed_delta,
++                        )
++                        return {
++                            "success": True,
++                            "order_id": direct_result.get("order_id"),
++                            "fill_price": direct_result.get("fill_price")
++                                          or trade.current_price,
++                            "broker": "ib_direct",
++                        }
++                    # Non-filled (submitted/partial/rejected) — surface so
++                    # the manage loop retries on next tick. The order may
++                    # still fill at IB; the phantom-share clamp short-
++                    # circuits to a no-op close if it does.
++                    return {
++                        "success": False,
++                        "error": direct_result.get("error")
++                                 or f"ib_direct_close_{direct_result.get('status')}",
++                        "order_id": direct_result.get("order_id"),
++                        "broker": "ib_direct",
++                        "ib_direct_status": direct_result.get("status"),
++                        "filled_qty": direct_result.get("filled_qty", 0),
++                    }
++                except Exception as e:
++                    logger.critical(
++                        "[v19.34.40] ib_direct.place_close_market raised "
++                        "for %s: %s — failing hard, no pusher fallback.",
++                        trade.symbol, e,
++                    )
++                    return {
++                        "success": False,
++                        "error": f"ib_direct_close_exception: {str(e)[:200]}",
++                        "broker": "ib_direct",
++                    }
++
++            # Legacy pusher path (BOT_ORDER_PATH=pusher|shadow).
+             if not is_pusher_connected():
+-                logger.warning("IB pusher not connected - simulating close")
++                # v19.34.40 — HARD FAIL on pusher-offline. Pre-v40 we
++                # silently returned simulated=True here, causing the bot
++                # to book trades CLOSED locally while IB held them
++                # overnight. Mirror Patch J's entry-side contract.
++                logger.critical(
++                    "[v19.34.40 EOD-SAFETY] _ib_close_position: pusher "
++                    "OFFLINE for %s and BOT_ORDER_PATH != direct — "
++                    "refusing silent simulate. Trade stays OPEN; manage "
++                    "loop will retry next tick. Set BOT_ORDER_PATH=direct "
++                    "to route closes natively over the DGX ib_async "
++                    "socket.", trade.symbol,
++                )
+                 return {
+-                    "success": True,
+-                    "order_id": f"SIM-CLOSE-{trade.id}",
+-                    "fill_price": trade.current_price,
+-                    "simulated": True
++                    "success": False,
++                    "error": "pusher_offline_cannot_close_in_live_mode",
++                    "pusher_offline": True,
+                 }
+ 
+             # v19.13 — cancel bracket children first. Best-effort; we
