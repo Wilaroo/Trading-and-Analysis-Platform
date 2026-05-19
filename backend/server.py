@@ -4089,6 +4089,10 @@ async def startup_event():
                         print(f"[event-loop-monitor] stack dump failed: {_dump_err}")
             await asyncio.sleep(0.5)  # bump heartbeat 2× per second
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
+
+    # v19.34.35 — ADV cache health guard (auto-rebuild if corrupted)
+    from services.ib_historical_collector import _adv_cache_startup_guard
+    asyncio.create_task(_adv_cache_startup_guard(), name="_adv_cache_startup_guard")
     
     # Master cache refresh — ONE thread replaces 26+ per cycle
     asyncio.create_task(_streaming_cache_loop())

@@ -2921,3 +2921,40 @@ def init_ib_collector(db=None, ib_service=None, alpaca_service=None) -> IBHistor
     if alpaca_service:
         collector.set_alpaca_service(alpaca_service)
     return collector
+
+
+async def _adv_cache_startup_guard():
+    """v19.34.35 — Background startup guard that auto-rebuilds the ADV cache
+    if it's corrupted/empty. Prevents silent scanner starvation.
+    """
+    import asyncio, logging
+    logger = logging.getLogger(__name__)
+    await asyncio.sleep(20)
+    try:
+        collector = get_ib_collector()
+        if collector._db is None:
+            logger.warning("[adv-cache-guard] DB not initialized")
+            return
+        n = collector._db["symbol_adv_cache"].count_documents(
+            {"avg_dollar_volume": {"$gte": 1_000_000}}
+        )
+        if n >= 100:
+            logger.info(f"[adv-cache-guard] OK — {n:,} symbols >= $1M ADV")
+            return
+        total = collector._db["symbol_adv_cache"].count_documents({})
+        logger.warning(
+            f"[adv-cache-guard] !! cache empty/corrupted (n={n}, total={total}) "
+            f"— auto-rebuilding"
+        )
+        result = await collector.rebuild_adv_from_ib_data()
+        if result.get("success"):
+            ts = result.get("tier_summary", {})
+            logger.warning(
+                f"[adv-cache-guard] OK rebuild done: updated={result.get('symbols_updated')}, "
+                f"intraday={ts.get('intraday')}, swing={ts.get('swing')}, "
+                f"investment={ts.get('investment')}"
+            )
+        else:
+            logger.error(f"[adv-cache-guard] FAIL rebuild: {result.get('error')}")
+    except Exception as e:
+        logger.exception(f"[adv-cache-guard] crashed: {e}")
