@@ -848,7 +848,10 @@ class TradeExecution:
                 trade.entered_by = "bot_fired"
 
                 # Record actual entry (Phase 1 Learning)
-                if hasattr(bot, '_learning_loop') and bot._learning_loop:
+                # v19.34.31 — skip when fill_price is None (bracket submitted
+                # to IB but not yet filled; fill callback records later).
+                if (hasattr(bot, '_learning_loop') and bot._learning_loop
+                        and trade.fill_price is not None):
                     try:
                         bot._learning_loop.record_trade_entry(
                             trade_id=trade.id,
@@ -888,7 +891,16 @@ class TradeExecution:
                 await bot._log_trade_to_journal(trade, "entry")
 
                 sim_tag = " (SIMULATED)" if result.get('simulated') else ""
-                logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
+                # v19.34.31 — guard against fill_price=None for submitted-but-
+                # not-yet-filled brackets (ib-direct returns success on SUBMIT;
+                # IB sends the fill async). Without this, every async-fill
+                # bracket crashed execute_trade at the success log line,
+                # bubbled up as [TRADE_DROP] gate=execution_exception, and
+                # left a zombie PENDING row in bot_trades.
+                if trade.fill_price is not None:
+                    logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
+                else:
+                    logger.info(f"📤 Trade submitted{sim_tag}: {trade.symbol} {trade.shares} (awaiting IB fill)")
 
                 # Surface to V5 Unified Stream so operators see fills land
                 # in the same place they see scanner / safety events.
