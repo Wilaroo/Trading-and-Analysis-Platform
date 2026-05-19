@@ -863,6 +863,46 @@ class IBDirectService:
         try:
             contract = Stock(symbol, exchange, currency)
             await self._ib.qualifyContractsAsync(contract)
+
+            # v19.34.39 — Fresh-price re-check at submit time.
+            # Fetches LIVE market price from IB; if entry_price has drifted
+            # > threshold% (alert went stale between scan & submit), abort.
+            # Universal fix for all setups — no setup-level changes needed.
+            import os as _os39
+            try:
+                _band_pct39 = float(_os39.environ.get('IB_ENTRY_PRICE_BAND_PCT', '2.5'))
+            except Exception:
+                _band_pct39 = 2.5
+            _live_px = 0.0
+            try:
+                _tickers = await self._ib.reqTickersAsync(contract)
+                if _tickers:
+                    _tk = _tickers[0]
+                    _live_px = float(_tk.marketPrice() or 0) or float(getattr(_tk, "last", 0) or 0) or float(getattr(_tk, "close", 0) or 0)
+            except Exception as _px_err:
+                logger.warning(
+                    "[v19.34.39 live-price] %s could not fetch live price: %s — proceeding without guard.",
+                    symbol, _px_err,
+                )
+            if _live_px > 0 and _band_pct39 > 0:
+                _dev_pct = abs(entry_price - _live_px) / _live_px * 100.0
+                if _dev_pct > _band_pct39:
+                    logger.warning(
+                        "[v19.34.39 live-price] %s REJECTED at submit: entry=$%.4f is %.2f%% from LIVE $%.4f (threshold %.2f%%). Alert stale — skip.",
+                        symbol, entry_price, _dev_pct, _live_px, _band_pct39,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"alert_stale:{_dev_pct:.2f}pct_from_live_market",
+                        "entry_order_id": None, "stop_order_id": None,
+                        "target_order_id": None, "oca_group": None,
+                        "status": "rejected_stale_alert",
+                        "fill_price": None, "filled_qty": 0,
+                        "broker": "ib_direct", "simulated": False,
+                        "current_price": _live_px, "entry_price": entry_price,
+                        "deviation_pct": _dev_pct, "threshold_pct": _band_pct39,
+                    }
+
             parent_order = LimitOrder(parent_action, qty, round(entry_price, 4))
             try:
                 parent_order.tif = "DAY"
