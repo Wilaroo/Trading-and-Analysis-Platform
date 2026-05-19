@@ -1090,6 +1090,26 @@ class OpportunityEvaluator:
         else:
             shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
 
+        # v19.34.29 — Sync sizer with execution_guardrails cap.
+        # AMZN was vetoed daily by `notional_over_cap $106k>$100k` because
+        # the sizer ignored the 40%-equity guardrail. Pre-clamp here.
+        try:
+            import os as _os
+            def _envf(k, d):
+                v = _os.environ.get(k)
+                try: return float(v) if v not in (None, "") else d
+                except: return d
+            _gp = _envf("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
+            _gt = _envf("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
+            _eq = float(getattr(bot.risk_params, "starting_capital", 0) or 0)
+            if _gp > 0 and _eq > 0 and entry_price > 0:
+                _gc = _gp * _eq * (1.0 + _gt)
+                _max_shares_by_guard = int(_gc / entry_price)
+                if _max_shares_by_guard > 0:
+                    shares = max(min(shares, _max_shares_by_guard), 1)
+        except Exception as _e:
+            logger.debug(f"execution-guardrail sizer pre-clamp skipped: {_e}")
+
         # 2026-05-01 v19.20 — Safety-cap-aware sizing (operator request).
         # The opportunity sizer and the downstream SafetyGuardrails had two
         # independent ceilings (max_position_pct=50% vs max_symbol_exposure_usd=$15k)

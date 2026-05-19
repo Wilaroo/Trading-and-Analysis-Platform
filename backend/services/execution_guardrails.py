@@ -52,6 +52,18 @@ MIN_STOP_DISTANCE_PCT = _env_float("EXECUTION_GUARDRAIL_MIN_STOP_PCT", 0.001)  #
 # the primary per-trade notional cap; this guardrail catches sizer
 # accidents, not normal sizing decisions.
 MAX_POSITION_NOTIONAL_PCT = _env_float("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
+# v19.34.29 — Tolerance band for the notional cap. 0.5% absorbs share-
+# rounding when int(cap/price) leaves a few dollars on the table.
+NOTIONAL_CAP_TOLERANCE = _env_float("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
+
+
+def effective_notional_cap(account_equity: float, max_pct=None) -> float:
+    """Single source of truth for the per-trade notional ceiling."""
+    if max_pct is None:
+        max_pct = _env_float("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
+    if not (account_equity and account_equity > 0) or max_pct <= 0:
+        return 0.0
+    return float(max_pct) * float(account_equity)
 
 
 @dataclass
@@ -127,7 +139,9 @@ def check_max_position_notional(
         return GuardrailResult(True, "")
     notional = entry_price * shares
     cap = max_pct * account_equity
-    if notional > cap:
+    # v19.34.29 — 0.5% tolerance absorbs integer-share rounding.
+    tol = _env_float("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", NOTIONAL_CAP_TOLERANCE)
+    if notional > cap * (1.0 + tol):
         return GuardrailResult(
             False,
             f"notional_over_cap: {notional:.0f} > {max_pct*100:.2f}%×equity "
