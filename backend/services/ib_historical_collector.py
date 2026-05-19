@@ -159,6 +159,18 @@ class IBHistoricalCollector:
         "min": 0.015,   # 1.5% — minimum movement to trade profitably
         "max": 0.10,    # 10% — maximum before it's untradeable chaos
     }
+
+    # v19.34.34 — High-flow ETFs/indices that bypass the ATR floor.
+    # Tradeable on flow events even when daily-bar ATR is quiet.
+    ATR_BYPASS_WATCHLIST = {
+        "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "EEM",
+        "XLF", "XLE", "XLK", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC",
+        "TQQQ", "SQQQ", "SPXU", "SPXS", "TNA", "TZA", "SOXL", "SOXS",
+        "UPRO", "SPXL", "FAS", "FAZ", "TMF", "TMV",
+        "VXX", "UVXY", "SVXY",
+        "GLD", "SLV", "GDX", "USO",
+        "ARKK", "SMH", "XBI",
+    }
     
     # Legacy share volume thresholds (fallback if dollar volume not computed)
     ADV_THRESHOLDS = {
@@ -508,7 +520,7 @@ class IBHistoricalCollector:
                         atr_pct = atr / latest_close
                 
                 # Determine tier
-                tier = self.get_symbol_tier(avg_vol, avg_dollar_volume, atr_pct)
+                tier = self.get_symbol_tier(avg_vol, avg_dollar_volume, atr_pct, symbol=symbol)
                 tier_counts[tier] = tier_counts.get(tier, 0) + 1
                 
                 if tier == "skip" and atr_pct > 0 and (atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]):
@@ -1345,14 +1357,15 @@ class IBHistoricalCollector:
         return chains
 
     
-    def get_symbol_tier(self, avg_volume: float, avg_dollar_volume: float = None, atr_pct: float = None) -> str:
+    def get_symbol_tier(self, avg_volume: float, avg_dollar_volume: float = None, atr_pct: float = None, symbol: str = None) -> str:
         """Determine which tier a symbol belongs to.
         
         Uses dollar volume (preferred) with ATR% filtering.
         Falls back to share volume if dollar volume not available.
         """
         # ATR% filter — skip symbols outside tradeable range
-        if atr_pct is not None:
+        # v19.34.34: bypass ATR gate for high-flow ETFs on ATR_BYPASS_WATCHLIST
+        if atr_pct is not None and (symbol is None or symbol not in self.ATR_BYPASS_WATCHLIST):
             if atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]:
                 return "skip"
         
