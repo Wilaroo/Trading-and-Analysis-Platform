@@ -3069,7 +3069,21 @@ class TimeSeriesAIService:
                     ]])
                     
                     # Predict using the setup model directly
-                    pred_raw = model._model.predict(feature_vector)
+                    # v19.34.30 Bug B fix - xgb.Booster requires DMatrix.
+                    try:
+                        import xgboost as _xgb
+                        _is_booster = isinstance(model._model, _xgb.Booster)
+                    except Exception:
+                        _is_booster = False
+                    if _is_booster:
+                        import xgboost as _xgb
+                        _dm = _xgb.DMatrix(
+                            feature_vector.astype(np.float32),
+                            feature_names=list(model._feature_names),
+                        )
+                        pred_raw = model._model.predict(_dm)
+                    else:
+                        pred_raw = model._model.predict(feature_vector)
                     
                     if len(pred_raw.shape) > 1 and pred_raw.shape[1] >= 3:
                         # 3-class: pred_raw shape = (1, 3) → [P(DOWN), P(FLAT), P(UP)]

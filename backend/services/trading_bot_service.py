@@ -2985,6 +2985,79 @@ class TradingBotService:
             except Exception as e:
                 logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
 
+        # v19.34.30 Bug A-2 stale PENDING row auto-reaper
+        async def _stale_pending_reaper_loop():
+            import os as _os3
+            interval_s = int(_os3.environ.get("PENDING_REAPER_INTERVAL_S", "60") or 60)
+            max_age_s = int(_os3.environ.get("PENDING_REAPER_MAX_AGE_S", "300") or 300)
+            disabled = (
+                _os3.environ.get("PENDING_REAPER_ENABLED", "true").strip().lower()
+                in ("0", "false", "no", "off")
+            )
+            if disabled:
+                logger.info("[v19.34.30 PENDING-REAPER] disabled by env")
+                return
+            await asyncio.sleep(45)
+            while self._running:
+                try:
+                    db = getattr(self, "_db", None)
+                    if db is not None:
+                        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_s)).isoformat()
+                        query = {
+                            "status": "pending",
+                            "pre_submit_at": {"$lt": cutoff},
+                            "$or": [
+                                {"executed_at": None},
+                                {"executed_at": {"$exists": False}},
+                            ],
+                        }
+                        stale = list(
+                            db["bot_trades"].find(
+                                query, {"_id": 0, "id": 1, "symbol": 1, "pre_submit_at": 1}
+                            ).limit(50)
+                        )
+                        if stale:
+                            stamp = datetime.now(timezone.utc).isoformat()
+                            updated_ids: List[str] = []
+                            for row in stale:
+                                tid = row.get("id")
+                                if not tid:
+                                    continue
+                                res = db["bot_trades"].update_one(
+                                    {"id": tid, "status": "pending"},
+                                    {"$set": {
+                                        "status": "rejected",
+                                        "close_reason": "stale_pending_auto_reaper",
+                                        "closed_at": stamp,
+                                        "reaped_at": stamp,
+                                        "reaper_version": "v19.34.30",
+                                    }},
+                                )
+                                if res.modified_count:
+                                    updated_ids.append(tid)
+                            if updated_ids:
+                                logger.warning(
+                                    "[v19.34.30 PENDING-REAPER] reaped %d stale PENDING row(s) (>%ds old)",
+                                    len(updated_ids), max_age_s,
+                                )
+                                for tid in updated_ids:
+                                    self._pending_trades.pop(tid, None)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.debug(f"[v19.34.30 PENDING-REAPER] loop tick failed: {e}")
+                try:
+                    await asyncio.sleep(interval_s)
+                except asyncio.CancelledError:
+                    raise
+
+        try:
+            self._pending_reaper_task = asyncio.create_task(_stale_pending_reaper_loop())
+        except Exception as e:
+            logger.warning(
+                f"[v19.34.30 PENDING-REAPER] failed to schedule (non-fatal): {e}"
+            )
+
         # ─── v19.34.17 (2026-05-06) — EOD-close policy migration ──────
         # Operator caught 2026-05-06 EOD: SBUX/ADBE/LITE/LIN reconciled
         # orphan positions stayed OPEN past the 3:55pm flatten window
