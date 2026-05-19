@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ib_async is the maintained successor to ib_insync (which was archived
 # in 2024 after the original maintainer passed away). Same API surface.
 try:
-    from ib_async import IB, Stock, MarketOrder, LimitOrder, StopOrder, Order
+    from ib_async import IB, Stock, MarketOrder, LimitOrder, StopOrder, StopLimitOrder, Order
     from ib_async import util as _ib_util          # noqa: F401  (handy for ad-hoc debug)
     IB_ASYNC_AVAILABLE = True
 except ImportError:                                  # pragma: no cover
@@ -1007,6 +1007,7 @@ class IBDirectService:
         *,
         order_type: str = "LMT",
         limit_price: Optional[float] = None,
+        stop_price: Optional[float] = None,
         time_in_force: str = "DAY",
         sec_type: str = "STK",
         exchange: str = "SMART",
@@ -1059,6 +1060,28 @@ class IBDirectService:
 
             if order_type_u == "MKT":
                 order = MarketOrder(action, qty)
+            elif order_type_u in ("STP", "STP_LMT", "STOP", "STOP_LIMIT"):
+                # v19.34.43 -- Breakout entry: order activates only when
+                # the market trades through `stop_price`. This is the
+                # right tool for breakout setups where a LMT would fill
+                # immediately at the existing inside price (against the
+                # breakout thesis) or get rejected by IB for being too
+                # far from market.
+                if stop_price is None:
+                    return {"success": False,
+                            "error": "stop_price required for STP / STP_LMT entry",
+                            "broker": "ib_direct", "simulated": False}
+                min_tick = await self._resolve_min_tick(contract)
+                stop_px_r = self._round_to_tick(float(stop_price), min_tick)
+                if order_type_u in ("STP_LMT", "STOP_LIMIT"):
+                    if limit_price is None:
+                        return {"success": False,
+                                "error": "limit_price required for STP_LMT entry",
+                                "broker": "ib_direct", "simulated": False}
+                    lmt_px_r = self._round_to_tick(float(limit_price), min_tick)
+                    order = StopLimitOrder(action, qty, lmt_px_r, stop_px_r)
+                else:
+                    order = StopOrder(action, qty, stop_px_r)
             else:
                 if limit_price is None:
                     return {"success": False,

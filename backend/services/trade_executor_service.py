@@ -30,6 +30,49 @@ from services.order_policy_registry import get_policy_for_trade
 
 logger = logging.getLogger(__name__)
 
+
+# ── v19.34.43 (Feb 2026) — Breakout entry order-type override map ──
+# Per-setup mapping of entry order type:
+#   "STP"     - stop-market: triggers when price crosses entry, fills at MKT.
+#               Best fill probability, accepts worst-case slippage. Use for
+#               liquid breakout setups where missing the move is worse than
+#               paying a few cents extra.
+#   "STP_LMT" - stop-limit: triggers when price crosses, then submits a LMT
+#               at entry +/- _STP_LMT_BUFFER_PCT. Caps slippage but can miss
+#               fast moves. Default for illiquid / thin setups.
+#   omitted   - falls through to plain LMT (legacy behavior).
+#
+# Operator can override at runtime via env vars without code changes:
+#   SENTCOM_BREAKOUT_ENTRY_TYPES="daily_breakout=STP,bouncy_ball=STP_LMT"
+#   SENTCOM_STP_LMT_BUFFER_PCT="0.005"
+_BREAKOUT_ENTRY_ORDER_TYPES: Dict[str, str] = {
+    "daily_breakout":      "STP",
+    "orb_breakout":        "STP",
+    "bouncy_ball":         "STP_LMT",
+    "vwap_continuation":   "STP_LMT",
+    "daily_squeeze":       "STP_LMT",
+    "fashionably_late":    "STP_LMT",
+    # Explicitly NOT breakouts -> LMT (legacy):
+    #   accumulation_entry, vwap_fade_long, vwap_fade_short, backside,
+    #   *_scalp, etc.
+}
+_STP_LMT_BUFFER_PCT: float = 0.005  # 0.5% slippage cap
+
+try:
+    _env_override = os.environ.get("SENTCOM_BREAKOUT_ENTRY_TYPES", "").strip()
+    if _env_override:
+        for _pair in _env_override.split(","):
+            _pair = _pair.strip()
+            if "=" in _pair:
+                _setup, _ot = _pair.split("=", 1)
+                _BREAKOUT_ENTRY_ORDER_TYPES[_setup.strip().lower()] = _ot.strip().upper()
+    _buf_env = os.environ.get("SENTCOM_STP_LMT_BUFFER_PCT", "").strip()
+    if _buf_env:
+        _STP_LMT_BUFFER_PCT = max(0.0, float(_buf_env))
+except Exception as _exc:  # pragma: no cover
+    logger.warning("[v19.34.43] env override parse failed: %s", _exc)
+
+
 # Alpaca configuration
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -507,28 +550,57 @@ class TradeExecutorService:
             
             # Determine order type based on setup
             setup_type = getattr(trade, 'setup_type', '').lower() if hasattr(trade, 'setup_type') else ''
+            setup_variant = (getattr(trade, 'setup_variant', '') or '').lower() if hasattr(trade, 'setup_variant') else ''
             scalp_setups = {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
             is_scalp = any(s in setup_type for s in scalp_setups)
+
+            # ── v19.34.43 — Breakout entries use STP / STP_LMT ──
+            # LMT entries on breakout setups were either filling at the
+            # existing inside price (defeating the thesis) or getting
+            # rejected by IB for being too far from market. STP /
+            # STP_LMT only activates when price actually crosses the
+            # breakout level (trade.entry_price).
+            breakout_entry_order_type = _BREAKOUT_ENTRY_ORDER_TYPES.get(setup_type)
+            if not breakout_entry_order_type:
+                breakout_entry_order_type = _BREAKOUT_ENTRY_ORDER_TYPES.get(setup_variant)
             
             # Calculate limit price with buffer
             entry_price = trade.entry_price
             action = "BUY" if trade.direction.value == "long" else "SELL"
+            stop_trigger_price: Optional[float] = None
             if entry_price and entry_price > 0:
-                if is_scalp:
+                if breakout_entry_order_type in ("STP", "STP_LMT") and not is_scalp:
+                    # v19.34.43 — breakout: STP/STP_LMT activates at entry_price.
+                    order_type = breakout_entry_order_type
+                    stop_trigger_price = float(entry_price)
+                    if order_type == "STP_LMT":
+                        # 0.5% slippage cap above/below the breakout level.
+                        buf_pct = _STP_LMT_BUFFER_PCT
+                        if action == "BUY":
+                            limit_price = round(entry_price * (1.0 + buf_pct), 2)
+                        else:
+                            limit_price = round(entry_price * (1.0 - buf_pct), 2)
+                    else:
+                        limit_price = None
+                    time_in_force = "DAY"
+                elif is_scalp:
                     # Tight buffer for scalps — 0.02% above ask
                     buffer = max(entry_price * 0.0002, 0.01)
                     order_type = "LMT"
                     time_in_force = "IOC"  # Immediate or Cancel for scalps
+                    if action == "BUY":
+                        limit_price = round(entry_price + buffer, 2)
+                    else:
+                        limit_price = round(entry_price - buffer, 2)
                 else:
                     # Standard buffer — 0.05% above ask
                     buffer = max(entry_price * 0.0005, 0.01)
                     order_type = "LMT"
                     time_in_force = "DAY"
-                
-                if action == "BUY":
-                    limit_price = round(entry_price + buffer, 2)
-                else:
-                    limit_price = round(entry_price - buffer, 2)
+                    if action == "BUY":
+                        limit_price = round(entry_price + buffer, 2)
+                    else:
+                        limit_price = round(entry_price - buffer, 2)
             else:
                 # Fallback to market order if no price
                 order_type = "MKT"
@@ -555,6 +627,7 @@ class TradeExecutorService:
                         trade,
                         order_type=order_type,
                         limit_price=limit_price,
+                        stop_price=stop_trigger_price,
                         time_in_force=time_in_force,
                         wait_for_fill_s=timeout,
                     )
