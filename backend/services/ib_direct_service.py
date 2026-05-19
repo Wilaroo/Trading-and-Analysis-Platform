@@ -677,6 +677,29 @@ class IBDirectService:
             parent_action = "SELL"   # ib_async's bracketOrder handles short via SELL
             child_action = "BUY"
 
+        # v19.34.38 PRICE-BAND GUARD — reject LMT entries too far from market
+        # (IB Error 202 protection: typically ~3% triggers IB auto-cancel).
+        import os as _os38
+        try:
+            _band_pct = float(_os38.environ.get('IB_ENTRY_PRICE_BAND_PCT', '2.5'))
+        except Exception:
+            _band_pct = 2.5
+        _cur_px = float(getattr(trade, 'current_price', 0) or 0)
+        if _cur_px > 0 and _band_pct > 0:
+            _dev_pct = abs(entry_price - _cur_px) / _cur_px * 100.0
+            if _dev_pct > _band_pct:
+                logger.warning(
+                    "[v19.34.38 price-band] %s REJECTED: entry=$%.4f is %.2f%% from current $%.4f (threshold %.2f%%). Setup stale/aggressive — skip.",
+                    symbol, entry_price, _dev_pct, _cur_px, _band_pct,
+                )
+                return {
+                    "success": False,
+                    "error": f"entry_too_aggressive:{_dev_pct:.2f}pct_from_market",
+                    "broker": "ib_direct", "simulated": False,
+                    "current_price": _cur_px, "entry_price": entry_price,
+                    "deviation_pct": _dev_pct, "threshold_pct": _band_pct,
+                }
+
         # v19.34.37 TWO-STEP MODE (default; rollback: IB_DIRECT_BRACKET_MODE=atomic)
         import os as _os
         _bracket_mode = (_os.environ.get('IB_DIRECT_BRACKET_MODE', 'two_step') or 'two_step').lower()
@@ -848,7 +871,7 @@ class IBDirectService:
                 pass
             parent_trade = self._ib.placeOrder(contract, parent_order)
             entry_id = int(parent_trade.order.orderId)
-            logger.info(
+            logger.warning(
                 "[v19.34.37 two-step] %s parent submitted: %s qty=%d LMT@%.4f id=%d timeout=%.1fs",
                 symbol, parent_action, qty, entry_price, entry_id, parent_timeout_s,
             )
@@ -864,7 +887,7 @@ class IBDirectService:
                 filled_qty = int(getattr(st_obj, "filled", 0) or 0)
                 avg_fill = float(getattr(st_obj, "avgFillPrice", 0.0) or 0.0)
                 if status != last_status:
-                    logger.info(
+                    logger.warning(
                         "[v19.34.37 two-step] %s parent status=%s filled=%d/%d",
                         symbol, status, filled_qty, qty,
                     )
@@ -924,7 +947,7 @@ class IBDirectService:
                     "errors": [oca_result.get("error", "oca_attach_failed")],
                 }
 
-            logger.info(
+            logger.warning(
                 "[v19.34.37 two-step] %s COMPLETE entry=%d filled=%d@%.4f stop=%s target=%s oca=%s",
                 symbol, entry_id, filled_qty, avg_fill,
                 oca_result.get("stop_order_id"), oca_result.get("target_order_id"),
