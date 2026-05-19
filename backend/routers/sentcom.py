@@ -543,6 +543,9 @@ async def get_positions():
             "consolidated_in_flatten_v19_34_44",
             "stale_pending_v19_34_78",
             "stale_pending_cleared_v19_34_78",
+            # v19.34.33 — reconciler-stamped phantom sweeps. Without this,
+            # $12,764 of yesterday-IB-fills bled into today's R chip.
+            "wrong_direction_phantom_swept_v19_29",
         }
         # Some reconciler paths stamp the reason with a "phantom_close:" prefix
         # (see position_reconciler._close_phantom_trade L665). Match by prefix
