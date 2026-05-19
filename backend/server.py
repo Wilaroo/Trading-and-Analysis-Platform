@@ -1543,6 +1543,9 @@ from routers.diagnostics import (  # noqa: E402
     set_db as _set_diagnostics_db,
 )
 app.include_router(diagnostics_router)
+# v19.34.41 - Rejection Analytics + Scanner Quality Score panel.
+from routers.rejection_analytics_router import router as rejection_analytics_router  # noqa: E402
+app.include_router(rejection_analytics_router)
 app.include_router(dynamic_risk_router)
 app.include_router(ai_modules_router)
 app.include_router(ai_training_router)
