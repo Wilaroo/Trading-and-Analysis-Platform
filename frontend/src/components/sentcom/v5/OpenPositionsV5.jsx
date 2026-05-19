@@ -507,8 +507,8 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
 
           {/* Setup + grade footer */}
           <div className="flex items-center gap-2 flex-wrap text-[13px] uppercase tracking-wider text-zinc-600">
-            {position.setup_type && (
-              <span>setup {position.setup_type}</span>
+            {(position.setup_variant || position.setup_type) && (
+              <span>setup {humanizeStyle(position.setup_variant || position.setup_type)}</span>
             )}
             {position.smb_grade && (
               <span>· grade {position.smb_grade}</span>
@@ -660,9 +660,9 @@ const GroupMemberRow = ({ member, idx }) => {
               SMB {member.smb_grade}
             </span>
           )}
-          {member.setup_type && (
+          {(member.setup_variant || member.setup_type) && (
             <span className="text-zinc-500 truncate max-w-[120px]">
-              {humanizeStyle(member.setup_type)}
+              {humanizeStyle(member.setup_variant || member.setup_type)}
             </span>
           )}
         </div>
