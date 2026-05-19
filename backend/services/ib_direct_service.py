@@ -154,6 +154,15 @@ class IBDirectService:
         self._last_heartbeat_ok_at: Optional[float] = None
         self._last_heartbeat_failed_at: Optional[float] = None
         self._heartbeat_failures_total: int = 0
+        # ── v19.34.42 (Feb 2026) — IB minTick cache ──
+        # Symbols like AMRZ had stop/target child brackets rejected by IB
+        # with Error 110 ("Min price variation") because the executor
+        # rounded prices to 4 decimals while IB's actual minTick for
+        # that symbol was $0.01 (or finer). The cache stores the
+        # IB-reported minTick per (symbol, currency) so we only pay the
+        # `reqContractDetailsAsync` round-trip once per symbol per
+        # connection.
+        self._min_tick_cache: Dict[tuple, float] = {}
 
     # ── connection lifecycle ──────────────────────────────────────────
 
@@ -535,6 +544,62 @@ class IBDirectService:
                          action, quantity, symbol, e)
             return {"success": False, "error": str(e)[:200]}
 
+    # ── v19.34.42 — IB minTick resolution + fp-safe price rounding ──
+    async def _resolve_min_tick(self, contract) -> float:
+        """Look up the contract's IB-reported minTick (cached).
+
+        Defaults to $0.01 if the lookup fails (the standard tick for
+        US stocks priced >= $1). This method is the antidote to IB
+        Error 110 "Min price variation" rejections: every order price
+        going to IB MUST round to a multiple of this value.
+        """
+        try:
+            key = (str(contract.symbol).upper(),
+                   str(getattr(contract, "currency", "USD")).upper())
+        except Exception:
+            key = ("?", "USD")
+        cache = self._min_tick_cache
+        if key in cache:
+            return cache[key]
+        try:
+            details = await self._ib.reqContractDetailsAsync(contract)
+            if details:
+                raw = getattr(details[0], "minTick", None)
+                mt = float(raw) if raw is not None else 0.01
+                if mt <= 0:
+                    mt = 0.01
+                cache[key] = mt
+                logger.info("[v19.34.42 minTick] %s -> $%g", key[0], mt)
+                return mt
+        except Exception as exc:
+            logger.warning(
+                "[v19.34.42 minTick] reqContractDetailsAsync failed for "
+                "%s: %s; defaulting to $0.01.", key[0], exc,
+            )
+        cache[key] = 0.01
+        return 0.01
+
+    @staticmethod
+    def _round_to_tick(price: float, min_tick: float) -> float:
+        """Round price to nearest min_tick increment using Decimal.
+
+        Pre-v19.34.42 we used `round(price, 4)` which leaves
+        floating-point artifacts (e.g. 12.35 -> 12.350000000000001)
+        that IB rejects with Error 110 even though they look fine.
+        Decimal-based quantize guarantees the result is an exact
+        multiple of min_tick.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+        try:
+            mt = float(min_tick)
+        except Exception:
+            mt = 0.01
+        if mt <= 0:
+            return round(float(price), 4)
+        p = Decimal(str(float(price)))
+        t = Decimal(str(mt))
+        return float((p / t).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t)
+
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
     async def place_close_market(
         self,
@@ -813,6 +878,8 @@ class IBDirectService:
             # Qualify the contract first (off the event loop).
             contract = Stock(symbol, exchange, currency)
             await self._ib.qualifyContractsAsync(contract)
+            # v19.34.42 — round to IB minTick (fixes Error 110).
+            min_tick = await self._resolve_min_tick(contract)
 
             # ib_async.bracketOrder constructs the three orders with
             # correct OCA group and transmit-sequencing. Parent's
@@ -821,9 +888,9 @@ class IBDirectService:
             bracket = self._ib.bracketOrder(
                 action=parent_action,
                 quantity=qty,
-                limitPrice=round(entry_price, 4),
-                takeProfitPrice=round(target_price, 4),
-                stopLossPrice=round(stop_price, 4),
+                limitPrice=self._round_to_tick(entry_price, min_tick),
+                takeProfitPrice=self._round_to_tick(target_price, min_tick),
+                stopLossPrice=self._round_to_tick(stop_price, min_tick),
             )
 
             # ib_async's bracketOrder returns a 3-tuple-like object
@@ -997,7 +1064,10 @@ class IBDirectService:
                     return {"success": False,
                             "error": "limit_price required for non-MKT order",
                             "broker": "ib_direct", "simulated": False}
-                order = LimitOrder(action, qty, round(float(limit_price), 4))
+                # v19.34.42 — round limit price to IB minTick.
+                min_tick = await self._resolve_min_tick(contract)
+                order = LimitOrder(action, qty,
+                                   self._round_to_tick(float(limit_price), min_tick))
             try:
                 order.tif = tif_u
             except Exception:
@@ -1105,7 +1175,9 @@ class IBDirectService:
         try:
             contract = Stock(symbol, exchange, currency)
             await self._ib.qualifyContractsAsync(contract)
-            order = StopOrder(action, qty, round(stop_px, 4))
+            # v19.34.42 — round stop price to IB minTick.
+            min_tick = await self._resolve_min_tick(contract)
+            order = StopOrder(action, qty, self._round_to_tick(stop_px, min_tick))
             try:
                 order.tif = (time_in_force or "GTC").upper()
             except Exception:
@@ -1198,12 +1270,16 @@ class IBDirectService:
         try:
             contract = Stock(symbol, exchange, currency)
             await self._ib.qualifyContractsAsync(contract)
+            # v19.34.42 — round both stop & target to IB minTick.
+            min_tick = await self._resolve_min_tick(contract)
+            stop_px = self._round_to_tick(stop_px, min_tick)
+            target_px = self._round_to_tick(target_px, min_tick)
 
             # 1) STP first. Refuse to submit target if stop fails — one-sided
             # exposure (target only, no stop) can flip the position on fill.
             stop_id = None
             try:
-                stop_order = StopOrder(action, qty, round(stop_px, 4))
+                stop_order = StopOrder(action, qty, stop_px)
                 try:
                     stop_order.tif = tif_u
                     stop_order.ocaGroup = oca_group
@@ -1234,7 +1310,7 @@ class IBDirectService:
             target_id = None
             target_error = None
             try:
-                target_order = LimitOrder(action, qty, round(target_px, 4))
+                target_order = LimitOrder(action, qty, target_px)
                 try:
                     target_order.tif = tif_u
                     target_order.ocaGroup = oca_group
