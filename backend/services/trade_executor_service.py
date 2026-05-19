@@ -1777,13 +1777,92 @@ class TradeExecutorService:
         try:
             from routers.ib import queue_order, get_order_result, is_pusher_connected
 
+            # v19.34.40 — Direct IB close path (no pusher dependency).
+            # Mirrors entry-side Patch J / L2a contract.
+            order_path = self._order_path_mode()
+            if order_path == "direct":
+                try:
+                    await self._cancel_ib_bracket_orders(trade)
+                except Exception as cancel_err:
+                    logger.warning(
+                        "[v19.34.40] bracket-children cancel before direct "
+                        "close failed for %s (non-fatal): %s",
+                        trade.symbol, cancel_err,
+                    )
+
+                try:
+                    from services.ib_direct_service import get_ib_direct_service
+                    ib_direct = get_ib_direct_service()
+                    logger.info(
+                        "[v19.34.40] _ib_close_position: routing via ib_direct "
+                        "(BOT_ORDER_PATH=direct) for %s qty=%d",
+                        trade.symbol, getattr(trade, "shares", 0),
+                    )
+                    direct_result = await ib_direct.place_close_market(
+                        trade, wait_for_fill_s=15.0,
+                    )
+
+                    if direct_result.get("success") and direct_result.get("status") == "filled":
+                        closing_action = "SELL" if trade.direction.value == "long" else "BUY"
+                        signed_delta = (
+                            -int(trade.shares) if closing_action == "SELL"
+                            else int(trade.shares)
+                        )
+                        self._maybe_schedule_shadow_observe(
+                            trade,
+                            {
+                                "success": True,
+                                "order_id": direct_result.get("order_id"),
+                                "fill_price": direct_result.get("fill_price")
+                                              or trade.current_price,
+                                "broker": "ib_direct",
+                            },
+                            action=closing_action, intent="close",
+                            expected_signed_delta=signed_delta,
+                        )
+                        return {
+                            "success": True,
+                            "order_id": direct_result.get("order_id"),
+                            "fill_price": direct_result.get("fill_price")
+                                          or trade.current_price,
+                            "broker": "ib_direct",
+                        }
+
+                    return {
+                        "success": False,
+                        "error": direct_result.get("error")
+                                 or f"ib_direct_close_{direct_result.get('status')}",
+                        "order_id": direct_result.get("order_id"),
+                        "broker": "ib_direct",
+                        "ib_direct_status": direct_result.get("status"),
+                        "filled_qty": direct_result.get("filled_qty", 0),
+                    }
+                except Exception as e:
+                    logger.critical(
+                        "[v19.34.40] ib_direct.place_close_market raised "
+                        "for %s: %s — failing hard, no pusher fallback.",
+                        trade.symbol, e,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"ib_direct_close_exception: {str(e)[:200]}",
+                        "broker": "ib_direct",
+                    }
+
+            # Legacy pusher path (BOT_ORDER_PATH=pusher|shadow).
             if not is_pusher_connected():
-                logger.warning("IB pusher not connected - simulating close")
+                logger.critical(
+                    "[v19.34.40 EOD-SAFETY] _ib_close_position: pusher "
+                    "OFFLINE for %s and BOT_ORDER_PATH != direct — "
+                    "refusing silent simulate. Trade stays OPEN; manage "
+                    "loop will retry next tick. Set BOT_ORDER_PATH=direct "
+                    "to route closes natively over the DGX ib_async "
+                    "socket.", trade.symbol,
+                )
                 return {
-                    "success": True,
-                    "order_id": f"SIM-CLOSE-{trade.id}",
-                    "fill_price": trade.current_price,
-                    "simulated": True
+                    "success": False,
+                    "error": "pusher_offline_cannot_close_in_live_mode",
+                    "pusher_offline": True,
                 }
 
             # v19.13 — cancel bracket children first. Best-effort; we
@@ -1795,6 +1874,7 @@ class TradeExecutorService:
             action = "SELL" if trade.direction.value == "long" else "BUY"
             
             order_id = queue_order({
+
                 "symbol": trade.symbol,
                 "action": action,
                 "quantity": trade.shares,
