@@ -677,6 +677,22 @@ class IBDirectService:
             parent_action = "SELL"   # ib_async's bracketOrder handles short via SELL
             child_action = "BUY"
 
+        # v19.34.37 TWO-STEP MODE (default; rollback: IB_DIRECT_BRACKET_MODE=atomic)
+        import os as _os
+        _bracket_mode = (_os.environ.get('IB_DIRECT_BRACKET_MODE', 'two_step') or 'two_step').lower()
+        if _bracket_mode == 'two_step':
+            try:
+                _parent_timeout_s = float(_os.environ.get('IB_DIRECT_BRACKET_PARENT_TIMEOUT_S', '30'))
+            except Exception:
+                _parent_timeout_s = 30.0
+            return await self._place_bracket_two_step(
+                trade=trade, symbol=symbol, direction=direction, qty=qty,
+                entry_price=entry_price, stop_price=stop_price, target_price=target_price,
+                parent_action=parent_action, child_action=child_action,
+                sec_type=sec_type, exchange=exchange, currency=currency,
+                parent_timeout_s=_parent_timeout_s,
+            )
+
         try:
             # Qualify the contract first (off the event loop).
             contract = Stock(symbol, exchange, currency)
@@ -809,6 +825,126 @@ class IBDirectService:
                 "error": f"ib_direct_bracket_error: {str(e)[:200]}",
                 "broker": "ib_direct",
                 "simulated": False,
+            }
+
+    # v19.34.37 — Two-step bracket helper
+    async def _place_bracket_two_step(
+        self, *, trade, symbol, direction, qty, entry_price, stop_price,
+        target_price, parent_action, child_action, sec_type, exchange,
+        currency, parent_timeout_s,
+    ):
+        """Safe two-step bracket: parent LMT alone first, then OCA
+        stop+target sized to actual filled qty. Fixes wrong-direction
+        phantoms (2026-05-19 incident)."""
+        import time as _t
+        try:
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            parent_order = LimitOrder(parent_action, qty, round(entry_price, 4))
+            try:
+                parent_order.tif = "DAY"
+                parent_order.transmit = True
+            except Exception:
+                pass
+            parent_trade = self._ib.placeOrder(contract, parent_order)
+            entry_id = int(parent_trade.order.orderId)
+            logger.info(
+                "[v19.34.37 two-step] %s parent submitted: %s qty=%d LMT@%.4f id=%d timeout=%.1fs",
+                symbol, parent_action, qty, entry_price, entry_id, parent_timeout_s,
+            )
+
+            deadline = _t.monotonic() + parent_timeout_s
+            last_status = ""
+            terminal_status = None
+            filled_qty = 0
+            avg_fill = 0.0
+            while _t.monotonic() < deadline:
+                st_obj = parent_trade.orderStatus
+                status = (getattr(st_obj, "status", "") or "").lower()
+                filled_qty = int(getattr(st_obj, "filled", 0) or 0)
+                avg_fill = float(getattr(st_obj, "avgFillPrice", 0.0) or 0.0)
+                if status != last_status:
+                    logger.info(
+                        "[v19.34.37 two-step] %s parent status=%s filled=%d/%d",
+                        symbol, status, filled_qty, qty,
+                    )
+                    last_status = status
+                if status == "filled" and filled_qty > 0:
+                    terminal_status = "filled"; break
+                if status in ("cancelled", "apicancelled", "inactive"):
+                    terminal_status = status; break
+                await asyncio.sleep(0.5)
+
+            if terminal_status != "filled" or filled_qty <= 0:
+                try:
+                    if terminal_status not in ("cancelled", "apicancelled", "inactive"):
+                        self._ib.cancelOrder(parent_order)
+                        logger.warning(
+                            "[v19.34.37 two-step] %s parent timed out (status=%s filled=%d/%d) cancelled.",
+                            symbol, terminal_status or "timeout", filled_qty, qty,
+                        )
+                except Exception as _e:
+                    logger.error("[v19.34.37 two-step] %s cancel failed: %s", symbol, _e)
+                return {
+                    "success": False,
+                    "error": f"parent_not_filled:{terminal_status or 'timeout'}",
+                    "entry_order_id": entry_id, "stop_order_id": None,
+                    "target_order_id": None, "oca_group": None,
+                    "status": "rejected" if terminal_status in ("cancelled", "apicancelled", "inactive") else "timeout",
+                    "fill_price": None, "filled_qty": filled_qty,
+                    "broker": "ib_direct", "simulated": False,
+                }
+
+            if filled_qty != qty:
+                logger.warning(
+                    "[v19.34.37 two-step] %s PARTIAL parent fill %d/%d — sizing brackets to %d.",
+                    symbol, filled_qty, qty, filled_qty,
+                )
+            _orig_shares = trade.shares
+            trade.shares = filled_qty
+            try:
+                oca_result = await self.place_oca_stop_target(
+                    trade, time_in_force="GTC", outside_rth=False,
+                    sec_type=sec_type, exchange=exchange, currency=currency,
+                )
+            finally:
+                trade.shares = _orig_shares
+
+            if not oca_result.get("success"):
+                logger.critical(
+                    "[v19.34.37 two-step] %s parent FILLED (%dsh) but OCA attach failed: %s. NAKED.",
+                    symbol, filled_qty, oca_result.get("error"),
+                )
+                return {
+                    "success": True, "entry_order_id": entry_id,
+                    "stop_order_id": None, "target_order_id": None,
+                    "oca_group": None, "status": "filled_naked_brackets_missing",
+                    "fill_price": avg_fill, "filled_qty": filled_qty,
+                    "broker": "ib_direct", "simulated": False,
+                    "errors": [oca_result.get("error", "oca_attach_failed")],
+                }
+
+            logger.info(
+                "[v19.34.37 two-step] %s COMPLETE entry=%d filled=%d@%.4f stop=%s target=%s oca=%s",
+                symbol, entry_id, filled_qty, avg_fill,
+                oca_result.get("stop_order_id"), oca_result.get("target_order_id"),
+                oca_result.get("oca_group"),
+            )
+            return {
+                "success": True, "entry_order_id": entry_id,
+                "stop_order_id": oca_result.get("stop_order_id"),
+                "target_order_id": oca_result.get("target_order_id"),
+                "oca_group": oca_result.get("oca_group"),
+                "status": "filled", "fill_price": avg_fill,
+                "filled_qty": filled_qty, "broker": "ib_direct",
+                "simulated": False, "partial_fill": filled_qty < qty,
+            }
+        except Exception as e:
+            logger.error("[v19.34.37 two-step] failed for %s: %s", symbol, e)
+            return {
+                "success": False,
+                "error": f"ib_direct_two_step_bracket_error: {str(e)[:200]}",
+                "broker": "ib_direct", "simulated": False,
             }
 
     # ── v19.34.28 Patch L2a — Native ib-direct order placement (rest of family) ──
