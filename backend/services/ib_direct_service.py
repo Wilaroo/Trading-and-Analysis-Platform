@@ -154,6 +154,8 @@ class IBDirectService:
         self._last_heartbeat_ok_at: Optional[float] = None
         self._last_heartbeat_failed_at: Optional[float] = None
         self._heartbeat_failures_total: int = 0
+        # v19.34.42 -- IB minTick cache (fixes Error 110 rejections).
+        self._min_tick_cache: dict = {}
 
     # ── connection lifecycle ──────────────────────────────────────────
 
@@ -543,6 +545,49 @@ class IBDirectService:
 
 
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
+    # v19.34.42 -- IB minTick resolution + fp-safe price rounding
+    async def _resolve_min_tick(self, contract) -> float:
+        """Look up the contract's IB-reported minTick (cached, $0.01 fallback)."""
+        try:
+            key = (str(contract.symbol).upper(),
+                   str(getattr(contract, "currency", "USD")).upper())
+        except Exception:
+            key = ("?", "USD")
+        cache = self._min_tick_cache
+        if key in cache:
+            return cache[key]
+        try:
+            details = await self._ib.reqContractDetailsAsync(contract)
+            if details:
+                raw = getattr(details[0], "minTick", None)
+                mt = float(raw) if raw is not None else 0.01
+                if mt <= 0:
+                    mt = 0.01
+                cache[key] = mt
+                logger.info("[v19.34.42 minTick] %s -> $%g", key[0], mt)
+                return mt
+        except Exception as exc:
+            logger.warning(
+                "[v19.34.42 minTick] reqContractDetailsAsync failed for "
+                "%s: %s; defaulting to $0.01.", key[0], exc,
+            )
+        cache[key] = 0.01
+        return 0.01
+
+    @staticmethod
+    def _round_to_tick(price: float, min_tick: float) -> float:
+        """Round to nearest min_tick increment via Decimal (no fp artifacts)."""
+        from decimal import Decimal, ROUND_HALF_UP
+        try:
+            mt = float(min_tick)
+        except Exception:
+            mt = 0.01
+        if mt <= 0:
+            return round(float(price), 4)
+        p = Decimal(str(float(price)))
+        t = Decimal(str(mt))
+        return float((p / t).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t)
+
     async def place_close_market(
         self,
         trade,
@@ -869,12 +914,14 @@ class IBDirectService:
             # transmit=False, stop's transmit=False, target's transmit=True
             # — atomic activation when the third is submitted.
             print(f"[BUG-Y INSTR] {symbol} step2 bracketOrder START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            # v19.34.42 -- round to IB minTick (fixes Error 110).
+            min_tick = await self._resolve_min_tick(contract)
             bracket = self._ib.bracketOrder(
                 action=parent_action,
                 quantity=qty,
-                limitPrice=round(entry_price, 4),
-                takeProfitPrice=round(target_price, 4),
-                stopLossPrice=round(stop_price, 4),
+                limitPrice=self._round_to_tick(entry_price, min_tick),
+                takeProfitPrice=self._round_to_tick(target_price, min_tick),
+                stopLossPrice=self._round_to_tick(stop_price, min_tick),
             )
 
             # ib_async's bracketOrder returns a 3-tuple-like object
@@ -1036,7 +1083,10 @@ class IBDirectService:
                         "deviation_pct": _dev_pct, "threshold_pct": _band_pct39,
                     }
 
-            parent_order = LimitOrder(parent_action, qty, round(entry_price, 4))
+            # v19.34.42 -- round entry to IB minTick.
+            _mt_p = await self._resolve_min_tick(contract)
+            parent_order = LimitOrder(parent_action, qty,
+                                      self._round_to_tick(entry_price, _mt_p))
             try:
                 parent_order.tif = "DAY"
                 parent_order.transmit = True
@@ -1226,7 +1276,10 @@ class IBDirectService:
                     return {"success": False,
                             "error": "limit_price required for non-MKT order",
                             "broker": "ib_direct", "simulated": False}
-                order = LimitOrder(action, qty, round(float(limit_price), 4))
+                # v19.34.42 -- round limit price to IB minTick.
+                min_tick_e = await self._resolve_min_tick(contract)
+                order = LimitOrder(action, qty,
+                                   self._round_to_tick(float(limit_price), min_tick_e))
             try:
                 order.tif = tif_u
             except Exception:
@@ -1340,7 +1393,9 @@ class IBDirectService:
             # try to drive a loop the main thread owns → deadlock.
             # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
-            order = StopOrder(action, qty, round(stop_px, 4))
+            # v19.34.42 -- round stop price to IB minTick.
+            min_tick = await self._resolve_min_tick(contract)
+            order = StopOrder(action, qty, self._round_to_tick(stop_px, min_tick))
             try:
                 order.tif = (time_in_force or "GTC").upper()
             except Exception:
@@ -1439,12 +1494,16 @@ class IBDirectService:
             # try to drive a loop the main thread owns → deadlock.
             # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
+            # v19.34.42 -- round stop & target to IB minTick.
+            min_tick = await self._resolve_min_tick(contract)
+            stop_px = self._round_to_tick(stop_px, min_tick)
+            target_px = self._round_to_tick(target_px, min_tick)
 
             # 1) STP first. Refuse to submit target if stop fails — one-sided
             # exposure (target only, no stop) can flip the position on fill.
             stop_id = None
             try:
-                stop_order = StopOrder(action, qty, round(stop_px, 4))
+                stop_order = StopOrder(action, qty, stop_px)
                 try:
                     stop_order.tif = tif_u
                     stop_order.ocaGroup = oca_group
@@ -1475,7 +1534,7 @@ class IBDirectService:
             target_id = None
             target_error = None
             try:
-                target_order = LimitOrder(action, qty, round(target_px, 4))
+                target_order = LimitOrder(action, qty, target_px)
                 try:
                     target_order.tif = tif_u
                     target_order.ocaGroup = oca_group
