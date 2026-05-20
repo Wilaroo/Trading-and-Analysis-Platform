@@ -3261,6 +3261,121 @@ class TradingBotService:
                     f"[v19.34.15b DRIFT-LOOP] failed to schedule (non-fatal): {e}"
                 )
 
+        # ─── v19.34.49 (2026-05-20) — Continuous Orphan-Reconcile Loop ─
+        # Pure IB-only orphans (positions IB has but bot doesn't track)
+        # are NOT handled by the share-drift loop (which acts only on
+        # already-tracked symbols; orphans are deferred at
+        # position_reconciler.py:1775 back to reconcile_orphan_positions).
+        # Without this loop, mid-session orphans (manual TWS fills,
+        # bracket-fill races, overnight carryovers) stay naked until
+        # the operator manually clicks "Reconcile N". Production root
+        # cause for the 2026-05-20 overnight 8-orphan incident.
+        if os.environ.get("AUTO_ORPHAN_RECONCILE_ENABLED", "true").lower() in (
+            "true", "1", "yes", "on"
+        ):
+            orphan_interval_s = int(
+                os.environ.get("AUTO_ORPHAN_RECONCILE_INTERVAL_S", "180") or 180
+            )
+            if orphan_interval_s < 30:
+                orphan_interval_s = 30  # safety floor
+
+            async def _orphan_reconcile_loop():
+                await asyncio.sleep(60)  # grace: pusher snapshot + boot pass settle
+                logger.info(
+                    "[v19.34.49 ORPHAN-LOOP] started, interval=%ss",
+                    orphan_interval_s,
+                )
+                self._orphan_reconcile_diag = {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "interval_s": orphan_interval_s,
+                    "tick_count": 0,
+                    "last_tick_at": None,
+                    "last_tick_status": "pending",
+                    "last_tick_error": None,
+                    "last_reconciled": [],
+                    "last_skipped": [],
+                    "consecutive_failures": 0,
+                }
+                while self._running:
+                    tick_started = datetime.now(timezone.utc)
+                    try:
+                        from routers.ib import is_pusher_connected
+                        if not is_pusher_connected():
+                            self._orphan_reconcile_diag["last_tick_status"] = "skipped_no_pusher"
+                            self._orphan_reconcile_diag["last_tick_at"] = tick_started.isoformat()
+                            self._orphan_reconcile_diag["tick_count"] += 1
+                        else:
+                            result = await self._position_reconciler.reconcile_orphan_positions(
+                                self, all_orphans=True,
+                            )
+                            self._orphan_reconcile_diag["tick_count"] += 1
+                            self._orphan_reconcile_diag["last_tick_at"] = tick_started.isoformat()
+                            n_recon = len(result.get("reconciled") or [])
+                            n_skip = len(result.get("skipped") or [])
+                            self._orphan_reconcile_diag["last_tick_status"] = (
+                                "ok" if result.get("success") else "error"
+                            )
+                            self._orphan_reconcile_diag["last_tick_error"] = result.get("error")
+                            claimed = [
+                                r.get("symbol") for r in (result.get("reconciled") or [])
+                                if r.get("symbol")
+                            ][:16]
+                            self._orphan_reconcile_diag["last_reconciled"] = claimed
+                            self._orphan_reconcile_diag["last_skipped"] = [
+                                {"symbol": s.get("symbol"), "reason": s.get("reason")}
+                                for s in (result.get("skipped") or [])
+                                if s.get("symbol")
+                            ][:16]
+                            self._orphan_reconcile_diag["consecutive_failures"] = 0
+                            if n_recon:
+                                logger.warning(
+                                    "[v19.34.49 ORPHAN-LOOP] auto-claimed %d orphan(s): %s "
+                                    "(skipped=%d)", n_recon, claimed, n_skip,
+                                )
+                                try:
+                                    from services.sentcom_service import emit_stream_event
+                                    await emit_stream_event({
+                                        "kind": "info",
+                                        "event": "auto_orphan_reconcile",
+                                        "text": (
+                                            f"\U0001F501 Auto-orphan-reconcile claimed "
+                                            f"{n_recon} naked IB orphan(s): "
+                                            f"{', '.join(claimed[:8])}"
+                                            + (f" (+{len(claimed)-8} more)"
+                                               if len(claimed) > 8 else "")
+                                        ),
+                                        "metadata": {
+                                            "reconciled_count": n_recon,
+                                            "skipped_count": n_skip,
+                                            "symbols": claimed,
+                                        },
+                                    })
+                                except Exception:
+                                    pass
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        diag = getattr(self, "_orphan_reconcile_diag", {})
+                        diag["last_tick_status"] = "exception"
+                        diag["last_tick_error"] = f"{type(e).__name__}: {e}"
+                        diag["last_tick_at"] = tick_started.isoformat()
+                        diag["consecutive_failures"] = (
+                            diag.get("consecutive_failures", 0) + 1
+                        )
+                        logger.warning(f"[v19.34.49 ORPHAN-LOOP] tick failed: {e}")
+                    try:
+                        await asyncio.sleep(orphan_interval_s)
+                    except asyncio.CancelledError:
+                        raise
+
+            try:
+                self._orphan_reconcile_task = asyncio.create_task(_orphan_reconcile_loop())
+            except Exception as e:
+                logger.warning(
+                    f"[v19.34.49 ORPHAN-LOOP] failed to schedule (non-fatal): {e}"
+                )
+
+
         # ─── v19.34.10 (2026-05-06) — State integrity watchdog ──────
         # Catches drift between in-memory `risk_params` and persisted
         # `bot_state.risk_params` in MongoDB (the v19.34.9 root cause
@@ -3302,6 +3417,16 @@ class TradingBotService:
             sdt.cancel()
             try:
                 await sdt
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        # v19.34.49 — cancel the orphan-reconcile loop if it's running.
+        ort = getattr(self, "_orphan_reconcile_task", None)
+        if ort is not None:
+            ort.cancel()
+            try:
+                await ort
             except asyncio.CancelledError:
                 pass
             except Exception:

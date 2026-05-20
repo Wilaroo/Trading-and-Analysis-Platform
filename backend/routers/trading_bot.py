@@ -8165,3 +8165,35 @@ async def resize_bracket_to_ib_truth(payload: ResizeBracketRequest):
         "errors": errors,
         "ran_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ─── v19.34.49 ORPHAN-LOOP diagnostic ───────────────────────────────
+@router.get("/orphan-reconcile-status")
+async def orphan_reconcile_status() -> Dict[str, Any]:
+    """Read-only diagnostic for the v19.34.49 continuous orphan-reconcile loop.
+
+    Returns:
+      • loop_alive: is the background task running?
+      • diag: tick_count, last_tick_at, last_tick_status, last_reconciled,
+              last_skipped, consecutive_failures
+      • task_exception: present iff the task crashed
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    task = getattr(_trading_bot, "_orphan_reconcile_task", None)
+    loop_alive = bool(task) and not (task.done() if task else True)
+    task_exception = None
+    if task and task.done():
+        try:
+            task_exception = repr(task.exception()) if task.exception() else None
+        except Exception:
+            task_exception = "could not read exception"
+    diag = getattr(_trading_bot, "_orphan_reconcile_diag", None) or {
+        "tick_count": 0, "last_tick_at": None, "last_tick_status": "never_ran",
+    }
+    return {
+        "success": True,
+        "loop_alive": loop_alive,
+        "task_exception": task_exception,
+        "diag": diag,
+    }
