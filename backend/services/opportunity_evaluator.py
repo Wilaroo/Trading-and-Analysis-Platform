@@ -36,6 +36,77 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+            # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
+            # Alerts that sit in the pipeline too long are no longer trading
+            # the setup they detected. Kill them at the gate to save the IB
+            # round-trip and surface pipeline lag in the Scanner Quality
+            # Panel as `stale_alert_ttl`. Fail-OPEN on missing timestamp.
+            try:
+                import os as _os_ttl
+                import time as _time_ttl
+                _ttl_raw = _os_ttl.environ.get("STALE_ALERT_TTL_SECONDS", "30")
+                try:
+                    _ttl_secs = float(_ttl_raw) if _ttl_raw not in (None, "") else 30.0
+                except (TypeError, ValueError):
+                    _ttl_secs = 30.0
+                if _ttl_secs > 0:
+                    _triggered_unix = alert.get("triggered_at_unix")
+                    if _triggered_unix is None:
+                        _iso = alert.get("triggered_at")
+                        if _iso:
+                            try:
+                                _triggered_unix = datetime.fromisoformat(
+                                    str(_iso).replace("Z", "+00:00")
+                                ).timestamp()
+                            except (TypeError, ValueError):
+                                _triggered_unix = None
+                    if _triggered_unix is not None:
+                        try:
+                            _age = _time_ttl.time() - float(_triggered_unix)
+                        except (TypeError, ValueError):
+                            _age = 0.0
+                        if _age >= _ttl_secs:
+                            logger.warning(
+                                "🕒 [v19.34.44 stale-alert-ttl] Dropping %s %s — "
+                                "alert age %.1fs ≥ TTL %.0fs.",
+                                symbol, setup_type, _age, _ttl_secs,
+                            )
+                            try:
+                                bot.record_rejection(
+                                    symbol=symbol, setup_type=setup_type,
+                                    direction=direction_str,
+                                    reason_code="stale_alert_ttl",
+                                    context={
+                                        "alert_age_seconds": round(_age, 2),
+                                        "ttl_seconds": _ttl_secs,
+                                        "triggered_at_unix": _triggered_unix,
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                from services.trade_drop_recorder import record_trade_drop
+                                record_trade_drop(
+                                    getattr(bot, "_db", None),
+                                    gate="stale_alert_ttl",
+                                    symbol=symbol,
+                                    setup_type=setup_type,
+                                    direction=direction_str,
+                                    reason=f"stale_alert_ttl: age={_age:.1f}s ≥ {_ttl_secs:.0f}s",
+                                    context={
+                                        "alert_age_seconds": round(_age, 2),
+                                        "ttl_seconds": _ttl_secs,
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            return None
+            except Exception as _ttl_err:
+                logger.debug(
+                    "[v19.34.44 stale-alert-ttl] gate crashed (fail-open): %s",
+                    _ttl_err,
+                )
+
             # ── v19.34.123 — Per-(symbol, direction) open-exposure cap ────
             # Setup-type-AGNOSTIC. The Feb 2026 incident showed the bot
             # firing 28 separate RJF SHORT entries in 76 minutes because
