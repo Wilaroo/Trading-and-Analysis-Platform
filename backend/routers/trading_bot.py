@@ -3051,6 +3051,104 @@ def delete_trade_by_symbol(symbol: str):
 
 
 
+# v19.34.64 (2026-05-20) — Position Truth Diff
+#
+# Lightweight, real-time divergence detector for the V5 HUD's status
+# strip. Compares the bot's `_open_trades` symbol set against IB's
+# authoritative `positions()` and returns a compact diff payload the
+# HUD polls every few seconds. Goal: a small green dot when in sync,
+# a red `Δ=N` count when not. Operator no longer waits 2-3 min for
+# the orphan-reconciler to catch up before realizing they have a
+# direction-flipped position from an OCA-race close.
+@router.get("/positions/truth-diff")
+async def positions_truth_diff():
+    """v19.34.64 — Bot vs IB position-set diff for HUD truth indicator.
+
+    Returns:
+      {
+        in_sync:            bool,
+        bot_count:          int,
+        ib_count:           int,
+        bot_only:           [{symbol, shares, direction}, ...],
+        ib_only:            [{symbol, shares}, ...],
+        direction_flipped:  [{symbol, bot_side, bot_shares, ib_side, ib_shares}],
+        share_mismatch:     [{symbol, bot_shares, ib_shares}],
+        as_of:              iso8601 str,
+      }
+    """
+    if not _trading_bot:
+        raise HTTPException(status_code=503, detail="Trading bot not initialized")
+    try:
+        bot_opens = {}
+        for tid, trade in list((_trading_bot._open_trades or {}).items()):
+            sym = (getattr(trade, "symbol", None) or "").upper()
+            if not sym:
+                continue
+            direction = getattr(getattr(trade, "direction", None), "value", "?")
+            shares = int(getattr(trade, "shares", 0) or 0)
+            signed_shares = -shares if direction == "short" else shares
+            bot_opens[sym] = {
+                "symbol": sym, "shares": shares,
+                "direction": direction, "signed": signed_shares,
+            }
+
+        ib_opens = {}
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None and await ib_direct.ensure_connected():
+                positions = await ib_direct.get_positions()
+                for p in positions:
+                    sym = (p.get("symbol") or "").upper()
+                    qty = int(p.get("position") or 0)
+                    if not sym or qty == 0:
+                        continue
+                    ib_opens[sym] = {
+                        "symbol": sym, "shares": abs(qty),
+                        "direction": "long" if qty > 0 else "short",
+                        "signed": qty,
+                    }
+        except Exception as e:
+            logger.debug(f"truth-diff: ib_direct.get_positions failed: {e}")
+
+        bot_syms = set(bot_opens.keys())
+        ib_syms = set(ib_opens.keys())
+        bot_only = [bot_opens[s] for s in sorted(bot_syms - ib_syms)]
+        ib_only = [ib_opens[s] for s in sorted(ib_syms - bot_syms)]
+        direction_flipped = []
+        share_mismatch = []
+        for sym in sorted(bot_syms & ib_syms):
+            b, i = bot_opens[sym], ib_opens[sym]
+            if b["direction"] != i["direction"]:
+                direction_flipped.append({
+                    "symbol": sym,
+                    "bot_side": b["direction"], "bot_shares": b["shares"],
+                    "ib_side": i["direction"], "ib_shares": i["shares"],
+                })
+            elif b["shares"] != i["shares"]:
+                share_mismatch.append({
+                    "symbol": sym,
+                    "bot_shares": b["shares"], "ib_shares": i["shares"],
+                })
+
+        in_sync = (not bot_only and not ib_only
+                   and not direction_flipped and not share_mismatch)
+        return {
+            "in_sync": in_sync,
+            "bot_count": len(bot_syms), "ib_count": len(ib_syms),
+            "bot_only": bot_only, "ib_only": ib_only,
+            "direction_flipped": direction_flipped,
+            "share_mismatch": share_mismatch,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"v19.34.64 positions/truth-diff failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
 @router.get("/positions/reconcile")
 async def reconcile_positions():
     """

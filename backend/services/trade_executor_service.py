@@ -1865,16 +1865,61 @@ class TradeExecutorService:
             #      manage-loop tick.
             order_path = self._order_path_mode()
             if order_path == "direct":
+                # v19.34.64 — Capture cancel-confirmation result so we
+                # can detect the OCA-race scenario (child filled during
+                # cancel propagation). Pre-v19.34.64 this was fire-and-
+                # forget and the bug surfaced as direction-flipped
+                # positions at IB post-close.
+                cancel_result: Dict[str, Any] = {
+                    "ib_direct_called": False, "filled": [], "timeout": [],
+                }
                 try:
-                    # v19.13 — cancel bracket children first (best-effort).
-                    # Same race-guard rationale as the legacy path.
-                    await self._cancel_ib_bracket_orders(trade)
+                    cancel_result = await self._cancel_ib_bracket_orders(trade)
                 except Exception as cancel_err:
                     logger.warning(
                         "[v19.34.40] bracket-children cancel before direct "
                         "close failed for %s (non-fatal): %s",
                         trade.symbol, cancel_err,
                     )
+
+                # v19.34.64 — If any child filled during the cancel wait,
+                # the position has already been exited via the bracket.
+                # Do NOT submit the MKT close — that would double-trade
+                # and flip direction at IB (the 2026-05-20 incident).
+                if cancel_result.get("filled"):
+                    logger.critical(
+                        "[v19.34.64] %s — bracket child(ren) %s filled "
+                        "during cancel wait; ABORTING MKT close to avoid "
+                        "direction-flip. Position is now exited via "
+                        "bracket; exec-details callback will book the "
+                        "trade CLOSED via the bracket-fill path.",
+                        trade.symbol, cancel_result["filled"],
+                    )
+                    return {
+                        "success": False,
+                        "error": "bracket_filled_during_cancel_wait",
+                        "broker": "ib_direct",
+                        "v19_34_64_oca_race_aborted": True,
+                        "filled_child_oids": cancel_result["filled"],
+                    }
+                # v19.34.64 — If any cancel timed out (never confirmed
+                # terminal), the close MKT would race the child. Abort
+                # and let the manage loop retry next tick once IB has
+                # finished processing the cancel.
+                if cancel_result.get("timeout"):
+                    logger.error(
+                        "[v19.34.64] %s — bracket child(ren) %s cancel "
+                        "did NOT confirm terminal within 4s; ABORTING "
+                        "MKT close. Manage loop will retry on next tick.",
+                        trade.symbol, cancel_result["timeout"],
+                    )
+                    return {
+                        "success": False,
+                        "error": "bracket_cancel_timeout_race_risk",
+                        "broker": "ib_direct",
+                        "v19_34_64_oca_race_aborted": True,
+                        "timeout_child_oids": cancel_result["timeout"],
+                    }
 
                 try:
                     from services.ib_direct_service import get_ib_direct_service
@@ -1889,6 +1934,50 @@ class TradeExecutorService:
                     )
 
                     if direct_result.get("success") and direct_result.get("status") == "filled":
+                        # v19.34.64 — Post-close authoritative IB
+                        # position check. Even with the OCA-race fix
+                        # above, other divergence sources (manual TWS
+                        # trades, IB-side glitches, network blips) can
+                        # leave IB with a non-zero position after our
+                        # MKT close reports filled. Verify here so the
+                        # bot does NOT mark CLOSED on a position IB
+                        # still holds.
+                        try:
+                            flat_check = await ib_direct.verify_position_flat(
+                                trade.symbol, expected_remaining=0,
+                            )
+                            if not flat_check.get("is_flat"):
+                                logger.critical(
+                                    "[v19.34.64 POST-CLOSE-DIVERGENCE] %s — "
+                                    "MKT close reported filled BUT IB "
+                                    "position=%d (expected 0, divergence=%d). "
+                                    "Refusing to book CLOSED — manage loop "
+                                    "will retry on next tick with phantom-"
+                                    "share clamp.",
+                                    trade.symbol,
+                                    flat_check.get("ib_position", 0),
+                                    flat_check.get("divergence", 0),
+                                )
+                                return {
+                                    "success": False,
+                                    "error": "post_close_position_divergence",
+                                    "order_id": direct_result.get("order_id"),
+                                    "broker": "ib_direct",
+                                    "v19_34_64_divergence": flat_check,
+                                }
+                        except Exception as verify_err:
+                            # Verification raised — log loudly but don't
+                            # block the close. Better to occasionally
+                            # mis-book CLOSED than to never close at all
+                            # if verify_position_flat itself is broken.
+                            logger.error(
+                                "[v19.34.64] verify_position_flat raised "
+                                "for %s after MKT close fill: %s. "
+                                "Proceeding with CLOSED booking — manage "
+                                "loop will catch any drift on next tick.",
+                                trade.symbol, verify_err,
+                            )
+
                         closing_action = "SELL" if trade.direction.value == "long" else "BUY"
                         signed_delta = (
                             -int(trade.shares) if closing_action == "SELL"
@@ -2020,14 +2109,35 @@ class TradeExecutorService:
             logger.error(f"IB close position error: {e}")
             return {"success": False, "error": str(e)}
     
-    async def _cancel_ib_bracket_orders(self, trade) -> None:
+    async def _cancel_ib_bracket_orders(self, trade) -> Dict[str, Any]:
         """v19.13 — cancel the IB bracket's stop + target children for `trade`.
+        v19.34.64 — Now polls IB until each child reaches terminal status
+        (Cancelled / Filled / Rejected) so the caller can detect the
+        OCA-race scenario where a child fires DURING the cancel
+        propagation window. Pre-v19.34.64 this method fired the cancel
+        and returned immediately, letting the close MKT race the child
+        and producing the IBIT/SOFI/RBLX direction-flip on 2026-05-20.
 
-        Best-effort: failures are logged at WARNING (NOT raised) because
-        the caller is about to submit a close MKT regardless — and IB
-        will reject duplicate fills, so the worst outcome of a cancel
-        miss is a benign IB-side rejection on the close, not a doubled
-        position.
+        Returns a partition dict (see `wait_for_orders_terminal`):
+          {
+            issued:           [oid, ...],    # cancels we sent
+            cancelled:        [oid, ...],    # IB confirmed cancelled
+            filled:           [oid, ...],    # *** RACE *** child fired
+                                             # during the wait — caller
+                                             # MUST abort the MKT close
+                                             # and treat trade as exited
+                                             # via bracket fill.
+            other_terminal:   [oid, ...],    # rejected/inactive — safe
+            timeout:          [oid, ...],    # cancel never confirmed
+                                             # within timeout — UNSAFE.
+                                             # Caller MUST abort.
+            unknown:          [oid, ...],    # oid wasn't in live trades
+                                             # cache (already GC'd) — safe.
+            ib_direct_called: bool,          # ib_direct.wait_for_orders_terminal
+                                             # actually ran (False on
+                                             # legacy paper/sim orders or
+                                             # missing ib_direct).
+          }
 
         Looks up order IDs from THREE possible places (legacy fields):
           - `trade.stop_order_id`     — set in trade_execution.py:318
@@ -2037,6 +2147,12 @@ class TradeExecutorService:
         Empty / non-numeric IDs are skipped silently (e.g.,
         `SIM-STOP-<uuid>` from simulated/paper modes).
         """
+        result: Dict[str, Any] = {
+            "issued": [], "cancelled": [], "filled": [],
+            "other_terminal": [], "timeout": [], "unknown": [],
+            "ib_direct_called": False,
+        }
+
         # Collect IDs from all three slots, dedupe, filter to int-castable.
         candidates = []
         for raw in (
@@ -2055,6 +2171,8 @@ class TradeExecutorService:
         # Dedupe while preserving order
         seen = set()
         ordered = [c for c in candidates if not (c in seen or seen.add(c))]
+        if not ordered:
+            return result
 
         for oid in ordered:
             try:
@@ -2070,6 +2188,7 @@ class TradeExecutorService:
                             f"({trade.symbol}) — child may have already filled or "
                             f"been cancelled."
                         )
+                    result["issued"].append(oid)
                 else:
                     logger.warning(
                         f"v19.13: IB service unavailable for cancel order_id={oid} "
@@ -2080,6 +2199,48 @@ class TradeExecutorService:
                     f"v19.13: bracket cancel raised for order_id={oid} "
                     f"({trade.symbol}): {type(e).__name__}: {e}"
                 )
+
+        # v19.34.64 — Confirm each cancel reached terminal status at IB
+        # before returning. Without this poll, the caller submits its
+        # MKT close in the 50-200ms window where the child cancel is
+        # still propagating; if the child's trigger price is touched in
+        # that window the child fills AND so does the MKT close,
+        # doubling the trade and flipping its direction at IB.
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None and await ib_direct.ensure_connected():
+                partition = await ib_direct.wait_for_orders_terminal(
+                    ordered, timeout_s=4.0, poll_iv_s=0.1,
+                )
+                result["cancelled"] = list(partition.get("cancelled", []))
+                result["filled"] = list(partition.get("filled", []))
+                result["other_terminal"] = list(partition.get("other_terminal", []))
+                result["timeout"] = list(partition.get("timeout", []))
+                result["unknown"] = list(partition.get("unknown", []))
+                result["ib_direct_called"] = True
+                if result["filled"]:
+                    logger.critical(
+                        "[v19.34.64 OCA-RACE] %s — bracket child(ren) "
+                        "filled DURING cancel wait: %s. Caller MUST abort "
+                        "the MKT close — position was already exited via "
+                        "bracket.", trade.symbol, result["filled"],
+                    )
+                if result["timeout"]:
+                    logger.error(
+                        "[v19.34.64 OCA-RACE] %s — bracket child(ren) "
+                        "%s never reached terminal status within 4s. "
+                        "Caller should abort the MKT close to avoid race.",
+                        trade.symbol, result["timeout"],
+                    )
+        except Exception as e:
+            logger.warning(
+                "[v19.34.64] wait_for_orders_terminal raised for %s: %s — "
+                "falling back to legacy fire-and-forget cancel (race risk).",
+                trade.symbol, e,
+            )
+
+        return result
 
     async def _cancel_related_orders(self, trade):
         """Cancel stop and target orders for a trade"""
