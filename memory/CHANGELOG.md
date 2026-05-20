@@ -1,3 +1,22 @@
+## 2026-05-12 — v19.34.57: `trade_type` audit-gap closer (REJECTED/VETOED leak)
+
+### Bug
+Audit revealed **227 `bot_trades` rows** with `trade_type='unknown'`. Root cause: the only place `trade_type` was stamped was inside the fill block of `services/trade_execution.py` (~L790-835). Trades that never reached fill — REJECTED by pre-trade gates, VETOED by risk guards, or aborted before broker submission — kept the dataclass default `"unknown"`. That polluted paper/live attribution and the live-readiness gate.
+
+### Fix
+Added `__post_init__` to the `BotTrade` dataclass at `services/trading_bot_service.py:765`. When `trade_type` is still the default `"unknown"` at construction time, it now reads `IB_ACCOUNT_ACTIVE` via `account_guard.load_account_expectation().active_mode` and stamps `paper`/`live` accordingly. Any import or env-load exception falls back to `"unknown"` (graceful degrade — never worse than legacy v19.34.56).
+
+The fill-time stamp in `trade_execution.py` stays canonical: it overwrites with the *actual* IB account classification on real fills, which is the truth for filled rows. `__post_init__` only fixes the construction-time default for trades that never reach the fill path.
+
+### Pytest coverage
+`tests/test_trade_type_init_v19_34_57.py` (6 tests): env=paper stamps paper, env=live stamps live, env unset normalizes to paper, explicit non-`"unknown"` ctor arg preserved, account_guard exception falls back to `"unknown"`, invalid env value normalizes to paper. **All passing.**
+
+### Operator action required (DGX patch)
+Apply the v19.34.57 patch script (provided in chat) to `~/Trading-and-Analysis-Platform/backend/services/trading_bot_service.py` and restart the backend. Existing 227 `unknown` rows are historical and will not auto-rewrite — they remain auditable as legacy until purged.
+
+---
+
+
 # TradeCommand / SentCom — Changelog
 
 Reverse-chronological log of shipped work. Newest first.

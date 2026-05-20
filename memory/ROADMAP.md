@@ -3983,6 +3983,13 @@ Each new setup needs: detector in `setup_pattern_detector.py`, feature extractor
 - 🟢 (P2) **Cancel-queue TTL/reaper** for stale `pending` entries (>5min unclaimed → log + auto-mark `expired`).
 - 🟢 (P2) **Mass-cancel endpoint** `/sweep-all-orphans` (single-shot version of today's python loop) — though v89 auto-sweep makes this lower priority.
 
+## Completed 2026-05-12 (v19.34.57 — audit-gap closer)
+- ✅ `BotTrade.__post_init__` stamps `trade_type` from `IB_ACCOUNT_ACTIVE` at construction.
+- ✅ Closes 227-row `trade_type='unknown'` audit gap on REJECTED/VETOED orders.
+- ✅ Fill-time canonical stamp in `trade_execution.py` preserved (still wins for filled rows).
+- ✅ 6/6 pytest in `test_trade_type_init_v19_34_57.py` passing.
+- 🟡 User action required: apply DGX patch script + restart backend.
+
 ## Completed 2026-05-11 late evening (v19.34.93 + v19.34.94 + data audit)
 - ✅ `resize-bracket-to-ib-truth` atomic cancel+re-attach endpoint.
 - ✅ Cancel-queue TTL/reaper (auto-expire >10min pending, revert >5min claimed).
