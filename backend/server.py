@@ -4094,9 +4094,12 @@ async def startup_event():
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
 
     # v19.34.46 — Memory watchdog (RSS/sys-mem heartbeat, 60s, tracemalloc on critical)
+    # NOTE: Motor/PyMongo Database objects reject bool() — must use `is None`.
     try:
         from services.memory_watchdog import memory_watchdog_loop
-        _wd_db = globals().get("db") or globals().get("_db")
+        _wd_db = globals().get("db")
+        if _wd_db is None:
+            _wd_db = globals().get("_db")
         asyncio.create_task(
             memory_watchdog_loop(db=_wd_db),
             name="_memory_watchdog",
