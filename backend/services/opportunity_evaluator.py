@@ -528,6 +528,73 @@ class OpportunityEvaluator:
             except Exception as exc:
                 logger.debug(f"stop-guard skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
 
+            # ── v19.34.45 — Guardrail-floor enforcement ─────────
+            # If the (alert-supplied, possibly smart-levels-widened) stop
+            # is tighter than 0.3 × ATR, replace with the canonical
+            # per-setup ATR-based stop. Sizer absorbs the wider risk.
+            stop_floor_meta = None
+            try:
+                import os as _os_floor
+                _enf_raw = _os_floor.environ.get("STOP_FLOOR_ENFORCE", "1")
+                _enf_on = str(_enf_raw).strip().lower() not in ("0","","false","no","off")
+                if _enf_on and stop_price and entry_price and atr and atr > 0:
+                    try:
+                        _floor_mult = float(_os_floor.environ.get(
+                            "EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT", "0.3"
+                        ))
+                    except (TypeError, ValueError):
+                        _floor_mult = 0.3
+                    _distance = abs(float(entry_price) - float(stop_price))
+                    _threshold = _floor_mult * float(atr)
+                    if _distance < _threshold:
+                        _orig_stop = float(stop_price)
+                        _new_stop = self.calculate_atr_based_stop(
+                            float(entry_price), direction, float(atr), setup_type, bot,
+                        )
+                        _new_distance = abs(float(entry_price) - float(_new_stop))
+                        if _new_distance >= _threshold:
+                            logger.warning(
+                                "🩹 [v19.34.45 stop-floor] %s %s — alert stop "
+                                "$%.4f (Δ=$%.4f, %.1f%% of ATR $%.4f) below floor "
+                                "%.2f×ATR=$%.4f. Recomputed via per-setup multiplier "
+                                "→ $%.4f (Δ=$%.4f). Sizer will absorb the wider risk.",
+                                symbol, setup_type, _orig_stop, _distance,
+                                (_distance / float(atr)) * 100.0, float(atr),
+                                _floor_mult, _threshold, _new_stop, _new_distance,
+                            )
+                            stop_price = _new_stop
+                            stop_floor_meta = {
+                                "applied": True,
+                                "original_stop": _orig_stop,
+                                "recomputed_stop": _new_stop,
+                                "atr": float(atr),
+                                "floor_atr_mult": _floor_mult,
+                                "original_distance": _distance,
+                                "recomputed_distance": _new_distance,
+                            }
+                        else:
+                            logger.error(
+                                "⚠️ [v19.34.45 stop-floor] %s %s — alert stop AND "
+                                "recomputed stop both below %.2f×ATR floor "
+                                "(alert Δ=$%.4f, recomputed Δ=$%.4f, threshold "
+                                "$%.4f). Check SETUP_MULTIPLIERS entry for %r.",
+                                symbol, setup_type, _floor_mult,
+                                _distance, _new_distance, _threshold, setup_type,
+                            )
+                            stop_floor_meta = {
+                                "applied": False,
+                                "reason": "recomputed_also_too_tight",
+                                "original_stop": _orig_stop,
+                                "recomputed_stop": _new_stop,
+                                "atr": float(atr),
+                                "floor_atr_mult": _floor_mult,
+                            }
+            except Exception as _floor_err:
+                logger.debug(
+                    "[v19.34.45 stop-floor] enforce crashed (fail-open): %s",
+                    _floor_err,
+                )
+
             # Calculate targets if not provided
             if not target_prices:
                 risk = abs(entry_price - stop_price)
