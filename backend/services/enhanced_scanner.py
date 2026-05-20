@@ -3523,6 +3523,20 @@ class EnhancedBackgroundScanner:
             )
         return None
     
+    # v19.34.47 — ATR-floored stop helper.
+    def _atr_floored_stop(self, entry_price: float, raw_stop: float,
+                          atr, direction: str,
+                          min_atr_mult: float = 0.5) -> float:
+        """Preserve structural anchor (LoD/HoD) where safe; widen to
+        min_atr_mult×ATR otherwise. Fail-OPEN on missing ATR."""
+        if not (entry_price and atr and float(atr) > 0):
+            return round(float(raw_stop), 2)
+        floor_distance = float(min_atr_mult) * float(atr)
+        if str(direction).lower() == "long":
+            return round(min(float(raw_stop), float(entry_price) - floor_distance), 2)
+        else:
+            return round(max(float(raw_stop), float(entry_price) + floor_distance), 2)
+
     async def _check_vwap_fade(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """VWAP Reversion - Fade extended moves back to VWAP"""
         # Long fade - extended below VWAP
@@ -3536,7 +3550,13 @@ class EnhancedBackgroundScanner:
                 priority=AlertPriority.MEDIUM,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.current_price,
-                stop_loss=round(snapshot.low_of_day - 0.02, 2),
+                stop_loss=self._atr_floored_stop(
+                    entry_price=snapshot.current_price,
+                    raw_stop=snapshot.low_of_day - 0.02,
+                    atr=getattr(snapshot, "atr", None),
+                    direction="long",
+                    min_atr_mult=0.5,
+                ),
                 target=round(snapshot.vwap, 2),
                 risk_reward=2.0,
                 trigger_probability=0.55,
@@ -3565,7 +3585,13 @@ class EnhancedBackgroundScanner:
                 priority=AlertPriority.MEDIUM,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.current_price,
-                stop_loss=round(snapshot.high_of_day + 0.02, 2),
+                stop_loss=self._atr_floored_stop(
+                    entry_price=snapshot.current_price,
+                    raw_stop=snapshot.high_of_day + 0.02,
+                    atr=getattr(snapshot, "atr", None),
+                    direction="short",
+                    min_atr_mult=0.5,
+                ),
                 target=round(snapshot.vwap, 2),
                 risk_reward=2.0,
                 trigger_probability=0.55,
