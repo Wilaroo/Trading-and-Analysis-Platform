@@ -4,6 +4,45 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
+## 🚀 Session Summary — 2026-05-20 (5 commits, HUD now matches TWS truth)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.57 | `BotTrade.__post_init__` stamps `trade_type` at construction (closes 227-row REJECTED/VETOED audit gap) | ✅ shipped, 6/6 tests passing |
+| v19.34.58 | HUD inline synthetic-bookings line under R/U split | ✅ shipped |
+| v19.34.59 | IB-authoritative R/U/BP on `/api/trading-bot/status` | ✅ shipped (but wrong endpoint — see v19.34.61) |
+| v19.34.60 | `/api/sentcom/stream` cap 100 → 500 (kills 422 errors on every poll) | ✅ shipped |
+| v19.34.61 | IB-authoritative R/U/BP on `/api/sentcom/status` (actual HUD source) | ✅ shipped, HUD matches TWS |
+
+**Final HUD readouts match TWS exactly:** R = −$8,392.48° / U = −$211 / BP = $276,783 / Equity = $209,800.
+
+### Same-session operator actions
+- ✅ Flattened AMRZ reverse-position via `/api/safety/emergency-flatten-ib` (bot tracked SHORT, IB had LONG 593 sh)
+- ✅ Fired `/api/trading-bot/eod-close-now` — closed all 20 opens (incl. swing/position-tagged, see v19.34.63 backlog)
+- ✅ Background orphan reconciler auto-cleared 3 lingering phantoms (KMI, EBAY, UPS) 2-3 min after IB close
+
+### 🔴 NEXT-SESSION PRIORITY: v19.34.64 — Phantom-sweep audit
+2026-05-20 produced **12 `wrong_direction_phantom_swept_v19_29` / `oca_closed_externally_v19_31`** closes in a single day. Plus AMRZ reverse-position. Plus 3 EOD phantoms. Pattern is clear: **bot's exit-tracker doesn't fire when fills come through non-bot paths** (OCA-triggered SL/PT, external TWS close, EOD batch). The 2-3 min orphan-reconciler is the safety net, not the primary path. Audit scope:
+1. Read-only script: characterize today's 12 phantom-sweep events — which symbols, setup types, OCA-vs-external split, time-of-day distribution.
+2. Trace one example end-to-end: OCA fill at IB → execDetails callback → bot's `_open_trades` dict → why no close event.
+3. Patch the close-event ingestion path (likely `services/trade_execution.py` execDetails handler or `services/order_status_listener.py`).
+4. Pytest with mocked execDetails for OCA SL fill + external close + EOD batch fill.
+
+### v19.34.62 backlog (P1 — single-touch fix tomorrow AM)
+Add `"scalp"` as a valid `trade_style` value in `BotTrade` dataclass. Currently scalps (gap_fade, fashionably_late, second_chance, backside, vwap_fade_short) all stamp `trade_style="trade_2_hold"` which is wrong. Wire: setup_evaluator → if `timeframe == "scalp"` → `trade_style="scalp"`. Also auto-set `close_at_eod=True` and `target_r_multiple ≤ 1.5R` for scalps. Update HUD position-row rendering to show "SCALP" label distinct from "T2H"/"A+"/"M2M". SMB grading should be timeframe-aware (a scalp shouldn't show "SMB A").
+
+### v19.34.63 backlog (P1)
+`POST /api/trading-bot/eod-close-now` ignores the `close_at_eod` flag and flattens **every** open position, not just intraday-flagged ones. Today it closed 6 swings + 2 position-style trades that operator wanted to keep. Fix: filter `_open_trades` by `trade.close_at_eod is True` before iterating.
+
+### Open positions overnight
+- WBD (1693 sh long, fresh swing entry @ 15:40, +$8 unrealized at close) — legitimate. Bot re-opened it after EOD batch close on a new squeeze signal.
+
+### Potential enhancement for next session
+**Position Truth Diff tile** on HUD: single small green dot when bot's `_open_trades` matches IB's positions, red `Δ=N` count when not. Real-time visual signal so phantoms surface instantly instead of waiting for the 2-3 min reconciler. Quick build (~30 min) — wires `useSentComPositions.length` vs `/api/ib/account/positions.length` into a status-bar pill.
+
+---
+
+
 
 ## 🚀 Session Summary — 2026-05-21 (5 commits shipped)
 

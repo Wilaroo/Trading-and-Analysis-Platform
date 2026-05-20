@@ -1,3 +1,51 @@
+## 2026-05-20 — v19.34.58 + v19.34.59 + v19.34.60 + v19.34.61: HUD reads IB truth
+
+### Operator trigger
+2026-05-20 mid-afternoon — operator noticed HUD showed `R +$0.00°` and `Buying Pwr $—` while TWS showed `Realized PnL −$8,392.48` and `Buying Power $277,095`. Six- to seven-figure attribution gap was inflating "looks fine" while real session loss was material.
+
+### Root causes (three stacked)
+1. **HUD synthetic-bookings line invisible.** v19.34.27 already bifurcated synthetic vs real realized PnL, but the synthetic context lived in `title=""` tooltip only. With R=$0.00 dominating visually, operator read the chip as "nothing happened" despite 12 reconciler-stamped closures totaling −$1,490 sitting in the tooltip.
+2. **`/api/trading-bot/status` never carried IB-authoritative RealizedPnL / UnrealizedPnL.** Only `/api/ib/account/summary` exposed `realized_pnl: -8392.48` (matches TWS). The HUD's source endpoint silently undercounted because it summed only bot-attributed closes from `bot_trades` (12 synthetic closures = −$1,490) and missed OCA/scale-out/manual-TWS closes (the other ~$6.9k of real IB realization).
+3. **Wrong endpoint patched.** Initial fix (v19.34.59) targeted `/api/trading-bot/status`. HUD actually reads `useSentComStatus.js` → **`/api/sentcom/status`**. Silently ineffective until v19.34.61 mirrored the enrichment onto the right endpoint.
+
+### Fixes
+- **v19.34.58** (`frontend/.../PipelineHUDV5.jsx`): Inline synthetic-bookings line under R/U split when `realizedPnlSyntheticCount > 0`. Same data as the existing tooltip, just promoted so it can't be missed.
+- **v19.34.59** (`backend/routers/trading_bot.py`): Pull `RealizedPnL` / `UnrealizedPnL` from IB pusher account snapshot. Surface as `account.realized_pnl`, `account.unrealized_pnl`, `status.account_realized_pnl`, `status.account_unrealized_pnl` (mirrors v19.6 `account_buying_power` pattern).
+- **v19.34.59** (`frontend/.../SentComV5View.jsx`): HUD prefers `status.account_realized_pnl` / `status.account_unrealized_pnl` when present. Falls back to bot-derived `totalRealizedPnl` when absent (legacy backend compat).
+- **v19.34.60** (`backend/routers/sentcom.py`): Bumped `/api/sentcom/stream` Pydantic `le=100 → le=500`. Frontend `useSentComStream.js` + `BracketReaperPill.jsx` request `limit=200`; backend was 422-ing every poll cycle.
+- **v19.34.61** (`backend/routers/sentcom.py`): Mirrored the v19.34.59 IB-account enrichment onto `/api/sentcom/status` (the actual HUD source). Post-patch: HUD R/U/BP/Equity match TWS exactly.
+
+### Verification
+Post-patch HUD vs TWS (2026-05-20 15:09 ET):
+| Field | TWS | HUD |
+|---|---|---|
+| Realized PnL | −$8,392.48 | −$8,392.48° |
+| Unrealized PnL | −$404.15 | −$211.81 (live drift) |
+| Day P&L | n/a | −$8,604.29 |
+| Equity | $209,602 | $209,800 |
+| Buying Power | $277,095 | $276,783 |
+
+Synthetic line still renders below R/U: `+12 synthetic · session −$1,490.50` (bot-attributed bifurcation preserved).
+
+### Same-session operator actions
+- **AMRZ reverse-position flatten.** Operator UI showed `[CRITICAL] AMRZ bot tracked SHORT but IB has LONG 593sh`. Fired `POST /api/safety/emergency-flatten-ib {symbols:["AMRZ"]}` → SELL 593 MKT, close_order #4197, IB flat post-patch.
+- **EOD close-all (20 positions).** `POST /api/trading-bot/eod-close-now` closed all 20 opens for batch realization −$70.84. Surprise behavior: endpoint ignored `close_at_eod` flag and flattened swing/position style trades too (logged as v19.34.63 backlog).
+- **Phantom reconcile.** 3 phantoms (KMI, EBAY, UPS) lingered ~2-3 min post-close before bot's background orphan-reconciler caught up and removed them. Confirmed: reconciler loop works; bug is in close-event ingestion path (logged as v19.34.64).
+
+### Operator-uncovered systemic finding
+2026-05-20 saw **12 `wrong_direction_phantom_swept_v19_29` / `oca_closed_externally_v19_31` closes** in a single day. The bot's exit-tracker reliably fails to mark trades CLOSED when fills come through non-bot paths (OCA-triggered, external TWS close, EOD batch). The 2-3 min reconciler lag is the safety net, not the primary close path. Root-cause audit queued as **v19.34.64** (next session priority).
+
+### DGX patch scripts in this run
+- `~/Trading-and-Analysis-Platform/documents/scripts/patch_v19_34_58.sh` (inline-pasted to terminal, no script file required)
+- v19.34.59 + v19.34.60 + v19.34.61 also inline-pasted
+
+### Commits (origin/main)
+- `2521d3d0` — v19.34.58 + v19.34.59
+- `7221ae55` — v19.34.60 + v19.34.61
+
+---
+
+
 ## 2026-05-12 — v19.34.57: `trade_type` audit-gap closer (REJECTED/VETOED leak)
 
 ### Bug
