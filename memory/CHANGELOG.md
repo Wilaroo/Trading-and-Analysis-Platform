@@ -4,7 +4,7 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
-## 2026-05-21 (v19.34.52 — Bar-Pipeline Restoration Phase A: raise IB pusher L1 cap 80 → 250)
+## 2026-05-21 (v19.34.52 — Bar-Pipeline Restoration Phase A: raise IB pusher L1 cap 80 → 500, target 400 live)
 
 ### Why
 Bar-pipeline audit found **119 of ~200 intraday symbols** had stale
@@ -16,21 +16,23 @@ fell out of the top-80 ADV ranking on each restart.
 
 ### Fix
 * `documents/scripts/ib_data_pusher.py`: `L1_HARD_CAP` raised
-  `80 → 250`. New comment block documents the IB Pro line
+  `80 → 500`. Comment block updated to document the IB Pro line
   allowance (500-700 lines on funded accounts) and the wide
-  headroom retained for the 3-slot dynamic L2 router.
+  headroom retained for the 3-slot dynamic L2 router. The active
+  live-universe target is `IB_PUSHER_L1_AUTO_TOP_N=400`; the
+  500-cap is a safety ceiling, not the requested count.
 * No backend changes — the cap is purely client-side on the
   Windows pusher process.
 
 ### Deployment (user-side, manual)
 1. On DGX: commit & push the patched `ib_data_pusher.py`.
 2. On Windows: `git pull` to sync.
-3. On Windows env: set `IB_PUSHER_L1_AUTO_TOP_N=200` so the pusher
-   actually requests 200 symbols (defaults below this if unset).
+3. On Windows env: set `IB_PUSHER_L1_AUTO_TOP_N=400` so the pusher
+   actually requests 400 symbols (defaults below this if unset).
 4. Restart `ib_data_pusher.py` (any of the `run_collector*.bat`
    wrappers, or the main pusher BAT).
 5. Verify: `db.ib_live_snapshot.findOne({_id:"current"}).quotes`
-   length should climb above 80 (target ~200).
+   length should climb above 80 (target ~400).
 
 ### Known follow-up
 * Phase B (next): Investigate why 30m / 1day / 1week historical
