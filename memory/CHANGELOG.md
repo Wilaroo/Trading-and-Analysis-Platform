@@ -4,6 +4,102 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-20 (v19.34.50 — _atr_floored_stop fails closed with pct fallback)
+
+### Why
+2026-05-20 audit caught **41 of 42** `pre_exec_guardrail_veto` rows in the
+last 24h tracing to a single fail-open path in the scanner's ATR-floored
+stop helper. Root cause: two different ATR data sources in the pipeline.
+
+* Scanner (`_atr_floored_stop`) reads `snapshot.atr` — often 0 for
+  symbols in the warmup window (IBIT, MU, SNDK, XLY at the open).
+* Guardrail (`check_min_stop_distance`) reads a separate daily-based
+  `atr_14` from the IB historical pipeline — populated with real values
+  (e.g. $2.30 for XLY, $27.84 for SNDK).
+* Old helper logic at line 3536: `if not (entry_price and atr and float(atr) > 0): return round(float(raw_stop), 2)` → silently passed the tight raw stop through. Downstream the guardrail saw a real ATR, recomputed its `0.3×ATR` threshold, and vetoed.
+* Net effect: scanner emits an alert, alert evaluates, broker call rejects, telemetry logs `stop_too_tight`, no trade fires. 41 wasted alert cycles per session.
+
+### Fix
+1. `enhanced_scanner._atr_floored_stop` (v19.34.50): when ATR is missing/zero, instead of returning the raw stop, apply a percentage floor of entry price. Env-tunable via `ATR_FLOOR_PCT_FALLBACK` (default `0.01` = 1%).
+2. Swept the last two un-wrapped active setups through the helper:
+   `_check_bouncy_ball` (line 5405) and `_check_fashionably_late`
+   (line 4060). Completes the post-v19.34.48 setup sweep.
+
+### Test
+`tests/test_atr_floored_stop_v19_34_50.py` — 9 cases incl. 2 real-world regressions from the audit (XLY backside @ $115.10 → stop $113.95, SNDK vwap_fade_short @ $1391.83 → stop $1405.75). All pass.
+
+### Expected impact
+`stop_too_tight` veto count: ~42/24h → ~1-2/24h (edge cases only).
+Verify via the 24h audit run from `/tmp/post_v19_34_50_audit.py` tomorrow.
+
+### Files
+* `backend/services/enhanced_scanner.py` (+32/-4)
+* `backend/tests/test_atr_floored_stop_v19_34_50.py` (+76 new)
+* `backend/.env` (+1 line: `ATR_FLOOR_PCT_FALLBACK=0.01`)
+
+### Commit
+`afc8f577` on `main` (pushed to GitHub).
+
+
+## 2026-05-20 (v19.34.49 — Continuous orphan-reconcile loop, 3-min)
+
+### Why
+Operator-reported incident on the morning of 2026-05-20: 8 IB positions
+visible in the V5 panel showed as orphan rows (`source='ib'`) with no
+backing `bot_trades` record, no stop, no profit target, no managed
+exit. Bot was rendering them but **not managing them**. They had
+carried over from the prior session as overnight orphans.
+
+Root cause: an architecture gap. Two reconciler mechanisms exist but
+neither continuously covers pure orphans:
+
+* `reconcile_orphan_positions` → handles pure orphans, but **only runs
+  once at boot if `AUTO_RECONCILE_AT_BOOT=true` env flag is set**, and
+  the operator's `.env` did not have it. So boot reconcile never fired
+  for this session.
+* `reconcile_share_drift` (the 24/7 30s loop at `trading_bot_service.py:3197`)
+  → handles share-COUNT drift on already-tracked symbols, but at
+  `position_reconciler.py:1775` it explicitly defers pure orphans
+  back to `reconcile_orphan_positions` and **never calls it itself**.
+
+Net effect: any pure orphan that appears after boot (overnight carryover,
+manual TWS fill, bracket-fill race leaving stranded shares) stays
+naked until the operator manually clicks the UI's "Reconcile N" button.
+
+### Fix
+1. New `_orphan_reconcile_loop` background task in
+   `TradingBotService.start()` modeled on the share-drift loop.
+   Calls `self._position_reconciler.reconcile_orphan_positions(self, all_orphans=True)`
+   every 180s after a 60s startup grace. Env-gated via
+   `AUTO_ORPHAN_RECONCILE_ENABLED=true` (default ON) and
+   `AUTO_ORPHAN_RECONCILE_INTERVAL_S=180` (safety-floored at 30s).
+2. `stop()` cleanup: cancels `_orphan_reconcile_task` cleanly.
+3. New diagnostic endpoint
+   `GET /api/trading-bot/orphan-reconcile-status` returning
+   `loop_alive`, `task_exception`, and the full diag dict
+   (started_at, tick_count, last_tick_status, last_reconciled,
+   last_skipped, consecutive_failures).
+4. Defaulted `AUTO_RECONCILE_AT_BOOT=true` in `.env` so boot is also
+   covered (belt-and-suspenders).
+
+### Verification
+* Endpoint live-checks `loop_alive: true` with `tick_count` incrementing
+  on the 180s cadence (verified 14:52 → 14:55 → ...).
+* Emits `auto_orphan_reconcile` stream event when claims happen so the
+  UI shows a notification.
+
+### Files
+* `backend/services/trading_bot_service.py` (+125)
+* `backend/routers/trading_bot.py` (+32 endpoint)
+* `backend/.env` (+3 vars)
+
+### Commit
+`7756293f` on `main` (pushed to GitHub).
+
+
+
+
+
 ## 2026-02-XX (v19.34.46 — Memory watchdog @ event loop)
 
 ### Why
