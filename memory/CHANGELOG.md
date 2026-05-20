@@ -4,6 +4,105 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+
+## 2026-05-20 (v19.34.51 — env-fallback trade_type stamp on both reconciler paths)
+
+### Why
+Audit on 2026-05-20 caught 8 currently-open `bot_trades` rows with
+`trade_type='unknown'` despite the system being in confirmed paper
+mode (`IB_ACCOUNT_ACTIVE=paper`, `current_account_id=DUN615665`).
+
+Two distinct reconciler bugs:
+1. **v19.34.1 path** (`reconcile_orphan_positions` → line 1432): when
+   `get_account_snapshot()` returned an empty dict during a transient
+   pusher race, the helper fell into `except` and stamped `unknown`.
+   No env fallback — unlike `/api/system/account-mode` which DOES fall
+   back to env's `active_mode` when snapshot is empty.
+2. **`reconciled_excess_v19_34_15b` path** (line 3062): never stamped
+   `trade_type` at all. Drift-spawned slices always rendered as `?`.
+
+### Fix
+* Both paths now query `get_account_snapshot()` first, then fall back
+  to `account_guard.load_account_expectation().active_mode` if the
+  snapshot returns empty/None. Mirrors the `/api/system/account-mode`
+  fallback logic.
+* `account_id_at_fill` set to the live snapshot ID when present, else
+  None (preserves auditability — we don't fake an account ID).
+* Backfill ran on 8 currently-open rows: 5 `reconciled_external` /
+  1 `reconciled_excess_v19_34_15b` + 3 `bot_fired` carryovers. All
+  now correctly tagged `paper` / `DUN615665`. Provenance field
+  `trade_type_source = "backfill_v19_34_51"` stamped for audit.
+
+### Known follow-up
+* **v19.34.52 candidate** — 3 of the 8 backfilled rows had
+  `entered_by='bot_fired'`. Bot-fired path is supposed to stamp
+  trade_type at fill time but somehow lost it for BBIO/ALNY/BALL.
+  Separate stamp leak in the bot-fired execution path needs
+  investigation. (SOXX from today stamped correctly, so the path
+  isn't 100% broken — likely a conditional branch issue.)
+
+### Files
+* `backend/services/position_reconciler.py` (+26/-3 across 3 hunks)
+
+### Commit
+`271feefe` on `main` (pushed to GitHub).
+
+
+## 2026-05-20 (Same-day audit findings — queued for v19.34.52+)
+
+While shipping 49/50/51, the post-fix audit surfaced four new issues
+that need follow-up sessions to do properly:
+
+### v19.34.52 candidate — bot-fired `trade_type` stamp leak
+3 of today's bot-fired trades (BBIO, ALNY, BALL) had
+`trade_type='unknown'` despite SOXX (also bot-fired today) stamping
+`paper` correctly. Conditional in the fill-time stamp path is missing
+some symbols. Backfill resolved the open rows; closed rows still
+historically tagged unknown.
+
+### v19.34.53 candidate — Bar-collector pipeline regression
+**System-wide finding** while investigating BBIO chart "May 4" axis
+display. `ib_historical_data` collection (220M docs) shows:
+* **119 of 200 top-tier intraday symbols (59.5%) have stale 1-min bars**.
+* Stoppages spread across ~3 weeks (rolling decay): 04-27 → 05-04 →
+  05-08 → 05-11 → 05-12 → 05-15 → 05-19 …
+* Two distinct pipelines confirmed by cross-timeframe sweep:
+    - **Live pusher** writes `1m/5m/15m/1h` for ~81 actively-subscribed
+      symbols. Symbols dropping out of subscription lose all live bars.
+    - **Backfill collector** writes `30m/1day/1week` for everyone —
+      **stopped on 2026-05-04 across the board** (every symbol's
+      `30 mins` and `1 day` series ends 2026-05-04).
+* Live execution unaffected — bot trades use `ib_live_snapshot` (a
+  third pipeline). So no mis-trades, but charts + ML training datasets
+  + backtests are silently degraded for >half the universe.
+* Frontend chart already has a `STALE CACHE` banner (line 1419 of
+  `ChartPanel.jsx`) but it's a small amber pill — easy to miss.
+
+### v19.34.54 candidate — DupKeyError race on `bot_trades` insert
+During the v19.34.49 restart, the old process logged a
+`DuplicateKeyError E11000 dup key: { id: 'c4182c10' }` (IBIT) at
+shutdown. Index integrity audit ran clean afterward (11,609 docs /
+11,609 unique IDs, no orphan dupes, `id_unique_v19_34_30` intact).
+The unique index *correctly rejected* the duplicate — no data
+corruption. But a race condition still exists where the orphan
+reconciler and share-drift loop can both decide to insert the same
+orphan in the same tick. Fix: convert the race-prone `insert_one`
+to `update_one(filter, update, upsert=True)` so the race becomes a
+no-op instead of a logged error.
+
+### v19.34.55+ — broker_rejected sub-causes (3 distinct)
+24h `broker_rejected` count of 165 is actually three different
+problems lumped together:
+* `parent_not_filled:cancelled` — 57 (bracket lifecycle issue)
+* `ib_direct_not_connected` — 57 (IB outage; **0 post-restart, self-healed**)
+* `alert_stale:N.NNpct_from_live_market` — ~30+ (alert timing slips
+  before execution reaches broker)
+
+Each needs its own investigation + fix.
+
+
+
+
 ## 2026-05-20 (v19.34.50 — _atr_floored_stop fails closed with pct fallback)
 
 ### Why
