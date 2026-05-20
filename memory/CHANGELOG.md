@@ -4,6 +4,38 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.56 — STALE CACHE chart banner: small pill → full overlay)
+
+### Why
+Existing banner was a small amber pill at chart top-center — easy to
+miss when scanning charts quickly during fast market conditions.
+Stale data is a trade-killer: placing an entry off bars that haven't
+refreshed since last week is worse than placing no trade at all.
+
+### Fix
+* `frontend/src/components/sentcom/panels/ChartPanel.jsx`: replaced
+  the top-center pill with a **full-chart overlay**:
+  - Translucent amber tint (`bg-amber-950/35`) over the chart so
+    bars are still visible underneath
+  - Diagonal warning stripe pattern across the whole chart (low
+    opacity so it doesn't obscure)
+  - Bold inset ring around the chart frame
+  - **Center alert card** with "STALE CACHE · DO NOT TRADE" headline,
+    days-stale count ("Data is N days old"), latest-bar timestamp,
+    and the staleness reason
+* `pointer-events-none` on the overlay container so the operator
+  can still hover/scroll the chart underneath; only the center card
+  re-enables pointer events for tooltips.
+* `data-testid="chart-stale-banner"` preserved so existing automation
+  / tests still locate it. Added `chart-stale-banner-card` for the
+  inner card.
+
+### Risk
+Low. Pure CSS/JSX change in a conditional render path. The condition
+that triggers the banner (`staleInfo?.stale && bars.length > 0`) is
+unchanged.
+
+
 ## 2026-05-21 (v19.34.55 — broker_rejected sub-triage)
 
 ### Why

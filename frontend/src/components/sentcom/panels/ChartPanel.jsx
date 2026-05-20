@@ -1416,21 +1416,67 @@ export const ChartPanel = ({
           {error}
         </div>
       )}
-      {!error && staleInfo?.stale && bars.length > 0 && (
-        <div
-          data-testid="chart-stale-banner"
-          className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 rounded-full border border-amber-500/50 bg-amber-500/10 text-[12px] uppercase tracking-wider text-amber-300"
-          title={`Historical collector hasn't written fresh bars. Reason: ${staleInfo.reason || 'unknown'}`}
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          STALE CACHE
-          {staleInfo.latest && (
-            <span className="text-amber-200/80 normal-case tracking-normal">
-              · latest {String(staleInfo.latest).slice(0, 10)}
-            </span>
-          )}
-        </div>
-      )}
+      {!error && staleInfo?.stale && bars.length > 0 && (() => {
+        // v19.34.56 — full-chart overlay (replaces small top pill).
+        // Translucent so the chart is still visible underneath, but
+        // the diagonal stripe pattern + center card make it impossible
+        // to miss that the data is stale before placing a trade.
+        const latestStr = staleInfo.latest ? String(staleInfo.latest).slice(0, 10) : null;
+        let daysStale = null;
+        if (latestStr) {
+          try {
+            const d = new Date(latestStr + 'T00:00:00Z');
+            const now = new Date();
+            daysStale = Math.max(0, Math.floor((now - d) / 86400000));
+          } catch { /* ignore */ }
+        }
+        return (
+          <div
+            data-testid="chart-stale-banner"
+            className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center"
+            title={`Historical collector hasn't written fresh bars. Reason: ${staleInfo.reason || 'unknown'}`}
+          >
+            {/* Translucent amber tint over the whole chart */}
+            <div className="absolute inset-0 bg-amber-950/35 backdrop-blur-[1px]" />
+            {/* Diagonal warning stripes across the chart */}
+            <div
+              className="absolute inset-0 opacity-30"
+              style={{
+                backgroundImage:
+                  'repeating-linear-gradient(45deg, rgba(245,158,11,0.35) 0 14px, transparent 14px 36px)',
+              }}
+            />
+            {/* Bold border around the chart frame */}
+            <div className="absolute inset-0 ring-2 ring-amber-500/70 ring-inset rounded" />
+            {/* Center alert card */}
+            <div
+              data-testid="chart-stale-banner-card"
+              className="relative z-10 pointer-events-auto flex flex-col items-center gap-2 px-6 py-4 rounded-lg border-2 border-amber-400 bg-amber-950/90 shadow-xl shadow-amber-900/60 max-w-[80%]"
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-amber-200 font-bold tracking-widest text-sm uppercase">
+                  Stale Cache · Do Not Trade
+                </span>
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              </div>
+              <div className="text-amber-50 text-base font-semibold text-center">
+                {daysStale !== null
+                  ? `Data is ${daysStale} day${daysStale === 1 ? '' : 's'} old`
+                  : 'Historical bars have not been refreshed'}
+              </div>
+              {latestStr && (
+                <div className="text-amber-200/80 text-xs">
+                  Latest bar: {latestStr}
+                </div>
+              )}
+              <div className="text-amber-300/70 text-[11px] mt-1 text-center max-w-md">
+                {staleInfo.reason || 'Historical collector has not written fresh bars for this bar size.'}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {!error && !staleInfo?.stale && staleInfo?.partial && bars.length > 0 && (
         <div
           data-testid="chart-partial-banner"

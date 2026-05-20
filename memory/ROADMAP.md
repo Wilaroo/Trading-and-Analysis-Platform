@@ -37,6 +37,25 @@ Open priorities, deferred ideas, and backlog. Move items to
   needed a manual `kill <pid> && bash spark_start.sh` cycle this session.
   Adding `--reload` to `spark_start.sh` (off by default, on for dev mode)
   would prevent the 30s blip on small backend changes.
+- 🟡 **P1 (earmarked) — PnL Data Drift Alert (60s telemetry catcher)**:
+  Compare bot-reported open PnL vs IB-snapshot PnL every 60s, alert if
+  delta exceeds threshold. Drift reconciler already corrects silently;
+  this would actively flag when corrections are happening so operator
+  can investigate root cause. Earmarked as P1 once trading goes live.
+
+### Backlog items RETIRED this session (after investigation)
+- ❌ **`trade_2_homerun` ladder dispatch register** — investigated, the
+  identifier doesn't exist anywhere in the codebase. The 6-style ladder
+  in `services/order_policy_registry.py` (scalp/intraday/multi_day/
+  swing/investment/position) already covers the home-run pattern via
+  `multi_day` (34%@10R), `investment` (40%@12R), and `position`
+  (50%@15R) runner rungs. This was a stale aspirational TODO that
+  never got built and isn't needed.
+- ❌ **`DuplicateKeyError` upsert fix on bot_trades** — investigated,
+  both write paths in `bot_persistence.py` already use `upsert=True`
+  (line 606 update_one, line 641 replace_one). No `insert_one` calls
+  remain on `bot_trades`. Fix shipped at some earlier point; the
+  backlog entry was stale.
 
 ### Orphaned data-quality finding (low priority)
 - **1 row in `ib_historical_data` with `bar_size: None`** — discovered during
