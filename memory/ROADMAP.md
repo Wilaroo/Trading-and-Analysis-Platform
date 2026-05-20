@@ -3,6 +3,38 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-05-21 (6 commits shipped)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.52  | Bar-Pipeline Phase A: pusher L1_HARD_CAP 80->500 | shipped |
+| v19.34.52b | Bar-Pipeline Phase A: backend recommender 100->600 | shipped |
+| v19.34.53  | env-fallback trade_type stamp on bot-fired path | shipped |
+| v19.34.54  | daily_squeeze ATR-floored stop | shipped |
+| v19.34.55  | broker_rejected 6-cause sub-triage | shipped |
+| v19.34.56  | STALE CACHE chart banner: small pill -> full overlay | shipped |
+
+Phase A live verification: 74 -> 402 quotes streaming post-restart.
+
+### Pending (user action)
+- Click "Collect Data" after market close (overnight). Drains 30m/1d/1w gap + 2,532 long-tail 1m/5m gap. Resolves Phase B + C together.
+- Phase D verification after the drain (re-run Q2/Q4 diagnostic).
+
+### New backlog (added this session)
+- P3: reqAccountUpdates 10s timeout cleanup in pusher (log noise).
+- P3: APScheduler nightly auto-smart_backfill (kills manual chore).
+- P3: Backend --reload flag in spark_start.sh.
+- P1 (earmarked, post-go-live): PnL Data Drift Alert (60s telemetry).
+
+### Backlog RETIRED this session (after investigation)
+- trade_2_homerun ladder dispatch register: identifier doesn't exist anywhere. Existing 6-style ladder (scalp/intraday/multi_day/swing/investment/position) already covers home-run patterns via multi_day 34%@10R, investment 40%@12R, position 50%@15R runner rungs.
+- DuplicateKeyError upsert fix: both bot_trades write paths in bot_persistence.py already use upsert=True. Fix shipped earlier.
+
+### Orphaned data-quality finding (low priority)
+- 1 row in ib_historical_data with bar_size: None. Junk row from a long-ago insertion bug. One-shot cleanup: db.ib_historical_data.deleteOne({bar_size: null}).
+
+---
+
 ## ✅ SHIPPED 2026-05-14 — Patches A (v19.34.30) + B/C/E (v19.34.31)
 
 All four order-management cascade-prevention patches are live. See
