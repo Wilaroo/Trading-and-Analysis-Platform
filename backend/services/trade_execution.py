@@ -838,7 +838,17 @@ class TradeExecution:
                         trade.trade_type = load_account_expectation().active_mode
                 except Exception as e:
                     logger.debug(f"trade_type classification failed (non-fatal): {e}")
-                    trade.trade_type = "unknown"
+                    # v19.34.53: env-fallback BEFORE "unknown" so a
+                    # transient pusher/import race during the classify
+                    # block doesn't lose the audit trail. Mirrors the
+                    # v19.34.51 reconciler fix. The 3 bot_fired rows
+                    # (BBIO/ALNY/BALL) that backfill v19.34.51 caught
+                    # came from this exact except path.
+                    try:
+                        from services.account_guard import load_account_expectation
+                        trade.trade_type = load_account_expectation().active_mode
+                    except Exception:
+                        trade.trade_type = "unknown"
 
                 # v19.34.3 (2026-05-04) — provenance stamp. The bot's
                 # own evaluation + execution path opened this trade
