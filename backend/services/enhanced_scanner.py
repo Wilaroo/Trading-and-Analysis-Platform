@@ -6546,7 +6546,24 @@ class EnhancedBackgroundScanner:
         direction = "long" if momentum > 0 else "short"
         
         current = closes[-1]
-        stop = current * (0.95 if direction == "long" else 1.05)
+        # v19.34.54: ATR-floored stop using the squeeze-period structural
+        # anchor (lowest low / highest high of the 20-bar BB window).
+        # min_atr_mult=1.5 matches the Keltner channel width and provides
+        # appropriate overnight gap headroom for a daily-timeframe swing.
+        # Replaces the prior hardcoded 5% stop that ignored ATR entirely
+        # and was the only remaining non-trading scanner setup not using
+        # _atr_floored_stop after v19.34.50.
+        if direction == "long":
+            structural_anchor = min(lows[-20:]) - 0.02
+        else:
+            structural_anchor = max(highs[-20:]) + 0.02
+        stop = self._atr_floored_stop(
+            entry_price=current,
+            raw_stop=structural_anchor,
+            atr=atr,
+            direction=direction,
+            min_atr_mult=1.5,
+        )
         target = current * (1.10 if direction == "long" else 0.90)
         
         return LiveAlert(
