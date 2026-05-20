@@ -1417,7 +1417,8 @@ class PositionReconciler:
                     # is the same one the orphan must belong to (otherwise
                     # the pusher snapshot wouldn't show it).
                     try:
-                        from services.account_guard import classify_account_id
+                        # v19.34.51 — env-fallback when pusher snapshot is empty.
+                        from services.account_guard import classify_account_id, load_account_expectation
                         from services.ib_pusher_rpc import get_account_snapshot
                         # v19.34.8 (2026-05-05) — wrap sync pusher RPC in
                         # asyncio.to_thread to prevent event-loop wedge.
@@ -1427,8 +1428,14 @@ class PositionReconciler:
                         # Same wedge class as v19.30.6/v19.30.8 fixes.
                         snap = await asyncio.to_thread(get_account_snapshot)
                         cur_account_id = (snap or {}).get("account_id") or ""
-                        trade.trade_type = classify_account_id(cur_account_id)
-                        trade.account_id_at_fill = cur_account_id or None
+                        if cur_account_id:
+                            trade.trade_type = classify_account_id(cur_account_id)
+                            trade.account_id_at_fill = cur_account_id
+                        else:
+                            # v19.34.51 — pusher snapshot empty; use env active_mode.
+                            exp = load_account_expectation()
+                            trade.trade_type = exp.active_mode or "unknown"
+                            trade.account_id_at_fill = None
                     except Exception as _acct_exc:
                         # Safe default: leave as "unknown" / None so the
                         # chip simply doesn't render rather than mislabel.
@@ -3093,6 +3100,22 @@ class PositionReconciler:
         trade.executed_at = datetime.now(timezone.utc).isoformat()
         trade.created_at = datetime.now(timezone.utc).isoformat()
         trade.entered_by = "reconciled_excess_v19_34_15b"
+        # v19.34.51 — stamp trade_type on excess-slice spawns too.
+        try:
+            from services.account_guard import classify_account_id, load_account_expectation
+            from services.ib_pusher_rpc import get_account_snapshot
+            snap = await asyncio.to_thread(get_account_snapshot)
+            cur_account_id = (snap or {}).get("account_id") or ""
+            if cur_account_id:
+                trade.trade_type = classify_account_id(cur_account_id)
+                trade.account_id_at_fill = cur_account_id
+            else:
+                exp = load_account_expectation()
+                trade.trade_type = exp.active_mode or "unknown"
+                trade.account_id_at_fill = None
+        except Exception as _acct_exc:
+            logger.debug(f"reconciled_excess {sym}: trade_type stamp skipped: {_acct_exc}")
+            trade.trade_type = "unknown"
         trade.synthetic_source = "share_drift_excess"
         trade.notes = (
             f"v19.34.15b: spawned to claim excess of {excess_abs} sh "
