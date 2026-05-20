@@ -37,5 +37,42 @@ class TestAtrFlooredStop(unittest.TestCase):
         self.assertEqual(self._h(0, 100.0, 2.0, "long"), 100.0)
 
 
+class TestV19_34_48_TradeSetupCoverage(unittest.TestCase):
+    """v19.34.48 swept 6 actual-trade setups. Verify each uses helper."""
+    def _src(self):
+        from pathlib import Path
+        p = Path(__file__).resolve().parents[1] / "services" / "enhanced_scanner.py"
+        return p.read_text()
+
+    def _assert_setup_uses_helper(self, setup):
+        src = self._src()
+        i = src.index(f'setup_type="{setup}"')
+        try:
+            j = src.index("setup_type=", i + 1)
+        except ValueError:
+            j = len(src)
+        self.assertIn("_atr_floored_stop", src[i:j],
+                      f"{setup} missing helper call")
+
+    def test_hitchhiker_uses_helper(self):       self._assert_setup_uses_helper("hitchhiker")
+    def test_gap_give_go_uses_helper(self):      self._assert_setup_uses_helper("gap_give_go")
+    def test_backside_uses_helper(self):         self._assert_setup_uses_helper("backside")
+    def test_off_sides_short_uses_helper(self):  self._assert_setup_uses_helper("off_sides_short")
+    def test_big_dog_uses_helper(self):          self._assert_setup_uses_helper("big_dog")
+    def test_9_ema_scalp_uses_helper(self):      self._assert_setup_uses_helper("9_ema_scalp")
+
+    def test_no_hardcoded_stops_in_trade_setups(self):
+        import re
+        src = self._src()
+        pat = re.compile(r"stop_loss=round\(snapshot\.\w+ [+-] 0\.0[12], 2\)")
+        for trade in ("hitchhiker","gap_give_go","backside",
+                      "off_sides_short","big_dog","9_ema_scalp"):
+            i = src.index(f'setup_type="{trade}"')
+            try: j = src.index("setup_type=", i + 1)
+            except ValueError: j = len(src)
+            self.assertFalse(pat.search(src[i:j]),
+                             f"{trade} regressed to hardcoded stop")
+
+
 if __name__ == "__main__":
     unittest.main()
