@@ -4093,6 +4093,20 @@ async def startup_event():
                         print(f"[event-loop-monitor] stack dump failed: {_dump_err}")
             await asyncio.sleep(0.5)  # bump heartbeat 2× per second
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
+
+    # v19.34.46 — Memory watchdog. Tonight's session caught the backend
+    # SIGKILL'd twice (exit 137 = kernel OOM). The watchdog logs RSS
+    # every 60s, warns at 80%, criticals at 90%, and arms tracemalloc
+    # on first critical to dump top-10 allocators on the second.
+    try:
+        from services.memory_watchdog import memory_watchdog_loop
+        _wd_db = globals().get("db") or globals().get("_db")
+        asyncio.create_task(
+            memory_watchdog_loop(db=_wd_db),
+            name="_memory_watchdog",
+        )
+    except Exception as _wd_err:
+        print(f"[memory-watchdog] failed to start: {_wd_err}")
     
     # Master cache refresh — ONE thread replaces 26+ per cycle
     asyncio.create_task(_streaming_cache_loop())

@@ -4,6 +4,46 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.46 — Memory watchdog @ event loop)
+
+### Why
+Two SIGKILL events (exit 137 = kernel OOM) during today's session
+while the backend was running natively on DGX (no supervisor restart).
+Idle RAM headroom was 95 GiB but the backend RSS climbed to ~21 GiB
+under load and tripped whatever cgroup / ulimit was active.
+
+### Fix
+New `services.memory_watchdog.memory_watchdog_loop` started as an
+asyncio task from `server.startup_event` right after
+`_event_loop_monitor`. Every 60s it:
+
+* Reads process RSS from `/proc/self/statm` and system pressure from
+  `/proc/meminfo` (zero non-stdlib deps).
+* INFOs a continuous heartbeat so we have a memory timeline in the log.
+* WARNs at 80% effective utilisation (max of process %-of-total or
+  system used %).
+* CRITICALs at 90%, arms tracemalloc on the first critical, dumps
+  top-10 allocators on the second — giving us forensic evidence
+  before the next SIGKILL hits.
+* Persists each sample to the `memory_watchdog` Mongo collection
+  (7-day TTL) so post-crash forensics work even after the process dies.
+
+Failure modes are all fail-OPEN (non-Linux hosts, /proc unavailable,
+Mongo flap) — watchdog never breaks the main loop.
+
+### Env knobs
+* `MEMORY_WATCHDOG_ENABLED` (default 1)
+* `MEMORY_WATCHDOG_INTERVAL_SEC` (default 60)
+* `MEMORY_WATCHDOG_WARN_PCT` (default 80)
+* `MEMORY_WATCHDOG_CRIT_PCT` (default 90)
+
+### Tests
+`tests/test_memory_watchdog_v19_34_46.py` — 7 cases covering sample
+collection, /proc fallback, env disable, one-tick integration with a
+mock Mongo. Full recently-touched suite: **53 passed / 0 failed**.
+
+---
+
 ## 2026-02-XX (v19.34.45 — Stop-floor enforcement @ evaluator)
 
 ### Why
