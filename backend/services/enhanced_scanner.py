@@ -3529,9 +3529,20 @@ class EnhancedBackgroundScanner:
                           min_atr_mult: float = 0.5) -> float:
         """Preserve structural anchor (LoD/HoD) where safe; widen to
         min_atr_mult×ATR otherwise. Fail-OPEN on missing ATR."""
-        if not (entry_price and atr and float(atr) > 0):
+        # v19.34.50 - fail-closed pct fallback when ATR missing/zero.
+        if not (entry_price and entry_price > 0):
             return round(float(raw_stop), 2)
-        floor_distance = float(min_atr_mult) * float(atr)
+        if atr and float(atr) > 0:
+            floor_distance = float(min_atr_mult) * float(atr)
+        else:
+            import os as _os
+            try:
+                pct_floor = float(
+                    _os.environ.get("ATR_FLOOR_PCT_FALLBACK", "0.01") or 0.01
+                )
+            except (TypeError, ValueError):
+                pct_floor = 0.01
+            floor_distance = pct_floor * float(entry_price)
         if str(direction).lower() == "long":
             return round(min(float(raw_stop), float(entry_price) - floor_distance), 2)
         else:
@@ -4053,7 +4064,13 @@ class EnhancedBackgroundScanner:
                 priority=AlertPriority.MEDIUM,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.current_price,
-                stop_loss=round(snapshot.vwap - (snapshot.atr * 0.33), 2),
+                stop_loss=self._atr_floored_stop(  # v19.34.50
+                    entry_price=snapshot.current_price,
+                    raw_stop=snapshot.vwap - (snapshot.atr * 0.33),
+                    atr=getattr(snapshot, "atr", None),
+                    direction="long",
+                    min_atr_mult=0.5,
+                ),
                 target=round(snapshot.vwap + (snapshot.vwap - snapshot.low_of_day), 2),
                 risk_reward=3.0,
                 trigger_probability=0.55,
@@ -5398,7 +5415,14 @@ class EnhancedBackgroundScanner:
             snapshot.rsi_14 <= 48 and
             snapshot.current_price <= snapshot.low_of_day * 1.005 and  # near LOD (within 0.5%)
             snapshot.rvol >= 1.3):
-            stop = round(snapshot.ema_9 + (snapshot.atr * 0.2), 2)  # just above the lower-high bounce
+            # v19.34.50 - wrap with ATR-floored helper.
+            stop = self._atr_floored_stop(
+                entry_price=snapshot.current_price,
+                raw_stop=snapshot.ema_9 + (snapshot.atr * 0.2),
+                atr=getattr(snapshot, "atr", None),
+                direction="short",
+                min_atr_mult=0.5,
+            )
             target = round(snapshot.low_of_day - (snapshot.atr * 1.5), 2)
             risk = abs(stop - snapshot.current_price)
             reward = abs(snapshot.current_price - target)
