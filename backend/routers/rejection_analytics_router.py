@@ -78,12 +78,21 @@ REASON_MAP: Dict[str, Dict[str, str]] = {
     "rejection_cooldown": {"label": "Recent-rejection cooldown",            "category": CAT_SCANNER_QUALITY},
     "ttl_expired":        {"label": "Setup TTL expired",                    "category": CAT_SCANNER_QUALITY},
     # ── broker (informational; doesn't count against scanner score) ──
-    "broker_rejected":    {"label": "Broker rejected",                      "category": CAT_BROKER},
+    "broker_rejected":    {"label": "Broker rejected (uncategorised)",      "category": CAT_BROKER},
     "execution_exception": {"label": "Execution exception",                 "category": CAT_BROKER},
     "min_tick":           {"label": "Min price variation (Error 110)",      "category": CAT_BROKER},
     "error_202":          {"label": "Order cancelled by IB (Error 202)",    "category": CAT_BROKER},
     "bracket_submission_timeout": {"label": "Bracket submission timeout",   "category": CAT_BROKER},
     "pusher_offline_cannot_close_in_live_mode": {"label": "Pusher offline (close)", "category": CAT_BROKER},
+    # v19.34.55 — broker_rejected sub-triage (per-cause breakdown so the
+    # UI shows WHY a broker rejection happened instead of the umbrella
+    # "Broker rejected" label that hid every cause behind one bucket).
+    "parent_cancelled":   {"label": "Parent leg cancelled (bracket OCA)",   "category": CAT_BROKER},
+    "margin_insufficient": {"label": "Insufficient margin/buying power",    "category": CAT_BROKER},
+    "pacing_violation":   {"label": "Pacing violation (Error 162)",         "category": CAT_BROKER},
+    "no_security_def":    {"label": "No security definition (Error 200)",   "category": CAT_BROKER},
+    "connection_lost":    {"label": "IB connection lost (Error 1100/1101)", "category": CAT_BROKER},
+    "duplicate_order":    {"label": "Duplicate order ID (Error 322)",       "category": CAT_BROKER},
     # ── policy (informational; doesn't count against scanner score) ──
     "account_guard":      {"label": "Account guard",                        "category": CAT_POLICY},
     "safety_guardrail":   {"label": "Safety guardrail",                     "category": CAT_POLICY},
@@ -112,10 +121,26 @@ def _normalise_reason(raw: Optional[str]) -> str:
         return "rejection_cooldown"
     if "ttl" in s and "expir" in s:
         return "ttl_expired"
+    if "error 1100" in s or "error 1101" in s or "connectivity" in s or "connection_lost" in s:
+        return "connection_lost"
     if "error 110" in s or "min_tick" in s or "min price variation" in s:
         return "min_tick"
     if "error 202" in s or "cancelled by ib" in s:
         return "error_202"
+    # v19.34.55 — broker_rejected sub-triage. Order matters: more
+    # specific patterns first so e.g. "Error 201" doesn't slip into
+    # the broader "rejected" bucket. connection_lost handled above
+    # because "Error 110" is a substring of "Error 1100"/"1101".
+    if "error 201" in s or "insufficient" in s or "margin" in s or "buying power" in s:
+        return "margin_insufficient"
+    if "error 162" in s or "pacing" in s:
+        return "pacing_violation"
+    if "error 200" in s or "no security definition" in s or "security_def" in s:
+        return "no_security_def"
+    if "error 322" in s or "duplicate order" in s or "duplicate_order" in s:
+        return "duplicate_order"
+    if "parent" in s and ("cancel" in s or "cancelled" in s):
+        return "parent_cancelled"
     if "bracket" in s and ("timeout" in s or "submission" in s):
         return "bracket_submission_timeout"
     if "kill_switch" in s or "kill-switch" in s:
