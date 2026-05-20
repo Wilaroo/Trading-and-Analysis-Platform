@@ -24,7 +24,10 @@ set SPARK_REPO=~/Trading-and-Analysis-Platform
 
 set IB_GATEWAY_PATH=C:\Jts\ibgateway\1037\ibgateway.exe
 set IB_PORT=4002
-set IB_SYMBOLS=VIX SPY QQQ IWM DIA XOM CVX CF NTR NVDA AAPL MSFT TSLA AMD
+set IB_SYMBOLS=VIX SPY QQQ IWM DIA
+:: v19.34.52: live-universe target. Matches DGX MAX_LIVE_SUBSCRIPTIONS=400.
+:: Was 60 — caused 119 stale-bar symbols. L1_HARD_CAP in ib_data_pusher.py = 500.
+set IB_PUSHER_L1_AUTO_TOP_N=400
 
 set IB_USERNAME=paperesw100000
 set IB_PASSWORD=Socr1025!@!?
@@ -216,7 +219,7 @@ taskkill /F /FI "WINDOWTITLE eq [IB PUSHER]*" >nul 2>&1
 timeout /t 1 /nobreak >nul
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
-    start "[IB PUSHER] Market Data" cmd /k "title [IB PUSHER] Market Data Feed to Spark && color 0E && cd /d %SCRIPTS_DIR% && echo. && echo ===================================================== && echo   [IB PUSHER] Real-Time Market Data && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_PUSHER_CLIENT_ID% ^| Color: YELLOW && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %SPARK_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
+    start "[IB PUSHER] Market Data" cmd /k "title [IB PUSHER] Market Data Feed to Spark && color 0E && cd /d %SCRIPTS_DIR% && set IB_PUSHER_L1_AUTO_TOP_N=%IB_PUSHER_L1_AUTO_TOP_N% && echo. && echo ===================================================== && echo   [IB PUSHER] Real-Time Market Data && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_PUSHER_CLIENT_ID% ^| Color: YELLOW && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %SPARK_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
     echo        Data pusher started (client ID: %IB_PUSHER_CLIENT_ID%)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
