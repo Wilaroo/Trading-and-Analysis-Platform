@@ -329,6 +329,26 @@ export const SentComV5View = ({
   const buyingPower = status?.account_buying_power ?? status?.buying_power ?? context?.account_buying_power;
   const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
+  // v19.34.59 (2026-05-20) — Prefer IB's authoritative session
+  // RealizedPnL / UnrealizedPnL when /api/trading-bot/status surfaces
+  // them (it now does, post v19.34.59 backend patch). Pre-fix the
+  // bot's `totalRealizedPnl` was computed only from `bot_trades`
+  // closes the bot itself fired/reconciled — which on 2026-05-20
+  // showed +$0 on the HUD while IB had realized -$8,392 (the bot's
+  // exit-tracker missed OCA/scale-out/manual-TWS closes). IB's
+  // RealizedPnL is the single source of truth and matches what the
+  // operator sees in TWS. Falls back to the bot-derived number when
+  // the field is absent (pre-patch backend, or pusher account snapshot
+  // not seeded yet).
+  const totalRealizedPnlEff =
+    (status?.account_realized_pnl != null) ? Number(status.account_realized_pnl) : totalRealizedPnl;
+  const totalUnrealizedPnlEff =
+    (status?.account_unrealized_pnl != null) ? Number(status.account_unrealized_pnl) : totalUnrealizedPnl;
+  const totalPnlTodayEff =
+    (totalRealizedPnlEff != null && totalUnrealizedPnlEff != null)
+      ? Number(totalRealizedPnlEff) + Number(totalUnrealizedPnlEff)
+      : totalPnlToday;
+
   // Single entry point for every ticker-symbol click anywhere inside V5:
   //   1. focus the symbol on the center chart (preserves the old UX)
   //   2. open the EnhancedTickerModal for deep analysis
@@ -469,9 +489,9 @@ export const SentComV5View = ({
           text: `${counts.close_r >= 0 ? '+' : ''}${counts.close_r.toFixed(1)}R`,
         } : undefined}
         totalPnl={totalPnl}
-        totalUnrealizedPnl={totalUnrealizedPnl}
-        totalRealizedPnl={totalRealizedPnl}
-        totalPnlToday={totalPnlToday}
+        totalUnrealizedPnl={totalUnrealizedPnlEff}
+        totalRealizedPnl={totalRealizedPnlEff}
+        totalPnlToday={totalPnlTodayEff}
         totalRealizedPnlSession={totalRealizedPnlSession}
         realizedPnlSyntheticCount={realizedPnlSyntheticCount}
         realizedPnlSyntheticSum={realizedPnlSyntheticSum}

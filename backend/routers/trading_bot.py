@@ -434,6 +434,20 @@ async def get_bot_status():
                 available_funds = _extract_account_value(
                     ib_account, "AvailableFunds", buying_power
                 )
+                # v19.34.59 (2026-05-20) — Surface IB's authoritative
+                # RealizedPnL/UnrealizedPnL at the account/status level.
+                # Pre-v19.34.59 the HUD computed `total_realized_pnl`
+                # only from the bot's own `bot_trades` records — which
+                # silently undercounts by ~$7k on days like 2026-05-20
+                # where IB realized -$8,392 but the bot's reconciler
+                # only attributed -$1,490 of synthetic closeouts (the
+                # rest of IB's realized came from OCA/scale-out/manual
+                # closes the bot's exit-tracker doesn't enumerate).
+                # IB's `RealizedPnL` is the single source of truth and
+                # already comes through `/api/ib/account/summary`; just
+                # piggyback it onto the same status payload.
+                realized_pnl = _extract_account_value(ib_account, "RealizedPnL", 0)
+                unrealized_pnl = _extract_account_value(ib_account, "UnrealizedPnL", 0)
                 if net_liq and net_liq > 0:
                     # 2026-02-13 (v19.34.141) — MERGE (not replace) so that
                     # a partial executor account (e.g. equity-only) keeps
@@ -448,6 +462,9 @@ async def get_bot_status():
                         "buying_power": float(buying_power),
                         "cash": float(cash),
                         "available_funds": float(available_funds),
+                        # v19.34.59 — IB-authoritative PnL fields.
+                        "realized_pnl": float(realized_pnl),
+                        "unrealized_pnl": float(unrealized_pnl),
                         "currency": "USD",
                         "source": "ib_pushed",
                         "connected": is_pusher_connected(),
@@ -477,6 +494,18 @@ async def get_bot_status():
         # (replaced the old `Latency` metric per operator request).
         if account.get("buying_power"):
             status["account_buying_power"] = account["buying_power"]
+        # v19.34.59 (2026-05-20) — Surface IB-authoritative R/U PnL at
+        # the top level so the V5 HUD can read
+        # `status.account_realized_pnl` directly without a second
+        # round-trip to /api/ib/account/summary. Mirrors the
+        # `account_buying_power` pattern from v19.6. The bot's own
+        # `total_realized_pnl` (computed from bot_trades) stays available
+        # via /api/sentcom/positions for the synthetic-attribution
+        # tooltip, but the chip itself now shows IB truth.
+        if account.get("realized_pnl") is not None:
+            status["account_realized_pnl"] = account["realized_pnl"]
+        if account.get("unrealized_pnl") is not None:
+            status["account_unrealized_pnl"] = account["unrealized_pnl"]
 
         # 2026-04-29 (operator-flagged pre-RTH): keep
         # `risk_params.starting_capital` in lock-step with the live
