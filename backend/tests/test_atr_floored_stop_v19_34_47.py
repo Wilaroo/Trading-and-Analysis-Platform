@@ -75,5 +75,77 @@ class TestAtrFlooredStop(unittest.TestCase):
         self.assertEqual(self._helper(0, 100.0, 2.0, "long"), 100.0)
 
 
+class TestV19_34_48_TradeSetupCoverage(unittest.TestCase):
+    """v19.34.48 swept 6 actual-trade setups to use _atr_floored_stop.
+    Verify each LiveAlert dispatch in the scanner calls the helper.
+    This is a SOURCE-SCAN regression — it doesn't run the scanner
+    (heavy), just greps for the wiring."""
+
+    def _src(self):
+        import os
+        from pathlib import Path
+        p = Path(__file__).resolve().parents[1] / "services" / "enhanced_scanner.py"
+        return p.read_text()
+
+    def test_hitchhiker_uses_helper(self):
+        src = self._src()
+        # Block from `setup_type="hitchhiker"` to next `setup_type=`.
+        i = src.index('setup_type="hitchhiker"')
+        j = src.index('setup_type=', i + 1)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_gap_give_go_uses_helper(self):
+        src = self._src()
+        i = src.index('setup_type="gap_give_go"')
+        j = src.index('setup_type=', i + 1)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_backside_uses_helper(self):
+        src = self._src()
+        i = src.index('setup_type="backside"')
+        j = src.index('setup_type=', i + 1)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_off_sides_short_uses_helper(self):
+        src = self._src()
+        i = src.index('setup_type="off_sides_short"')
+        j = src.index('setup_type=', i + 1)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_big_dog_uses_helper(self):
+        src = self._src()
+        i = src.index('setup_type="big_dog"')
+        j = src.index('setup_type=', i + 1)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_9_ema_scalp_uses_helper(self):
+        src = self._src()
+        i = src.index('setup_type="9_ema_scalp"')
+        # 9_ema_scalp may be the last setup in the file — guard for that.
+        try:
+            j = src.index('setup_type=', i + 1)
+        except ValueError:
+            j = len(src)
+        self.assertIn("_atr_floored_stop", src[i:j])
+
+    def test_no_hardcoded_stops_in_trade_setups(self):
+        """Failsafe: ensure none of the 6 trade setups regressed to
+        the old `stop_loss=round(snapshot.<x> ± 0.0N, 2)` pattern."""
+        import re
+        src = self._src()
+        pattern = re.compile(r'stop_loss=round\(snapshot\.\w+ [+-] 0\.0[12], 2\)')
+        for trade in ("hitchhiker", "gap_give_go", "backside",
+                      "off_sides_short", "big_dog", "9_ema_scalp"):
+            i = src.index(f'setup_type="{trade}"')
+            try:
+                j = src.index("setup_type=", i + 1)
+            except ValueError:
+                j = len(src)
+            self.assertFalse(
+                pattern.search(src[i:j]),
+                f"setup_type={trade!r} regressed to hardcoded stop",
+            )
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
