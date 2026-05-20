@@ -5,6 +5,32 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.56 — STALE CACHE chart banner: pill -> full overlay)
+* frontend/src/components/sentcom/panels/ChartPanel.jsx: full-chart translucent amber overlay + diagonal warning stripes + bold inset ring + center "STALE CACHE - DO NOT TRADE" card showing days-stale, latest bar, and reason. pointer-events-none on overlay preserves chart interaction.
+
+## 2026-05-21 (v19.34.55 — broker_rejected sub-triage)
+* routers/rejection_analytics_router.py: added 6 REASON_MAP entries (parent_cancelled, margin_insufficient, pacing_violation, no_security_def, connection_lost, duplicate_order). Extended _normalise_reason(). Ordering bug caught by tests: connection_lost must precede min_tick because "Error 110" is a substring of "Error 1100/1101".
+* test_broker_rejected_triage_v19_34_55.py — 25 cases passing.
+
+## 2026-05-21 (v19.34.54 — daily_squeeze ATR-floored stop)
+* services/enhanced_scanner.py: replaced hardcoded 5% stop with _atr_floored_stop(structural_anchor, atr, min_atr_mult=1.5). Structural anchor = lowest low / highest high of 20-bar BB window. Last non-trading scanner setup now consistent with v19.34.50.
+* test_daily_squeeze_atr_stop_v19_34_54.py — 7 cases passing.
+
+## 2026-05-21 (v19.34.53 — env-fallback trade_type stamp on bot-fired path)
+* services/trade_execution.py: nested env fallback inside the classify-exception branch (mirrors v19.34.51 reconciler). load_account_expectation().active_mode used instead of "unknown" so transient pusher/import races do not kill the audit trail. The 3 bot_fired rows (BBIO/ALNY/BALL) v19.34.51 backfilled came from this path.
+* test_trade_type_env_fallback_v19_34_53.py — 6 cases passing.
+
+## 2026-05-21 (v19.34.52b — Bar-Pipeline Phase A: backend recommender ceiling 100 -> 600)
+* backend/routers/backfill_router.py: top_n + max_total validators bumped le=100 -> le=600 (matches IB Pro Quote Booster Pack math). Pusher was getting HTTP 422 with the new top_n=400 request and falling back to 75-symbol cache. Post-restart: live quotes 74 -> 402 (5.4x lift).
+
+## 2026-05-21 (v19.34.52 — Bar-Pipeline Phase A: pusher L1 cap 80 -> 500, target 400 live)
+* documents/scripts/ib_data_pusher.py: L1_HARD_CAP 80 -> 500 (IB Pro line allowance with Booster Packs is 500-700; L2 router needs 3 slots headroom).
+* documents/TradeCommand_Spark_AITraining.bat: IB_PUSHER_L1_AUTO_TOP_N 60 -> 400 to match DGX MAX_LIVE_SUBSCRIPTIONS=400.
+* Root cause of the 119 stale-symbol issue: pusher silently truncating the cloud-recommended L1 list to 80 symbols on each restart, evicting any symbol outside top-80 ADV.
+
+NOTE: version numbers v19.34.52..56 are reused from a Feb 2026 cycle (drift reconciler, IB-direct watchdog) — disambiguated by date prefix.
+
+
 ## 2026-05-14 (v19.34.31) — Patches B + C + E: defense-in-depth for bracket lifecycle
 
 Sequel to v19.34.30 Patch A (which killed DB-side `target_order_ids` array
