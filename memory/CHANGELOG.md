@@ -4,6 +4,52 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.52b — Bar-Pipeline Restoration Phase A: backend recommender ceiling 100 → 600)
+
+### Why
+After v19.34.52 raised the Windows pusher's `L1_HARD_CAP` to 500 and the
+operator set `IB_PUSHER_L1_AUTO_TOP_N=400`, the pusher started getting
+**HTTP 422** from `/api/backfill/pusher-l1-recommendations`:
+
+```
+{"detail":[{"type":"less_than_equal","loc":["query","top_n"],
+"msg":"Input should be less than or equal to 100","ctx":{"le":100}},
+{"type":"less_than_equal","loc":["query","max_total"],
+"msg":"Input should be less than or equal to 100","ctx":{"le":100}}]}
+```
+
+The router-side Pydantic validators (`ge=1, le=100`) on both `top_n`
+and `max_total` were the leftover ceiling from when IB's 100-line
+budget was the binding constraint. Pusher silently fell back to its
+local cache (75 symbols) → 74 quotes streaming, identical to pre-fix.
+
+### Fix
+* `backend/routers/backfill_router.py`: bumped both validators
+  `le=100 → le=600`. Updated descriptions to document the IB Pro
+  Quote Booster Pack math (100 base + 100/pack × 5 packs ≈ 600).
+* Defaults left at `top_n=60, max_total=80` for backward-compatibility
+  with any other consumer that hits the endpoint without query params.
+* Underlying `get_pusher_l1_recommendations` in `services/symbol_universe.py`
+  has no internal cap, so no service-layer change needed.
+
+### Verification (post-restart)
+```
+curl /api/backfill/pusher-l1-recommendations?top_n=400&max_total=500
+  → success=True count=404
+
+ib_live_snapshot.quotes  : 402 symbols  (was 74 — 5.4× lift)
+ib_live_snapshot.positions: 12 symbols
+last_update              : 2026-05-20T16:43:32Z
+```
+
+### Deployment notes
+* DGX backend was running plain `uvicorn` (no `--reload`), so a manual
+  restart was required: `kill <pid> && bash scripts/spark_start.sh`.
+* Hot-reload would prevent this on future router-validator tweaks —
+  candidate enhancement (low priority, the start script auto-detects
+  missing services so the restart was a 30s blip).
+
+
 ## 2026-05-21 (v19.34.52 — Bar-Pipeline Restoration Phase A: raise IB pusher L1 cap 80 → 500, target 400 live)
 
 ### Why
