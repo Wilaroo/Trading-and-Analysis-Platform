@@ -168,6 +168,9 @@ def test_get_recent_drops_filters_by_gate():
 ROOT = Path(__file__).resolve().parents[1]
 TRADING_BOT = (ROOT / "services" / "trading_bot_service.py").read_text()
 TRADE_EXEC = (ROOT / "services" / "trade_execution.py").read_text()
+# v19.34.44 — Stale Alert TTL lives in the evaluator (upstream of the
+# bot/executor), so it has its own breadcrumb site we must scan too.
+OPP_EVAL = (ROOT / "services" / "opportunity_evaluator.py").read_text()
 
 
 def _src_has(haystack: str, snippet: str) -> bool:
@@ -209,7 +212,8 @@ def test_known_gates_match_instrumented_gates():
     # Ensure no orphan gates in KNOWN_GATES that aren't actually wired.
     instrumented_in_bot = set(re.findall(r'gate="(\w+)"', TRADING_BOT))
     instrumented_in_exec = set(re.findall(r'gate="(\w+)"', TRADE_EXEC))
-    union = instrumented_in_bot | instrumented_in_exec
+    instrumented_in_eval = set(re.findall(r'gate="(\w+)"', OPP_EVAL))
+    union = instrumented_in_bot | instrumented_in_exec | instrumented_in_eval
     # Every gate in KNOWN_GATES should have at least one wiring site.
     missing = KNOWN_GATES - union
     assert not missing, (

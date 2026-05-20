@@ -1554,6 +1554,19 @@ class TradingBotService:
                 f"size would blow past my max-notional-per-trade cap. Setup "
                 f"is fine, but the trade plan doesn't fit."
             )
+        if reason_code == "stale_alert_ttl":
+            age_secs = ctx.get("alert_age_seconds")
+            ttl_secs = ctx.get("ttl_seconds")
+            age_phrase = f" ({age_secs:.0f}s old, TTL {int(ttl_secs)}s)" if (
+                age_secs is not None and ttl_secs is not None
+            ) else ""
+            return (
+                f"🕒 Passing on {symbol} {setup_display} — this alert sat "
+                f"in the pipeline too long{age_phrase}. By now the trigger "
+                f"price has moved and the setup is no longer the one the "
+                f"scanner detected. Killing it here saves a round-trip to "
+                f"IB and a near-certain bad fill."
+            )
 
         # Generic fallback — never throw, never produce empty text.
         why = ctx.get("why", "did not meet criteria")

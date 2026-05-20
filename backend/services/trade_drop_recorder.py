@@ -69,6 +69,7 @@ KNOWN_GATES = {
     "safety_guardrail_crash",   # exception in the guardrail check path
     # trade_execution.execute_trade
     "no_trade_executor",        # bot._trade_executor is None
+    "stale_alert_ttl",          # v19.34.44 opportunity_evaluator pipeline-lag TTL
     "pre_exec_guardrail_veto",  # services.execution_guardrails ran_all_guardrails veto
     "strategy_paper_phase",     # strategy promotion still in PAPER (saved to bot_trades w/ status=paper)
     "strategy_simulation_phase",  # strategy still in SIMULATION

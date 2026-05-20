@@ -72,6 +72,7 @@ CAT_OTHER = "other"
 REASON_MAP: Dict[str, Dict[str, str]] = {
     # ── scanner-quality (count against the score) ──
     "stale_alert":        {"label": "Stale alert (TTL expired)",            "category": CAT_SCANNER_QUALITY},
+    "stale_alert_ttl":    {"label": "Stale alert (pipeline-lag TTL)",        "category": CAT_SCANNER_QUALITY},
     "live_price_gate":    {"label": "Live-price gate (>2.5% from alert)",   "category": CAT_SCANNER_QUALITY},
     "cooldown":           {"label": "Recent-rejection cooldown",            "category": CAT_SCANNER_QUALITY},
     "rejection_cooldown": {"label": "Recent-rejection cooldown",            "category": CAT_SCANNER_QUALITY},

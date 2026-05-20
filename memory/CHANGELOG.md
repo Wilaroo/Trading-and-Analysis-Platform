@@ -4,6 +4,62 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.44 — Stale Alert TTL @ pipeline gate)
+
+### Why
+Today's session caught **41 alerts** dying deep in the execution pipeline
+because by the time they reached IB the underlying price had drifted
+past their entry trigger. Symptoms downstream: Error 110 rejections,
+live-price-gate drops, and bad fills. The root cause is upstream
+pipeline lag — scanner emits at T+0, but enrichment + AI gate + sizing
+can take 30–60s on a busy cycle, and the alert is already obsolete
+before we attempt to act on it.
+
+### Fix
+New first-line gate in
+`backend/services/opportunity_evaluator.evaluate_opportunity`:
+
+* Reads `alert["triggered_at_unix"]` (fallback: parse ISO
+  `alert["triggered_at"]`).
+* If `now - triggered ≥ STALE_ALERT_TTL_SECONDS` (default **30s**),
+  return `None` — no enrichment, no IB round-trip, no slot reserved.
+* Logs via `bot.record_rejection(reason_code="stale_alert_ttl", …)` so
+  the Bot's Brain panel narrates it, and mirrors into the `trade_drops`
+  collection via `record_trade_drop(gate="stale_alert_ttl", …)` so the
+  Scanner Quality Panel rolls it under the canonical `stale_alert`
+  bucket.
+* **Fail-OPEN** when timestamp missing or `STALE_ALERT_TTL_SECONDS=0`
+  (legacy alert paths still flow; no silent blockade).
+
+### Surfaces touched
+* `services/opportunity_evaluator.py` — TTL gate.
+* `services/trade_drop_recorder.py` — `stale_alert_ttl` added to
+  `KNOWN_GATES`.
+* `services/trading_bot_service._compose_rejection_narrative` — new
+  `stale_alert_ttl` branch for Bot's Brain UI.
+* `routers/rejection_analytics_router.py` — `stale_alert_ttl` in
+  `REASON_MAP` (rolls into scanner-quality category).
+* `tests/test_trade_drop_instrumentation.py` — extended source-scan
+  set to include `opportunity_evaluator.py`.
+
+### Tests
+`tests/test_stale_alert_ttl_v19_34_44.py` — 10 cases (fresh vs stale,
+no-timestamp fail-open, TTL=0 disabled, env override, ISO fallback,
+default 30s, gate registration, narrative composition). Full
+recently-touched suite green: **88 passed, 0 failed**.
+
+### Env knobs
+* `STALE_ALERT_TTL_SECONDS` — default `30`. Set `0` to disable.
+
+### Operator-visible behaviour
+* Scanner Quality Panel will start showing a new daily count under
+  `Stale alert (pipeline-lag TTL)` once pipeline-lag drops surface
+  (was previously hidden as Error 110 / live-price-gate rejections
+  way downstream).
+* Bot's Brain panel narrates each drop with the alert's actual age.
+
+---
+
 ## 2026-02-XX (v19.34.30 — Next-action sweep: B / A-2 / Y-full / pusher-deprecation / UI variant precedence)
 
 ### Bug B — TREND_CONTINUATION XGBoost crash (FIXED)
