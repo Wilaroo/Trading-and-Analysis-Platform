@@ -4,6 +4,50 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.53 — env-fallback trade_type stamp on bot-fired execution path)
+
+### Why
+v19.34.51 backfilled 8 `bot_trades` rows with `trade_type='unknown'`.
+**3 of those 8** had `entered_by='bot_fired'` (BBIO, ALNY, BALL) —
+meaning the v19.34.51 reconciler fix didn't cover the path that
+actually opened them.
+
+Source-stamp leak in `services/trade_execution.py` (lines ~790-825):
+the bot-fired classify block tries `is_pusher_connected()` →
+`_pushed_ib_data["positions"]` → `classify_account_id(...)`. If ANY
+exception fires inside that try block (transient pusher race, dict-
+mutation-during-iter, account_guard import error during a hot reload,
+etc.) the bare except dropped straight to `trade_type = "unknown"` and
+the audit trail was lost permanently.
+
+### Fix
+* `services/trade_execution.py`: nested env fallback inside the except
+  branch — mirrors v19.34.51 reconciler. `load_account_expectation()`
+  → `.active_mode` is the same source `/api/system/account-mode` uses
+  when its own snapshot read fails, so the stamp stays consistent
+  across the codebase.
+* Outermost `"unknown"` fallback retained as last resort (env load
+  itself failing, e.g. a corrupted .env during deploy).
+* No backfill needed — the v19.34.51 backfill_v19_34_51 stamp already
+  patched the 3 affected rows. This fix prevents the next occurrence.
+
+### Test
+`backend/tests/test_trade_type_env_fallback_v19_34_53.py` — 6 cases:
+1. classify exception → env=paper
+2. classify exception → env=live
+3. classify exception + env load also fails → "unknown"
+4. import-error inside fallback → "unknown"
+5. patch-shape lock (catches accidental future revert)
+6. real account_guard sanity check
+
+All 6 passing locally.
+
+### Risk
+Low. The except branch was already a non-fatal path; we're just
+swapping the degraded value from `"unknown"` to a meaningful env mode,
+with the same `"unknown"` last-resort if everything else fails.
+
+
 ## 2026-05-21 (v19.34.52b — Bar-Pipeline Restoration Phase A: backend recommender ceiling 100 → 600)
 
 ### Why
