@@ -4072,9 +4072,15 @@ def main():
     #   3. Local cache file — fallback when (2) is set but unreachable.
     #   4. `--symbols` CLI arg — backwards-compatible final default.
     #
-    # Always capped at 80 to leave headroom under IB Gateway's 100-line
-    # ceiling for the dynamic L2 routing path.
-    L1_HARD_CAP = 80
+    # Capped at 250 to fit the IB Pro market-data line allowance (typically
+    # 500-700 lines on a funded account) while leaving wide headroom for
+    # the L2 dynamic routing path (max 3 concurrent L2 subscriptions) and
+    # any ad-hoc fundamental/contract-detail requests.
+    #
+    # v19.34.52: bumped from 80 → 250 to fix Bar-Pipeline Restoration
+    # Phase A — 119 of ~200 intraday symbols had stale 1m bars because
+    # the prior 80-cap evicted them from the live wave scanner.
+    L1_HARD_CAP = 250
     L1_CACHE_PATH = os.path.expanduser("~/.ib_pusher_l1_cache.json")
 
     def _save_l1_cache(symbols, source):

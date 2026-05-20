@@ -4,6 +4,44 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.52 — Bar-Pipeline Restoration Phase A: raise IB pusher L1 cap 80 → 250)
+
+### Why
+Bar-pipeline audit found **119 of ~200 intraday symbols** had stale
+1m chart bars (last bar 2026-05-04 or earlier). Root cause: the
+Windows-side `ib_data_pusher.py` had a hardcoded `L1_HARD_CAP = 80`
+that silently truncated the live-wave subscription list pulled from
+`/api/backfill/pusher-l1-recommendations`, evicting the symbols that
+fell out of the top-80 ADV ranking on each restart.
+
+### Fix
+* `documents/scripts/ib_data_pusher.py`: `L1_HARD_CAP` raised
+  `80 → 250`. New comment block documents the IB Pro line
+  allowance (500-700 lines on funded accounts) and the wide
+  headroom retained for the 3-slot dynamic L2 router.
+* No backend changes — the cap is purely client-side on the
+  Windows pusher process.
+
+### Deployment (user-side, manual)
+1. On DGX: commit & push the patched `ib_data_pusher.py`.
+2. On Windows: `git pull` to sync.
+3. On Windows env: set `IB_PUSHER_L1_AUTO_TOP_N=200` so the pusher
+   actually requests 200 symbols (defaults below this if unset).
+4. Restart `ib_data_pusher.py` (any of the `run_collector*.bat`
+   wrappers, or the main pusher BAT).
+5. Verify: `db.ib_live_snapshot.findOne({_id:"current"}).quotes`
+   length should climb above 80 (target ~200).
+
+### Known follow-up
+* Phase B (next): Investigate why 30m / 1day / 1week historical
+  bars stopped advancing on 2026-05-04 universally. Initial
+  inspection shows backend has no auto-scheduler for collection —
+  the Windows-side `run_collector*.bat` scripts fire the work
+  manually, so this may be an ops gap rather than a code bug.
+* Phase C: One-shot backfill the 119 stale symbols' 1m/5m gap
+  (May 4 → today) once the pusher cap is verified live.
+* Phase D: End-to-end verification against fresh row counts.
+
 
 ## 2026-05-20 (v19.34.51 — env-fallback trade_type stamp on both reconciler paths)
 
