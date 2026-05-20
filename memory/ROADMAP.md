@@ -3,6 +3,48 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+---
+
+## 🚀 Session Summary — 2026-05-21 (5 commits shipped)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.52  | Bar-Pipeline Phase A: pusher `L1_HARD_CAP` 80→500 | ✅ shipped |
+| v19.34.52b | Bar-Pipeline Phase A: backend recommender ceiling 100→600 | ✅ shipped |
+| v19.34.53  | env-fallback `trade_type` stamp on bot-fired execution path | ✅ shipped |
+| v19.34.54  | `daily_squeeze` ATR-floored stop (replaces hardcoded 5%) | ✅ shipped |
+| v19.34.55  | `broker_rejected` sub-triage (6 new IB cause categories) | ✅ shipped |
+
+**Phase A live verification:** 74 → **402 quotes streaming** post-pusher restart. ✅
+
+### Pending (user action)
+- ⏳ **Click "Collect Data" after market close** (overnight) to drain the
+  30m / 1d / 1w gap (last smart_backfill click was May 11). The
+  click will queue ~5-15K chained requests covering 30m/1d/1w plus
+  the 1m/5m gap on the 2,532 long-tail symbols. Phase B + Phase C
+  resolved together.
+- ⏳ **Phase D verification** after the overnight drain — re-run the
+  diagnostic Q2/Q4 and confirm tip-of-data marches forward.
+
+### New backlog items added this session
+- 🟢 **P3 — `reqAccountUpdates` 10s timeout cleanup** in pusher: harmless
+  but noisy log warning on every connect. Likely just a longer initial
+  wait + a non-fatal warning instead of an error log.
+- 🟢 **P3 — APScheduler nightly `smart_backfill` auto-trigger**: optional;
+  user opted to stay manual for now but may revisit if the click cadence
+  slips again.
+- 🟢 **P3 — Backend `--reload` flag**: routine validator/router tweaks
+  needed a manual `kill <pid> && bash spark_start.sh` cycle this session.
+  Adding `--reload` to `spark_start.sh` (off by default, on for dev mode)
+  would prevent the 30s blip on small backend changes.
+
+### Orphaned data-quality finding (low priority)
+- **1 row in `ib_historical_data` with `bar_size: None`** — discovered during
+  Q2 diagnostic. Junk row from a long-ago insertion bug. One-shot cleanup:
+  `db.ib_historical_data.deleteOne({bar_size: None})`.
+
+---
+
 ## 🔴 P0 — Patch L4: Pusher cleanup (post-L3 deprecation pass)
 
 **Status**: 🟢 READY TO START. L3 soft-passed 2026-05-18. See

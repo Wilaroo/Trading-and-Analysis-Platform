@@ -4,6 +4,69 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-05-21 (v19.34.55 — broker_rejected sub-triage)
+
+### Why
+Every broker rejection that wasn't `min_tick`, `error_202`, or
+`bracket_submission_timeout` fell through to the umbrella
+"broker_rejected" / "other" buckets in the analytics UI. Common IB
+rejection causes (parent cancelled on bracket OCA, margin shortage,
+pacing violation, connection loss) were invisible at a glance.
+
+### Fix
+* `routers/rejection_analytics_router.py`:
+  - Added 6 new REASON_MAP entries: `parent_cancelled`,
+    `margin_insufficient`, `pacing_violation`, `no_security_def`,
+    `connection_lost`, `duplicate_order` — all under CAT_BROKER.
+  - Extended `_normalise_reason()` with substring rules for each.
+  - **Subtle ordering bug fixed:** `connection_lost` rule must fire
+    BEFORE `min_tick` because "Error 110" is a substring of
+    "Error 1100" / "Error 1101". Test caught it on first run.
+
+### Test
+`backend/tests/test_broker_rejected_triage_v19_34_55.py` — 25 cases
+(6 parametrized triage families + ordering invariant + patch-shape lock).
+All passing.
+
+### Risk
+Low. Only adds new categorizations; existing keys (`min_tick`,
+`error_202`, `stale_alert`, etc.) untouched and verified by regression
+test. No DB schema changes.
+
+
+## 2026-05-21 (v19.34.54 — daily_squeeze ATR-floored stop)
+
+### Why
+`_check_daily_squeeze` in `enhanced_scanner.py` had a hardcoded 5%
+stop (`current * (0.95 if direction=="long" else 1.05)`). It was the
+last remaining non-trading scanner setup that didn't use
+`_atr_floored_stop` after v19.34.50 standardised the rest. ATR-blind
+stops fail in two opposite directions:
+- **Too tight** for high-volatility stocks (gets hit on noise)
+- **Too wide** for low-volatility stocks (oversized risk)
+
+### Fix
+* `services/enhanced_scanner.py`: replaced hardcoded 5% with
+  `_atr_floored_stop(structural_anchor, atr, min_atr_mult=1.5)`.
+* Structural anchor = lowest low (long) / highest high (short) of
+  the 20-bar BB window — the natural invalidation level for a
+  squeeze pattern.
+* `min_atr_mult=1.5` matches the Keltner channel width and provides
+  daily-timeframe gap headroom.
+
+### Test
+`backend/tests/test_daily_squeeze_atr_stop_v19_34_54.py` — 7 cases
+covering: structural-wins, ATR-floor-widens (long+short), zero-ATR
+fail-open, "≤ 5% legacy ceiling" sanity, patch shape lock.
+All passing.
+
+### Risk
+Low. Only one setup affected, structural anchor + 1.5×ATR floor is
+strictly more protective than the legacy 5% in the pathological
+low-ATR cases (test 6 verifies). High-ATR cases get the wider
+structural anchor automatically.
+
+
 ## 2026-05-21 (v19.34.53 — env-fallback trade_type stamp on bot-fired execution path)
 
 ### Why
