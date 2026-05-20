@@ -341,6 +341,35 @@ export const PipelineHUDV5 = ({
                   U {formatMoney(unrealizedNum)}
                 </span>
               </div>
+              {/* v19.34.58 — Inline synthetic-bookings line.
+                  Pre-v19.34.58 the synthetic-closeout context lived ONLY
+                  in the title="" tooltip. Operator review 2026-05-20:
+                  with R=$0.00° and 11 synthetic closeouts totaling
+                  -$2,507, the chip read as "nothing happened today" at
+                  a glance — the ° glyph wasn\'t loud enough to overcome
+                  the dominant zero. This line surfaces the synthetic
+                  count + session sum directly under the R/U split when
+                  count > 0, so the synthetic loss is visible without a
+                  hover. Same data as the tooltip, just promoted. */}
+              {realizedPnlSyntheticCount > 0 && (
+                <div
+                  data-testid="pipeline-pnl-synthetic-line"
+                  className="flex items-baseline gap-1 text-[11px] v5-mono text-zinc-500"
+                  title="Synthetic closeouts: bot records that IB had already realized in prior sessions. Excluded from today R to avoid double-counting against IB\'s books."
+                >
+                  <span>+{realizedPnlSyntheticCount} synthetic</span>
+                  <span className="text-zinc-700">·</span>
+                  <span
+                    className={
+                      (totalRealizedPnlSession ?? realizedPnlSyntheticSum ?? 0) >= 0
+                        ? 'text-emerald-500/80'
+                        : 'text-rose-500/80'
+                    }
+                  >
+                    session {formatMoney(totalRealizedPnlSession ?? realizedPnlSyntheticSum ?? 0)}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <Metric label="P&L" value={formatMoney(totalPnl)} color={pnlColor} />
