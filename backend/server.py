@@ -4093,6 +4093,17 @@ async def startup_event():
             await asyncio.sleep(0.5)  # bump heartbeat 2× per second
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
 
+    # v19.34.46 — Memory watchdog (RSS/sys-mem heartbeat, 60s, tracemalloc on critical)
+    try:
+        from services.memory_watchdog import memory_watchdog_loop
+        _wd_db = globals().get("db") or globals().get("_db")
+        asyncio.create_task(
+            memory_watchdog_loop(db=_wd_db),
+            name="_memory_watchdog",
+        )
+    except Exception as _wd_err:
+        print(f"[memory-watchdog] failed to start: {_wd_err}")
+
     # v19.34.35 — ADV cache health guard (auto-rebuild if corrupted)
     from services.ib_historical_collector import _adv_cache_startup_guard
     asyncio.create_task(_adv_cache_startup_guard(), name="_adv_cache_startup_guard")
