@@ -62,9 +62,63 @@ async def get_status():
     try:
         service = _get_service()
         status = await service.get_status()
+        status_dict = status.to_dict()
+
+        # v19.34.61 (2026-05-20) — Surface IB-authoritative account
+        # fields (RealizedPnL/UnrealizedPnL/BuyingPower/Equity) on the
+        # /api/sentcom/status response. Pre-v19.34.61 only
+        # /api/trading-bot/status carried these fields, but the V5 HUD
+        # reads from `useSentComStatus.js` which hits /api/sentcom/status —
+        # so v19.34.59 patches were silently ineffective: HUD kept
+        # showing R=$0.00° / BP=$— even though /api/trading-bot/status
+        # had the correct values. This block mirrors the v19.34.141 +
+        # v19.34.59 logic so both endpoints expose the same IB truth.
+        try:
+            from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
+            ib_account = (_pushed_ib_data or {}).get("account") or {}
+            if not ib_account:
+                try:
+                    import asyncio
+                    from services.ib_pusher_rpc import get_account_snapshot
+                    snap = await asyncio.to_thread(get_account_snapshot) or {}
+                    if snap.get("success") and snap.get("account"):
+                        ib_account = snap["account"]
+                        _pushed_ib_data["account"] = ib_account
+                except Exception as _e:
+                    logger.debug(f"sentcom/status account RPC fallback failed: {_e}")
+            if ib_account:
+                net_liq = _extract_account_value(ib_account, "NetLiquidation", 0)
+                if net_liq and net_liq > 0:
+                    buying_power = _extract_account_value(ib_account, "BuyingPower", 0)
+                    realized_pnl = _extract_account_value(ib_account, "RealizedPnL", 0)
+                    unrealized_pnl = _extract_account_value(ib_account, "UnrealizedPnL", 0)
+                    cash = _extract_account_value(ib_account, "TotalCashBalance", 0)
+                    available_funds = _extract_account_value(
+                        ib_account, "AvailableFunds", buying_power
+                    )
+                    status_dict["account_equity"] = float(net_liq)
+                    status_dict["equity"] = float(net_liq)
+                    status_dict["account_buying_power"] = float(buying_power)
+                    status_dict["account_realized_pnl"] = float(realized_pnl)
+                    status_dict["account_unrealized_pnl"] = float(unrealized_pnl)
+                    status_dict["account"] = {
+                        "equity": float(net_liq),
+                        "portfolio_value": float(net_liq),
+                        "buying_power": float(buying_power),
+                        "cash": float(cash),
+                        "available_funds": float(available_funds),
+                        "realized_pnl": float(realized_pnl),
+                        "unrealized_pnl": float(unrealized_pnl),
+                        "currency": "USD",
+                        "source": "ib_pushed",
+                        "connected": is_pusher_connected(),
+                    }
+        except Exception as e:
+            logger.debug(f"v19.34.61 IB account enrichment failed: {e}")
+
         return {
             "success": True,
-            "status": status.to_dict()
+            "status": status_dict
         }
     except Exception as e:
         logger.error(f"Error getting SentCom status: {e}")
