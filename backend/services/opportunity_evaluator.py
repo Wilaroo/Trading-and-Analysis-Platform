@@ -544,6 +544,97 @@ class OpportunityEvaluator:
             except Exception as exc:
                 logger.debug(f"stop-guard skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
 
+            # ── v19.34.45 — Guardrail-floor enforcement ─────────────────
+            # The execution_guardrails `check_min_stop_distance` rule
+            # requires |entry-stop| ≥ 0.3 × ATR. Upstream alerts have
+            # been seen supplying stops as tight as $0.03 on a $115
+            # stock with $2.30 ATR (XLY backside) — 1.3% of one ATR.
+            # Those trades were getting vetoed deep in the pipeline
+            # after enrichment / AI / sizing already burned cycles.
+            #
+            # Treat the floor as a contract: if the (possibly already
+            # smart-levels-widened) stop is still tighter than 0.3 ×
+            # ATR, replace it with the canonical per-setup ATR-based
+            # stop. The per-setup multipliers in SETUP_MULTIPLIERS
+            # (e.g. backside=0.5×, vwap_fade_short=1.0×) are already
+            # legal under the guardrail floor, so the recomputed stop
+            # will pass. Preserves the trade intent — sizer takes the
+            # bigger risk distance and produces a smaller share count.
+            #
+            # Env knobs:
+            #   STOP_FLOOR_ENFORCE=0  → disable (fail-open)
+            #   EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT=0.3 (shared knob)
+            stop_floor_meta = None
+            try:
+                import os as _os_floor
+                _enf_raw = _os_floor.environ.get("STOP_FLOOR_ENFORCE", "1")
+                _enf_on = str(_enf_raw).strip().lower() not in ("0", "", "false", "no", "off")
+                if _enf_on and stop_price and entry_price and atr and atr > 0:
+                    try:
+                        _floor_mult = float(_os_floor.environ.get(
+                            "EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT", "0.3"
+                        ))
+                    except (TypeError, ValueError):
+                        _floor_mult = 0.3
+                    _distance = abs(float(entry_price) - float(stop_price))
+                    _threshold = _floor_mult * float(atr)
+                    if _distance < _threshold:
+                        _orig_stop = float(stop_price)
+                        _new_stop = self.calculate_atr_based_stop(
+                            float(entry_price), direction, float(atr), setup_type, bot,
+                        )
+                        _new_distance = abs(float(entry_price) - float(_new_stop))
+                        if _new_distance >= _threshold:
+                            logger.warning(
+                                "🩹 [v19.34.45 stop-floor] %s %s — alert stop "
+                                "$%.4f (Δ=$%.4f, %.1f%% of ATR $%.4f) below floor "
+                                "%.2f×ATR=$%.4f. Recomputed via per-setup multiplier "
+                                "→ $%.4f (Δ=$%.4f). Sizer will absorb the wider risk.",
+                                symbol, setup_type, _orig_stop, _distance,
+                                (_distance / float(atr)) * 100.0, float(atr),
+                                _floor_mult, _threshold, _new_stop, _new_distance,
+                            )
+                            stop_price = _new_stop
+                            stop_floor_meta = {
+                                "applied": True,
+                                "original_stop": _orig_stop,
+                                "recomputed_stop": _new_stop,
+                                "atr": float(atr),
+                                "floor_atr_mult": _floor_mult,
+                                "original_distance": _distance,
+                                "recomputed_distance": _new_distance,
+                            }
+                        else:
+                            # Recomputed stop ALSO too tight — this would
+                            # only happen with a misconfigured per-setup
+                            # multiplier. Log and leave alert stop alone;
+                            # the pre-exec guardrail will catch + reject
+                            # so we still get protection, just not auto-
+                            # widening. Surface the misconfig.
+                            logger.error(
+                                "⚠️ [v19.34.45 stop-floor] %s %s — alert stop AND "
+                                "recomputed stop both below %.2f×ATR floor "
+                                "(alert Δ=$%.4f, recomputed Δ=$%.4f, threshold "
+                                "$%.4f). Check SETUP_MULTIPLIERS entry for %r.",
+                                symbol, setup_type, _floor_mult,
+                                _distance, _new_distance, _threshold, setup_type,
+                            )
+                            stop_floor_meta = {
+                                "applied": False,
+                                "reason": "recomputed_also_too_tight",
+                                "original_stop": _orig_stop,
+                                "recomputed_stop": _new_stop,
+                                "atr": float(atr),
+                                "floor_atr_mult": _floor_mult,
+                            }
+            except Exception as _floor_err:
+                # Fail-OPEN: never block trading on a bug in the floor
+                # check. The downstream pre-exec guardrail still applies.
+                logger.debug(
+                    "[v19.34.45 stop-floor] enforce crashed (fail-open): %s",
+                    _floor_err,
+                )
+
             # Calculate targets if not provided
             if not target_prices:
                 risk = abs(entry_price - stop_price)

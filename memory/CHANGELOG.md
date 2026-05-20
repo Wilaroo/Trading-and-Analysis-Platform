@@ -4,6 +4,61 @@ Reverse-chronological log of shipped work. Newest first.
 
 
 
+## 2026-02-XX (v19.34.45 — Stop-floor enforcement @ evaluator)
+
+### Why
+Mongo audit of `trade_drops` showed **100% of `pre_exec_guardrail_veto`
+rejections** (64 over 7 days) were `stop_too_tight` — the upstream
+scanner was supplying absurdly tight stops the canonical execution
+guardrail (`0.3 × ATR` floor) correctly refused. Examples:
+
+| Symbol | Setup | Entry | Stop | ATR | Stop Δ | % of ATR |
+|---|---|---:|---:|---:|---:|---:|
+| XLY | backside | $115.10 | $115.07 | $2.30 | $0.03 | **1.3%** |
+| MU | vwap_fade_short | $722.64 | $725.92 | $14.45 | $3.28 | 22.7% |
+| SNDK | vwap_fade_short | $1391.83 | $1384.74 | $27.83 | $7.09 | 25.5% |
+
+`opportunity_evaluator.evaluate_opportunity` had the per-setup ATR
+multipliers configured correctly (`backside`=0.5×, `vwap_fade_short`=1.0×)
+but only invoked them when `alert['stop_price']` was missing
+(line 511). Alerts that DID supply a tight stop bypassed the canonical
+math entirely.
+
+### Fix
+After all alert-supplied + stop-guard-widened stops, validate against
+the same `0.3 × ATR` floor the pre-exec guardrail uses. If the stop
+fails the floor, replace it with the canonical
+`calculate_atr_based_stop(...)` result (per-setup multiplier × ATR).
+The sizer downstream absorbs the wider risk distance — same intent,
+smaller position, no veto.
+
+* Recomputed stop is also floor-checked. If it fails too, log
+  `[v19.34.45 stop-floor]` ERROR (config bug) and leave alert stop
+  alone — the pre-exec guardrail will still reject. No silent
+  acceptance.
+* Fail-OPEN on missing ATR / unhandled exception.
+
+### Env knobs
+* `STOP_FLOOR_ENFORCE` — default `1`. Set `0` to disable.
+* `EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT` — shared with the pre-exec
+  guardrail; default `0.3`.
+
+### Tests
+`tests/test_stop_floor_enforcement_v19_34_45.py` — 6 cases including
+the literal XLY/MU/SNDK production samples, env override, env
+disable, no-ATR fail-open. Full recently-touched suite green:
+**94 passed / 0 failed**.
+
+### Expected operator impact
+* `pre_exec_guardrail_veto` count drops to near-zero (was ~9/day).
+* Affected setups (`backside`, `vwap_fade_short`) start getting filled
+  trades with appropriately-sized stops instead of vetoes.
+* New `[v19.34.45 stop-floor]` WARN entries in the log surface every
+  recomputation — useful canary for "scanner pushing tight stops" and
+  a hint that the upstream scanner template still needs fixing.
+
+---
+
 ## 2026-02-XX (v19.34.44 — Stale Alert TTL @ pipeline gate)
 
 ### Why
