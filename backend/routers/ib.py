@@ -309,6 +309,12 @@ def queue_cancellation(ib_order_id: int, reason: Optional[str] = None,
         # caller that manually retries after a `failed` doesn't reset
         # the strike counter to 0 and bypass the stale-drop guard.
         "failure_count": int((existing or {}).get("failure_count") or 0),
+        # v19.34.65b — Reset served_count on a fresh queue entry. This
+        # is the counter the `/cancellations/pending` route uses to
+        # auto-promote to stale_dropped when the pusher silently
+        # swallows fatal IB errors and never posts back to
+        # /cancellations/result.
+        "served_count": 0,
     }
     return _cancellation_queue[oid]
 
@@ -2046,15 +2052,53 @@ def get_pending_cancellations():
                     entry.get("ib_order_id"),
                 )
 
-    pending = [
-        dict(entry) for entry in _cancellation_queue.values()
-        if entry.get("status") == "pending"
-    ]
+    # v19.34.65b — Poll-count stale-drop guard. The pusher does NOT
+    # always call `/api/ib/cancellations/result` after a cancel attempt
+    # (observed in production: IB returns Error 10147 "OrderId not
+    # found" and the pusher silently moves on without posting back).
+    # Without a result report `failure_count` never bumps and the
+    # v19.34.65 stale-drop trigger never fires, so the same dead order
+    # is served on every `/cancellations/pending` poll forever.
+    #
+    # Fix: each time we hand a `pending` entry to the pusher, bump its
+    # `served_count`. After `_CANCEL_STALE_FAILURE_THRESHOLD` serves
+    # (default 3) without an accompanying result, promote it to
+    # `stale_dropped` ourselves. The pusher will simply stop seeing it
+    # in the next pending response → the 10147 loop dies.
+    pending: list = []
+    stale_dropped_via_poll = 0
+    for entry in _cancellation_queue.values():
+        if entry.get("status") != "pending":
+            continue
+        served = int(entry.get("served_count") or 0)
+        if served >= _CANCEL_STALE_FAILURE_THRESHOLD:
+            entry["status"] = "stale_dropped"
+            entry["completed_at"] = now.isoformat()
+            entry["stale_dropped_reason"] = "exceeded_poll_served_count_no_result"
+            entry["error"] = (
+                f"Served to pusher {served} times without a result report; "
+                "treating as unrecoverable. Pusher likely saw a fatal IB "
+                "error (e.g. 10147) but did not POST /cancellations/result."
+            )
+            stale_dropped_via_poll += 1
+            logger.warning(
+                "[v19.34.65b CANCEL-STALE-POLL] ib_order_id=%s dropped "
+                "after %d pending-poll serves without result (reason=%s).",
+                entry.get("ib_order_id"), served, entry.get("reason"),
+            )
+            continue
+        entry["served_count"] = served + 1
+        entry["last_served_at"] = now.isoformat()
+        pending.append(dict(entry))
     return {
         "success": True,
         "cancellations": pending,
         "count": len(pending),
-        "reaped": {"expired": expired_count, "reverted_to_pending": reverted_count},
+        "reaped": {
+            "expired": expired_count,
+            "reverted_to_pending": reverted_count,
+            "stale_dropped_via_poll": stale_dropped_via_poll,
+        },
     }
 
 
