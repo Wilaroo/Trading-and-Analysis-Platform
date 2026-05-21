@@ -22,9 +22,17 @@ cd "$REPO_DIR"
 #   - If you really want a forced restart, pass `--force` (or run
 #     scripts/spark_stop.sh first)
 FORCE_RESTART=false
+WITH_VIEWER=false
 for arg in "$@"; do
     if [[ "$arg" == "--force" ]]; then
         FORCE_RESTART=true
+    fi
+    # v19.34.73 — Optional: launch the tmux pipeline viewer after backend
+    # is healthy. Equivalent to running `bash scripts/pipeline_viewer.sh`
+    # separately, but bundled here so the operator can fire backend +
+    # observability in one shot from the Windows .bat or SSH session.
+    if [[ "$arg" == "--with-viewer" ]]; then
+        WITH_VIEWER=true
     fi
 done
 if [ "$FORCE_RESTART" = false ]; then
@@ -153,3 +161,26 @@ except Exception as e:
 
 echo ""
 echo "Backend up. Tail logs with: tail -f /tmp/backend.log"
+echo "Real-time pipeline viewer: bash scripts/pipeline_viewer.sh   (or --with-viewer)"
+
+# v19.34.73 — Launch tmux pipeline viewer if requested
+if [ "$WITH_VIEWER" = true ]; then
+    echo ""
+    echo "=== Launching tmux pipeline viewer (session: sentcom) ==="
+    sleep 2
+    if [[ -x "$REPO_DIR/scripts/pipeline_viewer.sh" ]]; then
+        # Detach-launch so this script exits cleanly; operator attaches manually
+        tmux kill-session -t sentcom 2>/dev/null || true
+        tmux new-session -d -s sentcom \
+            "bash $REPO_DIR/scripts/tail_pipeline.sh" 2>/dev/null || {
+            echo "  (tmux not available — falling back to inline tail)"
+            exec bash "$REPO_DIR/scripts/tail_pipeline.sh"
+        }
+        tmux split-window -h -t sentcom -p 30 \
+            "bash $REPO_DIR/scripts/tail_pipeline.sh --errors" 2>/dev/null || true
+        echo "  ✓ tmux session 'sentcom' started in background."
+        echo "  ✓ Attach with:  tmux attach -t sentcom"
+    else
+        echo "  ⚠ scripts/pipeline_viewer.sh not found or not executable"
+    fi
+fi

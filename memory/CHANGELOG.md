@@ -1,3 +1,66 @@
+## 2026-05-21 — v19.34.73B: AGENTS.md + real-time pipeline viewer
+
+### Trigger
+Two operator asks post-v19.34.73 deploy:
+1. Coding agents (E1, Claude, Cursor, Copilot) keep re-discovering the
+   same architectural patterns every session — major navigation friction
+   in a 30k+ line codebase. Need a top-level repo-scoped guidance file.
+2. No real-time visibility into the bot's decision pipeline. EOD review
+   was the only way to see what the bot was thinking. Need a live
+   firehose viewer.
+
+### Solution
+- **`/app/AGENTS.md`** — 361-line top-level navigation contract. Read
+  automatically by Emergent E1 / Claude Code / Cursor / Copilot at
+  session start. Covers: app architecture, two-machine deploy model,
+  code map (5 hot files + 10 supporting services + frontend), memory
+  conventions, versioning convention (v19.34.XX), **11 traps that have
+  burned us** (with code patterns), common operations, "what NOT to do",
+  frontend conventions. Updates as we learn.
+- **`/app/scripts/tail_pipeline.sh`** — color-coded real-time tail of
+  `/tmp/backend.log` with five filter modes:
+  - default (full pipeline: scan → AI → fill → close → errors)
+  - `--scan`, `--ai`, `--trades`, `--errors`, `--all`
+  - `--symbol ADI` to filter to one ticker
+  - Color palette: cyan=scan, blue=AI eval, magenta=verdict, green=fill,
+    yellow=skip, red=error, bold=bracket/OCA, gray=info
+- **`/app/scripts/pipeline_viewer.sh`** — tmux launcher: opens a
+  2-pane session (left=full pipeline, right=errors-only) plus 3
+  additional windows (trades / scanner / raw). Detaches cleanly via
+  Ctrl+B D; re-attach with `tmux attach -t sentcom`.
+- **`start_backend.sh --with-viewer`** flag — bundles backend launch
+  + tmux session start in one shot. Falls back to inline tail if tmux
+  isn't installed.
+
+### Files
+- `AGENTS.md` (+361, new top-level)
+- `scripts/tail_pipeline.sh` (+164, new)
+- `scripts/pipeline_viewer.sh` (+61, new)
+- `start_backend.sh` (+31, adds `--with-viewer` flag)
+
+### Deploy
+Patch at `paste.rs/xhFqV`. Apply with same flow as v19.34.73 patch.
+After apply, no restart needed — these are tooling additions only.
+
+### Usage post-deploy
+```bash
+# Real-time pipeline viewer (single pane)
+bash scripts/tail_pipeline.sh
+
+# tmux 2-pane (full + errors)
+bash scripts/pipeline_viewer.sh
+
+# Launch backend + viewer in one shot
+./start_backend.sh --force --with-viewer
+
+# Filter modes
+bash scripts/tail_pipeline.sh --trades       # fills + closes only
+bash scripts/tail_pipeline.sh --errors       # warnings + errors only
+bash scripts/tail_pipeline.sh --symbol RSP   # one ticker only
+```
+
+---
+
 ## 2026-05-21 — v19.34.73: Close-path hardening (4 surgical fixes)
 
 ### Trigger
