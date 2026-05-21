@@ -8,6 +8,41 @@
 
 ---
 
+## 0. TL;DR — if you read nothing else, read this
+
+These five rules cover the biggest historical $$ losses + the most
+counterintuitive traps in this codebase. Violating any of them has
+cost real money or required emergency patches.
+
+1. **`close_trade`, `submit_with_bracket`, and the kill-switch loop
+   are SAFETY-CRITICAL.** Fork via `_custom` siblings; don't patch in
+   place. *(v19.34.123: $25k operator loss when kill-switch was
+   bypassed because the daily-loss check only ran inside the scan
+   loop and the scanner was rate-limited.)*
+2. **NEVER send a close at IB without `_cancel_ib_bracket_orders` +
+   the 8s primary + 5s retry wait.** *(2026-05-20: MKT close raced a
+   bracket-child cancel — both filled in a 50-200ms window — IB
+   position flipped direction while the bot thought it was flat.)*
+3. **`_open_trades` is keyed by `trade_id`, NOT symbol.** Iterate
+   `.values()` and filter by `symbol`. Multiple trades on the same
+   `(symbol, direction)` is a real state, not a bug. *(b415ed5f
+   phantom incident — sym-dir-cap latched on a stale phantom and
+   blocked all new entries for hours.)*
+4. **`position_reconciler` MUST skip `entered_by="reconciled_excess_*"`**
+   on the orphan path or it treats its own emit as a fresh orphan and
+   spawns a new excess slice every 60s. *(v19.34.22 fix.)*
+5. **Always project `{"_id": 0}` on Mongo reads.** ObjectId is not
+   JSON-serializable; the response will 500 with no helpful trace.
+
+**Escape hatches:**
+- Modifying journey 2 (operator close), 3 (EOD), or 4 (drift)?
+  → re-read **§6.5** in full before editing.
+- Stuck after 1 attempt? → **§11** + **§11.5** (the "ask ONE focused
+  question" pattern + before/after-edit checklist).
+- Need a path you can't find? → **§3** code-nav map.
+
+---
+
 ## 1. What this app is (one paragraph)
 
 **SentCom** is a self-improving AI trading bot running natively on a
@@ -534,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.76 (2026-05-22, "AGENTS.md §6.5 institutional memory — Why each journey exists")
+- **Current version**: v19.34.77 (2026-05-22, "AGENTS.md §0 TL;DR + multi-tool auto-load pointers (Cursor, Copilot)")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
@@ -1042,7 +1077,8 @@ These are the heart of the V5 trading UI. Grouped by purpose:
 
 ---
 
-*Last updated: 2026-05-22 (v19.34.76 ship — §6.5 institutional-memory
-blurbs: every journey now explains WHICH past incident shaped its
-design). Update this file whenever you learn a new convention or
-trap.*
+*Last updated: 2026-05-22 (v19.34.77 ship — §0 TL;DR top-5 rules
++ multi-tool auto-load pointers `.cursorrules` and
+`.github/copilot-instructions.md` so Cursor and Copilot also pick up
+context automatically). Update this file whenever you learn a new
+convention or trap.*

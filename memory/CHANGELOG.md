@@ -1,3 +1,66 @@
+## 2026-05-22 — v19.34.77: AGENTS.md §0 TL;DR + multi-tool auto-load pointers
+
+### Trigger
+Operator pushed back on whether my proposed top-3 traps were really
+the most critical. Honest answer: no — I picked common gotchas, not
+biggest historical $$ damage. Reranked against actual CHANGELOG
+incidents.
+
+### What shipped
+- **AGENTS.md §0 (NEW)** — TL;DR section, top of file, ~30 lines.
+  Five blended rules covering both biggest historical losses AND
+  most-likely-violated patterns:
+  1. `close_trade` / `submit_with_bracket` / kill-switch safety-
+     critical → fork via `_custom`. (v19.34.123: **$25k loss**.)
+  2. Never close at IB without `_cancel_ib_bracket_orders` + 8s+5s
+     wait. (2026-05-20: position flipped at IB.)
+  3. `_open_trades` is trade_id-keyed, not symbol-keyed. (b415ed5f
+     phantom incident.)
+  4. `position_reconciler` MUST skip `reconciled_excess_*` on orphan
+     path. (v19.34.22 duplicator fix.)
+  5. Always project `{"_id": 0}` on Mongo reads.
+  Plus escape-hatch pointers to §6.5 / §11 / §11.5 / §3.
+- **`/app/.cursorrules` (NEW)** — 11-line pointer to AGENTS.md so
+  Cursor auto-loads context on repo open.
+- **`/app/.github/copilot-instructions.md` (NEW)** — 18-line pointer
+  to AGENTS.md (inlined the 5 TL;DR rules since Copilot doesn't
+  always cross-load) so GitHub Copilot auto-loads context.
+- **`/app/CLAUDE.md` rewritten** — added pointer to §0 specifically
+  so Claude Code session-load lands on the highest-value content.
+- Bumped §10 version → **v19.34.77**.
+
+### Why this matters — multi-tool auto-load
+Pre-v19.34.77 only Claude Code auto-loaded `CLAUDE.md`. After this
+patch, FOUR tools auto-load AGENTS.md context on session start:
+- **Claude Code** ← `CLAUDE.md` (existing, refined)
+- **Cursor** ← `.cursorrules`
+- **GitHub Copilot** ← `.github/copilot-instructions.md`
+- **AGENTS.md itself** for vendor-neutral agents (E1, Aider, Cline, etc.)
+
+Single source of truth preserved — the three pointer files contain
+no rules of their own (Copilot one has the §0 inlined for redundancy
+since Copilot is the most context-stingy of the bunch).
+
+### Why this matters — TL;DR ranking
+A new agent reading the first 30 lines now sees the five most
+expensive mistakes in repo history. The previous open of AGENTS.md
+landed them on §1 "What this app is" — useful, but they'd have to
+skim ~150 lines before hitting §6 traps. §0 puts the loaded gun
+right in their face.
+
+### Files touched
+- `/app/AGENTS.md` (+~50 lines: new §0, version bump, trailer)
+- `/app/CLAUDE.md` (rewritten, 14 lines)
+- `/app/.cursorrules` (new, 11 lines)
+- `/app/.github/copilot-instructions.md` (new, 18 lines)
+- `/app/memory/CHANGELOG.md` (this entry)
+
+### Stats
+AGENTS.md: 362 → 781 → 967 → 1048 → **~1095 lines (v19.34.77)**.
+
+---
+
+
 ## 2026-05-22 — v19.34.76: AGENTS.md §6.5 institutional-memory blurbs
 
 ### Trigger

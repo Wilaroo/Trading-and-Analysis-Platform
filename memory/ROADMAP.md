@@ -4,9 +4,9 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.76+ priority queue
+## 🚀 Next session — v19.34.77+ priority queue
 
-**Last shipped**: v19.34.76 (AGENTS.md §6.5 institutional-memory blurbs — 2026-05-22).
+**Last shipped**: v19.34.77 (AGENTS.md §0 TL;DR + multi-tool auto-load pointers — 2026-05-22).
 
 ### 🔴 P0 — Bracket-stacking auto-cancel endpoint
 GM/LIN-style excess target legs (N×K targets for N shares). Audit endpoint
