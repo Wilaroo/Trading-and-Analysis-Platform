@@ -41,6 +41,8 @@ import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
 // position's symbol so the operator can see what the scanner is
 // thinking without having to expand the row.
 import PositionThoughtsInline from './PositionThoughtsInline';
+// v19.34.72 — Operator Close panel (Market/Limit + percentage).
+import CloseTradeModal from './CloseTradeModal';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -229,6 +231,8 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
   const sparkColor = Number(pnlUsd) >= 0 ? '#22c55e' : '#ef4444';
   const tier = tierLabel(position);
   const trailLine = modelTrailLine(position);
+  // v19.34.72 — Close panel state.
+  const [closeOpen, setCloseOpen] = useState(false);
 
   const reasoning = Array.isArray(position.reasoning) ? position.reasoning : [];
   // v19.34.154 — Backend dataclass field is `scale_out_config`, not
@@ -359,9 +363,22 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
               expanding. Renders nothing for un-scaled positions. */}
           <ScaleOutBadge position={position} />
         </div>
-        <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
-          {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`v5-mono text-xs font-semibold ${pnlColor}`}>
+            {formatUsd(pnlUsd)}{pnlR != null ? ` · ${formatR(pnlR)}` : ''}
+          </span>
+          {/* v19.34.72 — Operator close button. Stops row toggle propagation
+              so clicking does not expand/collapse the row. */}
+          <button
+            type="button"
+            data-testid={`open-position-close-btn-${position.symbol}`}
+            onClick={(e) => { e.stopPropagation(); setCloseOpen(true); }}
+            className="px-1.5 py-0 text-[12px] uppercase tracking-wider rounded border border-rose-800 bg-rose-950/60 text-rose-300 hover:bg-rose-900 hover:text-rose-100 transition-colors font-semibold"
+            title="Close this position via IB (Market or Limit, partial supported)"
+          >
+            Close
+          </button>
+        </div>
       </div>
 
       {/* Sparkline */}
@@ -577,6 +594,14 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             symbol={position.symbol}
           />
         </div>
+      )}
+      {/* v19.34.72 — Operator Close panel */}
+      {closeOpen && (
+        <CloseTradeModal
+          position={position}
+          onClose={() => setCloseOpen(false)}
+          onSubmitted={() => { /* parent polls open-positions, modal stays open until Done */ }}
+        />
       )}
     </div>
   );

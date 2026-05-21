@@ -4453,6 +4453,26 @@ class TradingBotService:
     async def close_trade(self, trade_id: str, reason: str = "manual") -> bool:
         """Close an open trade — delegated to PositionManager module."""
         return await self._position_manager.close_trade(trade_id, self, reason=reason)
+
+    async def close_trade_custom(
+        self,
+        trade_id: str,
+        *,
+        percentage: float = 100.0,
+        order_type: str = "market",
+        limit_price: Optional[float] = None,
+        reason: str = "manual_panel_close",
+    ) -> Dict:
+        """v19.34.72 — Operator-driven Close with order_type + partial qty.
+        Delegated to PositionManager.close_trade_custom."""
+        return await self._position_manager.close_trade_custom(
+            trade_id, self,
+            percentage=percentage,
+            order_type=order_type,
+            limit_price=limit_price,
+            reason=reason,
+        )
+
     
     # ==================== DATA ACCESS ====================
     

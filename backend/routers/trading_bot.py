@@ -4620,19 +4620,54 @@ async def reject_trade(trade_id: str, reason: Optional[str] = None):
         raise HTTPException(status_code=404, detail="Trade not found")
 
 
+class CloseTradeRequest(BaseModel):
+    """v19.34.72 — Operator Close Panel payload."""
+    percentage: Optional[float] = 100.0
+    order_type: Optional[str] = "market"   # "market" | "limit"
+    limit_price: Optional[float] = None
+    reason: Optional[str] = "manual_panel_close"
+
+
 @router.post("/trades/{trade_id}/close")
-async def close_trade(trade_id: str, reason: Optional[str] = "manual"):
-    """Close an open trade"""
+async def close_trade(
+    trade_id: str,
+    reason: Optional[str] = "manual",
+    body: Optional[CloseTradeRequest] = Body(default=None),
+):
+    """Close an open trade.
+
+    v19.34.72 — Backwards-compatible upgrade:
+      - No body  → legacy 100%-MKT close via `bot.close_trade(...)`.
+      - With body → custom close via `bot.close_trade_custom(...)`:
+          {percentage, order_type, limit_price, reason}
+    """
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
-    
-    success = await _trading_bot.close_trade(trade_id, reason=reason)
-    
-    if success:
-        trade = _trading_bot.get_trade(trade_id)
-        return {"success": True, "message": "Trade closed", "trade": trade}
-    else:
-        raise HTTPException(status_code=400, detail="Failed to close trade or trade not found")
+
+    # Legacy path — no body provided.
+    if body is None:
+        success = await _trading_bot.close_trade(trade_id, reason=reason)
+        if success:
+            trade = _trading_bot.get_trade(trade_id)
+            return {"success": True, "message": "Trade closed", "trade": trade}
+        raise HTTPException(status_code=400,
+                            detail="Failed to close trade or trade not found")
+
+    # v19.34.72 — Custom-close path (Market/Limit + percentage).
+    result = await _trading_bot.close_trade_custom(
+        trade_id,
+        percentage=(body.percentage if body.percentage is not None else 100.0),
+        order_type=(body.order_type or "market"),
+        limit_price=body.limit_price,
+        reason=(body.reason or "manual_panel_close"),
+    )
+
+    if not result.get("success"):
+        # 404 for missing trade, 400 for everything else.
+        err = (result.get("error") or "").lower()
+        status_code = 404 if err == "trade_not_open" else 400
+        raise HTTPException(status_code=status_code, detail=result)
+    return result
 
 
 

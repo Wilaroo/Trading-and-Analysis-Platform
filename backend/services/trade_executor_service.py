@@ -1809,6 +1809,110 @@ class TradeExecutorService:
             logger.error(f"Close position error: {e}")
             return {"success": False, "error": str(e)}
     
+    async def close_position_custom(
+        self,
+        trade,
+        *,
+        order_type: str = "market",
+        limit_price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """v19.34.72 — Operator-driven close with order_type + limit_price.
+
+        Designed for the V5 manual Close panel. Distinct from
+        `close_position` (which the bot's own EOD/stop loops call as a
+        100%-MKT close) so the safety-critical bot exit path stays
+        untouched. Caller is expected to have already set
+        `trade.shares` to the partial qty (this matches how
+        `position_manager.close_trade` does it today).
+
+        order_type:
+          - "market": same path as place_close_market
+          - "limit":  requires limit_price > 0, uses place_close_limit
+        """
+        ot = (order_type or "market").lower()
+        if ot not in ("market", "limit"):
+            return {"success": False, "error": f"bad order_type: {order_type}"}
+        if ot == "limit":
+            try:
+                if limit_price is None or float(limit_price) <= 0:
+                    return {"success": False,
+                            "error": "limit_price required when order_type=limit"}
+            except Exception:
+                return {"success": False, "error": f"bad limit_price: {limit_price}"}
+
+        if self._mode == ExecutorMode.SIMULATED:
+            return {
+                "success": True,
+                "order_id": f"SIM-CLOSE-{trade.id}",
+                "fill_price": (float(limit_price) if ot == "limit"
+                               else trade.current_price),
+                "filled_qty": int(getattr(trade, "shares", 0) or 0),
+                "remaining_qty": 0,
+                "status": "filled",
+                "simulated": True,
+                "order_type": ot,
+            }
+
+        if not self._ensure_initialized():
+            return {"success": False, "error": "Executor not initialized"}
+
+        # Market route reuses the hardened existing path (bracket
+        # cancel + OCA-race guard via _ib_close_position).
+        if ot == "market":
+            return await self.close_position(trade)
+
+        # Limit route — only supported on LIVE/direct path. Paper
+        # (Alpaca) limit-close is out of scope for v19.34.72 because
+        # the operator-driven V5 Close panel is LIVE-only at IB.
+        try:
+            if self._mode == ExecutorMode.LIVE:
+                # Cancel bracket children before the LMT lands so we
+                # don't have two competing exits on the position.
+                cancel_result: Dict[str, Any] = {"filled": [], "timeout": []}
+                try:
+                    cancel_result = await self._cancel_ib_bracket_orders(trade)
+                except Exception as cancel_err:
+                    logger.warning(
+                        "[v19.34.72] bracket-children cancel before LMT close "
+                        "failed for %s (non-fatal): %s",
+                        trade.symbol, cancel_err,
+                    )
+                if cancel_result.get("filled"):
+                    return {
+                        "success": False,
+                        "error": "bracket_filled_during_cancel_wait",
+                        "broker": "ib_direct",
+                        "v19_34_72_oca_race_aborted": True,
+                        "filled_child_oids": cancel_result["filled"],
+                    }
+                if cancel_result.get("timeout"):
+                    return {
+                        "success": False,
+                        "error": "bracket_cancel_timeout_race_risk",
+                        "broker": "ib_direct",
+                        "v19_34_72_oca_race_aborted": True,
+                        "timeout_child_oids": cancel_result["timeout"],
+                    }
+
+                from services.ib_direct_service import get_ib_direct_service
+                ib_direct = get_ib_direct_service()
+                direct_result = await ib_direct.place_close_limit(
+                    trade,
+                    limit_price=float(limit_price),
+                    wait_for_fill_s=15.0,
+                )
+                direct_result["order_type"] = "limit"
+                return direct_result
+
+            # PAPER mode: not supported for limit close today.
+            return {
+                "success": False,
+                "error": "limit_close_only_supported_on_live_ib_direct",
+            }
+        except Exception as e:
+            logger.error(f"close_position_custom (limit) error: {e}")
+            return {"success": False, "error": str(e)}
+
     async def _ib_close_position(self, trade) -> Dict[str, Any]:
         """Close position via IB using order queue.
 
