@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.77 (2026-05-22, "AGENTS.md §0 TL;DR + multi-tool auto-load pointers (Cursor, Copilot)")
+- **Current version**: v19.34.78 (2026-05-22, "PRD.md AGENTS.md cross-reference — 5 critical rules inlined for Emergent auto-load")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

@@ -1,3 +1,49 @@
+## 2026-05-22 — v19.34.78: PRD.md cross-reference → AGENTS.md (Emergent auto-load)
+
+### Trigger
+Emergent E1's system prompt auto-reads `/app/memory/PRD.md` and
+`/app/memory/test_credentials.md` at session start — but NOT
+`AGENTS.md`. After shipping the AGENTS.md context layer
+(v19.34.74-77), the gap is: **a fresh Emergent session won't see any
+of it unless the operator manually prompts**. Plugged that hole.
+
+### What shipped
+Prepended a 22-line **⚠️ AGENTS — READ THIS BLOCK BEFORE ANY CODE
+CHANGE** callout to the top of `/app/memory/PRD.md`:
+
+- Inlines the **5 critical rules** verbatim from AGENTS.md §0 (so an
+  agent sees them even if it ignores the cross-reference).
+- Points to AGENTS.md for full context (§6.5 journeys, §11.5
+  checklist).
+- Adds a new editing rule: "Trap / journey / convention changes →
+  edit AGENTS.md" (keeping the doc-discipline contract clean).
+
+The 5 rules block uses redundant inlining intentionally — costs ~250
+tokens per Emergent session but guarantees the rules are loaded into
+agent context regardless of whether the agent opens AGENTS.md.
+
+Also bumped AGENTS.md §10 version → **v19.34.78**.
+
+### Why this matters — full auto-load matrix now complete
+| Tool | Auto-load file | Status |
+|---|---|---|
+| Emergent E1 (this platform) | `/app/memory/PRD.md` (top block) | ✅ |
+| Claude Code (Anthropic CLI) | `/app/CLAUDE.md` | ✅ (v19.34.75) |
+| Cursor | `/app/.cursorrules` | ✅ (v19.34.77) |
+| GitHub Copilot | `/app/.github/copilot-instructions.md` | ✅ (v19.34.77) |
+| Vendor-neutral agents (Aider, Cline, etc.) | `/app/AGENTS.md` | ✅ (convention) |
+
+5 tools, 1 source of truth, 0 drift surface.
+
+### Files touched
+- `/app/memory/PRD.md` (+22 lines: callout block at top + 1 new
+  doc-discipline rule)
+- `/app/AGENTS.md` (version bump only)
+- `/app/memory/CHANGELOG.md` (this entry)
+
+---
+
+
 ## 2026-05-22 — v19.34.77: AGENTS.md §0 TL;DR + multi-tool auto-load pointers
 
 ### Trigger
