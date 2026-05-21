@@ -4,24 +4,61 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Tomorrow's session — v19.34.73 deploy + validate
+## 🚀 Next session — v19.34.74+ priority queue
 
-**Status**: 4 surgical fixes shipped tonight. Tests 94/94. Ready to apply.
+**Last shipped**: v19.34.74 (AGENTS.md §12-17 context-pack — 2026-05-22).
 
-### Deploy
-1. `curl -sS -o /tmp/v19_34_73.patch https://paste.rs/mWxSQ && git apply --check /tmp/v19_34_73.patch && git apply /tmp/v19_34_73.patch`
-2. Restart backend
-3. Boot phantom-sibling purge runs automatically 20s after start
+### 🔴 P0 — Bracket-stacking auto-cancel endpoint
+GM/LIN-style excess target legs (N×K targets for N shares). Audit endpoint
+already flags them: `GET /api/trading-bot/bracket-stacking-audit`.
+**Action needed**: build `POST /api/trading-bot/bracket-stacking-cancel`
+that takes the audit output and cancels the loser legs (keep the one
+closest to entry; cancel the rest within the same OCA group). Tie to
+`_periodic_bracket_state_reconcile` so it auto-runs every 30s after boot.
 
-### Validate on tomorrow's open
+### 🔴 P1 — Quote-resub watchdog actual recovery
+Current `_stale_resub_set` triggers `pusher.subscribe_symbols()` via RPC
+every 60s but quotes still go 4.9hr stale. Likely a Windows pusher-side
+handler issue. Add diagnostic in `ib_data_pusher.py` to log subscription
+state per symbol; if not in IB's subscription cache despite the RPC call,
+force-reconnect the pusher socket.
+
+### 🟡 P2 — UI bug cluster
+- Top Movers panel: "no live data" while pusher status is green
+- Scanner panel: shows 0% while alerts are actively firing
+- Strategy Mix panel: `—` for win % / avg-R (scoring not populating)
+- Scalp positions: incorrectly graded "SMB B" (scoring is not
+  timeframe-aware — should distinguish scalp vs intraday vs swing)
+- AI rejection narrator: still believes `squeeze` is scalp-only despite
+  intraday promotion
+
+### 🟡 P2 — Adoption Review UI
+Operator wants to review/accept/reject orphan adoptions before they
+permanently move into `bot_trades` as `reconciled_external`.
+
+### 🟡 P2 — PnL data drift alert
+60s telemetry catcher to flag when IB-reported PnL diverges from
+`bot_trades.pnl` by > $25 / position.
+
+---
+## ✅ Recently shipped (validate on next open)
+
+### v19.34.74 — 2026-05-22 — AGENTS.md context-pack expansion
+- Sections 12-17 added (startup flow, glossary, DB schema, worker-loop
+  catalog, strategy taxonomy, frontend page map). 781 lines total.
+
+### v19.34.73 — 2026-05-21 — Close-path hardening
+**Status**: 4 surgical fixes shipped. Tests 94/94. Operator pulled & restarted.
+- Cancel-wait 4s → 8s + 5s retry
+- Naked-sweep sibling guard (fixes Error 200 bracket loops)
+- `/diag/symbol-state` fixed (was using symbol-keyed access on trade_id dict)
+- Boot phantom-sibling purge (b415ed5f race)
+
+### Validate on next open
 - ✓ Click Close 25% on any clean position — should complete cleanly within ~3-13s
 - ✓ Run `curl /api/trading-bot/diag/symbol-state?symbol=<any-open-symbol>` — `open_trades_in_memory` should now be populated
 - ✓ Check log for `🧹 [v19.34.73 phantom-purge]` — should report any cleared phantoms at boot
 - ✓ At 15:55 ET, EOD close should now actually flatten intraday positions
-
-### Deferred to v19.34.74+
-- 🟠 **P1: Bracket-stacking auto-cancel endpoint** (GM/LIN-style excess legs). Audit endpoint already flags them; need action endpoint. Real $$ risk. Needs careful design — not a one-liner.
-- 🟠 **P1: Quote-resub watchdog actual recovery** — current `_stale_resub_set` triggers `pusher.subscribe_symbols()` via RPC every 60s but quotes still go 4.9hr stale. Likely a Windows pusher-side handler issue. Needs diagnostic in `ib_data_pusher.py`.
 
 ---
 ## 🚀 Session Summary — 2026-05-20 (5 commits, HUD now matches TWS truth)

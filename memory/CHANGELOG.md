@@ -1,3 +1,64 @@
+## 2026-05-22 — v19.34.74: AGENTS.md context-pack expansion (sections 12-17)
+
+### Trigger
+Operator asked to extend `AGENTS.md` with: (a) full `.bat` startup
+orchestration flow, (b) §12-16 categorical knowledge (glossary, DB
+schema, worker-loop catalog, strategy taxonomy, frontend page map),
+and (c) cross-reference against `/app` as ground truth (no GitHub
+remote in this sandbox — flagged drift mitigation in §12).
+
+### What shipped
+- **AGENTS.md §12 — App-wide startup flow.** `StartTrading.bat` step-by-step
+  table (9 phases: Spark ping → git pull → spark_stop → spark_start →
+  IB Gateway auto-login (VBS SendKeys) → IB pusher (client 15) → 4 turbo
+  collectors (16-19) → browser → training monitor + health-loop) PLUS
+  one-liner table for the 6 sibling `.bat` files (StartCollection,
+  PostRestartAuto, NightlyAuto, WeekendAuto, SetupScheduledTasks,
+  Diagnostics) PLUS network-topology ASCII PLUS drift-risk warning
+  about `/app` vs operator's private GitHub repo.
+- **§13 — Glossary.** 22 terms-of-art: bracket/OCA, naked sweep, naked
+  sibling guard, orphan, phantom, drift, reconciled excess, bracket-
+  stacking, sym-dir-cap, direction-stability gate, TQS, SMB grade,
+  carry-forward alert, confidence gate, kill switch, focus mode, NIA,
+  stocks in play, setup vs trade, paste.rs, pipeline tail, Spark.
+- **§14 — MongoDB schema cheat-sheet.** 7 grouped tables covering
+  ~85 collections (out of ~165 total) — hot trading state, scanner
+  signals, market/sentiment, bars/quotes, ML/training, operator/UI,
+  misc infra. Includes TTL flags and key-field hints.
+- **§15 — Worker-loop catalog.** 16-row table of every
+  `asyncio.create_task` loop in `trading_bot_service.py.start()`
+  with spawn line, cadence, owner method, purpose. Includes boot-order
+  warning re: b415ed5f phantom race.
+- **§16 — Strategy/setup taxonomy.** Bellafiore two-layer model, the
+  7 Setups, 22-trade matrix-gated grid (🟢/🔴/—), aliases, 12
+  experimental trades, current gating policy (soft mode), live API
+  endpoint `/api/scanner/setup-trade-matrix`, plus known scoring bugs.
+- **§17 — Frontend page map.** Top-level tab → file → backend mapping
+  (20 tabs, tab-switching not React Router). Plus 73-file
+  `sentcom/v5/` component catalog grouped by purpose (positions,
+  status pills, reasoning feed, ML surfaces, diagnostics, layout).
+- Bumped §10 active version → **v19.34.74 (2026-05-22)**.
+- Updated trailer: "Last updated: 2026-05-22".
+
+### Why this matters
+Permanent, repo-scoped context for any future coding agent (Emergent
+E1, Claude Code, Cursor, etc.) — stops repeated mistakes like
+hallucinating collection names, missing the b415ed5f sibling race,
+treating `_open_trades` as symbol-keyed, or shortening the v19.34.73
+cancel-wait. File grew from 362 → 781 lines.
+
+### How to deploy
+Generated as a single `.patch` and uploaded to `paste.rs` — operator
+runs the standard one-liner (see §7 "Build + deploy a patch").
+
+### Files touched
+- `/app/AGENTS.md` (+419 lines net)
+- `/app/memory/CHANGELOG.md` (this entry)
+- `/app/memory/ROADMAP.md` (moved "AGENTS.md §12-16" item out of Next-session)
+
+---
+
+
 ## 2026-05-21 — v19.34.73B: AGENTS.md + real-time pipeline viewer
 
 ### Trigger
