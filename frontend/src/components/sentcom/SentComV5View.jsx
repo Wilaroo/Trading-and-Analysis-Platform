@@ -69,6 +69,7 @@ import SystemBanner from './v5/SystemBanner';
 // after 10 min, only renders when AUTO_RECONCILE_AT_BOOT ran.
 import BootReconcilePill from './v5/BootReconcilePill';
 import DriftGuardPill from './v5/DriftGuardPill';
+import CancelQueueSelfHealPill from './v5/CancelQueueSelfHealPill';
 import LLMRulesPill from './v5/LLMRulesPill';
 // v19.34.101 (Feb 2026) — Order-policy rulebook pill. Surfaces the live
 // per-style execution rulebook (TIF, scale-outs, trail anchor, EOD
@@ -552,6 +553,11 @@ export const SentComV5View = ({
             {/* v19.34.55 — drift-guard saves pill (only renders when
                 skip_count_today > 0). Hover → recent skip list. */}
             <DriftGuardPill />
+            {/* v19.34.65c — Cancel-queue self-heal pill. Renders only
+                when the v19.34.65 / v19.34.65b stale-drop guards have
+                fired ≥ 1 time this session. Each entry = one ended
+                IB cancel-loop. Hover for reason + recent breakdown. */}
+            <CancelQueueSelfHealPill />
             {/* v19.34.64 — LLM rules pill: live equity-tied caps the
                 chat-AI enforces. 11/13 · risk $2.5K · DLP -0.4%. Hover
                 for full rules list + breach detection. */}

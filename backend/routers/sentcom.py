@@ -23,6 +23,69 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sentcom", tags=["SentCom"])
 
 
+# v19.34.65d (Option E) — Build version probe.
+# Computed once at module import so we don't fork `git` on every
+# /api/sentcom/status call. The HUD + operator `curl` can now
+# instantly verify which build is live without grepping the log.
+def _resolve_build_version() -> dict:
+    """Best-effort git short SHA + branch + dirty flag.
+
+    Falls back to env var `SENTCOM_BUILD` (useful for container
+    deployments where .git is absent), then to a placeholder.
+    """
+    import subprocess
+    info = {"sha": None, "branch": None, "dirty": None, "source": "unknown"}
+    # Walk up from this file to find a .git directory. /app/backend/routers
+    # → /app/backend → /app (the user's `~/Trading-and-Analysis-Platform`
+    # checkout root).
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = None
+    for _ in range(5):
+        if os.path.isdir(os.path.join(here, ".git")):
+            repo_root = here
+            break
+        parent = os.path.dirname(here)
+        if parent == here:
+            break
+        here = parent
+    if repo_root:
+        try:
+            sha = subprocess.check_output(
+                ["git", "-C", repo_root, "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL, timeout=2,
+            ).decode("utf-8").strip()
+            branch = subprocess.check_output(
+                ["git", "-C", repo_root, "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL, timeout=2,
+            ).decode("utf-8").strip()
+            dirty_out = subprocess.check_output(
+                ["git", "-C", repo_root, "status", "--porcelain"],
+                stderr=subprocess.DEVNULL, timeout=2,
+            ).decode("utf-8").strip()
+            info.update({
+                "sha": sha,
+                "branch": branch,
+                "dirty": bool(dirty_out),
+                "source": "git",
+                "repo_root": repo_root,
+            })
+            return info
+        except Exception as e:
+            logger.debug(f"build_version git probe failed: {e}")
+    env_build = os.environ.get("SENTCOM_BUILD")
+    if env_build:
+        info.update({"sha": env_build, "source": "env"})
+    return info
+
+
+# Resolve once at import. The HUD doesn't need second-by-second
+# granularity — operators restart the backend to ship code, and a
+# restart re-runs this module. If you want to bust the cache without
+# a restart, hit `_BUILD_VERSION = _resolve_build_version()` via a
+# debug endpoint (not exposed today by design).
+_BUILD_VERSION: dict = _resolve_build_version()
+
+
 class ChatRequest(BaseModel):
     """Chat message request"""
     message: str
@@ -115,7 +178,11 @@ async def get_status():
 
         return {
             "success": True,
-            "status": status_dict
+            "status": status_dict,
+            # v19.34.65d (Option E) — Surface the running git SHA/branch
+            # so operators can curl /api/sentcom/status | jq .build_version
+            # to verify a patch actually took effect after a restart.
+            "build_version": _BUILD_VERSION,
         }
     except Exception as e:
         logger.error(f"Error getting SentCom status: {e}")
@@ -129,7 +196,8 @@ async def get_status():
                 "positions_count": 0,
                 "watching_count": 0,
                 "order_pipeline": {"pending": 0, "executing": 0, "filled": 0, "ib_pending": 0}
-            }
+            },
+            "build_version": _BUILD_VERSION,
         }
 
 
