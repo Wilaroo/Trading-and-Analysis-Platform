@@ -437,15 +437,10 @@ async def get_bot_status():
                 # v19.34.59 (2026-05-20) — Surface IB's authoritative
                 # RealizedPnL/UnrealizedPnL at the account/status level.
                 # Pre-v19.34.59 the HUD computed `total_realized_pnl`
-                # only from the bot's own `bot_trades` records — which
+                # only from the bot\'s own `bot_trades` records — which
                 # silently undercounts by ~$7k on days like 2026-05-20
-                # where IB realized -$8,392 but the bot's reconciler
-                # only attributed -$1,490 of synthetic closeouts (the
-                # rest of IB's realized came from OCA/scale-out/manual
-                # closes the bot's exit-tracker doesn't enumerate).
-                # IB's `RealizedPnL` is the single source of truth and
-                # already comes through `/api/ib/account/summary`; just
-                # piggyback it onto the same status payload.
+                # where IB realized -$8,392 but the bot\'s reconciler
+                # only attributed -$1,490 of synthetic closeouts.
                 realized_pnl = _extract_account_value(ib_account, "RealizedPnL", 0)
                 unrealized_pnl = _extract_account_value(ib_account, "UnrealizedPnL", 0)
                 if net_liq and net_liq > 0:
@@ -494,14 +489,8 @@ async def get_bot_status():
         # (replaced the old `Latency` metric per operator request).
         if account.get("buying_power"):
             status["account_buying_power"] = account["buying_power"]
-        # v19.34.59 (2026-05-20) — Surface IB-authoritative R/U PnL at
-        # the top level so the V5 HUD can read
-        # `status.account_realized_pnl` directly without a second
-        # round-trip to /api/ib/account/summary. Mirrors the
-        # `account_buying_power` pattern from v19.6. The bot's own
-        # `total_realized_pnl` (computed from bot_trades) stays available
-        # via /api/sentcom/positions for the synthetic-attribution
-        # tooltip, but the chip itself now shows IB truth.
+        # v19.34.59 — Surface IB-authoritative R/U PnL at top level so
+        # the V5 HUD can read `status.account_realized_pnl` directly.
         if account.get("realized_pnl") is not None:
             status["account_realized_pnl"] = account["realized_pnl"]
         if account.get("unrealized_pnl") is not None:
@@ -8291,4 +8280,36 @@ async def resize_bracket_to_ib_truth(payload: ResizeBracketRequest):
         "attached": attached,
         "errors": errors,
         "ran_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ─── v19.34.49 ORPHAN-LOOP diagnostic ───────────────────────────────
+@router.get("/orphan-reconcile-status")
+async def orphan_reconcile_status() -> Dict[str, Any]:
+    """Read-only diagnostic for the v19.34.49 continuous orphan-reconcile loop.
+
+    Returns:
+      • loop_alive: is the background task running?
+      • diag: tick_count, last_tick_at, last_tick_status, last_reconciled,
+              last_skipped, consecutive_failures
+      • task_exception: present iff the task crashed
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "Trading bot not initialized")
+    task = getattr(_trading_bot, "_orphan_reconcile_task", None)
+    loop_alive = bool(task) and not (task.done() if task else True)
+    task_exception = None
+    if task and task.done():
+        try:
+            task_exception = repr(task.exception()) if task.exception() else None
+        except Exception:
+            task_exception = "could not read exception"
+    diag = getattr(_trading_bot, "_orphan_reconcile_diag", None) or {
+        "tick_count": 0, "last_tick_at": None, "last_tick_status": "never_ran",
+    }
+    return {
+        "success": True,
+        "loop_alive": loop_alive,
+        "task_exception": task_exception,
+        "diag": diag,
     }

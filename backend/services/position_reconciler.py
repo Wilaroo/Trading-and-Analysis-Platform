@@ -903,6 +903,7 @@ class PositionReconciler:
         all_orphans: bool = False,
         stop_pct: float = None,
         rr: float = None,
+        atr_mult: float = None,
     ) -> Dict:
         """Materialize bot_trades for IB-only (orphan) positions so the bot
         can actively manage them (trail stops, scale-out, EOD close).
@@ -983,6 +984,18 @@ class PositionReconciler:
                 if rr is not None
                 else getattr(bot.risk_params, "reconciled_default_rr", 2.0)
             )
+            # v19.34.68 — ATR multiplier governing the WIDEN-stop floor for
+            # adopted-orphan brackets. 1.5×ATR is conservative: gives the
+            # position room to breathe through one full ATR of intraday
+            # noise plus a 50% safety margin. Operator can bump higher for
+            # high-vol holds (2.0 ~ 2.5) or lower for tight-range
+            # ETFs (1.0). Never goes below the pct floor — see compute
+            # block below.
+            default_atr_mult = float(
+                atr_mult
+                if atr_mult is not None
+                else getattr(bot.risk_params, "reconciled_default_atr_mult", 1.5)
+            )
             if default_stop_pct <= 0:
                 report["success"] = False
                 report["error"] = f"stop_pct must be > 0, got {default_stop_pct}"
@@ -990,6 +1003,14 @@ class PositionReconciler:
             if default_rr <= 0:
                 report["success"] = False
                 report["error"] = f"rr must be > 0, got {default_rr}"
+                return report
+            # v19.34.68 — Guard against degenerate ATR multiplier values.
+            if default_atr_mult < 0:
+                report["success"] = False
+                report["error"] = (
+                    f"atr_mult must be >= 0 (0 disables ATR widening), "
+                    f"got {default_atr_mult}"
+                )
                 return report
 
             # Build IB position map (upper-cased symbols).
@@ -1181,8 +1202,37 @@ class PositionReconciler:
                         or avg_cost
                     )
 
-                    # Compute stop + target from defaults anchored on avgCost.
-                    stop_distance = avg_cost * (default_stop_pct / 100.0)
+                    # v19.34.68 — ATR-aware stop sizing for adopted orphans.
+                    # Pre-fix: stop_distance = avg_cost * 2% (hardcoded). On
+                    # high-vol names (ARM @ $280, daily ATR ~$8) this set the
+                    # stop $5.60 wide — well inside the noise. ARM was stopped
+                    # out for -$1398 the same session on that tight stop.
+                    #
+                    # New default: max(2% × avg_cost, 1.5 × ATR). The percentage
+                    # floor keeps low-vol names (utilities, treasury ETFs) from
+                    # getting absurdly wide stops; the ATR multiplier widens
+                    # stops on volatile names to sit outside one ATR of price
+                    # noise. ATR multiplier is operator-configurable per
+                    # `bot.risk_params.reconciled_default_atr_mult` (default
+                    # 1.5) or per-request via `atr_mult` arg.
+                    #
+                    # Fallback chain for ATR source: quote.atr → quote.atr_14
+                    # → 0 (in which case the pct floor wins). We never compute
+                    # a stop tighter than the pct floor.
+                    pct_distance = avg_cost * (default_stop_pct / 100.0)
+                    atr_raw = (
+                        float(quote.get("atr") or 0)
+                        or float(quote.get("atr_14") or 0)
+                    )
+                    atr_distance = (default_atr_mult * atr_raw) if atr_raw > 0 else 0.0
+                    stop_distance = max(pct_distance, atr_distance)
+                    # Used downstream by the rationale-stamp + report so the
+                    # operator can see WHY a given stop was widened.
+                    _stop_basis = (
+                        "atr"
+                        if atr_distance > pct_distance and atr_distance > 0
+                        else "pct"
+                    )
                     target_distance = stop_distance * default_rr
                     if direction == TradeDirection.LONG:
                         stop_price = avg_cost - stop_distance
@@ -1446,6 +1496,11 @@ class PositionReconciler:
                     trade.notes = (
                         f"Reconciled from IB orphan — stop at {default_stop_pct:.1f}% "
                         f"from avg_cost, R:R {default_rr:.1f}"
+                        + (
+                            f" (widened to {default_atr_mult:.1f}×ATR for vol)"
+                            if _stop_basis == "atr"
+                            else ""
+                        )
                     )
                     # Initialize trailing stop config so the manage loop
                     # picks up the starting stop cleanly.
@@ -1456,7 +1511,11 @@ class PositionReconciler:
                     trade.entry_context = {
                         "scan_tier": "reconciled",
                         "smb_is_a_plus": False,
-                        "exit_rule": f"default {default_stop_pct:.1f}% stop, {default_rr:.1f}:1 R:R",
+                        "exit_rule": (
+                            f"default {default_stop_pct:.1f}% stop "
+                            f"{'(widened by ATR)' if _stop_basis == 'atr' else ''}"
+                            f", {default_rr:.1f}:1 R:R"
+                        ),
                         "trading_approach": "reconciled orphan (bot claiming untracked IB position)",
                         "reasoning": [
                             f"Reconciled from IB orphan on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",

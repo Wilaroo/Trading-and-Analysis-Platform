@@ -1,3 +1,103 @@
+## 2026-02 — v19.34.SYNC: /app ↔ DGX divergence reconciled
+
+### Trigger
+After 6 patches deployed in one session, /app and DGX had drifted significantly. Diagnostic discovery:
+- DGX was ahead by ~10 commits past `origin/main` (v19.34.57 through v19.34.67).
+- /app had remnant draft work from earlier fork sessions (v19.34.41 / v19.34.43 verbose drafts) that DGX had already superseded with cleaner refactors.
+- Two files actively diverged in opposite directions: `trade_executor_service.py` and `rejection_analytics_router.py`.
+
+### Resolution: DGX wins for all 10 files
+After inspecting the "extra" /app content, DGX's versions were uniformly newer:
+- `rejection_analytics_router.py`: DGX has v19.34.41 + v19.34.55 (broker triage layer); /app only had a verbose v19.34.41 draft.
+- `trade_executor_service.py`: DGX has v19.34.43 (cleaner) + v19.34.64 (OCA race-safe close); /app only had v19.34.43 draft.
+
+Pulled DGX → /app:
+- `backend/services/position_reconciler.py` (+197 lines, included v19.34.31 Patch C block)
+- `backend/services/position_manager.py` (+29 lines, v19.34.31 Patch B)
+- `backend/services/trading_bot_service.py` (+167 lines)
+- `backend/services/opportunity_evaluator.py` (net –58 lines, refactored cleaner)
+- `backend/services/trade_executor_service.py` (DGX canonical)
+- `backend/services/ib_direct_service.py` (+220 lines, v19.34.27 Patch L1)
+- `backend/services/enhanced_scanner.py` (+11 lines)
+- `backend/routers/trading_bot.py` (+21 lines)
+- `backend/routers/rejection_analytics_router.py` (DGX canonical)
+- `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx` (+28 lines, v19.34.67 deployed in this session)
+
+### Verification
+- `python3 -c "import ast; ast.parse(...)"` on all 10 files: all OK
+- Backend booted cleanly on synced /app: `build: 6fea40e8`
+- pytest suites (this session's 6 + the v19.34.64 OCA race suite): **53/53 passing**
+
+### Outstanding sync items (frontend, deferred — paste.rs 503'd on 3 files)
+- `frontend/src/components/sentcom/panels/PipelineHUDV5.jsx`
+- `frontend/src/components/sentcom/panels/ChartPanel.jsx`
+- `frontend/src/components/sentcom/v5/PositionTruthDiffPill.jsx`
+
+Operator can re-paste these later for a full close-out; not blocking any current work.
+
+
+## 2026-02 — v19.34.68: ATR-aware stop sizing for adopted orphans
+
+### Operator-reported root cause
+This session, ARM was stopped out for **−$1398** on a tight default stop. The bot adopted ARM as an IB orphan, computed `stop_distance = avg_cost × 2%` (hardcoded), which set the stop ~$5.60 wide on a $280 stock with a daily ATR of roughly $8. Stop landed well inside one ATR of intraday noise; the position was stopped on the first wick.
+
+### Fix (`backend/services/position_reconciler.py:reconcile_orphan_positions`)
+- New formula: `stop_distance = max(pct_floor, atr_mult × ATR)` where
+  - `pct_floor = avg_cost × default_stop_pct%` (preserves the old 2% behavior for low-vol names)
+  - `atr_mult` is operator-configurable (default 1.5 — gives one ATR of breathing room plus 50% safety margin)
+- New `atr_mult` arg on `reconcile_orphan_positions(...)` — operator can pass `0.0` to disable ATR widening and revert to pre-v19.34.68 behavior.
+- New `bot.risk_params.reconciled_default_atr_mult` config (default 1.5) — controls all adoptions.
+- ATR source fallback chain: `quote.atr → quote.atr_14 → 0` (in which case pct floor wins).
+- Negative ATR (rare pusher edge case) treated as missing.
+- Stamp basis on the trade rationale + V5 entry context so operator can see WHY a given stop was widened. Notes now read e.g. `"Reconciled from IB orphan — stop at 2.0% from avg_cost, R:R 2.0 (widened to 1.5×ATR for vol)"`.
+
+### Outcomes per representative position
+| Symbol | Avg | ATR | Pre-fix stop | Post-fix stop | Basis |
+|---|---|---|---|---|---|
+| ARM | $280 | $8 | $5.60 (2%) ❌ | $12 (1.5×ATR) ✅ | atr |
+| AEP | $129 | $1.50 | $2.58 | $2.58 | pct |
+| DIA | $499 | $4 | $9.98 | $9.98 | pct |
+| Future high-vol adopt (e.g. NVDA $500 ATR $15) | — | — | $10 ❌ | $22.50 ✅ | atr |
+
+### Test coverage (`backend/tests/test_reconciler_atr_stop_v19_34_68.py`)
+9/9 passing:
+- ARM regression directly reproduced + asserted fixed
+- Low-vol utility keeps pct floor (AEP, DIA)
+- Zero ATR falls back to pct (no crash)
+- Negative ATR treated as missing (no crash)
+- Operator tuning: higher mult → wider stop
+- `atr_mult=0` opt-out preserves pre-fix behavior
+- Tie goes to pct (boundary case)
+- Invariant: `stop_distance >= pct_floor` for every input
+
+### Deployment
+Patch: https://paste.rs/ypRNL (110-line diff vs operator's DGX baseline)
+
+```bash
+cd ~/Trading-and-Analysis-Platform && \
+curl -sS https://paste.rs/ypRNL -o /tmp/v19_34_68_atr_stop.patch && \
+git apply --check /tmp/v19_34_68_atr_stop.patch && \
+git apply /tmp/v19_34_68_atr_stop.patch && \
+git add -A && \
+git commit -m "v19.34.68: ATR-aware stop sizing for adopted orphans (kills the ARM-tight-stop class)" && \
+kill $(pgrep -f "python server.py" | head -1) && sleep 2 && \
+cd backend && nohup ~/Trading-and-Analysis-Platform/.venv/bin/python server.py > /tmp/sentcom-backend.log 2>&1 &
+disown
+```
+
+### Validation post-restart
+Next orphan adoption (manual or auto-sweep) should log the new `widened by ATR` note. Check via:
+```bash
+curl -s http://localhost:8001/api/sentcom/positions | python3 -c "
+import sys, json; positions = json.load(sys.stdin).get('positions', [])
+for p in positions:
+    if 'Reconciled' in (p.get('notes') or ''):
+        print(p['symbol'], '→', p.get('notes'))
+"
+```
+
+
+
 ## 2026-02 — v19.34.67: Position tier-chip label fix (every position said "DAY 2")
 
 ### Operator-reported regression

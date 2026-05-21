@@ -155,15 +155,8 @@ class IBDirectService:
         self._last_heartbeat_ok_at: Optional[float] = None
         self._last_heartbeat_failed_at: Optional[float] = None
         self._heartbeat_failures_total: int = 0
-        # ── v19.34.42 (Feb 2026) — IB minTick cache ──
-        # Symbols like AMRZ had stop/target child brackets rejected by IB
-        # with Error 110 ("Min price variation") because the executor
-        # rounded prices to 4 decimals while IB's actual minTick for
-        # that symbol was $0.01 (or finer). The cache stores the
-        # IB-reported minTick per (symbol, currency) so we only pay the
-        # `reqContractDetailsAsync` round-trip once per symbol per
-        # connection.
-        self._min_tick_cache: Dict[tuple, float] = {}
+        # v19.34.42 -- IB minTick cache (fixes Error 110 rejections).
+        self._min_tick_cache: dict = {}
 
     # ── connection lifecycle ──────────────────────────────────────────
 
@@ -528,6 +521,12 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
             order = MarketOrder(action.upper(), int(quantity))
             trade = self._ib.placeOrder(contract, order)
@@ -545,15 +544,11 @@ class IBDirectService:
                          action, quantity, symbol, e)
             return {"success": False, "error": str(e)[:200]}
 
-    # ── v19.34.42 — IB minTick resolution + fp-safe price rounding ──
-    async def _resolve_min_tick(self, contract) -> float:
-        """Look up the contract's IB-reported minTick (cached).
 
-        Defaults to $0.01 if the lookup fails (the standard tick for
-        US stocks priced >= $1). This method is the antidote to IB
-        Error 110 "Min price variation" rejections: every order price
-        going to IB MUST round to a multiple of this value.
-        """
+    # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
+    # v19.34.42 -- IB minTick resolution + fp-safe price rounding
+    async def _resolve_min_tick(self, contract) -> float:
+        """Look up the contract's IB-reported minTick (cached, $0.01 fallback)."""
         try:
             key = (str(contract.symbol).upper(),
                    str(getattr(contract, "currency", "USD")).upper())
@@ -582,14 +577,7 @@ class IBDirectService:
 
     @staticmethod
     def _round_to_tick(price: float, min_tick: float) -> float:
-        """Round price to nearest min_tick increment using Decimal.
-
-        Pre-v19.34.42 we used `round(price, 4)` which leaves
-        floating-point artifacts (e.g. 12.35 -> 12.350000000000001)
-        that IB rejects with Error 110 even though they look fine.
-        Decimal-based quantize guarantees the result is an exact
-        multiple of min_tick.
-        """
+        """Round to nearest min_tick increment via Decimal (no fp artifacts)."""
         from decimal import Decimal, ROUND_HALF_UP
         try:
             mt = float(min_tick)
@@ -601,7 +589,6 @@ class IBDirectService:
         t = Decimal(str(mt))
         return float((p / t).quantize(Decimal("1"), rounding=ROUND_HALF_UP) * t)
 
-    # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
     async def place_close_market(
         self,
         trade,
@@ -611,25 +598,8 @@ class IBDirectService:
         exchange: str = "SMART",
         currency: str = "USD",
     ) -> Dict[str, Any]:
-        """v19.34.40 — Native MKT-close on the DGX-side ib_async socket.
-
-        Direct replacement for the legacy `_ib_close_position` pusher-queue
-        path. Submits an opposite-side MarketOrder for the trade's remaining
-        shares and polls `orderStatus` until filled (or `wait_for_fill_s`).
-
-        Why this exists:
-          The EOD closer used to route every close MKT through the Windows
-          pusher's `queue_order`. When the pusher was offline, the legacy
-          path silently returned `{"success": True, "simulated": True}` —
-          the bot booked the trade CLOSED locally while IB still held the
-          position overnight. Same failure class Patch J killed for entries.
-          This method gives the EOD closer (and any other close caller) a
-          pusher-independent path that hard-fails when the direct socket
-          isn't there.
-
-        Returns shape compatible with `_ib_close_position`:
-          {success, order_id, fill_price, broker, simulated, status,
-           filled_qty, remaining_qty, error?}
+        """v19.34.40 — Native MKT-close on DGX-side ib_async socket.
+        Hard-fails on disconnect; NEVER silent-simulates.
         """
         if not await self.ensure_connected():
             return {"success": False, "error": "ib_direct_not_connected",
@@ -660,23 +630,19 @@ class IBDirectService:
             await self._ib.qualifyContractsAsync(contract)
             order = MarketOrder(action, qty)
             try:
-                # DAY TIF — close MKT should not survive the session.
                 order.tif = "DAY"
             except Exception:
                 pass
-
             close_trade = self._ib.placeOrder(contract, order)
             ib_order_id = int(close_trade.order.orderId)
 
-            # Poll orderStatus up to wait_for_fill_s. MKTs typically fill
-            # in 200-800ms; we sample every 250ms for ~40 ticks at 10s.
-            deadline = asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
-            poll_iv = 0.25
+            import asyncio as _asyncio
+            deadline = _asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
             ib_status = "submitted"
             filled_qty = 0
             avg_fill = 0.0
-            while asyncio.get_event_loop().time() < deadline:
-                await asyncio.sleep(poll_iv)
+            while _asyncio.get_event_loop().time() < deadline:
+                await _asyncio.sleep(0.25)
                 status_obj = close_trade.orderStatus
                 if status_obj is None:
                     continue
@@ -691,32 +657,21 @@ class IBDirectService:
                     break
 
             if ib_status == "filled":
-                status_out = "filled"
-                success = True
+                status_out, success = "filled", True
             elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
-                status_out = "rejected"
-                success = False
+                status_out, success = "rejected", False
             elif 0 < filled_qty < qty:
-                status_out = "partial"
-                success = True  # caller decides whether to retry remainder
+                status_out, success = "partial", True
             else:
-                status_out = "submitted"
-                # Order is working but not filled yet — surface as
-                # non-success so the manage loop retries next tick.
-                # The order itself is alive at IB so a real fill may
-                # arrive shortly; the retry will short-circuit via the
-                # phantom-share clamp when IB shows position=0.
-                success = False
+                status_out, success = "submitted", False
 
             fill_price = avg_fill if filled_qty > 0 else None
-
             logger.info(
-                "[v19.34.40 IB-DIRECT close] %s %s qty=%d → order_id=%d "
+                "[v19.34.40 IB-DIRECT close] %s %s qty=%d -> order_id=%d "
                 "status=%s filled=%d avg=%.4f",
                 symbol, action, qty, ib_order_id, status_out,
                 filled_qty, avg_fill,
             )
-
             return {
                 "success": success,
                 "order_id": ib_order_id,
@@ -738,6 +693,32 @@ class IBDirectService:
                     "broker": "ib_direct", "simulated": False}
 
 
+            fill_price = avg_fill if filled_qty > 0 else None
+            logger.info(
+                "[v19.34.40 IB-DIRECT close] %s %s qty=%d -> order_id=%d "
+                "status=%s filled=%d avg=%.4f",
+                symbol, action, qty, ib_order_id, status_out,
+                filled_qty, avg_fill,
+            )
+            return {
+                "success": success,
+                "order_id": ib_order_id,
+                "ib_order_id": ib_order_id,
+                "fill_price": fill_price,
+                "filled_qty": filled_qty,
+                "remaining_qty": max(0, qty - filled_qty),
+                "status": status_out,
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.40 IB-DIRECT close] place_close_market failed for "
+                "%s: %s", getattr(trade, "symbol", "?"), e,
+            )
+            return {"success": False,
+                    "error": f"ib_direct_close_error: {str(e)[:200]}",
+                    "broker": "ib_direct", "simulated": False}
 
     async def cancel_order(self, order_id: int) -> Dict[str, Any]:
         """Cancel a working order by IB orderId."""
@@ -1053,17 +1034,67 @@ class IBDirectService:
             parent_action = "SELL"   # ib_async's bracketOrder handles short via SELL
             child_action = "BUY"
 
+        # v19.34.38 PRICE-BAND GUARD — reject LMT entries too far from market
+        # (IB Error 202 protection: typically ~3% triggers IB auto-cancel).
+        import os as _os38
+        try:
+            _band_pct = float(_os38.environ.get('IB_ENTRY_PRICE_BAND_PCT', '2.5'))
+        except Exception:
+            _band_pct = 2.5
+        _cur_px = float(getattr(trade, 'current_price', 0) or 0)
+        if _cur_px > 0 and _band_pct > 0:
+            _dev_pct = abs(entry_price - _cur_px) / _cur_px * 100.0
+            if _dev_pct > _band_pct:
+                logger.warning(
+                    "[v19.34.38 price-band] %s REJECTED: entry=$%.4f is %.2f%% from current $%.4f (threshold %.2f%%). Setup stale/aggressive — skip.",
+                    symbol, entry_price, _dev_pct, _cur_px, _band_pct,
+                )
+                return {
+                    "success": False,
+                    "error": f"entry_too_aggressive:{_dev_pct:.2f}pct_from_market",
+                    "broker": "ib_direct", "simulated": False,
+                    "current_price": _cur_px, "entry_price": entry_price,
+                    "deviation_pct": _dev_pct, "threshold_pct": _band_pct,
+                }
+
+        # v19.34.37 TWO-STEP MODE (default; rollback: IB_DIRECT_BRACKET_MODE=atomic)
+        import os as _os
+        _bracket_mode = (_os.environ.get('IB_DIRECT_BRACKET_MODE', 'two_step') or 'two_step').lower()
+        if _bracket_mode == 'two_step':
+            try:
+                _parent_timeout_s = float(_os.environ.get('IB_DIRECT_BRACKET_PARENT_TIMEOUT_S', '30'))
+            except Exception:
+                _parent_timeout_s = 30.0
+            return await self._place_bracket_two_step(
+                trade=trade, symbol=symbol, direction=direction, qty=qty,
+                entry_price=entry_price, stop_price=stop_price, target_price=target_price,
+                parent_action=parent_action, child_action=child_action,
+                sec_type=sec_type, exchange=exchange, currency=currency,
+                parent_timeout_s=_parent_timeout_s,
+            )
+
         try:
             # Qualify the contract first (off the event loop).
             contract = Stock(symbol, exchange, currency)
+            import time as _bug_y_t
+            _t0 = _bug_y_t.monotonic()
+            print(f"[BUG-Y INSTR] {symbol} step1 qualifyContracts START t=0.000", flush=True)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
-            # v19.34.42 — round to IB minTick (fixes Error 110).
-            min_tick = await self._resolve_min_tick(contract)
+            print(f"[BUG-Y INSTR] {symbol} step1 qualifyContracts DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
             # ib_async.bracketOrder constructs the three orders with
             # correct OCA group and transmit-sequencing. Parent's
             # transmit=False, stop's transmit=False, target's transmit=True
             # — atomic activation when the third is submitted.
+            print(f"[BUG-Y INSTR] {symbol} step2 bracketOrder START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            # v19.34.42 -- round to IB minTick (fixes Error 110).
+            min_tick = await self._resolve_min_tick(contract)
             bracket = self._ib.bracketOrder(
                 action=parent_action,
                 quantity=qty,
@@ -1084,11 +1115,18 @@ class IBDirectService:
                     bracket[0], bracket[1], bracket[2],
                 )
 
+            print(f"[BUG-Y INSTR] {symbol} step2 bracketOrder DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             # Submit all three. ib_async will respect each order's
             # transmit flag and IB activates them atomically.
+            print(f"[BUG-Y INSTR] {symbol} step3 placeOrder(parent) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             parent_trade = self._ib.placeOrder(contract, parent_o)
+            print(f"[BUG-Y INSTR] {symbol} step3 placeOrder(parent) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step4 placeOrder(target) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             target_trade = self._ib.placeOrder(contract, take_profit_o)
+            print(f"[BUG-Y INSTR] {symbol} step4 placeOrder(target) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step5 placeOrder(stop) START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             stop_trade = self._ib.placeOrder(contract, stop_loss_o)
+            print(f"[BUG-Y INSTR] {symbol} step5 placeOrder(stop) DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
             # Brief settle so the parent's orderStatus callback fires
             # at least to 'PendingSubmit' or 'Submitted'. We do NOT wait
@@ -1096,9 +1134,9 @@ class IBDirectService:
             # event or naked_position_sweep.
             #
             # v19.34.28 L3-hotfix1 (2026-05-18) — replaced
-            # `asyncio.to_thread(self._ib.sleep, 0.5)` with plain
-            # `asyncio.sleep(0.5)`. ib_async's `IB.sleep()` internally
-            # calls `loop.run_until_complete(...)` on the MAIN event loop.
+            # asyncio.to_thread(self._ib.sleep, 0.5) with plain
+            # asyncio.sleep(0.5). ib_async's IB.sleep() internally
+            # calls loop.run_until_complete(...) on the MAIN event loop.
             # Running it from a worker thread (via asyncio.to_thread)
             # caused wedge-watchdog trips: the worker tried to drive a
             # loop the main thread owns. Plain asyncio.sleep is the
@@ -1106,8 +1144,11 @@ class IBDirectService:
             # the bug: wedge duration == wait_for_submission_s (5.0s)
             # exactly — i.e. the wait_for timeout itself was the longest
             # the main loop could stay un-pumped.
+            print(f"[BUG-Y INSTR] {symbol} step6 settle-sleep START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             await asyncio.sleep(0.5)
+            print(f"[BUG-Y INSTR] {symbol} step6 settle-sleep DONE  t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
 
+            print(f"[BUG-Y INSTR] {symbol} step7 read orderIds+orderStatus START t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             entry_id = int(parent_trade.order.orderId)
             stop_id = int(stop_trade.order.orderId)
             target_id = int(target_trade.order.orderId)
@@ -1142,6 +1183,8 @@ class IBDirectService:
                 entry_id, stop_id, target_id, oca_group, status_out,
             )
 
+            print(f"[BUG-Y INSTR] {symbol} step7 read orderIds+orderStatus DONE t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
+            print(f"[BUG-Y INSTR] {symbol} step8 RETURN success t={_bug_y_t.monotonic()-_t0:.3f}", flush=True)
             return {
                 "success": True,
                 "entry_order_id": entry_id,
@@ -1164,6 +1207,169 @@ class IBDirectService:
                 "error": f"ib_direct_bracket_error: {str(e)[:200]}",
                 "broker": "ib_direct",
                 "simulated": False,
+            }
+
+    # v19.34.37 — Two-step bracket helper
+    async def _place_bracket_two_step(
+        self, *, trade, symbol, direction, qty, entry_price, stop_price,
+        target_price, parent_action, child_action, sec_type, exchange,
+        currency, parent_timeout_s,
+    ):
+        """Safe two-step bracket: parent LMT alone first, then OCA
+        stop+target sized to actual filled qty. Fixes wrong-direction
+        phantoms (2026-05-19 incident)."""
+        import time as _t
+        try:
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+
+            # v19.34.39 — Fresh-price re-check at submit time.
+            # Fetches LIVE market price from IB; if entry_price has drifted
+            # > threshold% (alert went stale between scan & submit), abort.
+            # Universal fix for all setups — no setup-level changes needed.
+            import os as _os39
+            try:
+                _band_pct39 = float(_os39.environ.get('IB_ENTRY_PRICE_BAND_PCT', '2.5'))
+            except Exception:
+                _band_pct39 = 2.5
+            _live_px = 0.0
+            try:
+                _tickers = await self._ib.reqTickersAsync(contract)
+                if _tickers:
+                    _tk = _tickers[0]
+                    _live_px = float(_tk.marketPrice() or 0) or float(getattr(_tk, "last", 0) or 0) or float(getattr(_tk, "close", 0) or 0)
+            except Exception as _px_err:
+                logger.warning(
+                    "[v19.34.39 live-price] %s could not fetch live price: %s — proceeding without guard.",
+                    symbol, _px_err,
+                )
+            if _live_px > 0 and _band_pct39 > 0:
+                _dev_pct = abs(entry_price - _live_px) / _live_px * 100.0
+                if _dev_pct > _band_pct39:
+                    logger.warning(
+                        "[v19.34.39 live-price] %s REJECTED at submit: entry=$%.4f is %.2f%% from LIVE $%.4f (threshold %.2f%%). Alert stale — skip.",
+                        symbol, entry_price, _dev_pct, _live_px, _band_pct39,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"alert_stale:{_dev_pct:.2f}pct_from_live_market",
+                        "entry_order_id": None, "stop_order_id": None,
+                        "target_order_id": None, "oca_group": None,
+                        "status": "rejected_stale_alert",
+                        "fill_price": None, "filled_qty": 0,
+                        "broker": "ib_direct", "simulated": False,
+                        "current_price": _live_px, "entry_price": entry_price,
+                        "deviation_pct": _dev_pct, "threshold_pct": _band_pct39,
+                    }
+
+            # v19.34.42 -- round entry to IB minTick.
+            _mt_p = await self._resolve_min_tick(contract)
+            parent_order = LimitOrder(parent_action, qty,
+                                      self._round_to_tick(entry_price, _mt_p))
+            try:
+                parent_order.tif = "DAY"
+                parent_order.transmit = True
+            except Exception:
+                pass
+            parent_trade = self._ib.placeOrder(contract, parent_order)
+            entry_id = int(parent_trade.order.orderId)
+            logger.warning(
+                "[v19.34.37 two-step] %s parent submitted: %s qty=%d LMT@%.4f id=%d timeout=%.1fs",
+                symbol, parent_action, qty, entry_price, entry_id, parent_timeout_s,
+            )
+
+            deadline = _t.monotonic() + parent_timeout_s
+            last_status = ""
+            terminal_status = None
+            filled_qty = 0
+            avg_fill = 0.0
+            while _t.monotonic() < deadline:
+                st_obj = parent_trade.orderStatus
+                status = (getattr(st_obj, "status", "") or "").lower()
+                filled_qty = int(getattr(st_obj, "filled", 0) or 0)
+                avg_fill = float(getattr(st_obj, "avgFillPrice", 0.0) or 0.0)
+                if status != last_status:
+                    logger.warning(
+                        "[v19.34.37 two-step] %s parent status=%s filled=%d/%d",
+                        symbol, status, filled_qty, qty,
+                    )
+                    last_status = status
+                if status == "filled" and filled_qty > 0:
+                    terminal_status = "filled"; break
+                if status in ("cancelled", "apicancelled", "inactive"):
+                    terminal_status = status; break
+                await asyncio.sleep(0.5)
+
+            if terminal_status != "filled" or filled_qty <= 0:
+                try:
+                    if terminal_status not in ("cancelled", "apicancelled", "inactive"):
+                        self._ib.cancelOrder(parent_order)
+                        logger.warning(
+                            "[v19.34.37 two-step] %s parent timed out (status=%s filled=%d/%d) cancelled.",
+                            symbol, terminal_status or "timeout", filled_qty, qty,
+                        )
+                except Exception as _e:
+                    logger.error("[v19.34.37 two-step] %s cancel failed: %s", symbol, _e)
+                return {
+                    "success": False,
+                    "error": f"parent_not_filled:{terminal_status or 'timeout'}",
+                    "entry_order_id": entry_id, "stop_order_id": None,
+                    "target_order_id": None, "oca_group": None,
+                    "status": "rejected" if terminal_status in ("cancelled", "apicancelled", "inactive") else "timeout",
+                    "fill_price": None, "filled_qty": filled_qty,
+                    "broker": "ib_direct", "simulated": False,
+                }
+
+            if filled_qty != qty:
+                logger.warning(
+                    "[v19.34.37 two-step] %s PARTIAL parent fill %d/%d — sizing brackets to %d.",
+                    symbol, filled_qty, qty, filled_qty,
+                )
+            _orig_shares = trade.shares
+            trade.shares = filled_qty
+            try:
+                oca_result = await self.place_oca_stop_target(
+                    trade, time_in_force="GTC", outside_rth=False,
+                    sec_type=sec_type, exchange=exchange, currency=currency,
+                )
+            finally:
+                trade.shares = _orig_shares
+
+            if not oca_result.get("success"):
+                logger.critical(
+                    "[v19.34.37 two-step] %s parent FILLED (%dsh) but OCA attach failed: %s. NAKED.",
+                    symbol, filled_qty, oca_result.get("error"),
+                )
+                return {
+                    "success": True, "entry_order_id": entry_id,
+                    "stop_order_id": None, "target_order_id": None,
+                    "oca_group": None, "status": "filled_naked_brackets_missing",
+                    "fill_price": avg_fill, "filled_qty": filled_qty,
+                    "broker": "ib_direct", "simulated": False,
+                    "errors": [oca_result.get("error", "oca_attach_failed")],
+                }
+
+            logger.warning(
+                "[v19.34.37 two-step] %s COMPLETE entry=%d filled=%d@%.4f stop=%s target=%s oca=%s",
+                symbol, entry_id, filled_qty, avg_fill,
+                oca_result.get("stop_order_id"), oca_result.get("target_order_id"),
+                oca_result.get("oca_group"),
+            )
+            return {
+                "success": True, "entry_order_id": entry_id,
+                "stop_order_id": oca_result.get("stop_order_id"),
+                "target_order_id": oca_result.get("target_order_id"),
+                "oca_group": oca_result.get("oca_group"),
+                "status": "filled", "fill_price": avg_fill,
+                "filled_qty": filled_qty, "broker": "ib_direct",
+                "simulated": False, "partial_fill": filled_qty < qty,
+            }
+        except Exception as e:
+            logger.error("[v19.34.37 two-step] failed for %s: %s", symbol, e)
+            return {
+                "success": False,
+                "error": f"ib_direct_two_step_bracket_error: {str(e)[:200]}",
+                "broker": "ib_direct", "simulated": False,
             }
 
     # ── v19.34.28 Patch L2a — Native ib-direct order placement (rest of family) ──
@@ -1235,17 +1441,19 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
 
             if order_type_u == "MKT":
                 order = MarketOrder(action, qty)
             elif order_type_u in ("STP", "STP_LMT", "STOP", "STOP_LIMIT"):
-                # v19.34.43 -- Breakout entry: order activates only when
-                # the market trades through `stop_price`. This is the
-                # right tool for breakout setups where a LMT would fill
-                # immediately at the existing inside price (against the
-                # breakout thesis) or get rejected by IB for being too
-                # far from market.
+                # v19.34.43 -- Breakout entry. Activates only when
+                # market trades through `stop_price`.
                 if stop_price is None:
                     return {"success": False,
                             "error": "stop_price required for STP / STP_LMT entry",
@@ -1266,10 +1474,10 @@ class IBDirectService:
                     return {"success": False,
                             "error": "limit_price required for non-MKT order",
                             "broker": "ib_direct", "simulated": False}
-                # v19.34.42 — round limit price to IB minTick.
-                min_tick = await self._resolve_min_tick(contract)
+                # v19.34.42 -- round limit price to IB minTick.
+                min_tick_e = await self._resolve_min_tick(contract)
                 order = LimitOrder(action, qty,
-                                   self._round_to_tick(float(limit_price), min_tick))
+                                   self._round_to_tick(float(limit_price), min_tick_e))
             try:
                 order.tif = tif_u
             except Exception:
@@ -1376,8 +1584,14 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
-            # v19.34.42 — round stop price to IB minTick.
+            # v19.34.42 -- round stop price to IB minTick.
             min_tick = await self._resolve_min_tick(contract)
             order = StopOrder(action, qty, self._round_to_tick(stop_px, min_tick))
             try:
@@ -1471,8 +1685,14 @@ class IBDirectService:
 
         try:
             contract = Stock(symbol, exchange, currency)
+            # v19.34.28 Bug Y (2026-05-18) — replaced asyncio.to_thread wrapper.
+            # Same deadlock pattern as L3-hotfix1: ib_async's qualifyContracts
+            # internally calls loop.run_until_complete() on the main event
+            # loop. Dispatching via to_thread causes the worker thread to
+            # try to drive a loop the main thread owns → deadlock.
+            # The async coroutine equivalent is qualifyContractsAsync.
             await self._ib.qualifyContractsAsync(contract)
-            # v19.34.42 — round both stop & target to IB minTick.
+            # v19.34.42 -- round stop & target to IB minTick.
             min_tick = await self._resolve_min_tick(contract)
             stop_px = self._round_to_tick(stop_px, min_tick)
             target_px = self._round_to_tick(target_px, min_tick)
