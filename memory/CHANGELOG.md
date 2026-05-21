@@ -1,3 +1,40 @@
+## 2026-02 — v19.34.65b: Poll-count stale-drop backstop
+
+### Operator trigger
+After deploying v19.34.65, the orphan-gtc 10147 spam disappeared as expected — but a fresh symptom of the same disease class surfaced from a different code path: `Patch C: pre-attach LIN` had queued a cancel on `ib_order_id=4930` that IB kept rejecting with `Error 10147`, every ~10s for several minutes. The v19.34.65 `failure_count` trigger never fired because the pusher had not yet POSTed `/api/ib/cancellations/result` back (eventually it does, but the gap was minutes-wide and the spam was already obnoxious).
+
+### Root cause
+v19.34.65's stale-drop relied entirely on the pusher reporting `status=failed` to `/api/ib/cancellations/result`. The pusher does call that endpoint eventually, but it can be delayed or skipped on certain code paths. While the result report is missing, the entry stays in `pending` state forever — and `/api/ib/cancellations/pending` keeps serving the same order to the pusher every poll cycle.
+
+### Fix (`backend/routers/ib.py`)
+Pusher-agnostic poll-count guard inside `get_pending_cancellations()`:
+- Each new `_cancellation_queue` entry initialises `served_count = 0`.
+- Every time the entry is served via `/api/ib/cancellations/pending`, bump `served_count` and stamp `last_served_at`.
+- When `served_count >= _CANCEL_STALE_FAILURE_THRESHOLD` (3), promote the entry to `stale_dropped` BEFORE adding it to the response — so the pusher will never see it again from this poll forward.
+- New `reaped.stale_dropped_via_poll` counter in the `/cancellations/pending` response for observability.
+
+### Test coverage (`backend/tests/test_cancel_queue_stale_drop_v19_34_65.py`)
+Adds 3 tests on top of the original 6:
+- `test_poll_count_stale_drops_after_three_serves` — 4th poll promotes to stale_dropped, omits from response.
+- `test_poll_count_does_not_affect_claimed_entries` — only `pending` entries count.
+- `test_successful_result_supersedes_poll_count` — clean `cancelled` reports short-circuit the guard.
+
+**9/9 passing.**
+
+### Net effect
+The cancel-loop spam can now run for AT MOST `interval × threshold` ≈ 30s regardless of pusher behaviour. Combined with v19.34.65, we now have two independent kill paths:
+1. **Result-report path (v19.34.65)** — fatal IB error or 3 reported failures → stale_dropped.
+2. **Poll-served path (v19.34.65b)** — 3 pending-serves without a result → stale_dropped.
+
+### Production verification (2026-02-21 14:54 ET, DGX)
+- Pre-deploy: `Error 10147, reqId 4930` firing every ~10s for ~6 minutes (37+ TradeLogEntry stamps).
+- Post-deploy: **zero `10147` errors in the next 100 log lines**, queue empty, `4930` no longer present (`"Cancellation 4930 not queued"`).
+
+### Deployment
+Patch: https://paste.rs/m1lxy (1 file changed, 49 insertions, 5 deletions). Applied + committed as `3cd14176`.
+
+
+
 ## 2026-02 — v19.34.65: Orphan-GTC cancel-loop stale-drop guard
 
 ### Operator trigger
