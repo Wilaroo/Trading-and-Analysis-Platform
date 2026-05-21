@@ -257,6 +257,18 @@ working → position flips direction.
 Operator clicks `StartTrading.bat` at 9:25 ET. By 9:30:01, the bot is
 firing.
 
+> **Why this exists.** The sym-dir-cap (step 7) was added after a
+> live-trading incident where the scanner emitted multiple alerts on
+> the same `(symbol, direction)` within seconds and the bot stacked
+> 4–5 simultaneous entries with overlapping brackets. The setup gate
+> (step 4) came from the Bellafiore "trade-in-context" principle —
+> firing a `9_ema_scalp` long inside a `gap_up_into_resistance`
+> setup is a deliberate fade, not a mistake, but it MUST be tagged so
+> the priority is downgraded. The `_open_trades[trade_id]` keying (not
+> symbol-keyed) was a v19.34.x fix after the b415ed5f phantom race
+> proved multiple trades on the same `(symbol, direction)` are a real
+> state-space, not a bug.
+
 | Step | Location | Mutates / emits |
 |---|---|---|
 | 1. `.bat` step 5 | `scripts/ib_data_pusher.py` (Windows) | L1 quote stream → POST to `/api/live/quote-snapshot` |
@@ -278,6 +290,19 @@ critical entry-spine. Sibling/wrapper functions only.
 ### 🔴 Journey 2 — Operator close intervention (v19.34.72)
 Operator hits "Close 25%" in V5 panel. Bot must NOT race the brackets.
 
+> **Why this exists.** On **2026-05-20**, the bot sent a MKT close
+> during the 50–200ms window where a bracket-child cancel was still
+> propagating through IB. The child filled AND the close filled —
+> position flipped direction at IB while the bot still thought it
+> was flat. The v19.34.64 OCA-race guard, then the v19.34.72 sibling
+> `close_trade_custom` path, were built precisely so operator close
+> intent (partial / market / limit) could go through the SAME
+> bracket-cancel handshake as the bot's automated close path. The 8s
+> cancel-wait + 5s retry (v19.34.73) came from the 2026-05-21 EOD
+> incident where 21-of-21 positions failed to flatten because 4s
+> wasn't long enough under load. **Never** add a second close path
+> that bypasses `_cancel_ib_bracket_orders`.
+
 | Step | Location |
 |---|---|
 | 1. Click | `frontend/.../OpenPositionsV5.jsx` opens `<CloseTradeModal />` |
@@ -296,6 +321,20 @@ Operator hits "Close 25%" in V5 panel. Bot must NOT race the brackets.
 ### 🌅 Journey 3 — EOD wind-down (15:55 ET)
 Auto-flatten before market close. Single source of truth = `manage_open_trades`.
 
+> **Why this exists.** **2026-05-21**: at 15:55 ET, the bot logged
+> "🛑 EOD close fired for 21 trades" — and then nothing happened.
+> All 21 positions carried overnight, each holding $X notional risk
+> against the operator's intraday-only mandate. Root cause: the
+> `_cancel_ib_bracket_orders` 4s timeout was being hit on every
+> trade because the IB cancel-ack queue was saturated during the
+> last-5-minute scramble, so `close_trade` returned early with
+> `result["timeout"]` populated and skipped the actual close. v19.34.73
+> bumped the wait to **8s primary + 5s retry** and made the EOD path
+> retry the close (not just the cancel). The bot's intraday-only
+> mandate is sacrosanct — if you change ANYTHING in this journey,
+> validate at 15:55 ET on next session that every open position is
+> flat by 15:59:30 (`/api/trading-bot/trades/open` returns `[]`).
+
 | Step | Location |
 |---|---|
 | 1. Banner countdown | `EodCountdownBannerV5.jsx` (UI only) |
@@ -313,6 +352,22 @@ regression (v19.34.73 bumped 4s → 8s precisely for this).
 ### 🔁 Journey 4 — Drift detection & self-heal
 Every 60s. Most state corruption is caught here.
 
+> **Why this exists.** Two incidents shaped this entire loop:
+> (1) The **b415ed5f phantom race** — an orphan-adopted ghost (44sh,
+> `entered_by="reconciled_external"`) co-existed in `_open_trades`
+> with the real canonical (134sh, `entered_by="bot_fired"`). The
+> sym-dir-cap latched onto the older phantom, blocked all new entries,
+> and the naked-sweep reissued brackets for BOTH every 60s — the
+> phantom's submissions bounced off IB with Error 200 thirty-five
+> times. Fixed in v19.34.73 with the boot phantom-sibling purge.
+> (2) The **v19.34.22 reconciler duplicator** — the orphan-reconciler
+> was treating its own emitted `reconciled_excess_v19_34_15b` trades
+> as fresh orphans on the next tick, spawning a new excess slice every
+> 60s. The fix: explicitly skip `entered_by="reconciled_excess_*"`
+> on the orphan path. **If you ever modify `position_reconciler` —
+> grep for `reconciled_excess` first and make sure the skip-set is
+> still complete.**
+
 | Step | Location |
 |---|---|
 | 1. Loop tick | `trading_bot_service._share_drift_loop` (60s) |
@@ -327,6 +382,17 @@ on the orphan path (fixed v19.34.22) or it duplicates trades on every tick.
 
 ### 📊 Journey 5 — Historical backfill
 Operator clicks "Fill Gaps" in NIA UI. Turbo collectors wake.
+
+> **Why this exists.** IB enforces a hard pacing limit (~50 historical
+> requests per 10 min per client ID). v19.34.52 raised the pusher's
+> L1 cap from 80 → 500 and the live-universe target from 60 → 400
+> after **119 symbols showed stale bars** because the prior cap was
+> mid-day-saturating the subscription budget. The 4-collector
+> architecture (client IDs 16–19) staggers requests across 4 separate
+> IB connections, multiplying effective throughput ~4× while staying
+> under per-connection pacing. **Never collapse to a single collector
+> "for simplicity"** — you'll hit `pacing_violation` errors within
+> 10 minutes on any meaningful backfill.
 
 | Step | Location |
 |---|---|
@@ -343,6 +409,21 @@ req/10min). Operator must run `StartCollection.bat` for off-hours.
 
 ### 🧠 Journey 6 — ML training cycle
 Triggered nightly by `NightlyAuto.bat` or manually via NIA "Train All".
+
+> **Why this exists.** The backup-swap promotion pattern
+> (`setup_type_models_backup` ← swap ← `setup_type_models`) came from
+> an early model-regression incident: a newly trained `setup_type_model`
+> was hot-swapped into production directly, and within 15 minutes the
+> scanner was emitting low-quality alerts at 3× the prior rate. There
+> was no clean rollback path — the previous model artifacts had been
+> overwritten in place. The fix: every promotion writes the *current*
+> production model to `_backup` first; rollback is a single Mongo
+> rename. The shadow-mode step (writing `shadow_decisions` for N days
+> before promotion) was added later so degradation can be detected
+> BEFORE live capital sees it. **If you ever build a "fast-promote"
+> bypass for tuning experiments, the operator MUST be told in the
+> same session** — silent skips of shadow-mode have caused real
+> losses.
 
 | Step | Location |
 |---|---|
@@ -453,7 +534,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.75 (2026-05-22, "AGENTS.md UX upgrade — user journeys + edit checklist + CLAUDE.md")
+- **Current version**: v19.34.76 (2026-05-22, "AGENTS.md §6.5 institutional memory — Why each journey exists")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
@@ -961,7 +1042,7 @@ These are the heart of the V5 trading UI. Grouped by purpose:
 
 ---
 
-*Last updated: 2026-05-22 (v19.34.75 ship — user-journey narratives,
-pre/post-edit checklist, ONE-focused-question pattern, CLAUDE.md
-pointer). Update this file whenever you learn a new convention or
+*Last updated: 2026-05-22 (v19.34.76 ship — §6.5 institutional-memory
+blurbs: every journey now explains WHICH past incident shaped its
+design). Update this file whenever you learn a new convention or
 trap.*

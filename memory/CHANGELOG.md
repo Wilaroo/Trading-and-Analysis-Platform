@@ -1,3 +1,59 @@
+## 2026-05-22 — v19.34.76: AGENTS.md §6.5 institutional-memory blurbs
+
+### Trigger
+Operator approved the "Why we built it this way" enhancement for
+§6.5 user journeys — turn each journey from a navigation table into
+an institutional-memory artifact by attaching the specific past
+incident that shaped its design.
+
+### What shipped
+Added a 1-paragraph `> Why this exists.` callout above each of the
+6 journey tables in `AGENTS.md §6.5`. Each callout names the
+specific incident, the symptom, and the rule the next agent must
+follow to avoid regressing it:
+
+- **Journey 1 (Daily open)** — references sym-dir-cap stacking
+  incident + Bellafiore setup-in-context rule + b415ed5f phantom
+  proving `(symbol, direction)` multi-trade is a real state-space.
+- **Journey 2 (Operator close)** — names the **2026-05-20** OCA
+  flip-direction incident (MKT close raced bracket-child cancel,
+  both filled, position flipped) and chains the v19.34.64 → v19.34.72
+  → v19.34.73 patch history. Hard rule: never bypass
+  `_cancel_ib_bracket_orders`.
+- **Journey 3 (EOD wind-down)** — names the **2026-05-21** "21-of-21
+  EOD failure" where 4s cancel-wait timed out under load. Rule:
+  validate flatten-by-15:59:30 on every patch that touches this path.
+- **Journey 4 (Drift self-heal)** — chains the b415ed5f phantom
+  race (Error 200 × 35) AND the v19.34.22 reconciler duplicator
+  (self-emitted `reconciled_excess_*` re-treated as orphans).
+  Rule: grep `reconciled_excess` skip-set before editing.
+- **Journey 5 (Backfill)** — references the v19.34.52 "119 stale
+  symbols" incident that forced L1 cap 80 → 500 and 4-collector
+  architecture. Rule: never collapse to single collector.
+- **Journey 6 (ML training)** — references the early model-regression
+  where direct overwrite left no rollback path, forcing the backup-
+  swap pattern + shadow-mode gate. Rule: silent shadow-mode skips
+  must be operator-disclosed in the same session.
+
+### Why this matters
+The article's call-out was correct: a navigation manual tells you
+*what* but not *why*. Future agents (especially ones without the
+operator's verbal context) will now see the past pain that justifies
+each design decision and won't be tempted to "simplify away" the
+8s cancel-wait, the 4-collector split, the backup-swap promotion,
+or the phantom-purge boot step.
+
+### Files touched
+- `/app/AGENTS.md` (+~70 lines: 6 blurbs in §6.5, version bump,
+  trailer)
+- `/app/memory/CHANGELOG.md` (this entry)
+
+### Stats
+AGENTS.md: 362 → 781 (v19.34.74) → 967 (v19.34.75) → **~1040 lines (v19.34.76)**.
+
+---
+
+
 ## 2026-05-22 — v19.34.75: AGENTS.md UX upgrade (journeys + checklist + CLAUDE.md)
 
 ### Trigger
