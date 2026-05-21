@@ -45,6 +45,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -737,6 +738,184 @@ class IBDirectService:
         except Exception as e:
             logger.error("v19.34.25 [IB-DIRECT] cancel_order failed: %s — %s", order_id, e)
             return {"success": False, "error": str(e)[:200]}
+
+    # ── v19.34.64 (2026-05-20) — OCA-race-safe close helpers ──────────────
+    #
+    # The bug this addresses: pre-v19.34.64 `_cancel_ib_bracket_orders`
+    # fired cancel requests and returned immediately, then the close MKT
+    # was placed. In the ~50-200ms IB-side propagation window, an OCA
+    # child whose trigger price was being touched could fill before its
+    # cancel registered. Both the OCA child AND the MKT close then filled
+    # at IB, doubling the trade — for a short-2215 position with
+    # STOP_BUY 2215 active, IB ended at LONG 2215 after BUY 4430 cleared.
+    # 2026-05-20 incident: IBIT/SOFI/RBLX all direction-flipped on EOD
+    # close this way; bot saw status=filled (its own MKT order DID fill)
+    # and booked them CLOSED, then 2-3 min later the orphan-reconciler
+    # re-adopted the inverted positions.
+    #
+    # These two helpers give the close path the primitives to (a) wait
+    # for terminal cancel-confirmation before submitting the MKT close,
+    # and (b) verify the post-close IB position is actually flat.
+
+    async def wait_for_orders_terminal(
+        self,
+        order_ids: List[int],
+        timeout_s: float = 4.0,
+        poll_iv_s: float = 0.1,
+    ) -> Dict[str, Any]:
+        """v19.34.64 — Poll until every order_id reaches a terminal status.
+
+        Terminal statuses: 'Cancelled', 'ApiCancelled', 'Filled',
+        'Inactive', 'Rejected'.
+
+        Returns a partition of the input set:
+          {
+            cancelled:        [oid, ...],   # safe — child stood down
+            filled:           [oid, ...],   # BAD — OCA fired during wait
+            other_terminal:   [oid, ...],   # rejected/inactive — also safe
+            timeout:          [oid, ...],   # never reached terminal → caller
+                                            # should treat as `filled` risk
+            unknown:          [oid, ...],   # not in local trades cache —
+                                            # may be already-cancelled and
+                                            # garbage-collected → safe
+          }
+
+        Caller decision matrix:
+          - if filled or timeout is non-empty → ABORT the MKT close. The
+            position has likely already been exited (filled) or is at
+            high risk of race (timeout). The bracket-fill will be
+            ingested via the normal exec-details path.
+          - if only cancelled/other_terminal/unknown → safe to submit
+            close MKT; cancels confirmed by IB.
+        """
+        if not await self.ensure_connected():
+            return {"cancelled": [], "filled": [], "other_terminal": [],
+                    "timeout": list(order_ids), "unknown": []}
+
+        target_ids = {int(oid) for oid in order_ids if oid is not None}
+        if not target_ids:
+            return {"cancelled": [], "filled": [], "other_terminal": [],
+                    "timeout": [], "unknown": []}
+
+        terminal_cancel = {"cancelled", "apicancelled"}
+        terminal_fill = {"filled"}
+        terminal_other = {"inactive", "rejected"}
+
+        result: Dict[str, Any] = {
+            "cancelled": [], "filled": [], "other_terminal": [],
+            "timeout": [], "unknown": [],
+        }
+        pending = set(target_ids)
+
+        deadline = asyncio.get_event_loop().time() + max(0.1, float(timeout_s))
+        while pending and asyncio.get_event_loop().time() < deadline:
+            try:
+                trades = list(self._ib.trades())
+            except Exception:
+                trades = []
+            trades_by_id = {int(t.order.orderId): t for t in trades
+                            if t.order is not None}
+
+            # Walk pending; if found and terminal, classify and remove.
+            for oid in list(pending):
+                t = trades_by_id.get(oid)
+                if t is None:
+                    continue  # not seen yet — keep polling
+                status = (t.orderStatus.status or "").lower() if t.orderStatus else ""
+                if status in terminal_cancel:
+                    result["cancelled"].append(oid)
+                    pending.discard(oid)
+                elif status in terminal_fill:
+                    result["filled"].append(oid)
+                    pending.discard(oid)
+                elif status in terminal_other:
+                    result["other_terminal"].append(oid)
+                    pending.discard(oid)
+            if not pending:
+                break
+            await asyncio.sleep(poll_iv_s)
+
+        # Anything still pending — partition between "never seen in trades
+        # cache" (likely already cancelled & GC'd → unknown/safe) and
+        # "seen but didn't reach terminal" (timeout/unsafe). We treat
+        # never-seen as unknown to avoid false negatives; a non-existent
+        # orderId can't fill, so it's safe in practice.
+        if pending:
+            try:
+                trades = list(self._ib.trades())
+            except Exception:
+                trades = []
+            trade_ids_seen = {int(t.order.orderId) for t in trades
+                              if t.order is not None}
+            for oid in pending:
+                if oid in trade_ids_seen:
+                    result["timeout"].append(oid)
+                else:
+                    result["unknown"].append(oid)
+
+        return result
+
+    async def verify_position_flat(
+        self,
+        symbol: str,
+        expected_remaining: int = 0,
+        tolerance: int = 0,
+    ) -> Dict[str, Any]:
+        """v19.34.64 — Post-close authoritative position check.
+
+        After the bot's MKT close polls status=filled, this confirms
+        IB's actual `positions()` for `symbol` matches the expected
+        post-close remaining (default: zero / fully closed). If the
+        absolute mismatch exceeds `tolerance`, the close double-filled
+        (OCA + MKT both landed) and the bot's "closed" record is
+        misleading.
+
+        Returns:
+          {
+            is_flat:        bool,
+            ib_position:    int,             # signed (+ long, - short)
+            expected:       int,
+            divergence:     int,             # ib_position - expected
+            avg_cost:       float | None,
+            checked_at:     iso8601 str,
+          }
+        """
+        if not await self.ensure_connected():
+            return {"is_flat": False, "ib_position": 0,
+                    "expected": int(expected_remaining), "divergence": 0,
+                    "avg_cost": None,
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                    "error": "ib_direct_not_connected"}
+        try:
+            sym = str(symbol).upper()
+            positions = await asyncio.to_thread(self._ib.positions)
+            match = None
+            for p in positions:
+                if p.contract and p.contract.symbol == sym:
+                    match = p
+                    break
+            ib_qty = int(match.position) if match else 0
+            avg_cost = float(match.avgCost) if match else None
+            divergence = ib_qty - int(expected_remaining)
+            is_flat = abs(divergence) <= int(tolerance)
+            return {
+                "is_flat": is_flat,
+                "ib_position": ib_qty,
+                "expected": int(expected_remaining),
+                "divergence": divergence,
+                "avg_cost": avg_cost,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.64 IB-DIRECT] verify_position_flat(%s) failed: %s",
+                symbol, e,
+            )
+            return {"is_flat": False, "ib_position": 0,
+                    "expected": int(expected_remaining), "divergence": 0,
+                    "avg_cost": None,
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                    "error": str(e)[:200]}
 
     # ── v19.34.27 Patch L1 — Native ib_async bracket order placement ──────
     #
