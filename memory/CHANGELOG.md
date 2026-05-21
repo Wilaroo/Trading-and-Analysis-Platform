@@ -1,3 +1,66 @@
+## 2026-02 — v19.34.71: Pusher reports IB 10147/10148/200 as failed (root-cause closure)
+
+### Trigger
+v19.34.70 A-D made the bot RESILIENT to bracket-state staleness. v19.34.71
+removes the UPSTREAM CAUSE: the Windows pusher was silently failing to report
+IB cancel-rejection errors back to the backend.
+
+### Root cause
+`_execute_queued_cancellation` in `ib_data_pusher.py` only inspected
+`target_trade.orderStatus.status` during its 5s post-cancel wait. When IB
+rejected a cancel with error 10147 ("OrderId not found"), the rejection arrived
+via the async errorEvent callback and was routed by ib_insync into
+`Trade.log[-1].errorCode` — the loop never read the log. After 5s of no status
+change the pusher reported `pending`, backend treated it as still trying,
+re-served on next poll, served_count climbed to 3, silent stale-drop via
+v19.34.65b. Result: 21 unprotected positions on 2026-05-21.
+
+### Fix
+- Snapshot `len(Trade.log)` before issuing the cancel.
+- After each 0.5s sleep, scan log entries that arrived since baseline for
+  `errorCode != 0`.
+- Report any such entry as `"failed"` with `error="IB error {code}: {msg}"` so
+  backend's `_is_fatal_cancel_error()` immediately stale-drops the entry.
+- Bumped wait window from 10×0.5s (5s) → 20×0.5s (10s) to reduce false-positive
+  "pending" reports on slow IB acks.
+- Timeout-with-no-terminal-no-errorcode fallback now reports `"failed"` (not
+  `"pending"`) so the backend's failure_count bumps via the normal path.
+- Silent-return-on-claim-falsy now logs at INFO (was DEBUG) so operators can
+  see this path firing if v19.34.65b's backstop ever lights up again.
+
+### Verification
+- `tests/test_pusher_cancel_result_v19_34_71.py` — 9 cases:
+  10147/10148/200 each → failed, normal terminal → cancelled, filled-race →
+  failed, timeout-no-signal → failed, pre-existing-log-error → not attributed
+  to our cancel, cancelOrder-raises → failed, not-found → not_found.
+- All 9 pass on both /app (Emergent) and DGX (`.venv`/Python 3.12) layouts.
+- v19.34.69 + v19.34.70 A-D + v19.34.71 cumulative: **95/95 tests passing**.
+
+### Deployment
+- **DGX side**: commits `c2d7d1bc` (v19.34.69+70 A-D) and `af89c9ad`
+  (v19.34.71 pusher patch) and `f302ee83` (test path fix) all on GitHub `main`.
+- **Windows side**: the existing `start_tradecommand.bat` auto-pulls from
+  GitHub at boot (Step 2), so the pusher script gets the new code on next
+  `.bat` run. Step 5 restarts the pusher with v19.34.71 code live.
+- **No manual file copying or paste.rs flows needed for Windows** — git
+  is the deployment channel.
+
+### Expected observable behavior after restart
+**Pusher window**:
+```
+[CancelQueue] 4729 IB returned error 10147 → reporting failed (msg='Order Id 4729 ...')
+```
+**Spark backend log**:
+```
+[v19.34.65 CANCEL-STALE] ib_order_id=4729 dropped after 1 failure(s) (last_err='IB error 10147: ...', fatal=True, reason=...)
+```
+**Patch D (v19.34.70)** auto-cleanup loop will see fewer stale refs to clean
+up because the upstream is now reporting them correctly. The bracket-state
+desync class of bug is closed end-to-end.
+
+---
+
+
 ## 2026-02 — v19.34.70 A+B+C+D: Bot-vs-IB bracket-state desync fix (post-incident hardening)
 
 ### Trigger
