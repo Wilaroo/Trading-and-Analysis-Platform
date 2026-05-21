@@ -33,6 +33,7 @@ easy CI inclusion.
 Run from /app:
   python -m pytest backend/tests/test_pusher_cancel_result_v19_34_71.py -v
 """
+import os
 import sys
 import time
 import types
@@ -40,7 +41,36 @@ import importlib.util
 
 import pytest
 
-PUSHER_PATH = "/app/documents/scripts/ib_data_pusher.py"
+
+def _locate_pusher():
+    """v19.34.71 — auto-locate ib_data_pusher.py regardless of which repo
+    root the tests run from. Tries (in order):
+      1. /app/documents/scripts/...  (Emergent workspace)
+      2. <repo-root>/documents/scripts/...  (DGX/Windows checkouts)
+      3. PUSHER_SCRIPT env override (for unusual layouts)
+    Returns the first path that exists, else raises clearly."""
+    candidates = []
+    env_override = os.environ.get("PUSHER_SCRIPT")
+    if env_override:
+        candidates.append(env_override)
+    # 1. Emergent workspace
+    candidates.append("/app/documents/scripts/ib_data_pusher.py")
+    # 2. Relative to this test file (backend/tests/ → ../../documents/scripts/)
+    here = os.path.dirname(os.path.abspath(__file__))
+    rel = os.path.normpath(os.path.join(
+        here, "..", "..", "documents", "scripts", "ib_data_pusher.py"
+    ))
+    candidates.append(rel)
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    raise FileNotFoundError(
+        f"Could not locate ib_data_pusher.py. Tried: {candidates}. "
+        f"Set PUSHER_SCRIPT env var to override."
+    )
+
+
+PUSHER_PATH = _locate_pusher()
 
 
 # ---------------------------------------------------------------------
