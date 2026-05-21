@@ -36,20 +36,11 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
-            # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────────
+            # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
             # Alerts that sit in the pipeline too long are no longer trading
-            # the setup they detected — the price has moved, the trigger is
-            # gone, and the resulting IB order either gets rejected or fills
-            # at a worse price than the setup expected. Today's session
-            # caught 41 stale alerts deep in the pipeline (Error 110 / live-
-            # price gate). Killing them at the gate saves the round-trip and
-            # makes "scanner pipeline lag" visible in the Scanner Quality
-            # Panel as `stale_alert_ttl`.
-            #
-            # Source: `alert["triggered_at_unix"]` (int seconds, set by
-            # `enhanced_alerts.compose_alert`). Fail-OPEN if the field is
-            # missing so legacy alert paths without timestamps still flow.
-            # TTL is env-tunable via `STALE_ALERT_TTL_SECONDS`.
+            # the setup they detected. Kill them at the gate to save the IB
+            # round-trip and surface pipeline lag in the Scanner Quality
+            # Panel as `stale_alert_ttl`. Fail-OPEN on missing timestamp.
             try:
                 import os as _os_ttl
                 import time as _time_ttl
@@ -60,7 +51,6 @@ class OpportunityEvaluator:
                     _ttl_secs = 30.0
                 if _ttl_secs > 0:
                     _triggered_unix = alert.get("triggered_at_unix")
-                    # Fallback: parse ISO `triggered_at` if unix epoch absent.
                     if _triggered_unix is None:
                         _iso = alert.get("triggered_at")
                         if _iso:
@@ -78,8 +68,7 @@ class OpportunityEvaluator:
                         if _age >= _ttl_secs:
                             logger.warning(
                                 "🕒 [v19.34.44 stale-alert-ttl] Dropping %s %s — "
-                                "alert age %.1fs ≥ TTL %.0fs. Pipeline lag is "
-                                "killing this setup before it can fire.",
+                                "alert age %.1fs ≥ TTL %.0fs.",
                                 symbol, setup_type, _age, _ttl_secs,
                             )
                             try:
@@ -95,10 +84,6 @@ class OpportunityEvaluator:
                                 )
                             except Exception:
                                 pass
-                            # Mirror into `trade_drops` so the Scanner Quality
-                            # Panel and `/api/system/rejection-analytics`
-                            # surface it under the canonical `stale_alert`
-                            # bucket (normaliser maps "stale" → stale_alert).
                             try:
                                 from services.trade_drop_recorder import record_trade_drop
                                 record_trade_drop(
@@ -117,10 +102,9 @@ class OpportunityEvaluator:
                                 pass
                             return None
             except Exception as _ttl_err:
-                # Fail-OPEN: a bug in the TTL gate must never block trading.
                 logger.debug(
-                    "[v19.34.44 stale-alert-ttl] gate crashed (allowing entry "
-                    "as fail-open): %s", _ttl_err,
+                    "[v19.34.44 stale-alert-ttl] gate crashed (fail-open): %s",
+                    _ttl_err,
                 )
 
             # ── v19.34.123 — Per-(symbol, direction) open-exposure cap ────
@@ -544,31 +528,15 @@ class OpportunityEvaluator:
             except Exception as exc:
                 logger.debug(f"stop-guard skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
 
-            # ── v19.34.45 — Guardrail-floor enforcement ─────────────────
-            # The execution_guardrails `check_min_stop_distance` rule
-            # requires |entry-stop| ≥ 0.3 × ATR. Upstream alerts have
-            # been seen supplying stops as tight as $0.03 on a $115
-            # stock with $2.30 ATR (XLY backside) — 1.3% of one ATR.
-            # Those trades were getting vetoed deep in the pipeline
-            # after enrichment / AI / sizing already burned cycles.
-            #
-            # Treat the floor as a contract: if the (possibly already
-            # smart-levels-widened) stop is still tighter than 0.3 ×
-            # ATR, replace it with the canonical per-setup ATR-based
-            # stop. The per-setup multipliers in SETUP_MULTIPLIERS
-            # (e.g. backside=0.5×, vwap_fade_short=1.0×) are already
-            # legal under the guardrail floor, so the recomputed stop
-            # will pass. Preserves the trade intent — sizer takes the
-            # bigger risk distance and produces a smaller share count.
-            #
-            # Env knobs:
-            #   STOP_FLOOR_ENFORCE=0  → disable (fail-open)
-            #   EXECUTION_GUARDRAIL_MIN_STOP_ATR_MULT=0.3 (shared knob)
+            # ── v19.34.45 — Guardrail-floor enforcement ─────────
+            # If the (alert-supplied, possibly smart-levels-widened) stop
+            # is tighter than 0.3 × ATR, replace with the canonical
+            # per-setup ATR-based stop. Sizer absorbs the wider risk.
             stop_floor_meta = None
             try:
                 import os as _os_floor
                 _enf_raw = _os_floor.environ.get("STOP_FLOOR_ENFORCE", "1")
-                _enf_on = str(_enf_raw).strip().lower() not in ("0", "", "false", "no", "off")
+                _enf_on = str(_enf_raw).strip().lower() not in ("0","","false","no","off")
                 if _enf_on and stop_price and entry_price and atr and atr > 0:
                     try:
                         _floor_mult = float(_os_floor.environ.get(
@@ -605,12 +573,6 @@ class OpportunityEvaluator:
                                 "recomputed_distance": _new_distance,
                             }
                         else:
-                            # Recomputed stop ALSO too tight — this would
-                            # only happen with a misconfigured per-setup
-                            # multiplier. Log and leave alert stop alone;
-                            # the pre-exec guardrail will catch + reject
-                            # so we still get protection, just not auto-
-                            # widening. Surface the misconfig.
                             logger.error(
                                 "⚠️ [v19.34.45 stop-floor] %s %s — alert stop AND "
                                 "recomputed stop both below %.2f×ATR floor "
@@ -628,8 +590,6 @@ class OpportunityEvaluator:
                                 "floor_atr_mult": _floor_mult,
                             }
             except Exception as _floor_err:
-                # Fail-OPEN: never block trading on a bug in the floor
-                # check. The downstream pre-exec guardrail still applies.
                 logger.debug(
                     "[v19.34.45 stop-floor] enforce crashed (fail-open): %s",
                     _floor_err,
@@ -1268,43 +1228,25 @@ class OpportunityEvaluator:
         else:
             shares = max(min(max_shares_by_risk, max_shares_by_capital), 1)
 
-        # v19.34.X (Feb 2026) — Sync sizer with execution_guardrails cap.
-        # The downstream `check_max_position_notional` guardrail enforces
-        # an INDEPENDENT ceiling (`EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT`
-        # × live account equity, default 40%). When `max_notional_per_trade`
-        # is disabled (0) or set higher than that pct-ceiling — or when
-        # equity drifts down — the sizer would produce notional ABOVE the
-        # guardrail → trade vetoed with `notional_over_cap`. Bot logs all
-        # day with $0 P&L (operator-observed 2026-02). Pre-clamp here so
-        # both ceilings agree. The 0.5% tolerance band matches the
-        # guardrail's own tolerance for integer-share rounding edges.
-        # Env is re-read at call-time so hot config tweaks take effect
-        # without a backend restart.
+        # v19.34.29 — Sync sizer with execution_guardrails cap.
+        # AMZN was vetoed daily by `notional_over_cap $106k>$100k` because
+        # the sizer ignored the 40%-equity guardrail. Pre-clamp here.
         try:
             import os as _os
             def _envf(k, d):
                 v = _os.environ.get(k)
-                try:
-                    return float(v) if v not in (None, "") else d
-                except (TypeError, ValueError):
-                    return d
-            _guard_pct = _envf("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
-            _guard_tol = _envf("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
-            _equity_for_guard = float(
-                getattr(bot.risk_params, "starting_capital", 0) or 0
-            )
-            if (
-                _guard_pct > 0
-                and _equity_for_guard > 0
-                and entry_price > 0
-            ):
-                _guard_cap = _guard_pct * _equity_for_guard * (1.0 + _guard_tol)
-                _max_shares_by_guard = int(_guard_cap / entry_price)
+                try: return float(v) if v not in (None, "") else d
+                except: return d
+            _gp = _envf("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
+            _gt = _envf("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
+            _eq = float(getattr(bot.risk_params, "starting_capital", 0) or 0)
+            if _gp > 0 and _eq > 0 and entry_price > 0:
+                _gc = _gp * _eq * (1.0 + _gt)
+                _max_shares_by_guard = int(_gc / entry_price)
                 if _max_shares_by_guard > 0:
                     shares = max(min(shares, _max_shares_by_guard), 1)
-        except Exception as _ge:
-            # Never let the guardrail-sync lookup break sizing.
-            logger.debug(f"execution-guardrail sizer pre-clamp skipped: {_ge}")
+        except Exception as _e:
+            logger.debug(f"execution-guardrail sizer pre-clamp skipped: {_e}")
 
         # 2026-05-01 v19.20 — Safety-cap-aware sizing (operator request).
         # The opportunity sizer and the downstream SafetyGuardrails had two

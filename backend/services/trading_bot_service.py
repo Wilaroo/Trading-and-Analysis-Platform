@@ -774,7 +774,7 @@ class BotTrade:
         The fill-time block stays canonical (it reads the *actual* IB
         account_id from the pusher snapshot — the truth for filled rows).
         This `__post_init__` only fixes the construction-time default so
-        rejected/vetoed trades inherit the operator's configured intent
+        rejected/vetoed trades inherit the operator\'s configured intent
         from `IB_ACCOUNT_ACTIVE`. On any import or env-load failure it
         leaves the field as the dataclass default ("unknown") — never
         worse than the legacy behavior.
@@ -3023,52 +3023,24 @@ class TradingBotService:
             except Exception as e:
                 logger.debug(f"[v19.34.7 BOOT-SWEEP] schedule failed: {e}")
 
-        # ─── v19.34.X (Feb 2026) — Bug A-2: stale PENDING row auto-reaper ──
-        # `trade_execution.py` writes a `bot_trades` row with status=PENDING
-        # immediately BEFORE handing the order to the broker. If the broker
-        # call hangs (Bug-Y class deadlock) or errors before the post-fill
-        # `_save_trade` flips the row to OPEN/REJECTED, the row sits in
-        # PENDING forever and the bot's dedup logic blocks every subsequent
-        # attempt on that symbol with `duplicate_open_position`. Operator
-        # had to hand-clean 7 rows on 2026-05-18.
-        #
-        # This loop runs every 60s and marks any PENDING row older than
-        # `PENDING_REAPER_MAX_AGE_S` (default 300s = 5 min) as REJECTED
-        # with reason `stale_pending_auto_reaper`. Idempotent — runs only
-        # on rows with no `executed_at` so a slow but successful fill
-        # can't get clobbered.
+        # v19.34.30 Bug A-2 stale PENDING row auto-reaper
         async def _stale_pending_reaper_loop():
             import os as _os3
-            interval_s = int(
-                _os3.environ.get("PENDING_REAPER_INTERVAL_S", "60") or 60
-            )
-            max_age_s = int(
-                _os3.environ.get("PENDING_REAPER_MAX_AGE_S", "300") or 300
-            )
+            interval_s = int(_os3.environ.get("PENDING_REAPER_INTERVAL_S", "60") or 60)
+            max_age_s = int(_os3.environ.get("PENDING_REAPER_MAX_AGE_S", "300") or 300)
             disabled = (
                 _os3.environ.get("PENDING_REAPER_ENABLED", "true").strip().lower()
                 in ("0", "false", "no", "off")
             )
             if disabled:
-                logger.info("[v19.34.X PENDING-REAPER] disabled by env")
+                logger.info("[v19.34.30 PENDING-REAPER] disabled by env")
                 return
-
-            # 45s grace so the pre-submit row from a just-launched bracket
-            # has time to flip naturally before we sweep.
             await asyncio.sleep(45)
             while self._running:
                 try:
                     db = getattr(self, "_db", None)
                     if db is not None:
-                        cutoff = (
-                            datetime.now(timezone.utc)
-                            - timedelta(seconds=max_age_s)
-                        ).isoformat()
-                        # Match PENDING rows that:
-                        #   • have a pre_submit_at older than cutoff
-                        #   • have no executed_at (broker never confirmed)
-                        # Status field is lowercase in Mongo (`pending`)
-                        # per TradeStatus enum value.
+                        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_s)).isoformat()
                         query = {
                             "status": "pending",
                             "pre_submit_at": {"$lt": cutoff},
@@ -3079,8 +3051,7 @@ class TradingBotService:
                         }
                         stale = list(
                             db["bot_trades"].find(
-                                query, {"_id": 0, "id": 1, "symbol": 1,
-                                        "pre_submit_at": 1}
+                                query, {"_id": 0, "id": 1, "symbol": 1, "pre_submit_at": 1}
                             ).limit(50)
                         )
                         if stale:
@@ -3094,66 +3065,35 @@ class TradingBotService:
                                     {"id": tid, "status": "pending"},
                                     {"$set": {
                                         "status": "rejected",
-                                        "close_reason": (
-                                            "stale_pending_auto_reaper"
-                                        ),
+                                        "close_reason": "stale_pending_auto_reaper",
                                         "closed_at": stamp,
                                         "reaped_at": stamp,
-                                        "reaper_version": "v19.34.X",
+                                        "reaper_version": "v19.34.30",
                                     }},
                                 )
                                 if res.modified_count:
                                     updated_ids.append(tid)
                             if updated_ids:
                                 logger.warning(
-                                    "[v19.34.X PENDING-REAPER] reaped %d "
-                                    "stale PENDING row(s) (>%ds old): %s",
+                                    "[v19.34.30 PENDING-REAPER] reaped %d stale PENDING row(s) (>%ds old)",
                                     len(updated_ids), max_age_s,
-                                    [(r.get("symbol"), r.get("id"))
-                                     for r in stale if r.get("id") in updated_ids][:10],
                                 )
-                                # Also evict from in-memory pending cache
-                                # so dedup unblocks the symbol immediately.
                                 for tid in updated_ids:
                                     self._pending_trades.pop(tid, None)
-                                # Surface to operator stream once per sweep.
-                                try:
-                                    from services.sentcom_service import emit_stream_event
-                                    await emit_stream_event({
-                                        "kind": "alert",
-                                        "severity": "warning",
-                                        "event": "stale_pending_reaped",
-                                        "text": (
-                                            f"🧹 Reaped {len(updated_ids)} "
-                                            f"stale PENDING row(s) "
-                                            f"(>{max_age_s}s old)"
-                                        ),
-                                        "metadata": {
-                                            "count": len(updated_ids),
-                                            "max_age_s": max_age_s,
-                                            "trade_ids": updated_ids[:10],
-                                        },
-                                    })
-                                except Exception:
-                                    pass
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    logger.debug(
-                        f"[v19.34.X PENDING-REAPER] loop tick failed: {e}"
-                    )
+                    logger.debug(f"[v19.34.30 PENDING-REAPER] loop tick failed: {e}")
                 try:
                     await asyncio.sleep(interval_s)
                 except asyncio.CancelledError:
                     raise
 
         try:
-            self._pending_reaper_task = asyncio.create_task(
-                _stale_pending_reaper_loop()
-            )
+            self._pending_reaper_task = asyncio.create_task(_stale_pending_reaper_loop())
         except Exception as e:
             logger.warning(
-                f"[v19.34.X PENDING-REAPER] failed to schedule (non-fatal): {e}"
+                f"[v19.34.30 PENDING-REAPER] failed to schedule (non-fatal): {e}"
             )
 
         # ─── v19.34.17 (2026-05-06) — EOD-close policy migration ──────
@@ -3346,6 +3286,121 @@ class TradingBotService:
                     f"[v19.34.15b DRIFT-LOOP] failed to schedule (non-fatal): {e}"
                 )
 
+        # ─── v19.34.49 (2026-05-20) — Continuous Orphan-Reconcile Loop ─
+        # Pure IB-only orphans (positions IB has but bot doesn't track)
+        # are NOT handled by the share-drift loop (which acts only on
+        # already-tracked symbols; orphans are deferred at
+        # position_reconciler.py:1775 back to reconcile_orphan_positions).
+        # Without this loop, mid-session orphans (manual TWS fills,
+        # bracket-fill races, overnight carryovers) stay naked until
+        # the operator manually clicks "Reconcile N". Production root
+        # cause for the 2026-05-20 overnight 8-orphan incident.
+        if os.environ.get("AUTO_ORPHAN_RECONCILE_ENABLED", "true").lower() in (
+            "true", "1", "yes", "on"
+        ):
+            orphan_interval_s = int(
+                os.environ.get("AUTO_ORPHAN_RECONCILE_INTERVAL_S", "180") or 180
+            )
+            if orphan_interval_s < 30:
+                orphan_interval_s = 30  # safety floor
+
+            async def _orphan_reconcile_loop():
+                await asyncio.sleep(60)  # grace: pusher snapshot + boot pass settle
+                logger.info(
+                    "[v19.34.49 ORPHAN-LOOP] started, interval=%ss",
+                    orphan_interval_s,
+                )
+                self._orphan_reconcile_diag = {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "interval_s": orphan_interval_s,
+                    "tick_count": 0,
+                    "last_tick_at": None,
+                    "last_tick_status": "pending",
+                    "last_tick_error": None,
+                    "last_reconciled": [],
+                    "last_skipped": [],
+                    "consecutive_failures": 0,
+                }
+                while self._running:
+                    tick_started = datetime.now(timezone.utc)
+                    try:
+                        from routers.ib import is_pusher_connected
+                        if not is_pusher_connected():
+                            self._orphan_reconcile_diag["last_tick_status"] = "skipped_no_pusher"
+                            self._orphan_reconcile_diag["last_tick_at"] = tick_started.isoformat()
+                            self._orphan_reconcile_diag["tick_count"] += 1
+                        else:
+                            result = await self._position_reconciler.reconcile_orphan_positions(
+                                self, all_orphans=True,
+                            )
+                            self._orphan_reconcile_diag["tick_count"] += 1
+                            self._orphan_reconcile_diag["last_tick_at"] = tick_started.isoformat()
+                            n_recon = len(result.get("reconciled") or [])
+                            n_skip = len(result.get("skipped") or [])
+                            self._orphan_reconcile_diag["last_tick_status"] = (
+                                "ok" if result.get("success") else "error"
+                            )
+                            self._orphan_reconcile_diag["last_tick_error"] = result.get("error")
+                            claimed = [
+                                r.get("symbol") for r in (result.get("reconciled") or [])
+                                if r.get("symbol")
+                            ][:16]
+                            self._orphan_reconcile_diag["last_reconciled"] = claimed
+                            self._orphan_reconcile_diag["last_skipped"] = [
+                                {"symbol": s.get("symbol"), "reason": s.get("reason")}
+                                for s in (result.get("skipped") or [])
+                                if s.get("symbol")
+                            ][:16]
+                            self._orphan_reconcile_diag["consecutive_failures"] = 0
+                            if n_recon:
+                                logger.warning(
+                                    "[v19.34.49 ORPHAN-LOOP] auto-claimed %d orphan(s): %s "
+                                    "(skipped=%d)", n_recon, claimed, n_skip,
+                                )
+                                try:
+                                    from services.sentcom_service import emit_stream_event
+                                    await emit_stream_event({
+                                        "kind": "info",
+                                        "event": "auto_orphan_reconcile",
+                                        "text": (
+                                            f"\U0001F501 Auto-orphan-reconcile claimed "
+                                            f"{n_recon} naked IB orphan(s): "
+                                            f"{', '.join(claimed[:8])}"
+                                            + (f" (+{len(claimed)-8} more)"
+                                               if len(claimed) > 8 else "")
+                                        ),
+                                        "metadata": {
+                                            "reconciled_count": n_recon,
+                                            "skipped_count": n_skip,
+                                            "symbols": claimed,
+                                        },
+                                    })
+                                except Exception:
+                                    pass
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        diag = getattr(self, "_orphan_reconcile_diag", {})
+                        diag["last_tick_status"] = "exception"
+                        diag["last_tick_error"] = f"{type(e).__name__}: {e}"
+                        diag["last_tick_at"] = tick_started.isoformat()
+                        diag["consecutive_failures"] = (
+                            diag.get("consecutive_failures", 0) + 1
+                        )
+                        logger.warning(f"[v19.34.49 ORPHAN-LOOP] tick failed: {e}")
+                    try:
+                        await asyncio.sleep(orphan_interval_s)
+                    except asyncio.CancelledError:
+                        raise
+
+            try:
+                self._orphan_reconcile_task = asyncio.create_task(_orphan_reconcile_loop())
+            except Exception as e:
+                logger.warning(
+                    f"[v19.34.49 ORPHAN-LOOP] failed to schedule (non-fatal): {e}"
+                )
+
+
         # ─── v19.34.10 (2026-05-06) — State integrity watchdog ──────
         # Catches drift between in-memory `risk_params` and persisted
         # `bot_state.risk_params` in MongoDB (the v19.34.9 root cause
@@ -3387,6 +3442,16 @@ class TradingBotService:
             sdt.cancel()
             try:
                 await sdt
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        # v19.34.49 — cancel the orphan-reconcile loop if it's running.
+        ort = getattr(self, "_orphan_reconcile_task", None)
+        if ort is not None:
+            ort.cancel()
+            try:
+                await ort
             except asyncio.CancelledError:
                 pass
             except Exception:
@@ -4649,6 +4714,38 @@ class TradingBotService:
             return result
         result["source_tier"] = source_info.get("tier")
 
+        # ─────────── v19.34.31 PATCH E ─────────── # v19_34_31_PATCH_E_pusher_stale_guard
+        # If the pusher snapshot used to build live_order_ids is older
+        # than PUSHER_STALE_THRESHOLD_SEC, the snapshot is missing
+        # recently-issued OCA stop/target IDs — the naked sweep will
+        # then wrongly flag every active bracket as NAKED and trigger
+        # an emergency reissue cascade (bracket stacking).
+        PUSHER_STALE_THRESHOLD_SEC = 45.0
+        try:
+            if (source_info or {}).get("tier") == "pusher_orders_snapshot":
+                from routers.ib import _pushed_ib_data
+                from datetime import datetime, timezone
+                _lu = (_pushed_ib_data or {}).get("last_update")
+                if _lu:
+                    _last_dt = datetime.fromisoformat(str(_lu).replace("Z", "+00:00"))
+                    _age = (datetime.now(timezone.utc) - _last_dt).total_seconds()
+                    result["pusher_age_sec"] = _age
+                    if _age > PUSHER_STALE_THRESHOLD_SEC:
+                        result["skipped_reason"] = f"pusher_snapshot_stale:{_age:.1f}s"
+                        print(
+                            f"[v127 naked-sweep] SKIP — pusher snapshot is "
+                            f"{_age:.1f}s old (>{PUSHER_STALE_THRESHOLD_SEC}s). "
+                            f"Refusing to reissue brackets on a stale order book.",
+                            flush=True,
+                        )
+                        return result
+        except Exception as _stale_err:
+            print(
+                f"[v127 naked-sweep] pusher-stale check failed (continuing): "
+                f"{_stale_err}", flush=True,
+            )
+        # ─────────── /PATCH E ───────────
+
         # Skip if executor is in non-LIVE mode (simulator/paper has no
         # actual IB orders, though pusher-mode is also "LIVE").
         mode_str = (
@@ -4798,10 +4895,9 @@ class TradingBotService:
                     tgt_id = oca_result.get("target_order_id")
                     if tgt_id is not None:
                         trade.target_order_id = tgt_id
+                        # v19.34.30 Patch A: REPLACE not append.
                         try:
-                            if not getattr(trade, "target_order_ids", None):
-                                trade.target_order_ids = []
-                            trade.target_order_ids.append(tgt_id)
+                            trade.target_order_ids = [tgt_id]
                         except Exception:
                             pass
                     trade.oca_group = oca_result.get("oca_group")

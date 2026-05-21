@@ -1417,7 +1417,8 @@ class PositionReconciler:
                     # is the same one the orphan must belong to (otherwise
                     # the pusher snapshot wouldn't show it).
                     try:
-                        from services.account_guard import classify_account_id
+                        # v19.34.51 — env-fallback when pusher snapshot is empty.
+                        from services.account_guard import classify_account_id, load_account_expectation
                         from services.ib_pusher_rpc import get_account_snapshot
                         # v19.34.8 (2026-05-05) — wrap sync pusher RPC in
                         # asyncio.to_thread to prevent event-loop wedge.
@@ -1427,8 +1428,14 @@ class PositionReconciler:
                         # Same wedge class as v19.30.6/v19.30.8 fixes.
                         snap = await asyncio.to_thread(get_account_snapshot)
                         cur_account_id = (snap or {}).get("account_id") or ""
-                        trade.trade_type = classify_account_id(cur_account_id)
-                        trade.account_id_at_fill = cur_account_id or None
+                        if cur_account_id:
+                            trade.trade_type = classify_account_id(cur_account_id)
+                            trade.account_id_at_fill = cur_account_id
+                        else:
+                            # v19.34.51 — pusher snapshot empty; use env active_mode.
+                            exp = load_account_expectation()
+                            trade.trade_type = exp.active_mode or "unknown"
+                            trade.account_id_at_fill = None
                     except Exception as _acct_exc:
                         # Safe default: leave as "unknown" / None so the
                         # chip simply doesn't render rather than mislabel.
@@ -1501,43 +1508,184 @@ class PositionReconciler:
                             )
                         else:
                             self._stamp_bracket_attach(trade.id)
+                            # ─────────── v19.34.31 PATCH C ─────────── # v19_34_31_PATCH_C_pre_attach_cancel
+                            # v19.34.66 HARDENED (Feb 2026) — Operator caught
+                            # Patch C cancelling perfectly-good protective
+                            # legs at IB, then placing duplicate new ones on
+                            # top, AND triggering relentless Error 10147
+                            # cancel-loops when IB had already moved the leg
+                            # into PendingCancel/Cancelled. Pre-v19.34.66
+                            # Patch C did 3 wrong things:
+                            #   (1) Cancelled BOTH protective AND entry orders
+                            #       (any status Submitted/PreSubmitted, regardless
+                            #       of direction).
+                            #   (2) Always called attach_oca_stop_target() after,
+                            #       even if the live bracket was already complete.
+                            #   (3) Didn't honor the v19.34.65 stale_dropped
+                            #       lifecycle — re-queued cancels on dead ids.
+                            #
+                            # Three-way classification of live IB orders:
+                            #   (a) Already protected (STP + target LMT for the
+                            #       protective direction)  → SKIP cancels, SKIP
+                            #       attach. Stamp existing leg IDs on the trade.
+                            #   (b) Partially protected     → cancel only the
+                            #       protective legs (NEVER entry orders), then
+                            #       attach.
+                            #   (c) Unprotected             → no cancels needed,
+                            #       go straight to attach (original Patch C "naked"
+                            #       case).
+                            #
+                            # Operator constraint: "only cancel orders that need
+                            # cancelling, never create new orders that aren't
+                            # necessary."
+                            _patch_c_skip_attach = False
                             try:
-                                oca_result = await executor.attach_oca_stop_target(trade)
-                                if oca_result and oca_result.get("success"):
-                                    trade.stop_order_id = oca_result.get("stop_order_id")
-                                    tgt_id = oca_result.get("target_order_id")
-                                    if tgt_id:
-                                        # BotTrade tracks targets as a list
-                                        # (`target_order_ids`) since brackets
-                                        # can scale out across multiple PTs.
-                                        if not hasattr(trade, "target_order_ids") or trade.target_order_ids is None:
-                                            trade.target_order_ids = []
-                                        trade.target_order_ids.append(tgt_id)
-                                    trade.oca_group = oca_result.get("oca_group")
-                                    # Re-persist so the order IDs land in bot_trades.
-                                    await asyncio.to_thread(bot._persist_trade, trade)
-                                    bracket_attach_result = oca_result
+                                from routers.ib import (
+                                    _pushed_ib_data,
+                                    queue_cancellation,
+                                    get_cancellation_status,
+                                )
+                                _sym_c = (sym or '').upper()
+                                _orders_c = (_pushed_ib_data or {}).get('orders') or []
+                                if isinstance(_orders_c, dict):
+                                    _orders_c = _orders_c.get('orders', [])
+                                # Protective leg direction is OPPOSITE of position.
+                                _pos_is_long = (
+                                    direction.value.lower() == 'long'
+                                    if hasattr(direction, 'value')
+                                    else str(direction).lower() == 'long'
+                                )
+                                _protective_action = 'SELL' if _pos_is_long else 'BUY'
+                                # Classify live bracket legs.
+                                _has_stop = False
+                                _has_target = False
+                                _protective_leg_ids: list = []
+                                for _oc in _orders_c:
+                                    try:
+                                        if str(_oc.get('symbol') or '').upper() != _sym_c:
+                                            continue
+                                        _st = (_oc.get('status') or '').strip()
+                                        # Only consider currently-active legs.
+                                        # PendingCancel/Cancelled/Inactive are
+                                        # already on their way out — touching
+                                        # them is exactly what produced the
+                                        # 10147 loop.
+                                        if _st not in ('Submitted', 'PreSubmitted'):
+                                            continue
+                                        _action = (_oc.get('action') or '').upper()
+                                        if _action != _protective_action:
+                                            # Entry order or unrelated — DO NOT touch.
+                                            continue
+                                        _otype = (
+                                            _oc.get('order_type')
+                                            or _oc.get('orderType')
+                                            or ''
+                                        ).upper()
+                                        _oid = _oc.get('order_id') or _oc.get('orderId')
+                                        if _oid is None:
+                                            continue
+                                        if _otype in (
+                                            'STP', 'STP LMT', 'STP_LMT',
+                                            'TRAIL', 'TRAIL LMT', 'TRAIL_LMT',
+                                        ):
+                                            _has_stop = True
+                                            _protective_leg_ids.append(int(_oid))
+                                        elif _otype in ('LMT', 'LIMIT'):
+                                            _has_target = True
+                                            _protective_leg_ids.append(int(_oid))
+                                    except Exception:
+                                        continue
+
+                                if _has_stop and _has_target:
+                                    # CASE (a): position already fully protected.
+                                    # Do nothing — no cancels, no new orders.
+                                    _patch_c_skip_attach = True
+                                    bracket_attach_result = {
+                                        'success': True,
+                                        'skipped': 'already_protected_v19_34_66',
+                                        'existing_bracket_leg_ids': _protective_leg_ids,
+                                    }
+                                    # Stamp existing leg ID(s) on the trade so the
+                                    # UI's "stop at IB" indicator works.
+                                    if _protective_leg_ids and not getattr(trade, 'stop_order_id', None):
+                                        trade.stop_order_id = str(_protective_leg_ids[0])
                                     logger.info(
-                                        f"[RECONCILE BRACKET] {sym} OCA attached: "
-                                        f"stop={trade.stop_order_id} "
-                                        f"tgt={getattr(trade, 'target_order_ids', [])} "
-                                        f"oca={getattr(trade, 'oca_group', None)}"
+                                        f"[v19.34.66 PATCH-C HARDENED] {sym} "
+                                        f"already has live STP+LMT protective "
+                                        f"bracket (ids={_protective_leg_ids}). "
+                                        f"Skipping pre-attach cancel AND OCA "
+                                        f"attach — no unnecessary cancels, no "
+                                        f"duplicate orders."
                                     )
                                 else:
-                                    err = (oca_result or {}).get("error", "unknown")
-                                    bracket_attach_result = {"success": False, "error": err}
+                                    # CASE (b) or (c): cancel only protective
+                                    # legs we can confirm are stale-eligible.
+                                    # Honor v19.34.65 stale_dropped lifecycle.
+                                    for _oid in _protective_leg_ids:
+                                        try:
+                                            _exist = get_cancellation_status(int(_oid))
+                                            if _exist and _exist.get('status') in (
+                                                'stale_dropped', 'cancelled', 'expired',
+                                            ):
+                                                continue  # v19.34.65 already terminal
+                                            queue_cancellation(
+                                                ib_order_id=int(_oid),
+                                                reason=f'v19.34.31 Patch C: pre-attach {sym}',
+                                                requested_by='position_reconciler_v19_34_31',
+                                            )
+                                        except Exception:
+                                            continue
+                            except Exception as _pc:
+                                logger.warning(f'[v19.34.31 Patch C] {sym} pre-attach (non-fatal): {_pc}')
+                            # ─────────── /PATCH C ───────────
+                            if _patch_c_skip_attach:
+                                # v19.34.66 — Position already protected.
+                                # `bracket_attach_result` was set inside the
+                                # PATCH C block above. Don't fire the OCA
+                                # attach — it would duplicate live legs.
+                                pass
+                            else:
+                                try:
+                                    oca_result = await executor.attach_oca_stop_target(trade)
+                                    if oca_result and oca_result.get("success"):
+                                        trade.stop_order_id = oca_result.get("stop_order_id")
+                                        tgt_id = oca_result.get("target_order_id")
+                                        if tgt_id:
+                                            # BotTrade tracks targets as a list
+                                            # (`target_order_ids`) since brackets
+                                            # can scale out across multiple PTs.
+                                            # v19.34.30 Patch A: REPLACE not append.
+                                            # After a successful OCA re-attach, any prior
+                                            # target_order_ids are stale (filled, cancelled,
+                                            # or ghost orders at IB). Appending grew arrays
+                                            # to 200+ ghost IDs across reissue cycles and
+                                            # caused the bracket-stacking cascade.
+                                            trade.target_order_ids = [tgt_id]
+                                        trade.oca_group = oca_result.get("oca_group")
+                                        # Re-persist so the order IDs land in bot_trades.
+                                        await asyncio.to_thread(bot._persist_trade, trade)
+                                        bracket_attach_result = oca_result
+                                        logger.info(
+                                            f"[RECONCILE BRACKET] {sym} OCA attached: "
+                                            f"stop={trade.stop_order_id} "
+                                            f"tgt={getattr(trade, 'target_order_ids', [])} "
+                                            f"oca={getattr(trade, 'oca_group', None)}"
+                                        )
+                                    else:
+                                        err = (oca_result or {}).get("error", "unknown")
+                                        bracket_attach_result = {"success": False, "error": err}
+                                        logger.error(
+                                            f"[RECONCILE NAKED] {sym} {trade.id} adopted "
+                                            f"{abs_qty}sh but OCA attach failed: {err}. "
+                                            f"Position is UNPROTECTED at IB — operator must "
+                                            f"add stop manually or wait for retry."
+                                        )
+                                except Exception as e:
+                                    bracket_attach_result = {"success": False, "error": str(e)}
                                     logger.error(
-                                        f"[RECONCILE NAKED] {sym} {trade.id} adopted "
-                                        f"{abs_qty}sh but OCA attach failed: {err}. "
-                                        f"Position is UNPROTECTED at IB — operator must "
-                                        f"add stop manually or wait for retry."
+                                        f"[RECONCILE NAKED] {sym} OCA attach raised: {e}. "
+                                        f"Position UNPROTECTED."
                                     )
-                            except Exception as e:
-                                bracket_attach_result = {"success": False, "error": str(e)}
-                                logger.error(
-                                    f"[RECONCILE NAKED] {sym} OCA attach raised: {e}. "
-                                    f"Position UNPROTECTED."
-                                )
                     else:
                         logger.warning(
                             f"[RECONCILE] {sym} adopted but no executor with "
@@ -3060,6 +3208,22 @@ class PositionReconciler:
         trade.executed_at = datetime.now(timezone.utc).isoformat()
         trade.created_at = datetime.now(timezone.utc).isoformat()
         trade.entered_by = "reconciled_excess_v19_34_15b"
+        # v19.34.51 — stamp trade_type on excess-slice spawns too.
+        try:
+            from services.account_guard import classify_account_id, load_account_expectation
+            from services.ib_pusher_rpc import get_account_snapshot
+            snap = await asyncio.to_thread(get_account_snapshot)
+            cur_account_id = (snap or {}).get("account_id") or ""
+            if cur_account_id:
+                trade.trade_type = classify_account_id(cur_account_id)
+                trade.account_id_at_fill = cur_account_id
+            else:
+                exp = load_account_expectation()
+                trade.trade_type = exp.active_mode or "unknown"
+                trade.account_id_at_fill = None
+        except Exception as _acct_exc:
+            logger.debug(f"reconciled_excess {sym}: trade_type stamp skipped: {_acct_exc}")
+            trade.trade_type = "unknown"
         trade.synthetic_source = "share_drift_excess"
         trade.notes = (
             f"v19.34.15b: spawned to claim excess of {excess_abs} sh "
