@@ -244,6 +244,122 @@ working → position flips direction.
 
 ---
 
+## 6.5 User journeys end-to-end — the 6 flows that matter
+
+> **Use this section** when you need to *trace a behavior across files*
+> instead of debugging a single function. Each row is a column-by-column
+> contract: where a flow enters, the files it passes through, the state
+> it mutates, and where it exits. **If you find yourself about to edit
+> any file in one of these chains, re-read the whole row first** — these
+> are the safety-critical paths.
+
+### 🟢 Journey 1 — Daily open (entry pipeline)
+Operator clicks `StartTrading.bat` at 9:25 ET. By 9:30:01, the bot is
+firing.
+
+| Step | Location | Mutates / emits |
+|---|---|---|
+| 1. `.bat` step 5 | `scripts/ib_data_pusher.py` (Windows) | L1 quote stream → POST to `/api/live/quote-snapshot` |
+| 2. Quote ingest | `routers/live_data_router.py` → `tick_to_bar_persister.py` | `live_bar_cache`, `ib_live_snapshot` |
+| 3. Scanner pass | `scanner_service.py` `_scan_loop` (~5s cadence) | emits alert dict |
+| 4. Setup gate | `market_setup_classifier.py` matrix lookup | tags `out_of_context_warning` if mismatched |
+| 5. TQS scoring | `smart_filter.py` | grade A+ / A / B / C |
+| 6. Confidence gate | `confidence_gate_log` collection | allow / block |
+| 7. Sym-dir-cap guard | `opportunity_evaluator.py` iter `_open_trades.values()` | blocks if `(symbol, direction)` already held |
+| 8. Submit | `trade_executor_service.submit_with_bracket` | `bot_orders` insert + IB place |
+| 9. IB ack | `ib_direct_service.submit_bracket_order_oca` | parent + stop + target OCA group `ADOPT-OCA-XXX` |
+| 10. State materialize | `trading_bot_service._open_trades[trade_id]` | `bot_trades` insert + ws push |
+| 11. Manage | `position_manager.manage_open_trades` (per scan tick) | stop adjust, scale-out, trail |
+
+**Don't edit any of**: `_scan_loop`, `submit_with_bracket`,
+`opportunity_evaluator.evaluate`, `_open_trades` writes — they are the
+critical entry-spine. Sibling/wrapper functions only.
+
+### 🔴 Journey 2 — Operator close intervention (v19.34.72)
+Operator hits "Close 25%" in V5 panel. Bot must NOT race the brackets.
+
+| Step | Location |
+|---|---|
+| 1. Click | `frontend/.../OpenPositionsV5.jsx` opens `<CloseTradeModal />` |
+| 2. Modal submit | `POST /api/trading-bot/trades/{trade_id}/close` with `{ shares, order_type, limit_price }` |
+| 3. Router | `routers/trading_bot.py` close handler |
+| 4. Orchestrate | `position_manager.close_trade_custom` |
+| 5. Cancel brackets | `trade_executor._cancel_ib_bracket_orders` (8s primary + 5s retry — see §6 OCA-race trap) |
+| 6. Clamp shares | `position_manager._clamp_shares_to_ib_position` (never exceed live IB qty) |
+| 7. Place close | `trade_executor.close_position_custom` → `ib_direct.place_close_market` *or* `place_close_limit` |
+| 8. Persist | `bot._save_trade(trade)` updates `bot_trades`, `bracket_lifecycle_events` |
+| 9. WS push | `/ws` broadcasts updated trade row → frontend refresh |
+
+**Critical**: ALWAYS go through `close_trade_custom` (sibling) — do
+**not** patch `close_trade` (the safety-critical EOD/stop path).
+
+### 🌅 Journey 3 — EOD wind-down (15:55 ET)
+Auto-flatten before market close. Single source of truth = `manage_open_trades`.
+
+| Step | Location |
+|---|---|
+| 1. Banner countdown | `EodCountdownBannerV5.jsx` (UI only) |
+| 2. EOD branch | `position_manager.check_eod_close` (called per scan tick after 15:55) |
+| 3. For each open trade | `close_trade(trade)` with `reason="eod"` |
+| 4. Cancel brackets | `_cancel_ib_bracket_orders` (same 8s+5s contract) |
+| 5. Market close | `trade_executor.close_position` → `ib_direct.place_close_market` |
+| 6. Audit | `bracket_lifecycle_events` row per leg, `bot_trades.status="closed"` |
+| 7. Day rollup | `eod_generation_service` builds `daily_report_cards` |
+
+**Validate** after every v19.34.7x patch: at 15:55 ET, every open
+position must be flat by 15:59:30. If not → cancel-wait timeout
+regression (v19.34.73 bumped 4s → 8s precisely for this).
+
+### 🔁 Journey 4 — Drift detection & self-heal
+Every 60s. Most state corruption is caught here.
+
+| Step | Location |
+|---|---|
+| 1. Loop tick | `trading_bot_service._share_drift_loop` (60s) |
+| 2. Diff | per-symbol: `_open_trades` total qty vs IB position qty |
+| 3. Classify | excess / short / phantom / orphan |
+| 4. Resolve | `position_reconciler.reconcile_*` — spawns `reconciled_excess_*`, adopts external orphan, or purges phantom |
+| 5. Audit | `share_drift_events` row with `resolution` field |
+| 6. Naked sweep | `_naked_position_sweep` (also 60s) re-attaches brackets to any IB position lacking protection — with v19.34.73 sibling guard |
+
+**Trap**: `position_reconciler` MUST skip `entered_by="reconciled_excess_*"`
+on the orphan path (fixed v19.34.22) or it duplicates trades on every tick.
+
+### 📊 Journey 5 — Historical backfill
+Operator clicks "Fill Gaps" in NIA UI. Turbo collectors wake.
+
+| Step | Location |
+|---|---|
+| 1. Click | NIA page → `POST /api/ib-collector/enqueue` |
+| 2. Queue | `historical_data_queue_service` → `ib_collection_jobs` |
+| 3. Collector wake | Windows `ib_historical_collector.py --turbo` polls queue |
+| 4. IB historical | `reqHistoricalData` calls via `ib_async` |
+| 5. Upsert | `historical_bars` (5/30/1d resolutions) |
+| 6. Inventory | `data_inventory` updates completeness map |
+| 7. Audit | `ib_data_summary`, `ib_smart_backfill_history` |
+
+**Note**: live trading PAUSES if collectors saturate IB pacing (50
+req/10min). Operator must run `StartCollection.bat` for off-hours.
+
+### 🧠 Journey 6 — ML training cycle
+Triggered nightly by `NightlyAuto.bat` or manually via NIA "Train All".
+
+| Step | Location |
+|---|---|
+| 1. Trigger | `POST /api/ai-training/run` |
+| 2. Status | `training_pipeline_status` collection updates phase |
+| 3. Feature build | `feature_engine.py` → `feature_cache` |
+| 4. Train | `services/ai_modules/timeseries_*.py` (CNN, GBM, etc.) |
+| 5. Validate | `model_validations` — compare to `model_baselines` |
+| 6. Shadow | new model writes `shadow_decisions` for N days |
+| 7. Promote | operator approves → `setup_type_models_backup` ← swap ← `setup_type_models` |
+| 8. Archive | `training_runs_archive`, `training_history` |
+
+**Trap**: never write `setup_type_models` directly — always go through
+the backup-swap so a rollback is one Mongo op away.
+
+---
+
 ## 7. Common operations — copy-paste-ready
 
 ### Check bot's view of a position
@@ -337,9 +453,9 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.74 (2026-05-22, "AGENTS.md context-pack expansion")
+- **Current version**: v19.34.75 (2026-05-22, "AGENTS.md UX upgrade — user journeys + edit checklist + CLAUDE.md")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
-- **Known issues**: see ROADMAP.md "Tomorrow's session" section
+- **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
   due to 4s cancel-wait timeout under load)
 
@@ -354,6 +470,75 @@ cd /app/backend && python -m pytest tests/ -q
 4. Use the diag endpoints listed in §7.
 5. **Don't guess** — call `troubleshoot_agent` (read-only RCA) before
    making changes if it's been >1 attempt to fix.
+
+### If context is missing — ask ONE focused question
+
+When the operator's instruction is ambiguous, **don't fan out** —
+identify the single blocking question and ask it. Good questions:
+- **Which journey** are we modifying? (Entry / close / EOD / drift /
+  backfill / ML — see §6.5.)
+- **Which file owns it?** If you can't find the canonical owner,
+  grep first; only ask after you've shown what you searched.
+- **Which path is canonical?** When two flows look similar (e.g.,
+  `close_trade` vs `close_trade_custom`), confirm which one the
+  operator means before editing.
+- **What's the success signal?** A test? A log line? A UI state?
+  A specific IB order ack? Without this you'll claim victory without
+  proving it.
+
+Bad questions (don't ask these — go look first):
+- "Where is X defined?" → `grep -rn`
+- "What does Y do?" → read the file
+- "Is Z still in use?" → `grep -rn "Z\b"`
+
+---
+
+## 11.5 Before & after every edit — pre-flight checklist
+
+> **Run this in your head before touching code.** Most regressions in
+> this repo came from skipping step 1 (wrong journey) or step 4
+> (didn't grep for similar pathways first).
+
+### ✈️ Before you edit
+1. **Identify the journey** (§6.5). Which of the 6 flows owns this
+   behavior? If none → you're inventing a new flow; document it here
+   first.
+2. **Find the canonical owner.** Use §3 code-nav map; grep for the
+   function name in `_open_trades` writes or `close_*` paths.
+3. **Read the full function**, not just the lines you plan to change.
+   Side effects in this codebase are often 30 lines below the edit
+   site.
+4. **Search for siblings.** `grep -rn "<symbol>"` — does a similar
+   function already exist? If yes, extend it; don't fork it. Exception:
+   safety-critical paths (`close_trade`, `submit_with_bracket`) — those
+   you DO fork via `_custom` siblings (§6).
+5. **Check the recent CHANGELOG.** Has someone touched this file in
+   the last 5 versions? If yes, read those entries before editing.
+
+### 🛬 After you edit
+1. **Lint** what you touched (`ruff` for backend, ESLint for frontend).
+2. **Run the closest test suite** — `pytest backend/tests/test_*<keyword>*`.
+   If no test exists for this path → write one.
+3. **Tag the new code** with the version (`# v19.34.XX — <reason>`),
+   so the next agent can grep for the change.
+4. **Update §6.5** if you added/changed a journey, or **§10** version
+   pointer + **CHANGELOG.md** entry.
+5. **Generate the patch** (`git diff > /tmp/v19_34_XX.patch`), upload
+   to `paste.rs`, hand the operator the one-liner. NEVER use Emergent's
+   "Save to Github" button.
+
+### 🔒 Hard rules (will-bite-you-if-violated)
+- ❌ **Don't modify `close_trade`, `submit_with_bracket`, or the
+  `_open_trades` write path directly.** Fork via `_custom` siblings.
+- ❌ **Don't shorten the 8s cancel-wait** without proving IB cancel-ack
+  p99 has dropped below 2s.
+- ❌ **Don't iterate `_open_trades` as if it's symbol-keyed** — it's
+  `trade_id`-keyed (§6).
+- ❌ **Don't `find()` MongoDB without `{"_id": 0}` projection**.
+- ❌ **Don't add a new asyncio loop** without listing it in §15.
+- ❌ **Don't add a new collection** without listing it in §14.
+- ❌ **Don't rename a frontend tab key** without grepping for `activeTab
+  === '<key>'` first.
 
 ---
 
@@ -776,6 +961,7 @@ These are the heart of the V5 trading UI. Grouped by purpose:
 
 ---
 
-*Last updated: 2026-05-22 (v19.34.74 ship — `.bat` flow + sections
-12-17 context pack). Update this file whenever you learn a new
-convention or trap.*
+*Last updated: 2026-05-22 (v19.34.75 ship — user-journey narratives,
+pre/post-edit checklist, ONE-focused-question pattern, CLAUDE.md
+pointer). Update this file whenever you learn a new convention or
+trap.*

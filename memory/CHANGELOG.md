@@ -1,3 +1,72 @@
+## 2026-05-22 — v19.34.75: AGENTS.md UX upgrade (journeys + checklist + CLAUDE.md)
+
+### Trigger
+Operator shared an article on `AGENTS.md` best practices and asked
+for a coverage review. Cross-walked the article's template against
+v19.34.74 and identified two real gaps + one easy win: (a) end-to-end
+user-journey narratives (article's highest-leverage idea — trace flows
+across files, not just per-file context), (b) explicit before/after
+edit checklist + "ask ONE focused question" clarification pattern,
+(c) `CLAUDE.md` pointer so Claude Code auto-loads context.
+
+### What shipped
+- **AGENTS.md §6.5 — User journeys end-to-end (6 flows)**: each as a
+  column-by-column contract (step → location → mutation):
+  - 🟢 Journey 1: Daily open entry pipeline (11 steps: pusher → scan
+    → setup gate → TQS → confidence → sym-dir-cap → submit → IB ack →
+    state materialize → manage)
+  - 🔴 Journey 2: Operator close intervention (9 steps: V5 modal →
+    `close_trade_custom` sibling path, bracket-cancel race notes)
+  - 🌅 Journey 3: EOD wind-down (7 steps: 15:55 banner → `check_eod_close`
+    → flatten via `close_trade` → audit)
+  - 🔁 Journey 4: Drift detection & self-heal (6 steps: 60s loop →
+    diff → classify → reconcile → audit → naked sweep)
+  - 📊 Journey 5: Historical backfill (7 steps: NIA → queue → Windows
+    turbo collector → IB → upsert → inventory)
+  - 🧠 Journey 6: ML training cycle (8 steps: trigger → feature build
+    → train → validate → shadow → backup-swap promote)
+  Each journey explicitly calls out "DON'T edit these directly — fork
+  via `_custom` siblings" rules.
+- **AGENTS.md §11 tightened — "Ask ONE focused question"**: good vs
+  bad clarification questions, with the rule "don't ask for things
+  grep can answer".
+- **AGENTS.md §11.5 — Pre/post-edit checklist**: 5-step "before you
+  edit" (identify journey, find canonical owner, read full function,
+  search for siblings, check recent CHANGELOG), 5-step "after you
+  edit" (lint, test, version-tag, update §6.5/§10, generate patch).
+  Plus 7-bullet "hard rules" callout (no `close_trade` direct edits,
+  no 8s cancel-wait shortening, no symbol-keyed `_open_trades`
+  iteration, no missing `{"_id": 0}`, no orphan asyncio loops, no
+  orphan collections, no orphan tab rename).
+- **`/app/CLAUDE.md` created** — 10-line pointer to AGENTS.md so
+  Claude Code auto-loads context. Single source of truth preserved
+  (no symlink → no Git/Windows portability issues).
+- Bumped §10 version → **v19.34.75 (2026-05-22)**.
+- Trailer updated.
+
+### Why this matters
+The article correctly flagged that page-maps + worker-catalogs don't
+help an agent that needs to *trace a behavior across files*. §6.5
+fixes that — any future agent debugging an EOD close now has a single
+table that names every file in the chain. §11.5 turns the "rules of
+the road" from implicit (scattered across §6 + §8) into a checklist
+the agent runs mentally before every edit.
+
+### How to deploy
+Single `.patch` uploaded to `paste.rs`. Operator runs the standard
+one-liner.
+
+### Files touched
+- `/app/AGENTS.md` (+220 lines net: §6.5 + §11 expansion + §11.5)
+- `/app/CLAUDE.md` (new file, 10 lines)
+- `/app/memory/CHANGELOG.md` (this entry)
+
+### Stats
+AGENTS.md: 362 → 781 (v19.34.74) → **~1000 lines (v19.34.75)**.
+
+---
+
+
 ## 2026-05-22 — v19.34.74: AGENTS.md context-pack expansion (sections 12-17)
 
 ### Trigger
