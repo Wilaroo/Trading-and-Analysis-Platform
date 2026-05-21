@@ -1,3 +1,63 @@
+## 2026-02 — v19.34.66: Patch C hardening (cancel only when necessary, never create duplicates)
+
+### Operator trigger
+The v19.34.65 + 65b cancel-loop CONTAINMENT was deployed and verified silent. But the underlying cause — `position_reconciler` Patch C — was still firing aggressively. Operator's constraint for this fix: **"only cancel orders that need cancelling, never create new orders that aren't necessary."**
+
+### Root cause (in `backend/services/position_reconciler.py:1511`)
+Pre-v19.34.66 Patch C had 3 design flaws:
+1. **No protection classification.** It cancelled EVERY active IB order for the symbol regardless of direction — including the position's own entry order.
+2. **Unconditional attach.** After cancelling, it always called `executor.attach_oca_stop_target(trade)` even when the position already had a complete live STP+LMT bracket. Result: duplicate brackets on top of existing protective legs.
+3. **No stale-aware filter.** It re-queued cancels on orders the v19.34.65 stale-drop guard had already given up on (the source of the 4930 LIN loop: IB had moved 4930 to PendingCancel internally, pusher snapshot still listed it as Submitted, Patch C re-fired the cancel every reconciler tick).
+
+### Fix (`backend/services/position_reconciler.py` — same block at line 1511)
+Three-way classification of live IB orders for the symbol:
+
+| Case | Condition | Action |
+|---|---|---|
+| **(a) Already protected** | live STP+LMT in protective direction | **Skip cancel AND skip attach.** Stamp existing leg IDs on the BotTrade. |
+| **(b) Partially protected** | only one of STP/LMT live | Cancel only the protective legs that pass the v19.34.65 stale filter, then attach. |
+| **(c) Unprotected** | no protective legs | Skip cancels entirely, go straight to attach (original naked-orphan case). |
+
+Hardening invariants enforced by the new block:
+- **Direction discipline**: only `SELL` orders are considered protective for a LONG; only `BUY` for a SHORT. Entry orders are NEVER touched.
+- **Status discipline**: only `Submitted` and `PreSubmitted` are touched. `PendingCancel`, `Cancelled`, `Filled`, `Inactive` are skipped — this is exactly the 4930 case.
+- **Stale-aware**: orders already terminal in `_cancellation_queue` (`stale_dropped`/`cancelled`/`expired`) are skipped to honor v19.34.65 lifecycle.
+- **Attach-gate**: a new `_patch_c_skip_attach` flag prevents `attach_oca_stop_target()` from being called when the position is already fully protected — eliminating the duplicate-bracket creation path.
+
+### Test coverage (`backend/tests/test_patch_c_hardened_v19_34_66.py`)
+13/13 passing:
+- Already-protected (long + short) → skip
+- Partial protection (stop-only, target-only) → cancel+attach
+- Unprotected → attach-only
+- Direction discipline (BUY entries on a long, SELL entries on a short — must not be cancelled)
+- Status discipline (PendingCancel / Cancelled / Filled — must be ignored; smoking-gun `test_pending_cancel_orders_ignored` directly reproduces the 4930 failure pattern)
+- Symbol discipline (other-symbol orders ignored)
+- Stop-family variants (TRAIL, STP LMT → count as stop)
+
+### Deployment notes
+Patch generated against the operator's DGX-side `position_reconciler.py` (3475 lines, includes v19.34.31 Patch C block that was missing from /app). `git apply --check` validated on a fresh clone of the DGX file.
+
+Patch: https://paste.rs/YXD5l (1 file, 75 lines removed, 183 added — diff is 235 lines)
+
+Deploy:
+```bash
+cd ~/Trading-and-Analysis-Platform && \
+curl -sS https://paste.rs/YXD5l > /tmp/v19_34_66_patch_c.patch && \
+git apply --check /tmp/v19_34_66_patch_c.patch && \
+git apply /tmp/v19_34_66_patch_c.patch && \
+git add -A && git commit -m "v19.34.66: Patch C hardening — three-way classify, never create duplicates" && \
+kill $(pgrep -f "python server.py" | head -1) && sleep 2 && \
+cd backend && nohup ~/Trading-and-Analysis-Platform/.venv/bin/python server.py > /tmp/sentcom-backend.log 2>&1 &
+disown
+```
+
+### Post-deploy validation
+After restart, watch for `[v19.34.66 PATCH-C HARDENED]` log lines — every `RECONCILE NAKED` cycle that previously triggered a cancel loop now logs whether it (a) skipped (position already protected), (b) cancelled only protective legs, or (c) attached cleanly.
+
+If you ever see a duplicate-bracket OCA at IB again on a reconciled position, post-mortem starts here.
+
+
+
 ## 2026-02 — v19.34.65c + 65d: Cancellation stats endpoint, V5 self-heal pill, build_version probe
 
 ### Trigger
