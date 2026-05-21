@@ -2489,6 +2489,90 @@ class TradingBotService:
                     await asyncio.sleep(30)
             asyncio.create_task(_periodic_orphan_gtc_audit())
 
+            # ── v19.34.70 PATCH D — Periodic bracket-state reconciler ──
+            #
+            # Why this loop exists:
+            #   Even with Patches A (cancel-path filter) and B (attach-path
+            #   classifier), the bot's `_open_trades` rows accumulate stale
+            #   `stop_order_id` / `target_order_id(s)` references over time.
+            #   Patches A + B make the system RESILIENT to staleness; Patch
+            #   C (the explicit endpoint) lets the operator clean up on
+            #   demand. Patch D AUTOMATES that cleanup so stale refs never
+            #   pile up silently in the first place.
+            #
+            # Loop cadence: 120s by default (env override via
+            # `AUTO_RECONCILE_BRACKET_STATE_S`). 120s is conservative;
+            # the periodic orphan-GTC audit runs at 30s but does more
+            # work, so 120s here keeps total background load modest while
+            # catching staleness within ~2 min of it appearing.
+            #
+            # Safety: this loop ONLY clears confirmed-stale refs (IB
+            # cache snapshot is authoritative). When IB cache cannot be
+            # queried (ib_direct disconnected, etc.), the underlying
+            # endpoint refuses to clear anything → loop logs and skips.
+            # Setting `AUTO_RECONCILE_BRACKET_STATE=false` in the env
+            # disables the loop entirely.
+            async def _periodic_bracket_state_reconcile():
+                from os import environ
+                enabled = environ.get("AUTO_RECONCILE_BRACKET_STATE",
+                                      "true").lower() == "true"
+                if not enabled:
+                    logger.info(
+                        "[v19.34.70 PATCH D] periodic bracket-state "
+                        "reconcile DISABLED via env "
+                        "(AUTO_RECONCILE_BRACKET_STATE=false)"
+                    )
+                    return
+                interval_s = float(environ.get(
+                    "AUTO_RECONCILE_BRACKET_STATE_S", "120"
+                ))
+                logger.info(
+                    "[v19.34.70 PATCH D] periodic bracket-state "
+                    "reconcile ENABLED (interval=%.0fs). Stale tracked "
+                    "orderIds will be auto-cleared after IB cache "
+                    "cross-check.", interval_s,
+                )
+                # Wait one full interval before the first sweep — gives
+                # the bot's startup-time orphan reconciler a chance to
+                # finish before we look at the cleaned-up state.
+                await asyncio.sleep(interval_s)
+                while self._running:
+                    try:
+                        from routers.trading_bot import (
+                            reconcile_bracket_state,
+                            ReconcileBracketStateRequest,
+                        )
+                        report = await reconcile_bracket_state(
+                            ReconcileBracketStateRequest(dry_run=False)
+                        )
+                        modified = report.get("trades_modified", 0)
+                        if modified > 0:
+                            naked = [
+                                r["symbol"] for r in report.get("trades", [])
+                                if r.get("fully_unprotected")
+                            ]
+                            logger.warning(
+                                "[v19.34.70 PATCH D] cleared stale "
+                                "bracket refs from %d trade(s); %d now "
+                                "fully unprotected at IB: %s. The "
+                                "bracket-attach guard (manage loop) "
+                                "should re-attach within its next cycle.",
+                                modified, len(naked), naked,
+                            )
+                        elif not report.get("ib_cache_available", True):
+                            logger.debug(
+                                "[v19.34.70 PATCH D] skipped — IB cache "
+                                "unavailable. Will retry in %.0fs.",
+                                interval_s,
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            "[v19.34.70 PATCH D] tick error "
+                            "(non-fatal): %s", e,
+                        )
+                    await asyncio.sleep(interval_s)
+            asyncio.create_task(_periodic_bracket_state_reconcile())
+
             # 2026-05-04 v19.31.1 — Auto-reconcile-at-boot.
             # Operator-facing toggle: when AUTO_RECONCILE_AT_BOOT=true is
             # set in backend/.env, every legitimate IB-only carryover

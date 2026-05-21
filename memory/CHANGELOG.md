@@ -1,3 +1,115 @@
+## 2026-02 — v19.34.70 A+B+C+D: Bot-vs-IB bracket-state desync fix (post-incident hardening)
+
+### Trigger
+2026-05-21 incident: manual `/eod-close-now` returned `close_trade returned False`
+for every one of 21 open positions during market hours, with the executor citing
+`bracket_cancel_timeout_race_risk`. Forensic diagnosis (`diagnose_bracket_cancel_timeout.py`)
+revealed:
+  • All 21 trades had `stop_order_id` / `target_order_id` fields populated.
+  • NONE of those orderIds existed in IB's live `trades()` cache — they had been
+    silently cleaned up by IB after the v19.34.65b poll-count guard stale-dropped
+    the cancel-queue entries (pusher never reported back).
+  • As a result every position was UNPROTECTED at IB with no stop / no target.
+  • `/attach-brackets-to-unprotected` and `/protect-orphans` BOTH skipped all 21
+    as "already_bracketed" because they only checked bot memory.
+Operator manually closed all 21 in TWS as a safety play; agent investigated.
+
+Root cause: the bot's in-memory `stop_order_id` / `target_order_id(s)` references
+were never cross-checked against IB's authoritative `trades()` cache before being
+trusted. Stale refs piled up silently → multiple code paths (cancel, protect,
+attach-brackets) all behaved incorrectly when refs went stale.
+
+### Fix — four-patch chain
+**Patch A** (`trade_executor_service._cancel_ib_bracket_orders`): pre-filter the
+  candidate orderId list against IB's live `trades()` cache. OrderIds not in cache
+  are pre-loaded into the `unknown` result bucket (existing safe-bucket contract)
+  and skipped from the cancel + 4s terminal-wait. Eliminates the false-positive
+  timeouts that caused the 21-of-21 EOD failure. Preserves full OCA-race
+  protection for genuinely live brackets.
+
+**Patch B** (`routers/trading_bot._classify_bracket_freshness` +
+  `/attach-brackets-to-unprotected`): every trade's tracked orderIds are
+  classified as `live` / `stale` / `unverified` / `sim` / `absent` based on IB
+  cache snapshot. `has_real_stop` / `has_real_target` (the "already_bracketed"
+  decision) now derive from this classification, not from raw `bool()` of
+  memory. Adds `validate_against_ib_cache: bool = True` request flag (default
+  on; flip to False for legacy memory-only behavior when ib_direct is
+  unavailable). Every response row now carries `bracket_freshness` for audit.
+
+**Patch C** — new endpoint `POST /api/trading-bot/positions/reconcile-bracket-state`:
+  walks `_open_trades`, classifies each trade's refs, and (in live mode) nulls
+  stale fields in memory + persists via `bot._persist_trade(trade)`. Dry-run
+  returns a per-trade audit showing what would change. Refuses to clear anything
+  if ib_direct cache is unavailable (safety fail-closed). Request shape:
+  `{"dry_run": bool, "symbols": [...]}`. Response: per-trade `before/after`
+  audit + `trades_audited` / `trades_modified` counts.
+
+**Patch D** — background loop in `trading_bot_service.start_trading()` that
+  calls `reconcile_bracket_state` every `AUTO_RECONCILE_BRACKET_STATE_S` seconds
+  (default 120s) when `AUTO_RECONCILE_BRACKET_STATE=true` (default on). Stale
+  refs are auto-cleared on a steady cadence so they never accumulate silently.
+  Logs a `WARNING` when any clears happen; falls back to a `DEBUG` skip when
+  ib_direct can't be queried.
+
+### Verification
+- `tests/test_cancel_bracket_orders_prefilter_v19_34_70a.py` — 6 cases (pre-filter:
+  all-stale / all-live / mixed / ib_direct-unavailable / sim-ids / no-ids).
+- `tests/test_bracket_freshness_classifier_v19_34_70b.py` — 14 cases (every
+  classification label + combinations + garbage-input safety).
+- `tests/test_reconcile_bracket_state_v19_34_70c.py` — 9 cases (dry-run, live,
+  ib-unavailable refusal, symbol filter, sim untouched, 503 path).
+- `tests/test_periodic_bracket_state_reconcile_v19_34_70d.py` — 7 cases (env
+  toggle, cadence, modified-warning, cache-unavailable debug, exception
+  resilience, dry_run=False invariant, shutdown safety).
+- All 36 new pass. All 50 prior-session tests still pass (no regressions).
+- Total in v19.34.69 + v19.34.70 cumulative: 86/86 passing.
+
+### Deployment artifacts
+| File | URL |
+|---|---|
+| Patch (3 files unified) | https://paste.rs/424H9 |
+| test_cancel_bracket_orders_prefilter_v19_34_70a.py | https://paste.rs/YIUyS |
+| test_bracket_freshness_classifier_v19_34_70b.py | https://paste.rs/SVXAr |
+| test_reconcile_bracket_state_v19_34_70c.py | https://paste.rs/oOQLu |
+| test_periodic_bracket_state_reconcile_v19_34_70d.py | https://paste.rs/TQJq7 |
+
+### Operator one-liner (DGX)
+```bash
+cd ~/Trading-and-Analysis-Platform && \
+  curl -sS https://paste.rs/424H9 -o /tmp/v19_34_70_abcd.patch && \
+  curl -sS https://paste.rs/YIUyS -o backend/tests/test_cancel_bracket_orders_prefilter_v19_34_70a.py && \
+  curl -sS https://paste.rs/SVXAr -o backend/tests/test_bracket_freshness_classifier_v19_34_70b.py && \
+  curl -sS https://paste.rs/oOQLu -o backend/tests/test_reconcile_bracket_state_v19_34_70c.py && \
+  curl -sS https://paste.rs/TQJq7 -o backend/tests/test_periodic_bracket_state_reconcile_v19_34_70d.py && \
+  git apply /tmp/v19_34_70_abcd.patch && \
+  cd backend && ~/Trading-and-Analysis-Platform/.venv/bin/python -m pytest \
+    tests/test_cancel_bracket_orders_prefilter_v19_34_70a.py \
+    tests/test_bracket_freshness_classifier_v19_34_70b.py \
+    tests/test_reconcile_bracket_state_v19_34_70c.py \
+    tests/test_periodic_bracket_state_reconcile_v19_34_70d.py -v
+```
+
+Restart the backend the same way as last time:
+```bash
+kill $(sudo ss -ltnp | awk -F'pid=' '/8001/ {print $2}' | cut -d, -f1) && \
+  cd ~/Trading-and-Analysis-Platform/backend && \
+  nohup ~/Trading-and-Analysis-Platform/.venv/bin/python server.py > /tmp/sentcom-backend.log 2>&1 & disown
+```
+
+### Post-deploy verification
+Dry-run the Patch C endpoint to see today's stale refs surface:
+```bash
+sleep 5 && curl -s -X POST http://localhost:8001/api/trading-bot/positions/reconcile-bracket-state \
+  -H "Content-Type: application/json" -d '{"dry_run": true}' | python3 -m json.tool | head -60
+```
+
+You should see `trades_audited > 0` if any of today's adopted-but-now-flatten'd
+positions still have lingering stale refs. Then run with `"dry_run": false` to
+clear them (or just wait — Patch D will auto-clear within 120s of startup).
+
+---
+
+
 ## 2026-02 — v19.34.69: ATR resolver wired into orphan reconciler (fixes v19.34.68 no-op)
 
 ### Trigger

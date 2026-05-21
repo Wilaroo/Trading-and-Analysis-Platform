@@ -6337,6 +6337,151 @@ class AttachBracketsRequest(BaseModel):
     target_pct: float = 8.0        # default: +8% from current price
     symbols: Optional[List[str]] = None  # if set, only these symbols
     overrides: Optional[Dict[str, Dict[str, float]]] = None  # per-symbol stop/target
+    # v19.34.70 PATCH B — validate tracked orderIds against IB's live
+    # cache before trusting them. When True (the safe default from
+    # v19.34.70 onward), a trade is considered "unprotected" if its
+    # stop/target orderIds are absent from IB's `trades()` cache even
+    # if `stop_order_id` is set in bot memory. Fixes the 2026-05-21
+    # "21 positions all unprotected but all skipped as already_bracketed"
+    # incident, where every trade had a stale orderId pointer because
+    # the pusher silently failed to report cancel results back.
+    #
+    # Set False to revert to legacy v19.34.76 behavior (trust bot memory
+    # only). Useful if ib_direct is unavailable and IB cache can't be
+    # queried.
+    validate_against_ib_cache: bool = True
+
+
+def _ib_live_order_ids() -> set:
+    """v19.34.70 PATCH B helper — snapshot the live IB `trades()` cache
+    into a set of orderIds. Returns an empty set on any error so callers
+    can disambiguate "ib_direct unavailable" (empty set, treat all
+    tracked ids as unverified) from "id is gone" (id missing from a
+    populated set).
+
+    Caller should pair this with a `cache_available` flag — if the set
+    is empty AND ensure_connected failed, treat all ids as unverified
+    rather than as stale. The `_classify_bracket_freshness` helper below
+    handles that nuance.
+    """
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ibd = get_ib_direct_service()
+        if ibd is None:
+            return set()
+        # ensure_connected is async — for use inside async endpoints,
+        # callers should await `_ib_live_order_ids_async()` instead.
+        return set()
+    except Exception:
+        return set()
+
+
+async def _ib_live_order_ids_async() -> tuple:
+    """Async sibling of `_ib_live_order_ids` — returns
+    (live_ids: set[int], cache_available: bool).
+
+      live_ids: set of orderIds currently in IB's `trades()` cache.
+      cache_available:
+        True  → snapshot is authoritative; ids missing are TRULY gone.
+        False → could not query IB; caller must NOT mark anything as
+                stale based on this snapshot.
+    """
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ibd = get_ib_direct_service()
+        if ibd is None:
+            return set(), False
+        ok = await ibd.ensure_connected()
+        if not ok:
+            return set(), False
+        live = list(ibd._ib.trades())
+        ids = set()
+        for t in live:
+            if t.order is not None:
+                try:
+                    ids.add(int(t.order.orderId))
+                except (TypeError, ValueError):
+                    continue
+        return ids, True
+    except Exception as e:
+        logger.debug(f"[v19.34.70 PATCH B] IB cache snapshot failed: {e}")
+        return set(), False
+
+
+def _classify_bracket_freshness(trade, live_ids: set, cache_available: bool) -> dict:
+    """v19.34.70 PATCH B — Decide whether a trade's tracked bracket
+    orderIds are:
+      - REAL & LIVE at IB  (stop/target present in live_ids)         → "live"
+      - REAL but STALE     (set in bot memory, missing from live_ids,
+                            cache was authoritative)                  → "stale"
+      - UNVERIFIED         (set in bot memory, cache unavailable)     → "unverified"
+      - SIM / paper        (id starts with "SIM-")                    → "sim"
+      - ABSENT             (no id in bot memory)                      → "absent"
+
+    Returns:
+      {
+        "stop_state":  one of the labels above,
+        "target_state": same,
+        "has_real_stop":   True iff stop is "live" (or "unverified" when
+                           ib cache could not be queried — falls back to
+                           v19.34.76 behavior of trusting bot memory),
+        "has_real_target": same,
+        "stop_order_id":   bot-tracked value (for the audit response),
+        "target_order_ids":bot-tracked list,
+      }
+
+    The "unverified" → "trust bot memory" fallback is the safety
+    behavior: refusing to act when we can't see IB is much worse than
+    occasionally double-attaching when the operator KNOWS the cache is
+    fine. The dry_run preview shows the operator exactly what was
+    classified before any orders go out.
+    """
+    stop_raw = getattr(trade, "stop_order_id", None) or ""
+    tgt_singular = getattr(trade, "target_order_id", None)
+    tgt_plural = getattr(trade, "target_order_ids", []) or []
+    target_ids = ([tgt_singular] if tgt_singular else []) + [
+        t for t in tgt_plural if t
+    ]
+
+    def _label(raw):
+        if not raw:
+            return "absent"
+        s = str(raw)
+        if s.startswith("SIM-"):
+            return "sim"
+        try:
+            oid_int = int(raw)
+        except (TypeError, ValueError):
+            return "absent"
+        if not cache_available:
+            return "unverified"
+        return "live" if oid_int in live_ids else "stale"
+
+    stop_state = _label(stop_raw)
+    target_states = [_label(t) for t in target_ids]
+    target_state = "live" if "live" in target_states else (
+        "stale" if "stale" in target_states else (
+            "unverified" if "unverified" in target_states else (
+                "sim" if "sim" in target_states else "absent"
+            )
+        )
+    )
+
+    # has_real_X:
+    #   - "live" → real (verified at IB)
+    #   - "unverified" → trust bot memory (cache couldn't be queried)
+    #   - everything else → not real, needs attach
+    has_real_stop = stop_state in ("live", "unverified")
+    has_real_target = target_state in ("live", "unverified")
+
+    return {
+        "stop_state": stop_state,
+        "target_state": target_state,
+        "has_real_stop": has_real_stop,
+        "has_real_target": has_real_target,
+        "stop_order_id": stop_raw or None,
+        "target_order_ids": target_ids,
+    }
 
 
 @router.post("/attach-brackets-to-unprotected")
@@ -6389,6 +6534,23 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
     candidates = []
     skipped = []
 
+    # v19.34.70 PATCH B — snapshot IB's live order cache once before the
+    # loop. We use this to classify each trade's tracked orderIds as
+    # live / stale / unverified / sim / absent, instead of blindly
+    # trusting whatever the bot has in memory. Without this, the 2026-05-21
+    # incident reproduced: every one of 21 unprotected positions had a
+    # stale `stop_order_id` pointer and got skipped as "already_bracketed".
+    ib_live_ids, ib_cache_ok = (
+        await _ib_live_order_ids_async()
+        if payload.validate_against_ib_cache else (set(), False)
+    )
+    if payload.validate_against_ib_cache and not ib_cache_ok:
+        logger.warning(
+            "[v19.34.70 PATCH B] validate_against_ib_cache=True but IB "
+            "cache snapshot failed — falling back to legacy memory-only "
+            "check. Trades may be falsely skipped as already_bracketed."
+        )
+
     # Best-effort fetch of current prices from the pusher's last_price map.
     pusher_last_prices: Dict[str, float] = {}
     try:
@@ -6409,37 +6571,41 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
         if symbol_filter and sym not in symbol_filter:
             continue
 
-        existing_stop = getattr(trade, "stop_order_id", None) or ""
+        # v19.34.70 PATCH B — classify against IB cache instead of
+        # blindly trusting bot memory.
+        if payload.validate_against_ib_cache and ib_cache_ok:
+            cls = _classify_bracket_freshness(trade, ib_live_ids, True)
+        else:
+            # Legacy v19.34.76 path: memory-only classification.
+            cls = _classify_bracket_freshness(trade, set(), False)
+        existing_stop = cls["stop_order_id"] or ""
+        existing_tgt_ids = cls["target_order_ids"]
+        has_real_stop = cls["has_real_stop"]
+        has_real_tgt = cls["has_real_target"]
+
         # v19.34.81 — Trade objects vary: some store the target via the
         # singular `target_order_id`, others via the plural
-        # `target_order_ids` list, some via both. Pre-fix the
-        # v19.34.76 logic only checked the plural field, which produced
-        # false-positive "unprotected" rows for every trade brackeded
-        # via `attach_oca_stop_target` (which writes the singular
-        # field). Applying the dry-run output would have stacked
-        # duplicate target legs on top of the existing ones —
-        # recreating the exact problem v19.34.79 was designed to
-        # prevent.
-        _tgt_singular = getattr(trade, "target_order_id", None)
-        _tgt_plural = getattr(trade, "target_order_ids", []) or []
-        existing_tgt_ids = (
-            ([_tgt_singular] if _tgt_singular else [])
-            + [t for t in _tgt_plural if t]
-        )
+        # `target_order_ids` list, some via both. The classifier above
+        # already collapsed both shapes into a single list.
 
-        # "Already bracketed" = real (non-SIM-) stop_order_id AND at least
-        # one real (non-SIM-) target_order_id.
-        has_real_stop = bool(existing_stop) and not str(existing_stop).startswith("SIM-")
-        has_real_tgt = any(
-            tid and not str(tid).startswith("SIM-") for tid in existing_tgt_ids
-        )
+        # "Already bracketed" = real stop AND at least one real target.
         if has_real_stop and has_real_tgt:
-            skipped.append({
+            skip_row = {
                 "trade_id": trade_id, "symbol": sym,
                 "reason": "already_bracketed",
                 "stop_order_id": existing_stop,
                 "target_order_ids": existing_tgt_ids,
-            })
+            }
+            # v19.34.70 PATCH B — surface the validation source so the
+            # operator can tell whether this trust is rooted in live IB
+            # confirmation or just bot memory.
+            if payload.validate_against_ib_cache and ib_cache_ok:
+                skip_row["bracket_freshness"] = "live_at_ib"
+            elif payload.validate_against_ib_cache:
+                skip_row["bracket_freshness"] = "unverified_cache_unavailable"
+            else:
+                skip_row["bracket_freshness"] = "memory_only_legacy"
+            skipped.append(skip_row)
             continue
 
         # v19.34.83 — REFUSE TO STACK. If the trade has a REAL non-SIM
@@ -6601,6 +6767,205 @@ async def attach_brackets_to_unprotected(payload: AttachBracketsRequest):
 #   v19.34.77 SHIPS the diagnostic; auto-fix lives behind a separate
 #   patch (v19.34.78) once the operator confirms the diagnosis matches
 #   what they see in TWS.
+
+# ── v19.34.70 PATCH C — Reconcile bracket state vs. IB ────────────────────
+#
+# Why this exists:
+#   Even after Patches A + B, the bot's `_open_trades` rows can carry
+#   stale `stop_order_id` / `target_order_ids` references long after
+#   IB has cleaned the orders up. Patch A skips them safely at cancel-time
+#   and Patch B refuses to be fooled by them when deciding "is this
+#   protected?", but neither actually CLEANS the bot's view. Over time,
+#   stale references pile up and break other code paths (e.g., the
+#   bracket-stacking-audit reports false stacks, the V5 UI shows ghost
+#   protection pills, etc.).
+#
+# What this does:
+#   1. Snapshots IB's live `trades()` cache.
+#   2. Walks every `_open_trades` row.
+#   3. For each tracked orderId, classifies via _classify_bracket_freshness.
+#   4. If stale → records what would be nulled (dry_run) or actually
+#      nulls the field on the in-memory trade AND persists via
+#      `bot._persist_trade(trade)` to update Mongo.
+#   5. Returns a per-trade audit: what was stale, what was nulled,
+#      what's still real.
+#
+# Pairs with Patches A + B: this is the explicit "clean up my state"
+# button, while A + B make every other path resilient to staleness.
+
+class ReconcileBracketStateRequest(BaseModel):
+    dry_run: bool = True
+    symbols: Optional[List[str]] = None  # if set, only these symbols
+
+
+@router.post("/positions/reconcile-bracket-state")
+async def reconcile_bracket_state(payload: ReconcileBracketStateRequest):
+    """v19.34.70 PATCH C — Null out stale `stop_order_id` /
+    `target_order_id(s)` references in the bot's `_open_trades` after
+    cross-checking against IB's live order cache.
+
+    Use cases:
+      • After a session like 2026-05-21 where the pusher silently failed
+        to report cancel results and IB cleaned the orders up internally,
+        leaving the bot with dangling refs.
+      • Before invoking `/attach-brackets-to-unprotected` if you want
+        to be ABSOLUTELY certain stale refs don't mask a re-attach.
+      • As a daily-startup sanity sweep (could be scheduled — see
+        Patch D).
+
+    Response shape:
+      {
+        "success": true,
+        "dry_run": true,
+        "as_of": "<iso>",
+        "ib_cache_available": true,
+        "trades_audited": <int>,
+        "trades_modified": <int>,        // 0 in dry_run
+        "trades": [
+          {
+            "trade_id": "...",
+            "symbol": "CF",
+            "before": {
+              "stop_order_id": 4729, "stop_state": "stale",
+              "target_order_ids": [4730], "target_state": "stale",
+            },
+            "after": {                   // shows what dry_run WOULD do,
+                                         //   or what live mode DID do
+              "stop_order_id": null, "target_order_ids": [],
+              "stop_state": "cleared", "target_state": "cleared",
+            },
+            "fully_unprotected": true,   // true iff after = no real bracket
+            "applied": false,             // true iff not dry_run + write succeeded
+          },
+          ...
+        ]
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(status_code=503, detail="trading bot not initialized")
+
+    open_trades = getattr(_trading_bot, "_open_trades", {}) or {}
+    if not open_trades:
+        return {
+            "success": True,
+            "dry_run": payload.dry_run,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "ib_cache_available": False,
+            "trades_audited": 0,
+            "trades_modified": 0,
+            "trades": [],
+            "message": "no open trades in bot memory",
+        }
+
+    ib_live_ids, ib_cache_ok = await _ib_live_order_ids_async()
+    if not ib_cache_ok:
+        # Fail-safe: if we can't query IB, REFUSE to null anything.
+        # Otherwise we'd clear good refs and the bot would unnecessarily
+        # re-attach brackets that are perfectly fine.
+        return {
+            "success": False,
+            "dry_run": payload.dry_run,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "ib_cache_available": False,
+            "trades_audited": 0,
+            "trades_modified": 0,
+            "trades": [],
+            "error": (
+                "ib_direct cache unavailable — refusing to reconcile because "
+                "we can't distinguish stale from live ids. Confirm ib_direct "
+                "is connected (check /api/sentcom/status) and retry."
+            ),
+        }
+
+    symbol_filter = {s.upper() for s in (payload.symbols or [])}
+
+    audited = []
+    modified = 0
+
+    for trade_id, trade in list(open_trades.items()):
+        sym = (getattr(trade, "symbol", "") or "").upper()
+        if symbol_filter and sym not in symbol_filter:
+            continue
+
+        cls = _classify_bracket_freshness(trade, ib_live_ids, ib_cache_ok)
+
+        # Decide whether to clear:
+        #   - stale: definitively gone from IB → clear
+        #   - sim: not a real order at IB; safe to clear (won't have been
+        #     in cache anyway). HOWEVER paper-mode operators rely on these
+        #     for in-memory state, so we leave them alone.
+        #   - live / unverified / absent → no-op
+        clear_stop = cls["stop_state"] == "stale"
+        clear_target = cls["target_state"] == "stale"
+
+        if not (clear_stop or clear_target):
+            continue  # nothing to do for this trade
+
+        before = {
+            "stop_order_id": cls["stop_order_id"],
+            "stop_state": cls["stop_state"],
+            "target_order_ids": list(cls["target_order_ids"]),
+            "target_state": cls["target_state"],
+        }
+
+        after = {
+            "stop_order_id": cls["stop_order_id"] if not clear_stop else None,
+            "target_order_ids": (
+                [] if clear_target else list(cls["target_order_ids"])
+            ),
+            "stop_state": "cleared" if clear_stop else cls["stop_state"],
+            "target_state": "cleared" if clear_target else cls["target_state"],
+        }
+
+        applied = False
+        if not payload.dry_run:
+            try:
+                if clear_stop:
+                    trade.stop_order_id = None
+                if clear_target:
+                    # Clear both singular and plural fields to stay
+                    # consistent — the classifier collapsed both.
+                    if hasattr(trade, "target_order_id"):
+                        trade.target_order_id = None
+                    if hasattr(trade, "target_order_ids"):
+                        trade.target_order_ids = []
+                # Persist to Mongo so the change survives restart.
+                persist = getattr(_trading_bot, "_persist_trade", None)
+                if persist is not None:
+                    persist(trade)
+                applied = True
+                modified += 1
+            except Exception as e:
+                logger.error(
+                    "[v19.34.70 PATCH C] failed to clear stale refs for "
+                    "%s (trade_id=%s): %s", sym, trade_id, e,
+                )
+                applied = False
+
+        audited.append({
+            "trade_id": trade_id,
+            "symbol": sym,
+            "before": before,
+            "after": after,
+            "fully_unprotected": (
+                after["stop_order_id"] is None
+                and not after["target_order_ids"]
+            ),
+            "applied": applied,
+        })
+
+    return {
+        "success": True,
+        "dry_run": payload.dry_run,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "ib_cache_available": True,
+        "trades_audited": len(audited),
+        "trades_modified": modified,
+        "trades": audited,
+    }
+
+
+
 
 @router.get("/bracket-stacking-audit")
 async def bracket_stacking_audit():

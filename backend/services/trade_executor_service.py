@@ -2132,6 +2132,61 @@ class TradeExecutorService:
         if not ordered:
             return result
 
+        # v19.34.70 PATCH A — Pre-filter against IB's live order cache.
+        # Pre-fix: we issued cancels + waited 4s for terminal confirmation
+        # on every tracked orderId, regardless of whether IB still knew
+        # about them. When stop_order_id / target_order_id pointed at
+        # orders IB had silently cleaned up (cancel-confirm reverted to
+        # Submitted, pusher never reported back, IB internal cleanup),
+        # `wait_for_orders_terminal` saw them as "not in cache" → unknown
+        # (safe). Good. BUT during the flap window where IB had them
+        # bouncing PendingCancel ↔ Submitted, the wait_for_orders_terminal
+        # poll saw them in cache as NON-TERMINAL → timeout → close
+        # aborted with `bracket_cancel_timeout_race_risk`. This blocked
+        # every one of 21 manual EOD closes on 2026-05-21.
+        #
+        # Fix: before issuing any cancel, snapshot IB's live trades cache.
+        # Partition `ordered` into:
+        #   - `present`:  oids that IB currently knows about → cancel + wait
+        #   - `gone`:     oids NOT in IB cache → already-terminal-safe;
+        #                 record them in `unknown` (existing contract) and
+        #                 skip them from the cancel/wait path.
+        # This eliminates the most common cause of false-positive timeouts
+        # (stale tracked IDs) without weakening the OCA-race protection
+        # for genuinely live brackets.
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            _ibd_pre = get_ib_direct_service()
+            if _ibd_pre is not None and await _ibd_pre.ensure_connected():
+                _live = list(_ibd_pre._ib.trades())
+                _live_ids = {int(t.order.orderId) for t in _live
+                             if t.order is not None}
+                _gone = [oid for oid in ordered if oid not in _live_ids]
+                _present = [oid for oid in ordered if oid in _live_ids]
+                if _gone:
+                    logger.info(
+                        "[v19.34.70 PATCH A] %s — %d tracked orderId(s) not "
+                        "in IB cache (already-terminal-safe), skipping "
+                        "cancel/wait: %s",
+                        trade.symbol, len(_gone), _gone,
+                    )
+                    result["unknown"].extend(_gone)
+                ordered = _present
+            # If ib_direct unavailable, fall through to legacy path on
+            # full `ordered` — same behavior as pre-v19.34.70.
+        except Exception as _pa_err:
+            logger.debug(
+                "[v19.34.70 PATCH A] pre-filter failed for %s "
+                "(non-fatal, falling back to legacy path): %s",
+                trade.symbol, _pa_err,
+            )
+
+        # If pre-filter removed everything, return early — nothing to
+        # cancel/wait on. Caller sees `unknown` populated → treats as
+        # safe (no live brackets to race the MKT close).
+        if not ordered:
+            return result
+
         for oid in ordered:
             try:
                 # Use the singleton IB service already wired into the
@@ -2175,7 +2230,11 @@ class TradeExecutorService:
                 result["filled"] = list(partition.get("filled", []))
                 result["other_terminal"] = list(partition.get("other_terminal", []))
                 result["timeout"] = list(partition.get("timeout", []))
-                result["unknown"] = list(partition.get("unknown", []))
+                # v19.34.70 PATCH A — `extend` not `=` because the
+                # pre-filter above may have already pre-loaded `unknown`
+                # with stale (not-in-cache) orderIds; overwriting here
+                # would erase that signal and re-introduce the bug.
+                result["unknown"].extend(partition.get("unknown", []))
                 result["ib_direct_called"] = True
                 if result["filled"]:
                     logger.critical(
