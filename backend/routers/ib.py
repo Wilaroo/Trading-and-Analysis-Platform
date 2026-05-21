@@ -211,6 +211,13 @@ _order_queue_legacy = {
 # operator simply re-runs the endpoint.
 _cancellation_queue: Dict[int, Dict[str, Any]] = {}
 
+# v19.34.65c — Session start timestamp for `/cancellations/stats`.
+# Captured at module import (≈ backend boot) so the V5 HUD's self-heal
+# pill can label its counts as "this session" rather than implying
+# a longer history. In-memory only — resets every backend restart,
+# which is the same lifecycle as `_cancellation_queue` itself.
+_CANCELLATION_QUEUE_SESSION_STARTED_AT: str = datetime.now(timezone.utc).isoformat()
+
 
 class CancellationQueueRequest(BaseModel):
     """v19.34.88 — Enqueue a cancellation for a live IB order."""
@@ -2196,6 +2203,81 @@ def list_all_cancellations():
         "success": True,
         "count": len(_cancellation_queue),
         "cancellations": list(_cancellation_queue.values()),
+    }
+
+
+# ===================== v19.34.65c — Cancellation Stats =====================
+@router.get("/cancellations/stats")
+def get_cancellation_stats():
+    """v19.34.65c — Aggregated counts by status for the V5 HUD self-heal pill.
+
+    Drives the "Bot self-healed N stale orders this session" indicator
+    next to the existing R/U/BP chips. Session-scoped (resets every
+    backend restart with `_cancellation_queue`).
+
+    Response shape:
+      {
+        "success": true,
+        "session_started_at": "2026-02-21T14:54:04Z",
+        "totals": {
+            "pending": int, "claimed": int, "cancelled": int,
+            "failed": int, "stale_dropped": int, "expired": int,
+        },
+        "stale_dropped_breakdown": {
+            "fatal_ib_error": int,
+            "exceeded_failure_threshold": int,
+            "exceeded_poll_served_count_no_result": int,
+            "pusher_reported_not_found": int,
+        },
+        "recent_stale_dropped": [  # most recent first, capped at 10
+            {"ib_order_id": int, "reason": str|null,
+             "stale_dropped_reason": str, "completed_at": str,
+             "error": str|null},
+            ...
+        ],
+        "queue_size": int,    # total entries currently in memory
+      }
+    """
+    totals = {
+        "pending": 0, "claimed": 0, "cancelled": 0,
+        "failed": 0, "stale_dropped": 0, "expired": 0,
+    }
+    stale_breakdown = {
+        "fatal_ib_error": 0,
+        "exceeded_failure_threshold": 0,
+        "exceeded_poll_served_count_no_result": 0,
+        "pusher_reported_not_found": 0,
+        "other": 0,
+    }
+    stale_dropped_entries = []
+    for entry in _cancellation_queue.values():
+        st = entry.get("status")
+        if st in totals:
+            totals[st] += 1
+        if st == "stale_dropped":
+            reason = entry.get("stale_dropped_reason") or "other"
+            if reason in stale_breakdown:
+                stale_breakdown[reason] += 1
+            else:
+                stale_breakdown["other"] += 1
+            stale_dropped_entries.append({
+                "ib_order_id": entry.get("ib_order_id"),
+                "reason": entry.get("reason"),
+                "stale_dropped_reason": entry.get("stale_dropped_reason"),
+                "completed_at": entry.get("completed_at"),
+                "error": entry.get("error"),
+            })
+    # Sort newest-first by completed_at, cap at 10.
+    stale_dropped_entries.sort(
+        key=lambda r: r.get("completed_at") or "", reverse=True,
+    )
+    return {
+        "success": True,
+        "session_started_at": _CANCELLATION_QUEUE_SESSION_STARTED_AT,
+        "totals": totals,
+        "stale_dropped_breakdown": stale_breakdown,
+        "recent_stale_dropped": stale_dropped_entries[:10],
+        "queue_size": len(_cancellation_queue),
     }
 
 

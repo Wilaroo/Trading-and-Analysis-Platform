@@ -1,3 +1,72 @@
+## 2026-02 — v19.34.65c + 65d: Cancellation stats endpoint, V5 self-heal pill, build_version probe
+
+### Trigger
+After v19.34.65 + 65b landed and silenced the orphan-gtc / Patch C cancel-loop spam, the next step was operator visibility. Two complementary needs:
+1. **Self-heal visibility** — when the bot silently absorbs N dead IB orders per session, surface the count so the operator gains trust in the auto-pilot rather than wondering "did it really fix itself?".
+2. **Build-version probe** — operators repeatedly need to confirm a patch took effect after a restart (no easy way before today other than grepping logs).
+
+### Fix 1: `GET /api/ib/cancellations/stats` (v19.34.65c)
+New endpoint in `backend/routers/ib.py`. Aggregates `_cancellation_queue` by status with:
+- `totals`: count per status (pending / claimed / cancelled / failed / stale_dropped / expired)
+- `stale_dropped_breakdown`: bucketed by `stale_dropped_reason` (fatal_ib_error, exceeded_failure_threshold, exceeded_poll_served_count_no_result, pusher_reported_not_found, other)
+- `recent_stale_dropped[]`: 10 most recent stale-drops, newest first, each carrying `ib_order_id, reason, stale_dropped_reason, completed_at, error`
+- `session_started_at`: ISO timestamp captured at module import so the UI can label counts as "this session"
+- `queue_size`: total entries in memory
+
+New module-level constant `_CANCELLATION_QUEUE_SESSION_STARTED_AT` captures wall-clock at boot.
+
+### Fix 2: V5 HUD self-heal pill (v19.34.65c)
+New component `frontend/src/components/sentcom/v5/CancelQueueSelfHealPill.jsx`. Renders next to `DriftGuardPill` in `SentComV5View.jsx` only when `stale_dropped >= 1`. Polls `/api/ib/cancellations/stats` every 30s. Sky-blue chip showing `SELF-HEAL · N · Xs ago`. Hover tooltip shows reason breakdown + 6 most recent stale-dropped order IDs with their reasons.
+
+Visibility rule mirrors `DriftGuardPill`: silent when zero, surfaces only when there's something to claim credit for.
+
+### Fix 3: `build_version` in `/api/sentcom/status` (v19.34.65d, Option E)
+New `_resolve_build_version()` helper in `backend/routers/sentcom.py` shells out once at module import to capture `git rev-parse --short HEAD`, `--abbrev-ref HEAD`, and `git status --porcelain` (dirty flag). Cached in `_BUILD_VERSION` dict. Added to both success and error branches of `/api/sentcom/status` response under the new `build_version` key. Falls back to `SENTCOM_BUILD` env var if `.git` is absent (container deploys).
+
+Example response:
+```json
+"build_version": {
+  "sha": "79fbc6ac",
+  "branch": "main",
+  "dirty": true,
+  "source": "git",
+  "repo_root": "/home/spark-1a60/Trading-and-Analysis-Platform"
+}
+```
+
+Operator probe: `curl -s http://localhost:8001/api/sentcom/status | jq .build_version`
+
+### Test coverage
+- `backend/tests/test_cancel_queue_stats_v19_34_65c.py` — 5 cases (empty queue, all-status counts, breakdown by reason, recent capped at 10 newest-first, recent entry shape)
+- `backend/tests/test_sentcom_build_version_v19_34_65d.py` — 3 cases (git resolution, dict shape, idempotent resolver)
+
+Combined with existing v19.34.65 / 65b tests: **17/17 passing**.
+
+### Live smoke (`/app` container)
+```
+$ curl -s http://localhost:8001/api/sentcom/status | jq .build_version
+{ "sha": "79fbc6ac", "branch": "main", "dirty": true, "source": "git", "repo_root": "/app" }
+
+$ curl -s http://localhost:8001/api/ib/cancellations/stats | jq .totals
+{ "pending": 0, "claimed": 0, "cancelled": 0, "failed": 0, "stale_dropped": 0, "expired": 0 }
+```
+
+### Deployment
+Patch (4 files, 387-line diff): https://paste.rs/zJO9b
+Operator deploy:
+```bash
+cd ~/Trading-and-Analysis-Platform && \
+curl -sS https://paste.rs/zJO9b > /tmp/v19_34_65c.patch && \
+git apply --check /tmp/v19_34_65c.patch && git apply /tmp/v19_34_65c.patch && \
+git add -A && git commit -m "v19.34.65c+d: stats endpoint + V5 self-heal pill + build_version probe" && \
+cd frontend && yarn build && \
+kill $(pgrep -f "python server.py" | head -1) && sleep 2 && \
+cd ../backend && nohup ~/Trading-and-Analysis-Platform/.venv/bin/python server.py > /tmp/sentcom-backend.log 2>&1 &
+disown
+```
+
+
+
 ## 2026-02 — v19.34.65b: Poll-count stale-drop backstop
 
 ### Operator trigger
