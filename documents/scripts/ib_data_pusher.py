@@ -2506,7 +2506,24 @@ class IBDataPusher:
                 f"/api/ib/cancellations/claim/{ib_order_id}", timeout=10,
             )
             if not claim:
-                logger.debug(f"[CancelQueue] Could not claim {ib_order_id} (already claimed?)")
+                # v19.34.71 — When claim returns falsy, we previously
+                # returned silently. That left the entry on the backend
+                # in `pending` state, where the next /cancellations/
+                # pending poll would re-serve it → served_count climbed
+                # → eventually stale-dropped via v19.34.65b. We can't
+                # actually distinguish "already claimed by another
+                # worker" from "claim endpoint returned a transient
+                # error" here (post_safe swallows both into a falsy
+                # return), so we still don't report a result — but at
+                # least surface it in INFO so operators can see this
+                # path firing if the v19.34.65b fallback ever lights up
+                # again.
+                logger.info(
+                    f"[CancelQueue] {ib_order_id} claim returned falsy "
+                    f"(already claimed by another worker, or transient "
+                    f"backend error). Not reporting result; backend's "
+                    f"poll-count guard will catch genuine stalls."
+                )
                 return
         except Exception as e:
             logger.warning(f"[CancelQueue] Claim error {ib_order_id}: {e}")
@@ -2540,9 +2557,35 @@ class IBDataPusher:
             self._report_cancellation_result(ib_order_id, "failed", error=str(e))
             return
 
-        # Wait briefly for IB to confirm.
+        # v19.34.71 — Snapshot log length BEFORE the wait so we can detect
+        # NEW error entries that arrive in response to our cancelOrder.
+        # Pre-fix: the wait loop only inspected `orderStatus.status`, but
+        # IB's 10147 "OrderId not found" arrives via the async errorEvent
+        # callback which ib_insync routes to `Trade.log[-1].errorCode`.
+        # The order status itself never transitions to a terminal state
+        # (because IB rejected the cancel without changing the order's
+        # state), so we waited the full window then reported "pending" —
+        # backend re-served on the next poll and the served_count climbed
+        # to 3, triggering v19.34.65b's silent stale-drop fallback.
+        #
+        # Fix: track the log baseline; any new entry with non-zero
+        # errorCode is an IB rejection of our cancel. Report it as
+        # "failed" with the error code in the message so the backend's
+        # `_is_fatal_cancel_error()` (which scans for 10147/10148/200)
+        # can immediately promote the entry to `stale_dropped` instead of
+        # waiting for the polled-3-times-without-result fallback.
+        try:
+            _log_baseline_len = len(target_trade.log or [])
+        except Exception:
+            _log_baseline_len = 0
+
+        # v19.34.71 — Extended wait window from 10×0.5s (5s) → 20×0.5s
+        # (10s). IB occasionally takes 6-8s to echo terminal status on
+        # complex OCA brackets, especially intraday on high-traffic
+        # symbols. The longer window reduces false-positive "pending"
+        # reports that would force the backend to re-poll.
         confirmed = False
-        for _ in range(10):
+        for _ in range(20):
             self.ib.sleep(0.5)
             try:
                 status = (target_trade.orderStatus.status or "").lower()
@@ -2562,13 +2605,59 @@ class IBDataPusher:
                 confirmed = True
                 break
 
+            # v19.34.71 — Scan log entries that arrived AFTER cancelOrder
+            # for an IB error code. Any errorCode != 0 means IB rejected
+            # our cancel; the exact code tells us why (10147 / 10148 /
+            # 200 / etc.). Report it as "failed" so the backend can
+            # stale-drop instead of treating us as still pending.
+            try:
+                log_entries = target_trade.log or []
+                new_entries = log_entries[_log_baseline_len:]
+                for le in new_entries:
+                    try:
+                        ec = int(getattr(le, "errorCode", 0) or 0)
+                    except (TypeError, ValueError):
+                        ec = 0
+                    if ec != 0:
+                        msg = (getattr(le, "message", "") or "").strip()
+                        err = f"IB error {ec}: {msg or 'cancel rejected'}"
+                        logger.warning(
+                            f"[CancelQueue] {ib_order_id} IB returned "
+                            f"error {ec} → reporting failed (msg={msg!r})"
+                        )
+                        self._report_cancellation_result(
+                            ib_order_id, "failed", error=err,
+                        )
+                        confirmed = True
+                        break
+                if confirmed:
+                    break
+            except Exception as _le_err:
+                # Non-fatal: if log scanning blows up, just keep polling
+                # on status. v19.34.65b backstop will catch us.
+                logger.debug(
+                    f"[CancelQueue] log scan failed for {ib_order_id}: "
+                    f"{_le_err}"
+                )
+
         if not confirmed:
-            # cancelOrder() was sent but IB hasn't echoed terminal status yet.
-            # Report `pending` so the backend knows we tried but doesn't
-            # treat it as failed. Next audit poll will reveal the truth.
+            # v19.34.71 — Final fallback. cancelOrder() was sent but
+            # neither orderStatus reached terminal nor did we see an
+            # explicit IB error code in the log. Report "failed" (not
+            # "pending") with a descriptive error so the backend at
+            # least counts a failure toward the 3-strike stale-drop
+            # threshold. Reporting "pending" used to leave the entry in
+            # backend state `pending`, which the next /cancellations/
+            # pending poll re-served → served_count climbed → silent
+            # stale-drop via v19.34.65b. Reporting "failed" surfaces the
+            # problem immediately to the operator and bumps the failure
+            # count via the normal path.
             self._report_cancellation_result(
-                ib_order_id, "pending",
-                error="cancelOrder sent; IB not yet confirmed terminal."
+                ib_order_id, "failed",
+                error="cancel_timeout_no_terminal_no_errorcode: cancelOrder "
+                      "sent but IB did not echo terminal status nor an "
+                      "error code within 10s. Order may still be live; "
+                      "operator should verify in TWS."
             )
 
     def _report_cancellation_result(self, ib_order_id: int, status: str,
