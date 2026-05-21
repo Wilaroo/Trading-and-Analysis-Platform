@@ -896,6 +896,69 @@ class PositionReconciler:
 
     # ==================== PROPER RECONCILE (v19.24 — 2026-05-01) =====================
 
+    @staticmethod
+    def _resolve_orphan_atr(bot, symbol: str, quote: Optional[Dict[str, Any]]) -> tuple:
+        """v19.34.69 — Authoritative ATR lookup for adopted IB orphans.
+
+        v19.34.68 attempted to read `quote.atr` / `quote.atr_14` directly
+        from the pusher-relayed L1 quote payload. The pusher quote stream
+        does NOT carry ATR (operator dump 2026-05-12 confirmed `atr` key
+        absent on every symbol). That made the v19.34.68 widen-stop
+        codepath a silent no-op: every adoption fell back to the 2% pct
+        floor, including ARM ($280 / $8 ATR) which is the exact case the
+        patch was meant to fix.
+
+        This helper mirrors the same resolution chain the executor +
+        retune-stop endpoint already use (see
+        `routers/trading_bot._resolve_atr_for_symbol`), so adopted
+        orphans get the same ATR view as bot-originated trades:
+
+          1. `bot._latest_atr_5m[symbol]`   — primary, refreshed each
+             5-min bar by the live feature loop. Same source feed used
+             by `OpportunityEvaluator.calculate_atr_based_stop`.
+          2. `bot._scanner._latest_atr[symbol]` — last-known scanner
+             ATR. Survives bot restart if the scanner module has been
+             warm for at least one cycle.
+          3. `quote.atr` / `quote.atr_14`   — legacy. Kept so any future
+             pusher upgrade that populates the field is honored without
+             code changes.
+
+        Returns:
+            (atr_value: float, source: str)
+              atr_value: 0.0 if no source had a usable value (caller
+                should then fall back to pct-floor stop sizing).
+              source:    one of "bot_5m_cache" | "scanner_cache" |
+                "quote_payload" | "unavailable".
+        """
+        sym = (symbol or "").upper()
+        # 1) Primary: bot's live 5m ATR cache (same as live trading path).
+        try:
+            cache = getattr(bot, "_latest_atr_5m", None) or {}
+            val = cache.get(sym) or cache.get(symbol)
+            if val and float(val) > 0:
+                return float(val), "bot_5m_cache"
+        except Exception:
+            pass
+        # 2) Fallback: scanner's last-known ATR snapshot.
+        try:
+            scanner = getattr(bot, "_scanner", None)
+            if scanner is not None:
+                scan_cache = getattr(scanner, "_latest_atr", None) or {}
+                val = scan_cache.get(sym) or scan_cache.get(symbol)
+                if val and float(val) > 0:
+                    return float(val), "scanner_cache"
+        except Exception:
+            pass
+        # 3) Legacy: quote payload (currently empty, future-proofed).
+        if quote:
+            try:
+                val = quote.get("atr") or quote.get("atr_14")
+                if val and float(val) > 0:
+                    return float(val), "quote_payload"
+            except Exception:
+                pass
+        return 0.0, "unavailable"
+
     async def reconcile_orphan_positions(
         self,
         bot: 'TradingBotService',
@@ -1219,11 +1282,20 @@ class PositionReconciler:
                     # Fallback chain for ATR source: quote.atr → quote.atr_14
                     # → 0 (in which case the pct floor wins). We never compute
                     # a stop tighter than the pct floor.
+                    # v19.34.69 — ATR source fix. The v19.34.68 attempt read
+                    # `quote.atr / quote.atr_14` directly from the pusher
+                    # quote feed — those fields don't exist there, so every
+                    # adoption silently fell back to the pct floor (the exact
+                    # bug v19.34.68 was meant to fix). v19.34.69 routes the
+                    # lookup through `_resolve_orphan_atr` which queries the
+                    # same caches the live executor + retune-stop endpoint
+                    # use (bot._latest_atr_5m → scanner._latest_atr → quote).
+                    #
+                    # Fallback chain for ATR source: bot_5m_cache → scanner_cache
+                    # → quote_payload → unavailable. When unavailable, atr_raw=0
+                    # and the pct floor wins (safe behavior).
                     pct_distance = avg_cost * (default_stop_pct / 100.0)
-                    atr_raw = (
-                        float(quote.get("atr") or 0)
-                        or float(quote.get("atr_14") or 0)
-                    )
+                    atr_raw, atr_source = self._resolve_orphan_atr(bot, sym, quote)
                     atr_distance = (default_atr_mult * atr_raw) if atr_raw > 0 else 0.0
                     stop_distance = max(pct_distance, atr_distance)
                     # Used downstream by the rationale-stamp + report so the
@@ -1497,7 +1569,8 @@ class PositionReconciler:
                         f"Reconciled from IB orphan — stop at {default_stop_pct:.1f}% "
                         f"from avg_cost, R:R {default_rr:.1f}"
                         + (
-                            f" (widened to {default_atr_mult:.1f}×ATR for vol)"
+                            f" (widened to {default_atr_mult:.1f}×ATR "
+                            f"${atr_raw:.2f} from {atr_source} for vol)"
                             if _stop_basis == "atr"
                             else ""
                         )
@@ -1799,6 +1872,14 @@ class PositionReconciler:
                         "target_price": round(target_1, 4),
                         "risk_reward_ratio": default_rr,
                         "stop_pct": default_stop_pct,
+                        # v19.34.69 — audit fields so operators can verify
+                        # whether ATR widening actually fired and which
+                        # cache it came from (bot_5m_cache / scanner_cache /
+                        # quote_payload / unavailable).
+                        "stop_basis": _stop_basis,
+                        "atr_value": round(atr_raw, 4) if atr_raw else 0.0,
+                        "atr_source": atr_source,
+                        "atr_mult": default_atr_mult,
                         # v19.34.68 — surface bracket-attach outcome so
                         # operators / UI can tell at a glance whether the
                         # adopted position is actually protected at IB.
