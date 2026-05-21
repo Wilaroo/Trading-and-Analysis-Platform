@@ -1,3 +1,51 @@
+## 2026-02 — v19.34.65: Orphan-GTC cancel-loop stale-drop guard
+
+### Operator trigger
+After v19.34.64 + Windows-firewall fix restored pusher RPC, the backend log filled with cosmetic noise:
+```
+[v19.34.88 CANCEL-QUEUE] ib_order_id=<N> FAILED: Error 10147, reqId N: OrderId N that needs to be cancelled is not found
+```
+firing every few seconds for the same handful of dead bracket order IDs the orphan-gtc auto-sweep kept rediscovering. The orders were already gone from IB — pusher reported `failed`/10147 — but `queue_cancellation()` happily overwrote the failed entry with a fresh `pending` row every sweep cycle, so the pusher tried again, IB returned 10147 again, infinitum.
+
+### Root cause
+`routers/ib.queue_cancellation()` was idempotent only on `pending`/`claimed` entries. A `failed` entry got silently overwritten on the next `queue_cancellation()` call, restarting the loop. There was no per-order failure counter or fatal-error short-circuit.
+
+### Fix (`backend/routers/ib.py`)
+- New constants `_CANCEL_STALE_FAILURE_THRESHOLD = 3` and `_CANCEL_FATAL_ERROR_CODES = (10147, 10148, 200)`.
+- New helper `_is_fatal_cancel_error(err)` matches the codes inside the pusher-reported error string.
+- `queue_cancellation()` now:
+  - carries forward `failure_count` across re-queues;
+  - refuses to overwrite a `stale_dropped` entry;
+  - on re-queue of a `failed` entry whose last error was fatal (or whose `failure_count >= 3`), promotes the entry to `stale_dropped` and returns it unchanged.
+- `/api/ib/cancellations/result` (`report_cancellation_result`):
+  - bumps `failure_count` on `failed`;
+  - on the first fatal error (10147/10148/200) → immediate `stale_dropped`;
+  - on 3 consecutive non-fatal failures → `stale_dropped`;
+  - `not_found` reports go straight to `stale_dropped`;
+  - successful `cancelled` resets `failure_count` to 0.
+
+### Test suite
+`backend/tests/test_cancel_queue_stale_drop_v19_34_65.py` — **6/6 passing**:
+- fatal 10147 drops after one failure
+- generic failure drops after 3 strikes
+- `not_found` is immediate stale drop
+- re-queue on stale_dropped is a no-op (the core log-spam fix)
+- successful cancel resets the strike counter
+- `_is_fatal_cancel_error` helper spot-check
+
+### Net effect
+Once IB has conclusively reported an order gone (10147/10148/200) or it has failed 3 times in a row, it stays `stale_dropped` and the orphan-gtc reconciler's `queue_cancellation()` call returns the terminal entry unchanged — pusher never sees it, no more log spam.
+
+### Deployment
+Patch uploaded to dpaste (1-day expiry). Operator one-liner:
+```
+curl -sS https://dpaste.com/8V6JFBV4Y.txt | git -C ~/Trading-and-Analysis-Platform apply --check && \
+curl -sS https://dpaste.com/8V6JFBV4Y.txt | git -C ~/Trading-and-Analysis-Platform apply
+```
+Then `sudo systemctl restart sentcom-backend` (or the operator's usual restart).
+
+
+
 ## 2026-05-20 — v19.34.58 + v19.34.59 + v19.34.60 + v19.34.61: HUD reads IB truth
 
 ### Operator trigger

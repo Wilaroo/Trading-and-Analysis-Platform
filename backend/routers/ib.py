@@ -227,9 +227,41 @@ class CancellationResult(BaseModel):
     executed_at: Optional[str] = None
 
 
+# v19.34.65 — When an order has failed cancellation this many times in a
+# row, refuse to re-queue it and mark it `stale_dropped`. This stops the
+# orphan-gtc auto-sweep from re-arming the same dead ib_order_id every
+# scan cycle (IB returns Error 10147 "Order not found" forever — the
+# order was already gone but the bot's view still listed it). Per-order
+# state is in-memory which is fine: the queue itself is in-memory and
+# the worst-case on restart is one more sweep cycle (3 retries) before
+# the order is dropped again.
+_CANCEL_STALE_FAILURE_THRESHOLD = 3
+
+# IB error codes that mean "this order does not exist on IB" — we treat
+# these as fatal for retry purposes (no amount of re-queuing will help).
+# 10147 = OrderId not found, 10148 = OrderId already filled / cancelled,
+# 200   = No security definition (instrument is gone).
+_CANCEL_FATAL_ERROR_CODES = ("10147", "10148", "200")
+
+
+def _is_fatal_cancel_error(err: Optional[str]) -> bool:
+    """Return True if the pusher-reported error string indicates the
+    order is unrecoverably gone from IB and we should stop retrying."""
+    if not err:
+        return False
+    err_str = str(err)
+    return any(code in err_str for code in _CANCEL_FATAL_ERROR_CODES)
+
+
 def queue_cancellation(ib_order_id: int, reason: Optional[str] = None,
                        requested_by: str = "operator") -> Dict[str, Any]:
-    """v19.34.88 — Enqueue a cancellation; idempotent on ib_order_id."""
+    """v19.34.88 — Enqueue a cancellation; idempotent on ib_order_id.
+
+    v19.34.65 — Refuse to re-arm an order whose previous attempt(s)
+    failed with a fatal IB error (10147 / 10148 / 200) or which has
+    accumulated `_CANCEL_STALE_FAILURE_THRESHOLD` consecutive failures.
+    Returns the existing terminal entry instead of overwriting it.
+    """
     try:
         oid = int(ib_order_id)
     except (TypeError, ValueError):
@@ -241,6 +273,29 @@ def queue_cancellation(ib_order_id: int, reason: Optional[str] = None,
         if reason and not existing.get("reason"):
             existing["reason"] = reason
         return existing
+    # v19.34.65 — Stale-drop guard. Once an order is conclusively gone
+    # from IB (fatal error or 3 consecutive failures), keep it in the
+    # queue as `stale_dropped` and refuse to re-queue. Callers see the
+    # terminal entry unchanged so they can short-circuit their own
+    # retry loops.
+    if existing and existing.get("status") == "stale_dropped":
+        return existing
+    if existing and existing.get("status") == "failed":
+        failure_count = int(existing.get("failure_count") or 0)
+        last_err = existing.get("error")
+        if _is_fatal_cancel_error(last_err) or failure_count >= _CANCEL_STALE_FAILURE_THRESHOLD:
+            existing["status"] = "stale_dropped"
+            existing["completed_at"] = now_iso
+            existing["stale_dropped_reason"] = (
+                "fatal_ib_error" if _is_fatal_cancel_error(last_err)
+                else "exceeded_failure_threshold"
+            )
+            logger.warning(
+                "[v19.34.65 CANCEL-STALE] ib_order_id=%s dropped after %d "
+                "failure(s) (last_err=%r, reason=%s). Refusing to re-queue.",
+                oid, failure_count, last_err, reason,
+            )
+            return existing
     _cancellation_queue[oid] = {
         "ib_order_id": oid,
         "reason": reason,
@@ -250,6 +305,10 @@ def queue_cancellation(ib_order_id: int, reason: Optional[str] = None,
         "claimed_at": None,
         "completed_at": None,
         "error": None,
+        # v19.34.65 — Carry forward prior failure_count if any, so a
+        # caller that manually retries after a `failed` doesn't reset
+        # the strike counter to 0 and bypass the stale-drop guard.
+        "failure_count": int((existing or {}).get("failure_count") or 0),
     }
     return _cancellation_queue[oid]
 
@@ -2019,7 +2078,13 @@ def claim_cancellation(ib_order_id: int):
 @router.post("/cancellations/result")
 def report_cancellation_result(result: CancellationResult):
     """v19.34.88 — Pusher reports the outcome of a cancel.
-    Accepted statuses: cancelled, failed, not_found, pending."""
+    Accepted statuses: cancelled, failed, not_found, pending.
+
+    v19.34.65 — Track per-order failure_count and auto-promote to
+    `stale_dropped` once a fatal IB error (10147/10148/200) is reported
+    OR `_CANCEL_STALE_FAILURE_THRESHOLD` consecutive failures accrue.
+    This stops the orphan-gtc auto-sweep log-spam loop.
+    """
     entry = _cancellation_queue.get(int(result.ib_order_id))
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Cancellation {result.ib_order_id} not queued")
@@ -2030,15 +2095,44 @@ def report_cancellation_result(result: CancellationResult):
     entry["error"] = result.error
     entry["completed_at"] = result.executed_at or datetime.now(timezone.utc).isoformat()
     if status == "cancelled":
+        # Success → reset strike counter so a future re-use of the same
+        # ib_order_id (rare but possible after IB reassigns) starts fresh.
+        entry["failure_count"] = 0
         logger.warning(
             "[v19.34.88 CANCEL-QUEUE] ib_order_id=%s cancelled (reason=%s)",
             result.ib_order_id, entry.get("reason"),
         )
-    elif status == "failed":
-        logger.error(
-            "[v19.34.88 CANCEL-QUEUE] ib_order_id=%s FAILED: %s",
-            result.ib_order_id, result.error,
+    elif status == "not_found":
+        # `not_found` is conclusive — the order is gone from IB. Promote
+        # straight to stale_dropped so the reconciler stops re-queuing.
+        entry["status"] = "stale_dropped"
+        entry["stale_dropped_reason"] = "pusher_reported_not_found"
+        logger.warning(
+            "[v19.34.65 CANCEL-STALE] ib_order_id=%s reported not_found by "
+            "pusher → marked stale_dropped (reason=%s)",
+            result.ib_order_id, entry.get("reason"),
         )
+    elif status == "failed":
+        entry["failure_count"] = int(entry.get("failure_count") or 0) + 1
+        fc = entry["failure_count"]
+        is_fatal = _is_fatal_cancel_error(result.error)
+        if is_fatal or fc >= _CANCEL_STALE_FAILURE_THRESHOLD:
+            entry["status"] = "stale_dropped"
+            entry["stale_dropped_reason"] = (
+                "fatal_ib_error" if is_fatal else "exceeded_failure_threshold"
+            )
+            logger.warning(
+                "[v19.34.65 CANCEL-STALE] ib_order_id=%s dropped after %d "
+                "failure(s) (last_err=%r, fatal=%s, reason=%s).",
+                result.ib_order_id, fc, result.error, is_fatal,
+                entry.get("reason"),
+            )
+        else:
+            logger.error(
+                "[v19.34.88 CANCEL-QUEUE] ib_order_id=%s FAILED (%d/%d): %s",
+                result.ib_order_id, fc, _CANCEL_STALE_FAILURE_THRESHOLD,
+                result.error,
+            )
     return {"success": True, "cancellation": entry}
 
 
