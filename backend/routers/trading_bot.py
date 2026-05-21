@@ -134,13 +134,25 @@ async def diag_symbol_state(
     open_trades_mem: List[Dict[str, Any]] = []
     try:
         ot = getattr(_trading_bot, "_open_trades", {}) or {}
-        rows = ot.get(sym) or []
-        for t in (rows if isinstance(rows, list) else [rows]):
+        # v19.34.73 — `_open_trades` is keyed by trade_id, NOT by symbol.
+        # Pre-fix: `ot.get(sym)` returned None for every symbol, even
+        # ones the bot actively tracked. ADI showed `[]` here while
+        # `force-reconcile-down` simultaneously reported `tracked_total=134`.
+        # Fix: iterate values() and filter by symbol.
+        if isinstance(ot, dict):
+            rows = [
+                t for t in ot.values()
+                if str(getattr(t, "symbol", "") or "").upper() == sym
+            ]
+        else:
+            rows = []
+        for t in rows:
             d = {
                 "id": getattr(t, "id", None),
                 "symbol": getattr(t, "symbol", None),
                 "direction": getattr(t, "direction", None),
                 "status": str(getattr(t, "status", "")),
+                "entered_by": getattr(t, "entered_by", None),  # v19.34.73
                 "entry_price": getattr(t, "entry_price", None),
                 "remaining_shares": getattr(t, "remaining_shares", None),
                 "original_shares": getattr(t, "original_shares", None),
@@ -148,6 +160,8 @@ async def diag_symbol_state(
                 "target_prices": getattr(t, "target_prices", None),
                 "scale_outs_executed": getattr(t, "scale_outs_executed", None),
                 "setup_type": getattr(t, "setup_type", None),
+                "stop_order_id": getattr(t, "stop_order_id", None),  # v19.34.73
+                "target_order_id": getattr(t, "target_order_id", None),  # v19.34.73
                 "created_at": str(getattr(t, "created_at", "")) or None,
                 "ai_context": (getattr(t, "ai_context", "") or "")[:200] or None,
             }

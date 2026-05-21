@@ -2131,6 +2131,104 @@ class TradingBotService:
                     logger.warning(f"Startup orphan-guard failed (non-fatal): {e}")
             asyncio.create_task(_startup_orphan_guard())
 
+            # ── v19.34.73 (2026-05-21) — Boot phantom-sibling purge ──
+            # The 2026-05-21 ADI incident: trade `b415ed5f` (44sh,
+            # orphan-adopted from a prior session) co-existed in
+            # `_open_trades` with the real bot_fired `82f0686f` (134sh).
+            # Both matched (ADI, long) so the sym-dir-cap guard latched
+            # onto the older `b415ed5f` as canonical and refused all
+            # new ADI entries; meanwhile the naked-sweep reissued
+            # brackets for BOTH every 60s, with `b415ed5f`'s submissions
+            # bouncing off IB with Error 200 (stale contract / no
+            # secdef) 35+ times.
+            #
+            # This pass purges the LOSER sibling for any (symbol,
+            # direction) bucket that has >1 trade in `_open_trades`.
+            # "Loser" = lower score per the same `_score_sibling`
+            # function used by `_naked_position_sweep` (bot_fired beats
+            # orphan-adopted; ties broken by remaining_shares).
+            # The purged trade is moved to `_closed_trades` with
+            # `close_reason="phantom_sibling_purge_v19_34_73"` and a
+            # synthetic 0-share close (no PnL impact).
+            async def _startup_phantom_sibling_purge():
+                try:
+                    await asyncio.sleep(20)  # let restore_state + orphan-guard settle
+                    from services.trading_bot_service import TradeStatus
+                    _sib_map: Dict[tuple, list] = {}
+                    for _tid, _t in self._open_trades.items():
+                        _ss = (getattr(_t, "symbol", "") or "").upper()
+                        _sd = getattr(_t, "direction", None)
+                        _sdv = getattr(_sd, "value", str(_sd) if _sd else "long").lower()
+                        _sib_map.setdefault((_ss, _sdv), []).append(_tid)
+
+                    def _score(_t) -> int:
+                        _eb = (getattr(_t, "entered_by", "") or "").lower()
+                        _bonus = 10000 if "bot_fired" in _eb else 0
+                        _rs = int(abs(getattr(_t, "remaining_shares", 0) or 0))
+                        return _bonus + _rs
+
+                    purged = []
+                    for (_sym, _dir), _tids in _sib_map.items():
+                        if len(_tids) <= 1:
+                            continue
+                        _scored = sorted(
+                            (
+                                (_score(self._open_trades[_tid]), _tid)
+                                for _tid in _tids
+                                if _tid in self._open_trades
+                            ),
+                            reverse=True,
+                        )
+                        _winner = _scored[0][1] if _scored else None
+                        for _, _loser_tid in _scored[1:]:
+                            _loser = self._open_trades.get(_loser_tid)
+                            if _loser is None:
+                                continue
+                            try:
+                                _loser.status = TradeStatus.CLOSED
+                                _loser.close_reason = "phantom_sibling_purge_v19_34_73"
+                                _loser.closed_at = datetime.now(timezone.utc).isoformat()
+                                _loser.remaining_shares = 0
+                                del self._open_trades[_loser_tid]
+                                self._closed_trades.append(_loser)
+                                try:
+                                    await self._save_trade(_loser)
+                                except Exception as _se:
+                                    logger.debug(
+                                        f"[v19.34.73 phantom-purge] save failed for "
+                                        f"{_loser_tid} (non-fatal): {_se}"
+                                    )
+                                purged.append({
+                                    "purged_trade_id": _loser_tid,
+                                    "symbol": _sym,
+                                    "direction": _dir,
+                                    "kept_canonical": _winner,
+                                })
+                                logger.warning(
+                                    f"🧹 [v19.34.73 phantom-purge] Removed {_sym} "
+                                    f"{_dir} phantom {_loser_tid} from _open_trades "
+                                    f"— canonical {_winner} owns the position."
+                                )
+                            except Exception as _pe:
+                                logger.warning(
+                                    f"[v19.34.73 phantom-purge] could not purge "
+                                    f"{_loser_tid} (non-fatal): {_pe}"
+                                )
+                    if purged:
+                        logger.warning(
+                            f"🧹 [v19.34.73 phantom-purge] Boot purge complete: "
+                            f"removed {len(purged)} phantom sibling(s). Details: {purged}"
+                        )
+                    else:
+                        logger.info(
+                            "[v19.34.73 phantom-purge] No sibling-phantoms found at boot."
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[v19.34.73 phantom-purge] boot pass failed (non-fatal): {e}"
+                    )
+            asyncio.create_task(_startup_phantom_sibling_purge())
+
             # ── v19.34.66 (2026-02-09) — Boot-time orphan-GTC tripwire ──
             # Long-missing audit pass. Every prior reconciler starts from
             # the bot's view of the world; none ever asked "what does IB
@@ -4886,12 +4984,66 @@ class TradingBotService:
         # The 2% / 3% defaults mirror `reconcile_orphan_positions`.
         EMERGENCY_STOP_PCT = 2.0
         EMERGENCY_RR = 1.5
+
+        # v19.34.73 — Sibling-canonical guard. Pre-fix: when two trades
+        # for the same (symbol, direction) co-existed in `_open_trades`
+        # (e.g., real bot_fired `82f0686f` 134sh + stale orphan-adopted
+        # `b415ed5f` 44sh from a prior session), the naked-sweep
+        # reissued brackets for BOTH every 60s. IB rejected the smaller
+        # phantom's bracket with Error 200 (stale contract / no
+        # secdef), and the next sweep saw it naked again → infinite
+        # error-200 loop (observed 35+ cycles for ADI on 2026-05-21).
+        # Fix: build a sibling map, score each canonical (bot_fired +
+        # remaining_shares), and skip naked-reissue for any trade
+        # that's NOT the highest-scored sibling. The losing sibling
+        # gets marked for purge by the boot-time phantom cleaner.
+        _sibling_map: Dict[tuple, list] = {}
+        for _stid, _strade in self._open_trades.items():
+            _ssym = (getattr(_strade, "symbol", "") or "").upper()
+            _sdir = getattr(_strade, "direction", None)
+            _sdv = getattr(_sdir, "value", str(_sdir) if _sdir else "long").lower()
+            _sibling_map.setdefault((_ssym, _sdv), []).append(_stid)
+
+        def _score_sibling(_t) -> int:
+            """Higher score = healthier canonical. bot_fired wins."""
+            _eb = (getattr(_t, "entered_by", "") or "").lower()
+            _bonus = 10000 if "bot_fired" in _eb else 0
+            _rs = int(abs(getattr(_t, "remaining_shares", 0) or 0))
+            return _bonus + _rs
+
         for tid, trade in list(self._open_trades.items()):
             try:
                 rs = int(abs(getattr(trade, "remaining_shares", 0) or 0))
                 if rs <= 0:
                     continue
                 result["checked"] += 1
+
+                # v19.34.73 — Skip if a healthier sibling owns
+                # (symbol, direction). This trade is a phantom.
+                _g_sym = (getattr(trade, "symbol", "") or "").upper()
+                _g_dir = getattr(trade, "direction", None)
+                _g_dv = getattr(_g_dir, "value", str(_g_dir) if _g_dir else "long").lower()
+                _sibs = _sibling_map.get((_g_sym, _g_dv), [])
+                if len(_sibs) > 1:
+                    _scored = []
+                    for _sib_tid in _sibs:
+                        _sib_t = self._open_trades.get(_sib_tid)
+                        if _sib_t is None:
+                            continue
+                        _scored.append((_score_sibling(_sib_t), _sib_tid))
+                    _scored.sort(reverse=True)
+                    _winner = _scored[0][1] if _scored else None
+                    if _winner is not None and _winner != tid:
+                        print(
+                            f"[v19.34.73 naked-sweep] {_g_sym} {tid}: "
+                            f"SKIP reissue — healthier sibling {_winner} "
+                            f"owns ({_g_sym}, {_g_dv}). This trade is a "
+                            f"phantom and will be cleaned up by the boot "
+                            f"phantom-purge pass.",
+                            flush=True,
+                        )
+                        result.setdefault("skipped_phantom_siblings", []).append(tid)
+                        continue
 
                 stop_id = getattr(trade, "stop_order_id", None)
                 stop_id_str = str(stop_id) if stop_id is not None else None

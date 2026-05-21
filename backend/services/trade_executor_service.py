@@ -2323,13 +2323,69 @@ class TradeExecutorService:
         # still propagating; if the child's trigger price is touched in
         # that window the child fills AND so does the MKT close,
         # doubling the trade and flipping its direction at IB.
+        #
+        # v19.34.73 — Bumped wait 4s → 8s and added retry-once on timeout.
+        # The 4s cap was producing false-positive race-risk aborts under
+        # normal IB Gateway load — every Close button click on
+        # 2026-05-21 timed out, and the 15:55 ET EOD close failed
+        # silently for ALL 11 positions (operator manually flatted at
+        # 16:00 ET). 8s comfortably covers normal IB ack timing (median
+        # ~200ms, p99 ~1.5s); retry-once handles the case where IB
+        # Gateway dropped our first cancel mid-flight (common after a
+        # reconnect). Total worst-case wait: 8s + 5s = 13s.
         try:
             from services.ib_direct_service import get_ib_direct_service
             ib_direct = get_ib_direct_service()
             if ib_direct is not None and await ib_direct.ensure_connected():
                 partition = await ib_direct.wait_for_orders_terminal(
-                    ordered, timeout_s=4.0, poll_iv_s=0.1,
+                    ordered, timeout_s=8.0, poll_iv_s=0.1,
                 )
+                # v19.34.73 — retry-once on first-pass timeout. Re-issue
+                # cancels on the timed-out oids (in case IB Gateway lost
+                # the first cancel) and wait a shorter 5s for confirmation.
+                _retry_oids = list(partition.get("timeout", []))
+                if _retry_oids:
+                    logger.warning(
+                        "[v19.34.73 cancel-retry] %s — first 8s wait timed "
+                        "out on %s, re-issuing cancels + 5s retry-wait.",
+                        trade.symbol, _retry_oids,
+                    )
+                    for _oid in _retry_oids:
+                        try:
+                            from routers.ib import _ib_service
+                            if _ib_service is not None:
+                                await _ib_service.cancel_order(_oid)
+                        except Exception as _re_err:
+                            logger.debug(
+                                "[v19.34.73 cancel-retry] re-cancel %s "
+                                "raised (non-fatal): %s", _oid, _re_err,
+                            )
+                    partition2 = await ib_direct.wait_for_orders_terminal(
+                        _retry_oids, timeout_s=5.0, poll_iv_s=0.1,
+                    )
+                    # Promote any newly-terminal oids out of timeout into
+                    # their actual bucket; whatever STILL times out
+                    # remains in timeout.
+                    new_cancelled = list(partition2.get("cancelled", []))
+                    new_filled = list(partition2.get("filled", []))
+                    new_other = list(partition2.get("other_terminal", []))
+                    new_unknown = list(partition2.get("unknown", []))
+                    new_timeout = list(partition2.get("timeout", []))
+                    # Rebuild partition with the merged view.
+                    partition = {
+                        "cancelled": list(partition.get("cancelled", [])) + new_cancelled,
+                        "filled":    list(partition.get("filled", []))    + new_filled,
+                        "other_terminal": list(partition.get("other_terminal", [])) + new_other,
+                        "unknown":   list(partition.get("unknown", []))   + new_unknown,
+                        "timeout":   new_timeout,
+                    }
+                    logger.info(
+                        "[v19.34.73 cancel-retry] %s — after retry: "
+                        "cancelled=%d filled=%d other=%d timeout=%d",
+                        trade.symbol, len(partition["cancelled"]),
+                        len(partition["filled"]), len(partition["other_terminal"]),
+                        len(partition["timeout"]),
+                    )
                 result["cancelled"] = list(partition.get("cancelled", []))
                 result["filled"] = list(partition.get("filled", []))
                 result["other_terminal"] = list(partition.get("other_terminal", []))
@@ -2349,9 +2405,10 @@ class TradeExecutorService:
                     )
                 if result["timeout"]:
                     logger.error(
-                        "[v19.34.64 OCA-RACE] %s — bracket child(ren) "
-                        "%s never reached terminal status within 4s. "
-                        "Caller should abort the MKT close to avoid race.",
+                        "[v19.34.64+v19.34.73 OCA-RACE] %s — bracket "
+                        "child(ren) %s never reached terminal status "
+                        "within 8s + 5s retry. Caller should abort the "
+                        "MKT close to avoid race.",
                         trade.symbol, result["timeout"],
                     )
         except Exception as e:
