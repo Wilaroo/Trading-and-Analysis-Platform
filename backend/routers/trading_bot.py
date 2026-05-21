@@ -2788,27 +2788,95 @@ def update_eod_config(config: EODConfigUpdate):
 
 
 @router.post("/eod-close-now")
-async def trigger_eod_close_now():
-    """
-    Manually trigger EOD close of all positions.
-    Use this to close all positions immediately regardless of time.
+async def trigger_eod_close_now(payload: Optional[Dict[str, Any]] = Body(default=None)):
+    """v19.34.69 — Manually trigger EOD close of intraday positions.
+
+    v19.34.63 bug: this endpoint iterated `_open_trades` blind and closed
+    EVERY position — including swing & position trades flagged
+    `close_at_eod=False` — silently overriding the operator's intent to
+    hold those names overnight. The auto-EOD path
+    (`PositionManager.check_eod_close`) already filtered correctly; the
+    manual button did not. Operator caught the divergence 2026-05-12 after
+    a manual EOD-close prematurely flatten'd a multi-day swing position.
+
+    v19.34.69 mirrors the auto-path contract: default behavior closes
+    ONLY trades flagged `close_at_eod=True`. Swing/position trades are
+    preserved and counted as `swing_held`.
+
+    Optional body:
+      {
+        "include_swing": false  // if true, force-close ALL trades regardless
+                                // of `close_at_eod` (emergency flatten).
+                                // Default: false.
+      }
+
+    Response shape (new fields marked v19.34.69):
+      {
+        "success": bool,
+        "message": str,
+        "closed_count": int,
+        "swing_held": int,           // v19.34.69 — count NOT closed (overnights)
+        "swing_held_symbols": [str], // v19.34.69 — first 25 preserved symbols
+        "include_swing": bool,       // v19.34.69 — echo of the flag used
+        "total_pnl": float,
+        "results": [{symbol, shares, pnl, status, close_at_eod}]
+      }
     """
     if not _trading_bot:
         raise HTTPException(status_code=503, detail="Trading bot not initialized")
-    
+
+    include_swing = bool((payload or {}).get("include_swing", False))
+
     open_count = len(_trading_bot._open_trades)
     if open_count == 0:
-        return {"success": True, "message": "No open positions to close", "closed_count": 0}
-    
+        return {
+            "success": True,
+            "message": "No open positions to close",
+            "closed_count": 0,
+            "swing_held": 0,
+            "swing_held_symbols": [],
+            "include_swing": include_swing,
+        }
+
+    # v19.34.69 — partition trades by `close_at_eod` flag. Default-True
+    # for any legacy trade without the attribute so we never silently
+    # skip a position that the bot couldn't categorize. Mirrors the
+    # auto-path's safety default in `PositionManager.check_eod_close`.
+    eod_trades = {}
+    swing_held_symbols = []
+    for trade_id, trade in _trading_bot._open_trades.items():
+        if include_swing or getattr(trade, "close_at_eod", True):
+            eod_trades[trade_id] = trade
+        else:
+            swing_held_symbols.append(trade.symbol)
+
+    swing_held_count = len(swing_held_symbols)
+
+    if not eod_trades:
+        # All open trades are swing/position and operator did not pass
+        # include_swing=true. Return a friendly success with no closes.
+        return {
+            "success": True,
+            "message": (
+                f"All {open_count} open trades are swing/position "
+                f"(close_at_eod=False) — none closed. Pass "
+                f"include_swing=true to force-flatten."
+            ),
+            "closed_count": 0,
+            "swing_held": swing_held_count,
+            "swing_held_symbols": swing_held_symbols[:25],
+            "include_swing": include_swing,
+        }
+
     closed_count = 0
     total_pnl = 0.0
     results = []
-    
+
     # 2026-04-30 v19.14 — close_trade returns a BOOL, not a dict.
     # Was calling `.get("success")` on the bool → silent AttributeError
     # made every manual EOD attempt look like a no-op. Now we treat
     # the bool correctly + read realized_pnl from the trade post-close.
-    for trade_id, trade in list(_trading_bot._open_trades.items()):
+    for trade_id, trade in list(eod_trades.items()):
         try:
             ok = await _trading_bot.close_trade(trade_id, reason="manual_eod_close")
             if ok:
@@ -2819,25 +2887,35 @@ async def trigger_eod_close_now():
                     "symbol": trade.symbol,
                     "shares": getattr(trade, "remaining_shares", 0),
                     "pnl": pnl,
+                    "close_at_eod": getattr(trade, "close_at_eod", True),
                     "status": "closed"
                 })
             else:
                 results.append({
                     "symbol": trade.symbol,
+                    "close_at_eod": getattr(trade, "close_at_eod", True),
                     "error": "close_trade returned False (broker refused / executor offline)",
                     "status": "failed"
                 })
         except Exception as e:
             results.append({
                 "symbol": trade.symbol,
+                "close_at_eod": getattr(trade, "close_at_eod", True),
                 "error": str(e),
                 "status": "error"
             })
-    
+
+    msg_parts = [f"Closed {closed_count} of {len(eod_trades)} intraday positions"]
+    if swing_held_count > 0 and not include_swing:
+        msg_parts.append(f"{swing_held_count} swing position(s) held overnight")
+
     return {
         "success": True,
-        "message": f"Closed {closed_count} of {open_count} positions",
+        "message": "; ".join(msg_parts),
         "closed_count": closed_count,
+        "swing_held": swing_held_count,
+        "swing_held_symbols": swing_held_symbols[:25],
+        "include_swing": include_swing,
         "total_pnl": total_pnl,
         "results": results
     }
