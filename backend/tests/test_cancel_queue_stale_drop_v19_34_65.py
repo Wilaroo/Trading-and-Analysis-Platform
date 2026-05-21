@@ -135,3 +135,70 @@ def test_fatal_error_codes_are_detected(ib_module):
     assert ib_module._is_fatal_cancel_error("Error 1100 connection lost") is False
     assert ib_module._is_fatal_cancel_error("") is False
     assert ib_module._is_fatal_cancel_error(None) is False
+
+
+# ─── v19.34.65b — Poll-count stale-drop guard ─────────────────────────────
+def test_poll_count_stale_drops_after_three_serves(ib_module):
+    """When the pusher polls /cancellations/pending repeatedly but never
+    posts back a result (observed in prod when IB returns 10147 and the
+    pusher silently moves on), the entry must auto-promote to
+    `stale_dropped` after `_CANCEL_STALE_FAILURE_THRESHOLD` serves —
+    no result report required.
+    """
+    ib_module.queue_cancellation(606, reason="v19.34.31 Patch C: pre-attach LIN")
+    # First poll: served_count 0 → 1, entry returned to pusher.
+    resp1 = ib_module.get_pending_cancellations()
+    assert any(c["ib_order_id"] == 606 for c in resp1["cancellations"])
+    assert ib_module._cancellation_queue[606]["served_count"] == 1
+    # Second poll: served_count 1 → 2.
+    resp2 = ib_module.get_pending_cancellations()
+    assert any(c["ib_order_id"] == 606 for c in resp2["cancellations"])
+    assert ib_module._cancellation_queue[606]["served_count"] == 2
+    # Third poll: served_count 2 → 3.
+    resp3 = ib_module.get_pending_cancellations()
+    assert any(c["ib_order_id"] == 606 for c in resp3["cancellations"])
+    assert ib_module._cancellation_queue[606]["served_count"] == 3
+    # Fourth poll: 3 >= threshold → promote stale_dropped, NOT returned.
+    resp4 = ib_module.get_pending_cancellations()
+    pending_ids = [c["ib_order_id"] for c in resp4["cancellations"]]
+    assert 606 not in pending_ids
+    assert ib_module._cancellation_queue[606]["status"] == "stale_dropped"
+    assert ib_module._cancellation_queue[606]["stale_dropped_reason"] == "exceeded_poll_served_count_no_result"
+    assert resp4["reaped"]["stale_dropped_via_poll"] == 1
+    # Fifth poll: nothing should happen — entry remains stale_dropped.
+    resp5 = ib_module.get_pending_cancellations()
+    pending_ids = [c["ib_order_id"] for c in resp5["cancellations"]]
+    assert 606 not in pending_ids
+    assert resp5["reaped"]["stale_dropped_via_poll"] == 0
+
+
+def test_poll_count_does_not_affect_claimed_entries(ib_module):
+    """A `claimed` entry is not counted by the poll-stale guard (only
+    `pending` entries are served via /cancellations/pending)."""
+    ib_module.queue_cancellation(707, reason="orphan-gtc auto-sweep")
+    # Pusher claims it.
+    ib_module.claim_cancellation(707)
+    assert ib_module._cancellation_queue[707]["status"] == "claimed"
+    # Even after many polls, the claimed entry's served_count stays 0.
+    for _ in range(5):
+        ib_module.get_pending_cancellations()
+    assert ib_module._cancellation_queue[707]["served_count"] == 0
+    assert ib_module._cancellation_queue[707]["status"] == "claimed"
+
+
+def test_successful_result_supersedes_poll_count(ib_module):
+    """If the pusher does report back `cancelled` before the poll-count
+    threshold is hit, the entry leaves `pending` and the poll-stale
+    guard never fires."""
+    ib_module.queue_cancellation(808, reason="orphan-gtc auto-sweep")
+    ib_module.get_pending_cancellations()  # served=1
+    ib_module.get_pending_cancellations()  # served=2
+    # Pusher reports success.
+    ib_module.report_cancellation_result(
+        ib_module.CancellationResult(ib_order_id=808, status="cancelled")
+    )
+    assert ib_module._cancellation_queue[808]["status"] == "cancelled"
+    # Subsequent polls don't return it (not pending) and don't promote it.
+    resp = ib_module.get_pending_cancellations()
+    assert 808 not in [c["ib_order_id"] for c in resp["cancellations"]]
+    assert ib_module._cancellation_queue[808]["status"] == "cancelled"
