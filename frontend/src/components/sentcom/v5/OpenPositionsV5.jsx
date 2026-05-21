@@ -63,15 +63,30 @@ const formatPx = (v) => {
 // the tier chip reads cleanly (operator review: "TRADE 2 HOLD long" was
 // verbose). Maps strict identifier → tighter display label. Unknown
 // names get a generic underscore-strip + 12-char truncation.
+//
+// 2026-02 v19.34.67 — IMPORTANT: do NOT map SMB style classifications
+// (`trade_2_hold`, `trade_2_continuation`, `move_2_move`, `a_plus`) into
+// the visible tier label. They are SMB style classes (see
+// `services/tqs/tqs_engine.py:194` where `trade_2_hold` = "Intraday
+// Swing 1-6h"), NOT day-counter markers. Pre-v19.34.67 the map had
+// `trade_2_hold: 'DAY 2'` which made every position read as "DAY 2 long"
+// regardless of actual hold duration. The fall-through chain in
+// `tierLabel` below now suppresses these generic style classes and
+// prefers the setup-derived label. `day_2_continuation` and
+// `day_2_failure` remain mapped — those ARE Linda Raschke "Day 2"
+// pattern names and are valid as a tier label.
 const STYLE_HUMAN_MAP = {
-  trade_2_hold:               'DAY 2',
-  trade_2_continuation:       'DAY 2',
+  // SMB style classes intentionally NOT mapped — they are demoted by
+  // `GENERIC_TRADE_STYLE_KEYS` below and never appear as tier labels.
   day_2_continuation:         'DAY 2',
   day_2_failure:              'DAY 2 FAIL',
   relative_strength_position: 'RS POS',
   relative_strength:          'RS',
   base_breakout:              'BREAKOUT',
   accumulation_entry:         'ACCUM',
+  mean_reversion_long:        'MEAN REV',
+  mean_reversion_short:       'MEAN REV',
+  mean_reversion:             'MEAN REV',
   earnings_momentum:          'EARN MOM',
   sector_rotation:            'ROTATION',
   opening_range_break:        'ORB',
@@ -80,6 +95,8 @@ const STYLE_HUMAN_MAP = {
   '9_ema_scalp':              '9-EMA',
   vwap_continuation:          'VWAP',
   vwap_bounce:                'VWAP',
+  vwap_fade_long:             'VWAP FADE',
+  vwap_fade_short:            'VWAP FADE',
   premarket_high_break:       'PMH',
   bouncy_ball:                'BOUNCY',
   bella_fade:                 'FADE',
@@ -89,6 +106,14 @@ const STYLE_HUMAN_MAP = {
   up_through_open:            'UP THRU',
   gap_pick_roll:              'PICK ROLL',
   gap_fade:                   'GAP FADE',
+  // v19.34.67 — reconciled orphans (positions adopted by the bot from
+  // an IB-side open position with no matching BotTrade) deserve a
+  // distinct, non-generic label so the operator can tell them apart at
+  // a glance. Without this they fell through to scan_tier='reconciled'
+  // → 'RECONCILED' (truncated to 12 chars) or worse, the now-removed
+  // 'trade_2_hold: DAY 2' mapping. Both were noise.
+  reconciled_orphan:          'ADOPTED',
+  reconciled:                 'ADOPTED',
 };
 
 const humanizeStyle = (raw) => {
@@ -99,27 +124,41 @@ const humanizeStyle = (raw) => {
   return key.replace(/_/g, ' ').toUpperCase().slice(0, 12);
 };
 
+// v19.34.67 — SMB style classifications that the bot defaults onto every
+// BotTrade. They describe the *trade style* (how long to hold) NOT the
+// setup that fired. When `trade_style` carries one of these, the tier
+// chip must fall through to `setup_variant` / `setup_type` / `scan_tier`
+// / `timeframe` to surface the actually-meaningful label. See
+// `services/tqs/tqs_engine.py:194` for the canonical SMB style list:
+//   - move_2_move = scalp (minutes)
+//   - trade_2_hold = intraday swing (1-6h)
+//   - a_plus      = day+ hold
+const GENERIC_TRADE_STYLE_KEYS = new Set([
+  'trade_2_hold', 'trade_2_continuation', 'move_2_move', 'a_plus',
+]);
+
 // Derive the visible "tier chip" text from the position. Mirrors the
 // mockup: SCALP long, SHORT_REV, DAY long, SWING short, etc.
-// v19.34.32 — When backend stamps trade_style="trade_2_hold" (the
-// generic intraday fallback), prefer the setup-derived horizon so a
-// daily_squeeze stops reading as "DAY 2 short" / "INTRA".
-// v19.34.X (Feb 2026) — setup_variant (granular SMB name, e.g.
-// "spencer_scalp") wins over the broader setup_type ("SCALP") when
-// present. Without this, every scalp variant collapsed to a generic
-// "SCALP long" pill — operator couldn't tell vwap_bounce from
-// rubber_band_long at a glance.
-const GENERIC_TRADE_STYLE_KEYS = new Set(['trade_2_hold']);
+//
+// v19.34.67 — Fix "every position labeled DAY 2" bug. Pre-fix, every
+// position with the bot's default `trade_style='trade_2_hold'` (SMB
+// "intraday swing" classification) rendered as "DAY 2 <dir>", regardless
+// of the actual setup. Operator caught it Feb 2026 with 21/21 positions
+// mislabeled. The new fall-through chain prefers the setup-derived
+// label whenever `trade_style` is a generic SMB style class. For
+// reconciled-orphan positions where `setup_type='reconciled_orphan'`,
+// the chip now reads "ADOPTED <dir>" (e.g. "ADOPTED short" for the
+// adopted CF position) — which is operationally meaningful and
+// distinguishes orphan-adoptions from bot-originated trades.
 const tierLabel = (pos) => {
   const dir = (pos.direction || pos.side || '').toLowerCase();
   const dirText = dir === 'short' ? 'short' : 'long';
   const rawTs = String(pos.trade_style || '').trim().toLowerCase();
   const isGenericTs = GENERIC_TRADE_STYLE_KEYS.has(rawTs);
-  // trade_style is set by the bot when a setup is taken (e.g. "scalp",
-  // "swing", "day", "position"). scan_tier is the universe-level tier
-  // (intraday/swing/position/investment). Prefer trade_style unless
-  // it's the generic "trade_2_hold" fallback; then fall through to
-  // setup_variant (granular SMB name) → setup_type → scan_tier → timeframe.
+  // When trade_style is a generic SMB class, prefer the setup-derived
+  // label (granular variant first, then broader type, then scan_tier,
+  // finally timeframe). humanizeStyle returns '' for empty/null/undef
+  // which `||` falls past correctly.
   const style = (!isGenericTs && humanizeStyle(pos.trade_style))
     || humanizeStyle(pos.setup_variant)
     || humanizeStyle(pos.setup_type)
@@ -131,19 +170,14 @@ const tierLabel = (pos) => {
 
 // Synthesize a "model trail / why" sub-line from whatever the bot wrote
 // onto the trade. Mirrors the mockup line:
-//   "Entry $228.20 → Last $225.53 · SL $229.59 · PT $205.37 · 15sh · SMB B"
-// v19.34.32 — entry/last lead the line so the operator's most-asked-for
-// reference price (entry) is the first thing visible after the symbol.
+//   "TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull"
 const modelTrailLine = (pos) => {
   const parts = [];
-  // Lead with Entry → Last so the operator's anchor price is prominent.
-  if (pos.entry_price != null) {
-    let head = `Entry $${formatPx(pos.entry_price)}`;
-    if (pos.current_price != null) {
-      head += ` → Last $${formatPx(pos.current_price)}`;
-    }
-    parts.push(head);
-  }
+  // 2026-05-01 v19.23.1 — operator wants share size visible on every
+  // row at-a-glance. Lead with `Nsh` so the position size is the first
+  // thing the eye picks up after the symbol+pnl.
+  const sh = pos.shares ?? pos.quantity;
+  if (sh != null) parts.push(`${Math.round(Math.abs(Number(sh)))}sh`);
   const trail = pos.trailing_stop_state || {};
   if (trail.enabled && trail.current_stop) {
     const mode = (trail.mode || 'trail').toUpperCase();
@@ -154,9 +188,6 @@ const modelTrailLine = (pos) => {
   const pt = pos.target_price
     ?? (Array.isArray(pos.target_prices) ? pos.target_prices[0] : null);
   if (pt != null) parts.push(`PT $${formatPx(pt)}`);
-  // Share size next — operator's second most-asked-for reference.
-  const sh = pos.shares ?? pos.quantity;
-  if (sh != null) parts.push(`${Math.round(Math.abs(Number(sh)))}sh`);
   // Reasoning first bullet (often the model that fired the trade)
   const reasoning = Array.isArray(pos.reasoning) ? pos.reasoning : [];
   if (reasoning.length > 0) {
@@ -244,14 +275,11 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           <span className={`v5-chip ${chipClass}`}>{tier}</span>
           {/* v19.34.99 — trade-style + time-horizon chip. Always present
               even when trade_style is missing (falls back to setup-derived
-              style via SETUP_TO_STYLE). Hover for full horizon text.
-              v19.34.32 — showSetup=true so the actual setup name
-              (Daily Squeeze, Accumulation Entry, Fashionably Late, …)
-              is visible at a glance instead of just the horizon code. */}
+              style via SETUP_TO_STYLE). Hover for full horizon text. */}
           <TradeStyleChip
             row={position}
             compact={true}
-            showSetup={true}
+            showSetup={false}
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
@@ -532,8 +560,8 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
 
           {/* Setup + grade footer */}
           <div className="flex items-center gap-2 flex-wrap text-[13px] uppercase tracking-wider text-zinc-600">
-            {position.setup_type && (
-              <span>setup {position.setup_type}</span>
+            {(position.setup_variant || position.setup_type) && (
+              <span>setup {humanizeStyle(position.setup_variant || position.setup_type)}</span>
             )}
             {position.smb_grade && (
               <span>· grade {position.smb_grade}</span>
@@ -685,9 +713,9 @@ const GroupMemberRow = ({ member, idx }) => {
               SMB {member.smb_grade}
             </span>
           )}
-          {member.setup_type && (
+          {(member.setup_variant || member.setup_type) && (
             <span className="text-zinc-500 truncate max-w-[120px]">
-              {humanizeStyle(member.setup_type)}
+              {humanizeStyle(member.setup_variant || member.setup_type)}
             </span>
           )}
         </div>
