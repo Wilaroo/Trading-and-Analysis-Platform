@@ -3,6 +3,23 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-05-22 (5 patches shipped — AGENTS.md context layer)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.74 | AGENTS.md §12-17 context pack (.bat flow, glossary, DB schema, workers, taxonomy, page map) | shipped |
+| v19.34.75 | AGENTS.md §6.5 user journeys + §11.5 edit checklist + CLAUDE.md pointer | shipped |
+| v19.34.76 | AGENTS.md §6.5 "Why this exists" institutional-memory blurbs per journey | shipped |
+| v19.34.77 | AGENTS.md §0 TL;DR (5 critical rules) + `.cursorrules` + `.github/copilot-instructions.md` | shipped |
+| v19.34.78 | PRD.md cross-reference to AGENTS.md (Emergent E1 auto-load) | shipped |
+
+AGENTS.md: 362 → 1,084 lines. Auto-loaded by 5 tools (Emergent E1, Claude Code, Cursor, Copilot, vendor-neutral). Single source of truth = `AGENTS.md`. Consolidated patch: `paste.rs/HVpaq`.
+
+### Next session priorities (P0/P1)
+- 🔴 **P0**: Bracket-stacking auto-cancel endpoint (`POST /api/trading-bot/bracket-stacking-cancel`) — GM/LIN excess-leg real $$ risk. Tie to `_periodic_bracket_state_reconcile`.
+- 🔴 **P1**: Quote-resubscribe watchdog real recovery (4.9h stale quote bug — diagnose Windows pusher handler, not just RPC trigger).
+- 🐛 5-min cleanup: fix `position_reconciler.py:1197` MagicMock comparison in `test_orphan_reconciler_skips_excess_slice_v19_34_22`.
+
 ## Session Summary - 2026-05-21 (6 commits shipped)
 
 | Version | Topic | Status |

@@ -1,5 +1,29 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **⚠️ AGENTS — READ THIS BLOCK BEFORE ANY CODE CHANGE.**
+>
+> Open `/app/AGENTS.md` and read **§0 TL;DR** + any sections relevant
+> to your task (typically §6.5 for journey context, §11.5 for the
+> edit checklist). If you cannot or will not open the file, the 5
+> rules below are the bare minimum — violating any of them has cost
+> real money in production:
+>
+> 1. **`close_trade`, `submit_with_bracket`, kill-switch are SAFETY-
+>    CRITICAL.** Fork via `_custom` siblings; never patch in place.
+>    *(v19.34.123: $25k loss when kill-switch was bypassed.)*
+> 2. **NEVER close at IB without `_cancel_ib_bracket_orders` + 8s + 5s
+>    retry.** *(2026-05-20: IB position flipped direction.)*
+> 3. **`_open_trades` is keyed by `trade_id`, NOT symbol.** Iterate
+>    `.values()` and filter. *(b415ed5f phantom incident.)*
+> 4. **`position_reconciler` MUST skip `entered_by="reconciled_excess_*"`**
+>    on the orphan path or it duplicates trades every 60s. *(v19.34.22.)*
+> 5. **Always project `{"_id": 0}` on Mongo reads.** ObjectId is not
+>    JSON-serializable.
+>
+> Full context, why each rule exists, and the journey maps are in
+> `/app/AGENTS.md`. Treat this PRD as the *what we're building*; treat
+> AGENTS.md as the *how to safely touch it*.
+
 > Lean, static spec. Dated work history lives in `CHANGELOG.md`.
 > Open priorities and backlog live in `ROADMAP.md`.
 >
@@ -10,6 +34,7 @@
 >     completed item is removed and recorded in CHANGELOG.
 >   - Architecture / API contract / hardware topology changes → edit
 >     **PRD.md** (this file).
+>   - Trap / journey / convention changes → edit **AGENTS.md**.
 >   - Never silently drop history; never let `🔴 Now / Near-term` go
 >     stale across more than one task.
 

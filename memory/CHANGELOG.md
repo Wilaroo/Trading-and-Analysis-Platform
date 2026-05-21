@@ -1,3 +1,61 @@
+## 2026-05-22 — v19.34.74-78: AGENTS.md context layer + multi-tool auto-load
+
+### Trigger
+Build a permanent, repo-scoped context layer so every coding agent
+(Emergent E1, Claude Code, Cursor, Copilot, vendor-neutral) starts
+sessions already knowing the codebase's traps, journeys, and
+conventions. Shipped as 5 incremental patches.
+
+### What shipped (5 versions)
+- **v19.34.74** — AGENTS.md §12-17 context pack (.bat startup flow,
+  glossary, ~165-collection DB schema cheat-sheet, 16-row worker-loop
+  catalog, Bellafiore strategy taxonomy, 20-tab + 73-component
+  frontend page map). AGENTS.md: 362 → 781 lines.
+- **v19.34.75** — UX upgrade: §6.5 user-journey narratives (6 flows
+  as step→file→mutation tables), §11.5 before/after-edit checklist,
+  §11 "ask ONE focused question" pattern, CLAUDE.md pointer for
+  Claude Code auto-load. AGENTS.md: 781 → 967 lines.
+- **v19.34.76** — Institutional-memory blurbs: each §6.5 journey
+  gained a "Why this exists" paragraph naming the specific incident
+  that shaped its design (2026-05-20 OCA flip, 2026-05-21 21-of-21
+  EOD failure, b415ed5f phantom race, v19.34.22 reconciler duplicator,
+  v19.34.52 119-stale-symbols, ML rollback gap). AGENTS.md: 967 → 1048.
+- **v19.34.77** — AGENTS.md §0 TL;DR (5 most critical rules at top
+  of file) + `.cursorrules` and `.github/copilot-instructions.md`
+  pointer files for Cursor + GitHub Copilot auto-load. AGENTS.md:
+  1048 → 1084 lines.
+- **v19.34.78** — PRD.md cross-reference: prepended a 22-line
+  callout block to memory/PRD.md inlining the 5 critical rules
+  verbatim + pointing at AGENTS.md, so Emergent E1 (which auto-reads
+  PRD.md on session start but NOT AGENTS.md) now sees the rules with
+  zero operator prompting.
+
+### Why this matters — full auto-load matrix across 5 tools
+| Tool | Loads | Status |
+|---|---|---|
+| Emergent E1 | `memory/PRD.md` top callout | ✅ |
+| Claude Code | `CLAUDE.md` | ✅ |
+| Cursor | `.cursorrules` | ✅ |
+| GitHub Copilot | `.github/copilot-instructions.md` | ✅ |
+| Vendor-neutral (Aider, Cline, …) | `AGENTS.md` (convention) | ✅ |
+
+Single source of truth = `AGENTS.md`. Pointer files contain no rules
+of their own (Copilot + PRD inline the 5 rules redundantly because
+those tools are most context-stingy).
+
+### Files touched
+- `AGENTS.md` (362 → 1,084 lines, 3× growth)
+- `CLAUDE.md` (new, 16 lines)
+- `.cursorrules` (new, 12 lines)
+- `.github/copilot-instructions.md` (new, 22 lines)
+- `memory/PRD.md` (callout prepended, +22 lines)
+
+### Deploy
+Consolidated patch at `paste.rs/HVpaq` — applied cleanly to DGX
+v19.34.73 baseline. Docs-only; no backend restart needed.
+
+---
+
 # TradeCommand / SentCom — Changelog
 
 Reverse-chronological log of shipped work. Newest first.

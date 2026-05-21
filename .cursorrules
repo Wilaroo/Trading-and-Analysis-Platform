@@ -1,0 +1,12 @@
+# Cursor — repo rules
+
+See `AGENTS.md` in the repo root. That is the canonical context file
+for this repository — read it first before making any changes.
+
+If you only have time for one section, read **§0 TL;DR** (top of file)
+— it lists the 5 rules whose violation has cost real money or required
+emergency patches in production.
+
+This file exists so Cursor auto-loads project context. It deliberately
+contains no rules of its own — keeping a single source of truth in
+`AGENTS.md` prevents drift between the two files.
