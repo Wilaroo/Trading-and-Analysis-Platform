@@ -63,15 +63,30 @@ const formatPx = (v) => {
 // the tier chip reads cleanly (operator review: "TRADE 2 HOLD long" was
 // verbose). Maps strict identifier → tighter display label. Unknown
 // names get a generic underscore-strip + 12-char truncation.
+//
+// 2026-02 v19.34.67 — IMPORTANT: do NOT map SMB style classifications
+// (`trade_2_hold`, `trade_2_continuation`, `move_2_move`, `a_plus`) into
+// the visible tier label. They are SMB style classes (see
+// `services/tqs/tqs_engine.py:194` where `trade_2_hold` = "Intraday
+// Swing 1-6h"), NOT day-counter markers. Pre-v19.34.67 the map had
+// `trade_2_hold: 'DAY 2'` which made every position read as "DAY 2 long"
+// regardless of actual hold duration. The fall-through chain in
+// `tierLabel` below now suppresses these generic style classes and
+// prefers the setup-derived label. `day_2_continuation` and
+// `day_2_failure` remain mapped — those ARE Linda Raschke "Day 2"
+// pattern names and are valid as a tier label.
 const STYLE_HUMAN_MAP = {
-  trade_2_hold:               'DAY 2',
-  trade_2_continuation:       'DAY 2',
+  // SMB style classes intentionally NOT mapped — they are demoted by
+  // `GENERIC_TRADE_STYLE_KEYS` below and never appear as tier labels.
   day_2_continuation:         'DAY 2',
   day_2_failure:              'DAY 2 FAIL',
   relative_strength_position: 'RS POS',
   relative_strength:          'RS',
   base_breakout:              'BREAKOUT',
   accumulation_entry:         'ACCUM',
+  mean_reversion_long:        'MEAN REV',
+  mean_reversion_short:       'MEAN REV',
+  mean_reversion:             'MEAN REV',
   earnings_momentum:          'EARN MOM',
   sector_rotation:            'ROTATION',
   opening_range_break:        'ORB',
@@ -80,6 +95,8 @@ const STYLE_HUMAN_MAP = {
   '9_ema_scalp':              '9-EMA',
   vwap_continuation:          'VWAP',
   vwap_bounce:                'VWAP',
+  vwap_fade_long:             'VWAP FADE',
+  vwap_fade_short:            'VWAP FADE',
   premarket_high_break:       'PMH',
   bouncy_ball:                'BOUNCY',
   bella_fade:                 'FADE',
@@ -89,6 +106,14 @@ const STYLE_HUMAN_MAP = {
   up_through_open:            'UP THRU',
   gap_pick_roll:              'PICK ROLL',
   gap_fade:                   'GAP FADE',
+  // v19.34.67 — reconciled orphans (positions adopted by the bot from
+  // an IB-side open position with no matching BotTrade) deserve a
+  // distinct, non-generic label so the operator can tell them apart at
+  // a glance. Without this they fell through to scan_tier='reconciled'
+  // → 'RECONCILED' (truncated to 12 chars) or worse, the now-removed
+  // 'trade_2_hold: DAY 2' mapping. Both were noise.
+  reconciled_orphan:          'ADOPTED',
+  reconciled:                 'ADOPTED',
 };
 
 const humanizeStyle = (raw) => {
@@ -99,16 +124,44 @@ const humanizeStyle = (raw) => {
   return key.replace(/_/g, ' ').toUpperCase().slice(0, 12);
 };
 
+// v19.34.67 — SMB style classifications that the bot defaults onto every
+// BotTrade. They describe the *trade style* (how long to hold) NOT the
+// setup that fired. When `trade_style` carries one of these, the tier
+// chip must fall through to `setup_variant` / `setup_type` / `scan_tier`
+// / `timeframe` to surface the actually-meaningful label. See
+// `services/tqs/tqs_engine.py:194` for the canonical SMB style list:
+//   - move_2_move = scalp (minutes)
+//   - trade_2_hold = intraday swing (1-6h)
+//   - a_plus      = day+ hold
+const GENERIC_TRADE_STYLE_KEYS = new Set([
+  'trade_2_hold', 'trade_2_continuation', 'move_2_move', 'a_plus',
+]);
+
 // Derive the visible "tier chip" text from the position. Mirrors the
 // mockup: SCALP long, SHORT_REV, DAY long, SWING short, etc.
+//
+// v19.34.67 — Fix "every position labeled DAY 2" bug. Pre-fix, every
+// position with the bot's default `trade_style='trade_2_hold'` (SMB
+// "intraday swing" classification) rendered as "DAY 2 <dir>", regardless
+// of the actual setup. Operator caught it Feb 2026 with 21/21 positions
+// mislabeled. The new fall-through chain prefers the setup-derived
+// label whenever `trade_style` is a generic SMB style class. For
+// reconciled-orphan positions where `setup_type='reconciled_orphan'`,
+// the chip now reads "ADOPTED <dir>" (e.g. "ADOPTED short" for the
+// adopted CF position) — which is operationally meaningful and
+// distinguishes orphan-adoptions from bot-originated trades.
 const tierLabel = (pos) => {
   const dir = (pos.direction || pos.side || '').toLowerCase();
   const dirText = dir === 'short' ? 'short' : 'long';
-  // trade_style is set by the bot when a setup is taken (e.g. "scalp",
-  // "swing", "day", "position"). scan_tier is the universe-level tier
-  // (intraday/swing/position/investment). Prefer trade_style; fall back
-  // to scan_tier; finally, timeframe.
-  const style = humanizeStyle(pos.trade_style)
+  const rawTs = String(pos.trade_style || '').trim().toLowerCase();
+  const isGenericTs = GENERIC_TRADE_STYLE_KEYS.has(rawTs);
+  // When trade_style is a generic SMB class, prefer the setup-derived
+  // label (granular variant first, then broader type, then scan_tier,
+  // finally timeframe). humanizeStyle returns '' for empty/null/undef
+  // which `||` falls past correctly.
+  const style = (!isGenericTs && humanizeStyle(pos.trade_style))
+    || humanizeStyle(pos.setup_variant)
+    || humanizeStyle(pos.setup_type)
     || humanizeStyle(pos.scan_tier)
     || humanizeStyle(pos.timeframe);
   if (!style) return dirText.toUpperCase();
