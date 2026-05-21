@@ -2373,3 +2373,289 @@ class PositionManager:
         except Exception as e:
             logger.error(f"Error closing trade: {e}")
             return False
+
+    async def close_trade_custom(
+        self,
+        trade_id: str,
+        bot: 'TradingBotService',
+        *,
+        percentage: float = 100.0,
+        order_type: str = "market",
+        limit_price: Optional[float] = None,
+        reason: str = "manual_panel_close",
+    ) -> Dict:
+        """v19.34.72 — Operator-driven Close with order_type + partial qty.
+
+        Distinct from `close_trade` so the bot's safety-critical
+        100%-MKT close path (EOD, stop-loss, scale-out engine) is
+        completely untouched.
+
+        Args:
+            percentage: 1.0..100.0 — share of remaining_shares to close.
+            order_type: "market" or "limit".
+            limit_price: required when order_type=="limit".
+            reason: stamped on the trade record for the audit trail.
+
+        Returns:
+            {
+              "success": bool,
+              "trade_id": str,
+              "symbol": str,
+              "shares_closed": int,
+              "shares_remaining": int,
+              "order_type": str,
+              "limit_price": Optional[float],
+              "fill_price": Optional[float],
+              "order_id": Optional[int],
+              "status": str,
+              "partial": bool,
+              "error": Optional[str],
+            }
+        """
+        from services.trading_bot_service import TradeDirection, TradeStatus
+
+        if trade_id not in bot._open_trades:
+            return {"success": False, "error": "trade_not_open", "trade_id": trade_id}
+
+        trade = bot._open_trades[trade_id]
+
+        # ── Validate percentage ──────────────────────────────────
+        try:
+            pct = float(percentage)
+        except Exception:
+            return {"success": False, "error": f"bad percentage: {percentage}"}
+        if pct <= 0 or pct > 100:
+            return {"success": False,
+                    "error": f"percentage must be in (0, 100]; got {pct}"}
+
+        # ── Validate order_type / limit_price ───────────────────
+        ot = (order_type or "market").lower()
+        if ot not in ("market", "limit"):
+            return {"success": False, "error": f"bad order_type: {order_type}"}
+        if ot == "limit":
+            try:
+                if limit_price is None or float(limit_price) <= 0:
+                    return {"success": False,
+                            "error": "limit_price required when order_type=limit"}
+            except Exception:
+                return {"success": False,
+                        "error": f"bad limit_price: {limit_price}"}
+
+        # ── Compute base qty (bot-tracked remaining) ────────────
+        base_qty = int(trade.remaining_shares
+                       if trade.remaining_shares > 0 else trade.shares)
+        if base_qty <= 0:
+            return {"success": False, "error": "no_shares_to_close",
+                    "trade_id": trade_id, "symbol": trade.symbol}
+
+        # ── Clamp against IB authoritative position (phantom-share guard) ──
+        try:
+            base_qty = await self._clamp_shares_to_ib_position(
+                trade, base_qty, reason=reason
+            )
+        except Exception as clamp_err:
+            logger.debug(
+                f"close_trade_custom: phantom-share clamp errored for "
+                f"{trade.symbol} ({clamp_err}); using bot-tracked count {base_qty}"
+            )
+
+        if base_qty <= 0:
+            # IB shows zero — phantom recovery. Mirror close_trade.
+            logger.warning(
+                f"close_trade_custom: {trade.symbol} clamped to 0 shares — "
+                f"IB shows no position. Marking trade {trade_id} CLOSED locally."
+            )
+            from services.pnl_compute import apply_close_pnl
+            apply_close_pnl(
+                trade,
+                reason=f"{reason}_phantom_recovery_v19_34_72",
+                exit_price=getattr(trade, "current_price", None),
+            )
+            trade.status = TradeStatus.CLOSED
+            del bot._open_trades[trade_id]
+            bot._closed_trades.append(trade)
+            try:
+                await bot._save_trade(trade)
+            except Exception as e:
+                logger.warning(f"close_trade_custom phantom-recovery save failed: {e}")
+            return {
+                "success": True, "trade_id": trade_id, "symbol": trade.symbol,
+                "shares_closed": 0, "shares_remaining": 0,
+                "order_type": ot, "limit_price": limit_price,
+                "fill_price": None, "order_id": None,
+                "status": "phantom_recovery", "partial": False,
+            }
+
+        # ── Compute shares to close from percentage ─────────────
+        shares_to_close = max(1, int(round(base_qty * pct / 100.0)))
+        shares_to_close = min(shares_to_close, base_qty)
+        is_full_close = (shares_to_close >= base_qty) or (pct >= 100.0)
+
+        # ── Dispatch to executor ────────────────────────────────
+        if not bot._trade_executor:
+            return {"success": False, "error": "trade_executor_not_available"}
+
+        original_shares_field = trade.shares
+        trade.shares = shares_to_close  # executor reads this
+
+        try:
+            result = await bot._trade_executor.close_position_custom(
+                trade,
+                order_type=ot,
+                limit_price=(float(limit_price) if ot == "limit" else None),
+            )
+        except Exception as exec_err:
+            trade.shares = original_shares_field
+            logger.error(
+                f"close_trade_custom executor exception for {trade.symbol}: {exec_err}"
+            )
+            return {"success": False, "error": f"executor_exception: {exec_err}",
+                    "trade_id": trade_id, "symbol": trade.symbol}
+
+        trade.shares = original_shares_field  # restore canonical field
+
+        if not result.get("success"):
+            # Stamp error for operator visibility & let manage loop continue.
+            try:
+                trade._last_close_error = str(result.get("error") or "executor failed")[:300]
+                trade._last_close_error_at = datetime.now(timezone.utc).isoformat()
+            except Exception:
+                pass
+            return {
+                "success": False,
+                "trade_id": trade_id, "symbol": trade.symbol,
+                "shares_closed": 0,
+                "shares_remaining": int(trade.remaining_shares or trade.shares),
+                "order_type": ot, "limit_price": limit_price,
+                "status": result.get("status", "rejected"),
+                "error": result.get("error", "executor_failed"),
+                "partial": False,
+            }
+
+        # ── Success path: book the filled slice ─────────────────
+        fill_price = result.get("fill_price")
+        filled_qty = int(result.get("filled_qty") or shares_to_close)
+        if fill_price is None:
+            # LMT may report success with no fill yet (status=working).
+            # Defer booking until executor confirms a fill. Treat as
+            # "submitted" — trade stays OPEN, no PnL booked.
+            return {
+                "success": True,
+                "trade_id": trade_id, "symbol": trade.symbol,
+                "shares_closed": 0,
+                "shares_remaining": int(trade.remaining_shares or trade.shares),
+                "order_type": ot, "limit_price": limit_price,
+                "fill_price": None,
+                "order_id": result.get("order_id"),
+                "status": result.get("status", "working"),
+                "partial": False,
+                "note": "limit_order_resting_at_ib",
+            }
+
+        # Book realized PnL on the filled slice.
+        if trade.direction == TradeDirection.LONG:
+            slice_pnl = (float(fill_price) - trade.fill_price) * filled_qty
+        else:
+            slice_pnl = (trade.fill_price - float(fill_price)) * filled_qty
+        trade.realized_pnl += slice_pnl
+        bot._apply_commission(trade, filled_qty)
+
+        # Decrement remaining_shares; if we set it from `shares`
+        # earlier (initial size) preserve that base for arithmetic.
+        if trade.remaining_shares <= 0:
+            trade.remaining_shares = trade.shares
+        trade.remaining_shares = max(0, trade.remaining_shares - filled_qty)
+
+        is_now_flat = (trade.remaining_shares <= 0) or is_full_close
+
+        if is_now_flat:
+            # Full close — mirror close_trade's terminal flow.
+            trade.status = TradeStatus.CLOSED
+            trade.exit_price = float(fill_price)
+            trade.closed_at = datetime.now(timezone.utc).isoformat()
+            trade.close_reason = reason
+            trade.unrealized_pnl = 0
+            trade.remaining_shares = 0
+
+            bot._daily_stats.net_pnl += trade.net_pnl
+            if trade.realized_pnl > 0:
+                bot._daily_stats.trades_won += 1
+                bot._daily_stats.largest_win = max(
+                    bot._daily_stats.largest_win, trade.realized_pnl)
+            else:
+                bot._daily_stats.trades_lost += 1
+                bot._daily_stats.largest_loss = min(
+                    bot._daily_stats.largest_loss, trade.realized_pnl)
+            total = bot._daily_stats.trades_won + bot._daily_stats.trades_lost
+            bot._daily_stats.win_rate = (
+                bot._daily_stats.trades_won / total * 100) if total > 0 else 0
+
+            del bot._open_trades[trade_id]
+            bot._closed_trades.append(trade)
+
+            try:
+                rcs = getattr(bot, "_recently_closed_symbols", None)
+                if rcs is None:
+                    bot._recently_closed_symbols = {}
+                    rcs = bot._recently_closed_symbols
+                rcs[trade.symbol] = datetime.now(timezone.utc)
+            except Exception:
+                pass
+
+            try:
+                if hasattr(bot, '_stop_manager') and bot._stop_manager \
+                        and hasattr(bot._stop_manager, 'forget_trade'):
+                    bot._stop_manager.forget_trade(trade_id)
+            except Exception as e:
+                logger.warning(f"close_trade_custom: forget_trade failed: {e}")
+
+            await bot._notify_trade_update(trade, "closed")
+            await bot._save_trade(trade)
+            try:
+                await bot._log_trade_to_journal(trade, "exit")
+            except Exception as e:
+                logger.warning(f"close_trade_custom journal exit failed: {e}")
+            try:
+                await bot._log_trade_to_regime_performance(trade)
+            except Exception:
+                pass
+        else:
+            # Partial close — keep trade open with reduced size.
+            # Append to partial_exits ledger for auditability.
+            try:
+                so_cfg = trade.scale_out_config or {}
+                partial_exits = so_cfg.setdefault("partial_exits", [])
+                partial_exits.append({
+                    "source": "v19_34_72_operator_panel",
+                    "order_type": ot,
+                    "limit_price": (float(limit_price) if ot == "limit" else None),
+                    "shares_sold": filled_qty,
+                    "price": float(fill_price),
+                    "pnl": round(slice_pnl, 2),
+                    "reason": reason,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as e:
+                logger.warning(f"close_trade_custom partial_exits append failed: {e}")
+
+            await bot._notify_trade_update(trade, "partial_close")
+            await bot._save_trade(trade)
+
+            # NOTE: bracket children were cancelled before the close.
+            # The periodic Bracket-State Reconciler (v19.34.70d) will
+            # re-attach a fresh bracket to the remaining shares on its
+            # next 120s tick. Operator can also fire
+            # /attach-brackets-to-unprotected manually.
+
+        return {
+            "success": True,
+            "trade_id": trade_id, "symbol": trade.symbol,
+            "shares_closed": filled_qty,
+            "shares_remaining": int(trade.remaining_shares),
+            "order_type": ot, "limit_price": limit_price,
+            "fill_price": float(fill_price),
+            "order_id": result.get("order_id"),
+            "status": result.get("status", "filled"),
+            "partial": (not is_now_flat),
+            "slice_pnl": round(slice_pnl, 2),
+        }

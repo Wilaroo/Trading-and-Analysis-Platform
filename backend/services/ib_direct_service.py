@@ -720,6 +720,134 @@ class IBDirectService:
                     "error": f"ib_direct_close_error: {str(e)[:200]}",
                     "broker": "ib_direct", "simulated": False}
 
+    async def place_close_limit(
+        self,
+        trade,
+        *,
+        limit_price: float,
+        wait_for_fill_s: float = 10.0,
+        sec_type: str = "STK",
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Dict[str, Any]:
+        """v19.34.72 — Native LMT-close on DGX-side ib_async socket.
+
+        Mirrors `place_close_market` contract; differs only in that a
+        LimitOrder is submitted instead of MarketOrder. Used by the V5
+        Close panel when the operator wants to exit at a specific price
+        (e.g., capture a small mean-reversion bounce rather than slip
+        through the book).
+
+        Hard-fails on disconnect; NEVER silent-simulates.
+        Returns same dict shape as place_close_market.
+        """
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected",
+                    "broker": "ib_direct", "simulated": False}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode",
+                    "broker": "ib_direct", "simulated": False}
+        if not self.is_authorized_to_trade():
+            return {"success": False,
+                    "error": "ib_direct_not_authorized_managed_accounts_empty",
+                    "broker": "ib_direct", "simulated": False}
+
+        try:
+            lmt = float(limit_price)
+            if lmt <= 0:
+                return {"success": False, "error": f"bad limit_price: {limit_price}",
+                        "broker": "ib_direct", "simulated": False}
+        except Exception:
+            return {"success": False, "error": f"bad limit_price: {limit_price}",
+                    "broker": "ib_direct", "simulated": False}
+
+        try:
+            symbol = str(trade.symbol).upper()
+            direction = (getattr(trade.direction, "value", None)
+                         or str(trade.direction)).lower()
+            qty = int(getattr(trade, "remaining_shares", 0) or trade.shares)
+            if qty <= 0:
+                return {"success": False, "error": f"bad shares: {qty}",
+                        "broker": "ib_direct", "simulated": False}
+            action = "SELL" if direction == "long" else "BUY"
+        except Exception as e:
+            return {"success": False, "error": f"bad trade fields: {e}",
+                    "broker": "ib_direct", "simulated": False}
+
+        try:
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            order = LimitOrder(action, qty, lmt)
+            try:
+                order.tif = "DAY"
+            except Exception:
+                pass
+            close_trade_obj = self._ib.placeOrder(contract, order)
+            ib_order_id = int(close_trade_obj.order.orderId)
+
+            import asyncio as _asyncio
+            deadline = _asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
+            ib_status = "submitted"
+            filled_qty = 0
+            avg_fill = 0.0
+            while _asyncio.get_event_loop().time() < deadline:
+                await _asyncio.sleep(0.25)
+                status_obj = close_trade_obj.orderStatus
+                if status_obj is None:
+                    continue
+                ib_status = (status_obj.status or "submitted").lower()
+                filled_qty = int(status_obj.filled or 0)
+                avg_fill = float(status_obj.avgFillPrice or 0.0)
+                if ib_status in ("filled", "cancelled", "apicancelled",
+                                 "inactive", "rejected"):
+                    break
+                if filled_qty >= qty:
+                    ib_status = "filled"
+                    break
+
+            if ib_status == "filled":
+                status_out, success = "filled", True
+            elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
+                status_out, success = "rejected", False
+            elif 0 < filled_qty < qty:
+                # LMT partial — return success=True, caller will book the
+                # filled slice. Unfilled remainder stays working at IB
+                # until the LMT cancels or fills, OR caller cancels it.
+                status_out, success = "partial", True
+            else:
+                # LMT may legitimately not fill within the wait window
+                # (price never traded). Surface as "working" + success=False
+                # so caller can decide whether to leave it resting or cancel.
+                status_out, success = "working", False
+
+            fill_price = avg_fill if filled_qty > 0 else None
+            logger.info(
+                "[v19.34.72 IB-DIRECT close_lmt] %s %s qty=%d lmt=%.4f -> "
+                "order_id=%d status=%s filled=%d avg=%.4f",
+                symbol, action, qty, lmt, ib_order_id, status_out,
+                filled_qty, avg_fill,
+            )
+            return {
+                "success": success,
+                "order_id": ib_order_id,
+                "ib_order_id": ib_order_id,
+                "fill_price": fill_price,
+                "filled_qty": filled_qty,
+                "remaining_qty": max(0, qty - filled_qty),
+                "status": status_out,
+                "limit_price": lmt,
+                "broker": "ib_direct",
+                "simulated": False,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.72 IB-DIRECT close_lmt] place_close_limit failed for "
+                "%s: %s", getattr(trade, "symbol", "?"), e,
+            )
+            return {"success": False,
+                    "error": f"ib_direct_close_lmt_error: {str(e)[:200]}",
+                    "broker": "ib_direct", "simulated": False}
+
     async def cancel_order(self, order_id: int) -> Dict[str, Any]:
         """Cancel a working order by IB orderId."""
         if not await self.ensure_connected():
