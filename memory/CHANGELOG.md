@@ -1,3 +1,56 @@
+## 2026-02 — v19.34.69: ATR resolver wired into orphan reconciler (fixes v19.34.68 no-op)
+
+### Trigger
+Operator dump 2026-05-12: `quote.atr` and `quote.atr_14` are NOT present in the
+pusher-relayed L1 quote payload. v19.34.68 read ATR from `quote.atr` directly, so
+the widen-stop path was a silent no-op — every adopted orphan fell back to the 2%
+pct floor, including the exact ARM case (avg $280 / ATR ~$8) the patch existed to
+fix. The pre-fix 2% floor put ARM's stop $5.60 wide; the same session ARM was
+stopped out for −$1398.
+
+### Fix
+1. New `PositionReconciler._resolve_orphan_atr(bot, symbol, quote)` static helper
+   mirrors the same resolution chain used by the live executor + retune-stop endpoint:
+     a) `bot._latest_atr_5m[symbol]`   — primary (refreshed every 5m bar)
+     b) `bot._scanner._latest_atr[symbol]` — fallback (scanner cache)
+     c) `quote.atr` / `quote.atr_14`     — legacy (future-proof; currently empty)
+     d) Returns `(0.0, "unavailable")`   — caller then falls back to pct floor.
+2. `reconcile_orphan_positions` now calls the helper instead of reading the empty
+   `quote.atr` directly.
+3. Trade `notes` + `report["reconciled"][i]` carry the new audit fields:
+   `stop_basis`, `atr_value`, `atr_source`, `atr_mult` — so operators can see at
+   a glance whether widening fired and which cache it came from.
+
+### Verification
+- `tests/test_orphan_atr_resolver_v19_34_69.py` (18 cases) — all pass.
+- `tests/test_reconciler_atr_stop_v19_34_68.py` (9 cases, formula tests) — still pass.
+- `tests/test_patch_c_hardened_v19_34_66.py` — still pass.
+- Pre-existing failures unrelated to this patch (`test_v19_34_68_orphan_adoption_attaches_bracket`,
+  `test_orphan_reconciler_skips_excess_slice_v19_34_22`) reproduce identically with patch
+  stashed → confirmed not caused by v19.34.69.
+
+### Deployment artifacts
+- Patch:     https://paste.rs/TdcMq  →  `git apply v19_34_69_atr_resolver.patch`
+- Tests:     https://paste.rs/Kf8w0  →  `backend/tests/test_orphan_atr_resolver_v19_34_69.py`
+
+### Operator one-liner (DGX)
+```
+cd ~/Trading-and-Analysis-Platform && \
+  curl -sS https://paste.rs/TdcMq -o /tmp/v19_34_69_atr_resolver.patch && \
+  curl -sS https://paste.rs/Kf8w0 -o backend/tests/test_orphan_atr_resolver_v19_34_69.py && \
+  git apply /tmp/v19_34_69_atr_resolver.patch && \
+  cd backend && python -m pytest tests/test_orphan_atr_resolver_v19_34_69.py tests/test_reconciler_atr_stop_v19_34_68.py -v && \
+  cd .. && sudo systemctl restart sentcom-backend
+```
+
+After restart, verify the patch is live by running a reconcile in dry-run mode
+and checking the report payload — adopted orphans should now have
+`atr_source = "bot_5m_cache"` (or `"scanner_cache"`) for volatile names, and
+`atr_source = "unavailable"` only for symbols the scanner has not yet covered.
+
+---
+
+
 ## 2026-02 — v19.34.SYNC: /app ↔ DGX divergence reconciled
 
 ### Trigger
