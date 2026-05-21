@@ -1,3 +1,60 @@
+## 2026-02 — v19.34.67: Position tier-chip label fix (every position said "DAY 2")
+
+### Operator-reported regression
+All 21 open positions on the V5 dashboard were rendering as `DAY 2 <dir>` regardless of actual setup or hold duration. Operator caught it Feb 2026 — none of the positions were carryovers from yesterday, every reconcile timestamp was today UTC, but the tier chip claimed they were all Day-2 holds.
+
+### Root cause (two-layer)
+1. **Bot side (`opportunity_evaluator.py:948` + `trading_bot_service.py:615`)**: the default `trade_style='trade_2_hold'` gets stamped on every new BotTrade. This is correct — `trade_2_hold` is the SMB style classification meaning "Intraday Swing (1-6h)" (see `services/tqs/tqs_engine.py:194`). NOT a day counter.
+2. **Frontend side (`OpenPositionsV5.jsx`)**: pre-fix `STYLE_HUMAN_MAP['trade_2_hold'] = 'DAY 2'` — a hardcoded mistranslation that turned every SMB-stamped position into a fake "Day 2" label. There was no fall-through to surface the actual setup label.
+
+### Diagnostic payload (5 sample positions, post-restart 2026-02-21)
+All 21 positions carried `trade_style: 'trade_2_hold'`. Setup-side detail varied:
+- CF: `setup_variant=''`, `setup_type='reconciled_orphan'` (adopted from IB orphan)
+- INTU: `setup_variant='mean_reversion_long'`
+- C: `setup_variant='squeeze'`
+- AEP / CBRE: `setup_variant='accumulation_entry'`
+
+Even though setup data was rich, the frontend mapped `trade_style` first and produced "DAY 2" for all 5.
+
+### Fix (`frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`)
+1. **Removed `trade_2_hold: 'DAY 2'` and `trade_2_continuation: 'DAY 2'`** from `STYLE_HUMAN_MAP`. These are SMB style classes, not setup names.
+2. **Added `GENERIC_TRADE_STYLE_KEYS = {'trade_2_hold', 'trade_2_continuation', 'move_2_move', 'a_plus'}`** — all four SMB style classes per `tqs_engine.py:194`.
+3. **Rewrote `tierLabel()` with a 5-step fall-through chain**: when `trade_style` is a generic SMB class, prefer `setup_variant` → `setup_type` → `scan_tier` → `timeframe`. Empty strings (the CF case) fall through correctly.
+4. **Added `reconciled_orphan: 'ADOPTED'` and `reconciled: 'ADOPTED'`** mappings — clean, distinct label for IB-orphan adoptions instead of the noise of `'RECONCILED O'` (12-char truncation) or worse.
+5. **Added `mean_reversion_long/_short`, `vwap_fade_long/_short` mappings** — surface popular setups cleanly without 12-char truncation.
+6. **Kept `day_2_continuation: 'DAY 2'` and `day_2_failure: 'DAY 2 FAIL'`** — those are real Linda Raschke setup names; "DAY 2" IS the correct chip when they fire.
+
+### Label transitions (operator-reported regressions)
+| Position | Before | After |
+|---|---|---|
+| CF (reconciled orphan) | `DAY 2 short` | `ADOPTED short` |
+| INTU (mean_reversion_long) | `DAY 2 long` | `MEAN REV long` |
+| C (squeeze) | `DAY 2 short` | `SQUEEZE short` |
+| AEP (accumulation_entry) | `DAY 2 long` | `ACCUM long` |
+| CBRE (accumulation_entry) | `DAY 2 long` | `ACCUM long` |
+
+### Test coverage (`backend/tests/test_position_tier_label_v19_34_67.py`)
+15/15 passing — replicates the JS `tierLabel()` logic in Python so pytest locks in the spec. Includes the 4 operator-reported regressions + SMB-class-never-leaks invariants + Day-2-when-legit invariants + edge cases (empty string, unknown setup, no setup at all).
+
+### File divergence note
+`/app`'s `OpenPositionsV5.jsx` had a v19.34.32 partial fix in place; operator's DGX was on an older version that lacked that fix. Both now converge on v19.34.67 (full rewrite + ADOPTED label). Next sync pass should pull the DGX file into /app, but for now the patch goes DGX-side only.
+
+### Deployment
+Patch: https://paste.rs/pzCqA (110-line diff against operator's DGX file)
+```bash
+cd ~/Trading-and-Analysis-Platform && \
+curl -sS https://paste.rs/pzCqA -o /tmp/v19_34_67_label_fix.patch && \
+git apply --check /tmp/v19_34_67_label_fix.patch && \
+git apply /tmp/v19_34_67_label_fix.patch && \
+git add -A && \
+git commit -m "v19.34.67: fix position tier-chip — stop mistranslating SMB trade_2_hold as DAY 2" && \
+cd frontend && yarn build && cd ..
+# (frontend-only change — no backend restart needed; the V5 panel just polls /api/sentcom/positions)
+# Hard-refresh your browser (Cmd+Shift+R / Ctrl+F5) to bust the cached bundle.
+```
+
+
+
 ## 2026-02 — v19.34.66: Patch C hardening (cancel only when necessary, never create duplicates)
 
 ### Operator trigger
