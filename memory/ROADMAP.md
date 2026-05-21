@@ -4,39 +4,24 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚨 P0 / P1 — Next Session (uncovered during v19.34.72 deploy 2026-05-21 PM)
+## 🚀 Tomorrow's session — v19.34.73 deploy + validate
 
-These were surfaced while testing the Close button on ADI. Operator
-had to manually flatten all 11 positions in TWS at 16:00 ET because
-the EOD close at 15:55 ET failed silently.
+**Status**: 4 surgical fixes shipped tonight. Tests 94/94. Ready to apply.
 
-### 🔴 v19.34.73 patch — bundled P0/P1 fixes (TODO)
-1. **EOD close did not actually close positions** at 15:55 ET. Likely
-   same `bracket_cancel_timeout_race_risk` chain we hit on the Close
-   button. Root cause may be 4s cancel-wait too aggressive under load.
-2. **Bump `_cancel_ib_bracket_orders` cancel-wait** from 4s → 8s and add
-   retry-once on timeout (most IB Gateway latency clears in <2 retries).
-3. **Purge `b415ed5f`-style phantoms** from the canonical-symbol map on
-   every boot — any canonical id that isn't present in `_open_trades`
-   should be evicted. Also fix the periodic `naked_sweep_reissue` worker
-   so it doesn't reissue brackets for trades not in `_open_trades`.
-4. **Quote-subscription watchdog throttle/retry** — when ANY tracked
-   symbol's quote goes >120s stale, auto-resubscribe (the current
-   "Requesting pusher re-subscribe to recover" log fires but doesn't
-   appear to actually trigger a working resub). 4.9-hour-old quotes
-   across ALL symbols simultaneously is a systemic failure.
-5. **Bracket-stacking auto-cancel endpoint** (`v19.34.78`) — for GM/LIN
-   pattern: bot=N sh, IB pending_target_qty=N×K, excess legs at risk
-   of double-fill. Audit endpoint flags it; need an action endpoint.
-6. **Fix `diag/symbol-state`** to actually read `_open_trades`. Returns
-   empty even when `force-reconcile-down` confirms trade tracked.
+### Deploy
+1. `curl -sS -o /tmp/v19_34_73.patch https://paste.rs/mWxSQ && git apply --check /tmp/v19_34_73.patch && git apply /tmp/v19_34_73.patch`
+2. Restart backend
+3. Boot phantom-sibling purge runs automatically 20s after start
 
-### 🟠 Open issues to test in-session
-- IB Direct intermittent connect failures (`192.168.50.1:4002 clientId=11`)
-  — happens on cold-start before pusher fully connects. May just need
-  a longer init grace period.
-- Faulthandler thread dumps in log indicate the backend was hung at
-  some point. Investigate `readiness_*` thread blockage.
+### Validate on tomorrow's open
+- ✓ Click Close 25% on any clean position — should complete cleanly within ~3-13s
+- ✓ Run `curl /api/trading-bot/diag/symbol-state?symbol=<any-open-symbol>` — `open_trades_in_memory` should now be populated
+- ✓ Check log for `🧹 [v19.34.73 phantom-purge]` — should report any cleared phantoms at boot
+- ✓ At 15:55 ET, EOD close should now actually flatten intraday positions
+
+### Deferred to v19.34.74+
+- 🟠 **P1: Bracket-stacking auto-cancel endpoint** (GM/LIN-style excess legs). Audit endpoint already flags them; need action endpoint. Real $$ risk. Needs careful design — not a one-liner.
+- 🟠 **P1: Quote-resub watchdog actual recovery** — current `_stale_resub_set` triggers `pusher.subscribe_symbols()` via RPC every 60s but quotes still go 4.9hr stale. Likely a Windows pusher-side handler issue. Needs diagnostic in `ib_data_pusher.py`.
 
 ---
 ## 🚀 Session Summary — 2026-05-20 (5 commits, HUD now matches TWS truth)

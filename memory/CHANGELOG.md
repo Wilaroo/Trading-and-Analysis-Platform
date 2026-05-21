@@ -1,3 +1,85 @@
+## 2026-05-21 — v19.34.73: Close-path hardening (4 surgical fixes)
+
+### Trigger
+The 2026-05-21 PM session revealed the v19.34.72 Operator Close panel UI
+worked perfectly but **no actual close could complete** — first ADI 25%
+attempt returned `bracket_cancel_timeout_race_risk`. Investigation
+uncovered the EOD close at 15:55 ET ALSO failed silently for ALL 11
+positions, forcing the operator to manually flatten in TWS at 16:00.
+Root cause: 4s cancel-wait timeout in `_cancel_ib_bracket_orders`
+plus a stale phantom trade (`b415ed5f`) in `_open_trades` that the
+naked-sweep worker kept trying to bracket every 60s.
+
+### Four surgical fixes
+
+**Fix A — Cancel-wait 4s → 8s + retry-once** (`trade_executor_service.py`).
+The 4s `wait_for_orders_terminal` cap was producing false-positive
+race-risk aborts under normal IB Gateway load. Bumped to 8s primary +
+re-issue cancels on the timeout-set + 5s retry-wait. Total worst-case
+13s. Median IB cancel ack is ~200ms, p99 ~1.5s, so 8s is conservatively
+generous. **Directly fixes the EOD-close-silent-failure** since
+`check_eod_close` routes through the same `close_trade` →
+`_cancel_ib_bracket_orders` path.
+
+**Fix B — Naked-sweep sibling guard** (`trading_bot_service.py`,
+`_naked_position_sweep`). Pre-fix: when two trades for same
+(symbol, direction) co-existed in `_open_trades` (e.g., real bot_fired
+`82f0686f` 134sh + stale orphan-adopted `b415ed5f` 44sh), the
+naked-sweep reissued brackets for BOTH every 60s — `b415ed5f`'s went
+to IB and got Error 200 (stale contract / no secdef) 35+ cycles.
+Fix: build a sibling map per cycle, score each canonical (bot_fired
+beats orphan-adopted; tie-break on `remaining_shares`), and skip
+naked-reissue for any loser. Loser trades get cleaned up at next boot
+by Fix D.
+
+**Fix C — `/diag/symbol-state` lookup bug** (`routers/trading_bot.py`).
+Pre-fix: `ot.get(sym) or []` — `_open_trades` is keyed by `trade_id`,
+not symbol, so this ALWAYS returned `[]` regardless of the bot's
+actual state. ADI showed empty diag while `force-reconcile-down`
+simultaneously reported `tracked_total=134` with `82f0686f`. Fix:
+iterate `.values()` and filter by symbol. Also returns
+`entered_by` / `stop_order_id` / `target_order_id` in the row dict so
+operator can spot orphan-adoptions vs bot_fired at a glance.
+
+**Fix D — Boot phantom-sibling purge** (`trading_bot_service.py`,
+`start()`). New background task runs once at boot (20s delay to let
+`_restore_state` + orphan-guard settle). Identifies any (symbol,
+direction) bucket with >1 trade in `_open_trades`, scores them per
+the same logic as Fix B, and moves losers to `_closed_trades` with
+`close_reason="phantom_sibling_purge_v19_34_73"` and 0 shares.
+Persists via `_save_trade`. Eliminates `b415ed5f`-style ghosts that
+persist across restarts and silently break the sym-dir-cap guard +
+naked-sweep.
+
+### Tests
+9/9 new pytest cases in `test_v19_34_73_close_path_hardening.py`:
+- Sibling-map scoring (bot_fired wins, ties broken by shares)
+- Single-trade no-sibling-guard bypass
+- Diag iterates values(), finds multi-trade phantoms
+- Lock-in tests assert 8.0s/5.0s timeouts present in source
+- Lock-in tests assert diag fix + naked-sweep guard + boot purge wired
+
+**94/94 across v19.34.69 → v19.34.73 — zero regression.**
+
+### Files
+- `backend/services/trade_executor_service.py` (+65)
+- `backend/services/trading_bot_service.py` (+152)
+- `backend/routers/trading_bot.py` (+18)
+- `backend/tests/test_v19_34_73_close_path_hardening.py` (+246)
+
+### Deploy
+Patch at paste.rs/mWxSQ. Apply on DGX, restart backend. No frontend
+changes required.
+
+### Deferred to v19.34.74+
+- **Bracket-stacking auto-cancel endpoint** (GM/LIN pattern, real $$
+  risk). Needs careful design — not a one-liner.
+- **Quote-resub watchdog actual fire** — current resub triggers via
+  pusher RPC but the Windows pusher side appears unreliable. Needs
+  diagnostic pass on `ib_data_pusher.py` subscribe_symbols handler.
+
+---
+
 ## 2026-05-21 — v19.34.72: Operator Close Panel (Market/Limit + percentage)
 
 ### Trigger
