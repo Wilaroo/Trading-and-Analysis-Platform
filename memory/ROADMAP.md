@@ -4,6 +4,41 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
+## 🚨 P0 / P1 — Next Session (uncovered during v19.34.72 deploy 2026-05-21 PM)
+
+These were surfaced while testing the Close button on ADI. Operator
+had to manually flatten all 11 positions in TWS at 16:00 ET because
+the EOD close at 15:55 ET failed silently.
+
+### 🔴 v19.34.73 patch — bundled P0/P1 fixes (TODO)
+1. **EOD close did not actually close positions** at 15:55 ET. Likely
+   same `bracket_cancel_timeout_race_risk` chain we hit on the Close
+   button. Root cause may be 4s cancel-wait too aggressive under load.
+2. **Bump `_cancel_ib_bracket_orders` cancel-wait** from 4s → 8s and add
+   retry-once on timeout (most IB Gateway latency clears in <2 retries).
+3. **Purge `b415ed5f`-style phantoms** from the canonical-symbol map on
+   every boot — any canonical id that isn't present in `_open_trades`
+   should be evicted. Also fix the periodic `naked_sweep_reissue` worker
+   so it doesn't reissue brackets for trades not in `_open_trades`.
+4. **Quote-subscription watchdog throttle/retry** — when ANY tracked
+   symbol's quote goes >120s stale, auto-resubscribe (the current
+   "Requesting pusher re-subscribe to recover" log fires but doesn't
+   appear to actually trigger a working resub). 4.9-hour-old quotes
+   across ALL symbols simultaneously is a systemic failure.
+5. **Bracket-stacking auto-cancel endpoint** (`v19.34.78`) — for GM/LIN
+   pattern: bot=N sh, IB pending_target_qty=N×K, excess legs at risk
+   of double-fill. Audit endpoint flags it; need an action endpoint.
+6. **Fix `diag/symbol-state`** to actually read `_open_trades`. Returns
+   empty even when `force-reconcile-down` confirms trade tracked.
+
+### 🟠 Open issues to test in-session
+- IB Direct intermittent connect failures (`192.168.50.1:4002 clientId=11`)
+  — happens on cold-start before pusher fully connects. May just need
+  a longer init grace period.
+- Faulthandler thread dumps in log indicate the backend was hung at
+  some point. Investigate `readiness_*` thread blockage.
+
+---
 ## 🚀 Session Summary — 2026-05-20 (5 commits, HUD now matches TWS truth)
 
 | Version | Topic | Status |

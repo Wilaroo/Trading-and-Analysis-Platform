@@ -1,3 +1,82 @@
+## 2026-05-21 — v19.34.72: Operator Close Panel (Market/Limit + percentage)
+
+### Trigger
+Operator requested an immediate-exit Close button on every Open Position
+row in V5 — Market or Limit, with 25/50/75/100% partial-close support.
+Goal: give operator emergency-exit control without touching the bot's
+safety-critical 100%-MKT close path (EOD / stop-loss / scale-out).
+
+### Solution (sibling code path, NOT touching existing close_trade)
+- **`ib_direct_service.place_close_limit()`** — new method, mirrors
+  `place_close_market` contract; submits a LimitOrder. Returns same
+  dict shape. Handles `working` status for LMT-not-filled-within-wait.
+- **`trade_executor_service.close_position_custom(trade, *, order_type,
+  limit_price=None)`** — new method. Market route delegates to existing
+  `close_position`; Limit route runs the same v19.34.64 OCA-race guard
+  before submitting LMT close.
+- **`position_manager.close_trade_custom(trade_id, bot, *, percentage,
+  order_type, limit_price, reason)`** — new method, distinct from
+  `close_trade`. Handles partial closes (keeps trade open with reduced
+  remaining_shares + appends partial_exit ledger entry). Full close
+  mirrors `close_trade`'s terminal flow exactly.
+- **`trading_bot_service.close_trade_custom()`** — exposes new method
+  on bot. Legacy `close_trade()` unchanged.
+- **`POST /api/trading-bot/trades/{trade_id}/close`** — backwards-compatible:
+  no body → legacy 100% MKT close; with body → dispatches to
+  `close_trade_custom`. `CloseTradeRequest` Pydantic schema added.
+
+### Frontend
+- **`CloseTradeModal.jsx`** — new modal. Market/Limit toggle, 25/50/75/100
+  preset buttons + slider, computed "About to: SELL/BUY-TO-COVER N SYM @
+  MKT/LMT" line. Modal mounted from `PositionRow` in `OpenPositionsV5.jsx`
+  via small rose "Close" button next to PnL.
+
+### Tests
+- **`test_close_trade_custom_v19_34_72.py`** — 12 cases all passing:
+  market 100% full, market 50% partial, limit-price-required, limit
+  price flow, LMT-resting-at-IB, unknown trade_id, bad percentage,
+  bad order_type, executor failure path, short-position PnL math,
+  router accepts body + dispatches, router no-body uses legacy path.
+
+### Operator session (2026-05-21 PM)
+- UI modal validated working perfectly (screenshot confirmed).
+- First Close attempt on ADI 25% returned `bracket_cancel_timeout_race_risk`
+  — investigation surfaced **5 pre-existing P0/P1 bugs** unrelated to
+  v19.34.72 itself:
+  1. `b415ed5f` phantom locked in canonical-symbol map (sym-dir-cap
+     blocking new ADI entries, periodic naked-sweep worker reissuing
+     brackets for stale 44sh ghost, each cycle Error 200'd by IB)
+  2. 4.9-hour-stale quotes across ALL tracked symbols (pusher subscriptions
+     died en masse, recovered after triggered re-subscribe)
+  3. IB Direct intermittent connect failures (clientId=11 on
+     192.168.50.1:4002)
+  4. **EOD close at 15:55 ET did not close any positions** — operator
+     manually flattened all 11 positions in TWS at 16:00 (P0!)
+  5. `diag/symbol-state` endpoint shows `open_trades_in_memory: []`
+     even when `force-reconcile-down` confirms trade tracked
+- GM and LIN flagged with real bracket stacking (excess target legs
+  300sh / 27sh respectively) — pending v19.34.78 auto-cancel.
+- Faulthandler stack traces in log indicate backend was hung at some
+  point — likely correlated with the cancel-wait timeouts.
+
+### Files
+- `backend/services/ib_direct_service.py` (+128)
+- `backend/services/trade_executor_service.py` (+104)
+- `backend/services/position_manager.py` (+286)
+- `backend/services/trading_bot_service.py` (+20)
+- `backend/routers/trading_bot.py` (+55/-13)
+- `backend/tests/test_close_trade_custom_v19_34_72.py` (+410)
+- `frontend/src/components/sentcom/v5/CloseTradeModal.jsx` (+287)
+- `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx` (+31)
+
+### Deploy
+Patch applied via paste.rs/JUSuz on DGX, `yarn build`, restart.
+Tests 12/12 in dev env; DGX env missing finnhub/fastapi in user-site
+python3.12 so pytest deferred — patch validated via successful apply
++ live UI screenshot.
+
+---
+
 ## 2026-02 — v19.34.71: Pusher reports IB 10147/10148/200 as failed (root-cause closure)
 
 ### Trigger
