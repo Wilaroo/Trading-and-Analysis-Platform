@@ -1,3 +1,145 @@
+## 2026-05-22 — v19.34.84: quote_resub_watchdog v82 test suite + lazy services/__init__.py (SHIPPED)
+
+### Trigger
+P2.2 follow-up from v82. The v80 test file (`test_quote_resub_watchdog_v19_34_80.py`)
+exercised the old `_stale_resub_set` API that v82 deliberately removed.
+Tests fail-collected. Two compounding issues surfaced during DGX execution:
+1. **PEP 668 system pip blocked** — DGX runs system Python 3.12 (no venv);
+   `pip install finnhub-python` refused with `externally-managed-environment`.
+2. **Eager import pollution** — `services/__init__.py` did
+   `from .stock_data import StockDataService` at the top, which transitively
+   pulled `import finnhub` for ANY test importing ANY service submodule
+   (including `services.quote_resub_watchdog` which has zero finnhub deps).
+
+### What shipped
+
+**`backend/tests/test_quote_resub_watchdog_v19_34_82.py` (NEW, 163 lines, 8 tests)**
+
+Drops `position_manager._stale_resub_set` dependency. Mocks
+`services.ib_pusher_rpc.get_pusher_rpc_client` and exercises
+`_State`/`_tick`/`_force_resub`/`quote_resub_watchdog_loop` directly:
+
+- `test_empty_open_trades_clears_prior_state` — prior state evicted when
+  bot has nothing to track.
+- `test_missing_from_subs_triggers_unsub_resub` — bot tracks UAL but
+  pusher has no subscription → unsubscribe→subscribe fires.
+- `test_snapshot_failed_triggers_unsub_resub` — symbol in registry but
+  `quote_snapshot` returns `success:false` (the live UAL/COR split-brain
+  case) → unsubscribe→subscribe fires.
+- `test_escalates_after_three_failed_cycles` — after
+  `QUOTE_RESUB_WATCHDOG_ESCALATE_AFTER` (default 3) consecutive failed
+  cycles → writes severity=high row to `quote_resub_watchdog_events`
+  with `version=v19.34.82`, `divergence_kind=missing_from_subs`.
+- `test_recovery_clears_watchdog_state` — symbol heals → state evicted.
+- `test_pusher_unreachable_safe_skip` — `rpc.subscriptions()` returns
+  None → tick exits cleanly, no spurious resubs.
+- `test_force_resub_handles_rpc_exception` — RPC raises → `_force_resub`
+  returns False (no crash).
+- `test_env_disable_exits_immediately` — `QUOTE_RESUB_WATCHDOG_ENABLED=false`
+  → loop exits before first iteration.
+
+**8/8 passing in 3.08s** under system `python3 -m pytest` on DGX.
+
+**`backend/services/__init__.py` — PEP 562 lazy re-exports**
+
+Replaced eager `from .stock_data import ...` (× 5 submodules) with a
+`__getattr__` dispatch table. Submodules load only on first attribute
+access; once loaded, the value is cached in `globals()`. Production
+semantics unchanged:
+
+- `from services import StockDataService` → triggers load on first hit,
+  identical behavior afterwards.
+- `from services.stock_data import StockDataService` → bypasses
+  `__init__.py` entirely (already the common pattern in this codebase).
+- `dir(services)` returns the union of materialized + lazy names.
+
+Side-effect win: tests that touch one submodule no longer drag in
+`finnhub` / `finbert` / `ai_modules` / `market_context` / etc.
+Unblocks future test isolation without system pip changes.
+
+### Deployment
+
+- `backend/tests/test_quote_resub_watchdog_v19_34_80.py` — deleted.
+- `backend/tests/test_quote_resub_watchdog_v19_34_82.py` — created.
+- `backend/services/__init__.py` — lazy rewrite.
+- `backend/services/__init__.py.v19_34_84_bak` — operator backup
+  (untracked, can be deleted at any time).
+
+Commit `2f0b4448` on `origin/main`. Linear history with v83 (Windows
+`.bat` fix) and v82 Phase A/B.
+
+### Verification
+```bash
+cd ~/Trading-and-Analysis-Platform/backend
+python3 -m pytest tests/test_quote_resub_watchdog_v19_34_82.py -v
+# ============================== 8 passed in 3.08s ===============================
+```
+
+### Cleanup queued (P3 — not blocking)
+- Delete `services/__init__.py.v19_34_84_bak` after a clean trading week.
+- Lazy-import audit on `services/ai_modules/finbert_sentiment.py` (the
+  other site that imports `finnhub` — currently fine since it's only
+  imported via `BriefMeAgent` which is wired through a router that
+  initializes lazily).
+- Delete dead `_fetch_finnhub_quote` references in `stock_data.py`
+  (already guarded by `test_phase1_phase2.py` IB-only assertion).
+
+---
+
+
+## 2026-05-22 — v19.34.83: TradeCommand_Spark_AITraining.bat parser fix + pusher cold-start delay (SHIPPED)
+
+### Trigger
+v82 deployment surfaced two latent bugs in the canonical Windows
+startup script `documents/TradeCommand_Spark_AITraining.bat`:
+
+1. **`)` parser bug** in 5 `echo` lines — unescaped `)` inside
+   `echo Data pusher started (client ID: %IB_PUSHER_CLIENT_ID%)`
+   prematurely closes the `IF EXIST (...)` block. Result: misleading
+   `[SKIP] ib_data_pusher.py not found` printed even on success.
+2. **Pusher cold-start race** — step 5 launched the pusher
+   (`ib_data_pusher.py`) immediately after `taskkill` while IB Gateway
+   was still mid-API-handshake on `:4002`. Pusher would exit on
+   first `reqMktData` with connection refusal, window closed silently.
+
+### What shipped
+
+**Fix 1 — escape `)` inside echo lines** (5 occurrences):
+```
+echo Data pusher started ^(client ID: %IB_PUSHER_CLIENT_ID%^)
+echo Collector 1 started ^(client ID: %IB_COLLECTOR_ID_1%^)
+echo Collector 2 started ^(client ID: %IB_COLLECTOR_ID_2%^)
+echo Collector 3 started ^(client ID: %IB_COLLECTOR_ID_3%^)
+echo Collector 4 started ^(client ID: %IB_COLLECTOR_ID_4%^)
+```
+
+**Fix 2 — 6s pusher cold-start delay** (inserted after the pusher
+`taskkill`, before `if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (`):
+```
+:: v19.34.83 - give IB Gateway time to fully ready the API port
+:: before pusher tries reqMktData (kills cold-start race).
+timeout /t 6 /nobreak >nul
+```
+
+### Deployment
+Patched via PowerShell Python heredoc script (operator-executed on
+Windows). Backup at
+`documents\TradeCommand_Spark_AITraining.bat.v19_34_83_bak`.
+Commit `fc012bbd` on `origin/main`.
+
+### Verification
+- `Select-String -Path $bat -Pattern "\^\(client ID:"` → 5 lines (expected).
+- `Select-String -Path $bat -Pattern "v19.34.83"` → 1 line at 219.
+
+### Notes
+A stray `StartTrading.bat.v19_34_83_bak` was created in `scripts/`
+(wrong dir) during an earlier patch attempt and has been removed.
+The canonical bat lives at `documents/TradeCommand_Spark_AITraining.bat`.
+
+---
+
+
+
 ## 2026-05-22 — v19.34.82: Timezone-safe quote pipeline + watchdog redesign (LIVE-VERIFIED)
 
 ### Trigger

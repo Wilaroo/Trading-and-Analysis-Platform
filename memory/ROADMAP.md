@@ -4,37 +4,24 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.82+ priority queue
+## 🚀 Next session — v19.34.84+ priority queue
 
-**Last shipped**: v19.34.82 (TZ-safe quote pipeline + watchdog redesign — 2026-05-22, LIVE-VERIFIED).
+**Last shipped**: v19.34.84 (quote_resub_watchdog v82 test suite + lazy
+services/__init__.py — 2026-05-22, 8/8 pytest green).
+**Prior**: v19.34.83 (Windows `.bat` parser fix + pusher cold-start delay),
+v19.34.82 (TZ-safe quote pipeline + watchdog redesign — LIVE-VERIFIED).
 
-### 🟡 P2 — `StartTrading.bat` cleanup (v19.34.83)
-Two bugs found while deploying v82:
+### ✅ SHIPPED — `StartTrading.bat` cleanup (v19.34.83)
+Both fixes landed in `documents/TradeCommand_Spark_AITraining.bat`:
+parser-bug `^)` escapes on 5 echo lines + 6s pusher cold-start delay
+between `taskkill` and `start`. Backup at `*.v19_34_83_bak`. See
+`CHANGELOG.md` for detail.
 
-1. **Parser bug**: unescaped `)` inside `echo` lines (5 spots: pusher
-   start + 4 collector starts) prematurely closes IF-blocks. Result:
-   misleading `[SKIP] ib_data_pusher.py not found` prints even on success.
-   Fix: change `(client ID: %VAR%)` → `^(client ID: %VAR%^)` in all 5 echo
-   lines.
-2. **Pusher cold-start race**: step 5 launches pusher before IB Gateway
-   finishes API handshake → pusher exits immediately, window closes.
-   Fix: add `timeout /t 6 /nobreak >nul` between the `taskkill` and the
-   `start` in step 5 (gives Gateway time after `:4002` listens).
-
-### 🟡 P2 — v82 watchdog test rewrite
-v80 tests at `backend/tests/test_quote_resub_watchdog_v19_34_80.py`
-exercised the old `_stale_resub_set` API which v82 removed. Tests now
-fail-collect (also blocked by venv-less pytest missing `finnhub`).
-
-Action: create `test_quote_resub_watchdog_v19_34_82.py` covering:
-* `_open_trade_symbols(bot)` extraction
-* `missing_from_subs` divergence → unsub+resub triggered
-* `snapshot_failed` divergence → unsub+resub triggered
-* Escalation after N failed attempts → event row written
-* `_force_resub` exception swallow path
-* Empty `_open_trades` → state cleared
-Use mock `rpc` exposing `subscriptions()`, `quote_snapshot()`,
-`subscribe_symbols()`, `unsubscribe_symbols()`, `is_configured()`.
+### ✅ SHIPPED — v82 watchdog test rewrite (v19.34.84)
+`test_quote_resub_watchdog_v19_34_82.py` covers all 8 cases listed in
+the original plan. PEP-668-friendly: paired with PEP 562 lazy
+`services/__init__.py` so pytest no longer needs `finnhub` installed
+in system Python. 8/8 passing in 3.08s. See `CHANGELOG.md` for detail.
 
 ### 🟢 P3 — Windows pusher file cleanup
 Delete 3 stray `ib_data_pusher.py` copies outside the canonical
