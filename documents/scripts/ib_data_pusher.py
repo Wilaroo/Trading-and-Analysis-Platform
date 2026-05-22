@@ -335,6 +335,11 @@ class IBDataPusher:
                 symbol = ticker.contract.symbol
                 
                 # Regular quote data
+                # v19.34.82 (2026-05-22) — naive .now() emitted local wall-
+                # clock (Windows TZ) which DGX consumers parsed as UTC,
+                # producing 4h false-stale on every quote (UAL/COR
+                # orphan incident). Emit aware-UTC with Z suffix.
+                from datetime import timezone as _tz_v82
                 self.quotes_buffer[symbol] = {
                     "symbol": symbol,
                     "bid": ticker.bid if ticker.bid > 0 else None,
@@ -345,7 +350,7 @@ class IBDataPusher:
                     "low": ticker.low if ticker.low > 0 else None,
                     "volume": ticker.volume if ticker.volume > 0 else None,
                     "open": ticker.open if ticker.open > 0 else None,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(_tz_v82.utc).isoformat().replace("+00:00", "Z")
                 }
                 
                 # Extract fundamental data from ticker if available
