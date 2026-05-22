@@ -3,6 +3,23 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-05-22 (3 behavioral patches shipped — last $$ risks closed)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.79 | Bracket-stacking auto-cancel endpoint + 120s ride-along on `_periodic_bracket_state_reconcile` | shipped |
+| v19.34.80 | Quote-resub watchdog — verifies pusher RPC actually landed at IB, force-cycles on mismatch, escalates after 3 cycles | shipped |
+| v19.34.81 | Log visibility polish — bumped watchdog ENABLED log from `logger.info` → `logger.warning` (matches AUTO-SWEEP pattern, operator log config filters services.* INFO silently) | shipped |
+
+Backend restarted clean post-deploy. Both features verified: bracket-cancel endpoint responsive, watchdog ENABLED log appears at boot. Live-fire validation pending tomorrow's market open. Last two real-$$ risk vectors (GM/LIN-style stacking + 4.9h stale-quote bug) now have automated heal paths.
+
+### Next session priorities
+- 🟡 **P2**: Validate live-fire behavior of v79/v80 during tomorrow's market session (watch `bracket-cancel auto` and `quote-resub-watchdog NOT subscribed` log lines).
+- 🐛 5-min cleanup: fix `position_reconciler.py:1197` MagicMock comparison in `test_orphan_reconciler_skips_excess_slice_v19_34_22`.
+- 🟡 **P2**: UI bug cluster (Top Movers / Scanner % / Strategy Mix / Scalp SMB grade timeframe-awareness). Now armed with `quote_resub_watchdog_events` collection data to inform diagnosis.
+- 🟡 **P2**: Adoption Review UI (orphan accept/reject).
+- 🟡 **P2**: PnL data drift telemetry (60s catcher).
+
 ## Session Summary - 2026-05-22 (5 patches shipped — AGENTS.md context layer)
 
 | Version | Topic | Status |

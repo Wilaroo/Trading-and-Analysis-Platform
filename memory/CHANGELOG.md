@@ -1,3 +1,89 @@
+## 2026-05-22 — v19.34.79 + v19.34.80 + v19.34.81: First behavioral patches after the docs run
+
+### Trigger
+After completing the 5-patch AGENTS.md context layer, shifted back to
+the two remaining real-$$ risks in the system: GM/LIN-style bracket
+stacking (audit endpoint had been flagging it for weeks with no auto-
+heal) and the chronic 4.9-hour stale-quote bug.
+
+### What shipped (3 versions)
+- **v19.34.79** — Bracket-stacking auto-cancel:
+  - New `POST /api/trading-bot/bracket-stacking-cancel` endpoint
+    walks the existing audit, picks the newest complete OCA pair as
+    keep-set, cancels excess legs via `ib_direct.cancel_order` (per
+    AGENTS.md §0 rule #1).
+  - Defaults to `dry_run=true`. Refuses to leave any position naked.
+    Skips `pos_qty == 0` symbols. 200ms pacing between cancellations.
+  - Ride-along auto-cancel ticks every 120s inside the existing
+    `_periodic_bracket_state_reconcile` loop, gated by env
+    `AUTO_CANCEL_BRACKET_STACKING` (default true).
+- **v19.34.80** — Quote-resub watchdog:
+  - New service `services/quote_resub_watchdog.py` (~220 lines).
+  - Verifies every `pusher.subscribe_symbols()` RPC actually landed
+    in the live IB subscription set via `rpc.subscriptions(True)`.
+  - On mismatch (RPC said success but symbol missing), force-cycles
+    `unsubscribe_symbols` + `subscribe_symbols` to trigger fresh
+    `reqMktData` at IB.
+  - Escalates to new `quote_resub_watchdog_events` collection
+    (severity=high) after 3 failed cycles per symbol.
+  - Spawned from `TradingBotService.start()` next to share_drift_task.
+  - Env gates: `QUOTE_RESUB_WATCHDOG_ENABLED`, `_INTERVAL`,
+    `_ESCALATE_AFTER`.
+- **v19.34.81** — Log visibility polish: bumped watchdog `ENABLED`
+  and `DISABLED` log lines from `logger.info` → `logger.warning` so
+  they appear at boot (matches AUTO-SWEEP pattern; the operator's
+  log config drops `services.*` INFO lines silently).
+
+### Live verification on DGX (2026-05-22 after market close)
+- `start_backend.sh --force` boots clean, 24s to "Application
+  startup complete"
+- `[v19.34.80 quote-resub-watchdog] ENABLED (interval=60s,
+  escalate_after=3 failed cycles)` appears in `/tmp/backend.log`
+- `POST /api/trading-bot/bracket-stacking-cancel` with
+  `{"dry_run":true}` returns `success=true, symbols_processed=[],
+  symbols_in_audit=0` (clean state, no live positions after-hours
+  — expected)
+- Bot status confirms `running=true, mode=autonomous`
+
+### Tests
+- `test_bracket_stacking_cancel_v19_34_79.py` — 8 cases pass
+- `test_quote_resub_watchdog_v19_34_80.py` — 6 cases pass
+- 21 adjacent pre-existing tests still pass (no regression)
+
+### Why this matters
+GM/LIN-style stacking is no longer just visible in the audit — it
+auto-heals every 120s during market hours. And the chronic stale-
+quote bug now has a self-correcting layer that catches silent pusher-
+RPC ack-without-actually-subscribing failures within 60s, escalating
+to the events collection after 3 failed cycles for forensics.
+
+### Files touched
+- `backend/routers/trading_bot.py` (+~230 lines: new endpoint)
+- `backend/services/trading_bot_service.py` (+~50 lines: ride-along
+  + watchdog spawn)
+- `backend/services/quote_resub_watchdog.py` (NEW, ~220 lines)
+- `backend/tests/test_bracket_stacking_cancel_v19_34_79.py` (NEW)
+- `backend/tests/test_quote_resub_watchdog_v19_34_80.py` (NEW)
+- `AGENTS.md` (+ §10 version, §14 new collection row,
+  §15 new worker rows, trailer)
+
+### Deploy notes
+- Patch v79+80 at `paste.rs/wvnoR` (1214 lines, 6 files)
+- Patch v81 log polish at `paste.rs/mfcDz` (21 lines, 1 file)
+- Both applied to DGX cleanly, no rejects. Pre-market write held
+  until 4 PM ET per operator concern about live-order safety.
+
+### Live-fire validation (still pending)
+Tomorrow during market hours, watch for:
+- `[v19.34.79 bracket-cancel auto] cancelled=N refused_symbols=N`
+  logs (every 120s when stacking detected)
+- `[v19.34.80 quote-resub-watchdog] {sym} NOT subscribed at pusher
+  despite manage-loop request` (only on actual stale-sub failures)
+- `quote_resub_watchdog_events` collection populated if any symbol
+  hits the 3-cycle escalation threshold
+
+---
+
 ## 2026-05-22 — v19.34.74-78: AGENTS.md context layer + multi-tool auto-load
 
 ### Trigger

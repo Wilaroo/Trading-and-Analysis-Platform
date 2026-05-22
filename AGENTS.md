@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.78 (2026-05-22, "PRD.md AGENTS.md cross-reference — 5 critical rules inlined for Emergent auto-load")
+- **Current version**: v19.34.80 (2026-05-22, "Bracket-stacking auto-cancel + quote-resub watchdog — first real backend features after the docs-only run")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
@@ -820,6 +820,7 @@ output of `git log --oneline -5` on the DGX before generating patches.
 | `ib_smart_backfill_history` | Smart-backfill audit |
 | `ib_executions` | Raw IB exec reports |
 | `ib_short_data` | Short borrow / locate data |
+| `quote_resub_watchdog_events` | v19.34.80 watchdog escalations (symbol stayed unsubscribed despite pusher RPC ack). `severity=high`. |
 
 ### ML / training
 | Collection | Owns |
@@ -889,6 +890,8 @@ Cadence is in seconds. **If you add a new loop, add an entry here.**
 | EOD policy migration | ~L3339 | once | `_eod_policy_migration()` | One-shot config upgrade at first boot. |
 | Share-drift loop | ~L3465 | **60 s** | `_share_drift_loop()` | Detects + logs IB-vs-bot share count drift; emits `share_drift_events`. |
 | Orphan reconcile loop | ~L3579 | **60 s** | `_orphan_reconcile_loop()` | Continuous orphan adoption / ejection (fixed v19.34.22 to skip `reconciled_excess_*`). |
+| Quote-resub watchdog | ~L3503 | **60 s** | `quote_resub_watchdog_loop()` in `services/quote_resub_watchdog.py` | v19.34.80 — Verifies every pusher re-subscribe RPC actually landed at IB. Force-cycles unsub+resub when missing. Escalates to `quote_resub_watchdog_events` after 3 failed cycles. |
+| Bracket-stacking auto-cancel | ride-along on `_periodic_bracket_state_reconcile` (~L2613) | **120 s** | `routers.trading_bot.bracket_stacking_cancel` | v19.34.79 — Walks the bracket-stacking audit, picks newest complete OCA pair as keep-set, cancels excess legs via `ib_direct.cancel_order`. Gated by `AUTO_CANCEL_BRACKET_STACKING` env (default true). |
 | Manage-open-trades | (in `position_manager.py`) | scan-tick | `manage_open_trades()` | Per-trade stop / target / scale-out logic; naked sweep ride-along. |
 
 > ⚠️ **Boot order matters.** Multiple loops sleep at start to let
@@ -1077,8 +1080,8 @@ These are the heart of the V5 trading UI. Grouped by purpose:
 
 ---
 
-*Last updated: 2026-05-22 (v19.34.77 ship — §0 TL;DR top-5 rules
-+ multi-tool auto-load pointers `.cursorrules` and
-`.github/copilot-instructions.md` so Cursor and Copilot also pick up
-context automatically). Update this file whenever you learn a new
-convention or trap.*
+*Last updated: 2026-05-22 (v19.34.79+80 ship — first behavioral
+backend features after the AGENTS.md docs run: bracket-stacking
+auto-cancel endpoint + quote-resub watchdog. 14/14 tests passing,
+21/21 adjacent regression tests passing). Update this file whenever
+you learn a new convention or trap.*

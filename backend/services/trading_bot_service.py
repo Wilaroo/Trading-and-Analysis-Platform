@@ -2668,6 +2668,39 @@ class TradingBotService:
                             "[v19.34.70 PATCH D] tick error "
                             "(non-fatal): %s", e,
                         )
+                    # ── v19.34.79 — Bracket-stacking auto-cancel ──
+                    # Right after the state-reconcile sweep, run the
+                    # bracket-stacking auto-cancel so any GM/LIN-style
+                    # excess target/stop legs that the audit identifies
+                    # get cancelled in the same 120s tick. Gated by env
+                    # so the operator can disable independently of the
+                    # state-reconcile loop.
+                    try:
+                        from os import environ as _env79
+                        if _env79.get("AUTO_CANCEL_BRACKET_STACKING",
+                                      "true").lower() == "true":
+                            from routers.trading_bot import (
+                                bracket_stacking_cancel,
+                                BracketStackingCancelRequest,
+                            )
+                            result = await bracket_stacking_cancel(
+                                BracketStackingCancelRequest(dry_run=False)
+                            )
+                            cancelled = (result.get("totals") or {}).get("cancelled", 0)
+                            refused = (result.get("totals") or {}).get("refused_symbols", 0)
+                            if cancelled > 0 or refused > 0:
+                                logger.warning(
+                                    "[v19.34.79 bracket-cancel auto] "
+                                    "cancelled=%d refused_symbols=%d "
+                                    "(symbols_in_audit=%d)",
+                                    cancelled, refused,
+                                    (result.get("totals") or {}).get("symbols_in_audit", 0),
+                                )
+                    except Exception as e:
+                        logger.debug(
+                            "[v19.34.79 bracket-cancel auto] tick error "
+                            "(non-fatal): %s", e,
+                        )
                     await asyncio.sleep(interval_s)
             asyncio.create_task(_periodic_bracket_state_reconcile())
 
@@ -3467,6 +3500,26 @@ class TradingBotService:
                 logger.warning(
                     f"[v19.34.15b DRIFT-LOOP] failed to schedule (non-fatal): {e}"
                 )
+
+        # ─── v19.34.80 (2026-05-22) — Quote-Resubscribe Watchdog ──────
+        # Verifies every pusher re-subscribe RPC actually landed in the
+        # live IB subscription set. Pre-v19.34.80 the position_manager
+        # fired `subscribe_symbols()` and trusted the pusher's 200 OK,
+        # which silently masked failures (4.9hr stale-quote operator
+        # incident). The watchdog cross-checks subscriptions() and
+        # force-cycles unsub+resub when a symbol the manage loop said
+        # was stale never actually registers at IB. Escalates to
+        # `quote_resub_watchdog_events` after 3 failed cycles.
+        try:
+            from services.quote_resub_watchdog import quote_resub_watchdog_loop
+            self._quote_resub_watchdog_task = asyncio.create_task(
+                quote_resub_watchdog_loop(self)
+            )
+        except Exception as e:
+            logger.warning(
+                f"[v19.34.80 quote-resub-watchdog] failed to schedule "
+                f"(non-fatal): {e}"
+            )
 
         # ─── v19.34.49 (2026-05-20) — Continuous Orphan-Reconcile Loop ─
         # Pure IB-only orphans (positions IB has but bot doesn't track)
