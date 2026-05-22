@@ -4,7 +4,103 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.87+ priority queue
+## 🚀 Next session — v19.34.88+ priority queue
+
+**Last shipped**: v19.34.87 (setup_retro.py CLI + loop-offender
+detector — 2026-05-22, surfaced -17.68R lost in 25min from 21 stops
+on 4 symbols due to absent post-stop cooldown).
+**Prior**: v85 (UI honesty), v86 (strategy-mix closed_at), v83/v84.
+
+### 🔴 P0 — v19.34.88: per-symbol post-stop cooldown
+**Loud signal, clear $ value.** The retro tool found that on
+2026-05-14 the bot lost roughly **$15-25k in 25 minutes** because
+nothing stopped it from re-entering ETHU / CHWY / AJG / BALL
+immediately after each stop. 5-6 consecutive stops per symbol at
+~-1.20R each.
+
+The current "Recent-rejection cooldown" (visible in v85's rejection
+analytics) gates on `alert_id`, but each fresh scanner pulse mints
+a new alert_id, so the cooldown is effectively per-pulse, not
+per-symbol.
+
+**Implementation candidates (pick ONE in a fresh session)**:
+1. `services/enhanced_scanner.py` — at alert-creation time, check
+   `recently_stopped(symbol, setup_base)` and suppress.
+2. `services/opportunity_evaluator.py` — when evaluating, drop
+   candidates whose (symbol, setup_base) hit a stop in last 30 min.
+3. `services/position_manager.py` — at pre-trade gate, reject the
+   ticket if the same (symbol, setup_base) was stopped within TTL.
+4. `services/trading_bot_service.py::_compose_rejection_narrative`
+   path — surface as a new rejection category so it shows up in
+   the SIGNAL PASS pill correctly.
+
+**Recommended**: option (2) `opportunity_evaluator` — the right
+boundary for "should this idea be traded at all?" Use a small
+Redis-ish in-memory dict keyed on `(symbol, setup_base)` → stop
+timestamp, TTL 30 min. Add a config flag
+`POST_STOP_COOLDOWN_MINUTES` (default 30) so the operator can dial
+it. Add `services/post_stop_cooldown.py` as the single source of
+truth so future write sites can all consult it.
+
+**Test required**: simulate ETHU stop at T=0, attempt re-entry at
+T=5min → should reject. Re-entry at T=31min → should pass.
+
+**Verification**: re-run `setup_retro.py --days 7` after a few
+trading days. Loop offenders count should drop to ~0 for any
+single-day window.
+
+### 🔴 P0 — v19.34.89: alert_outcomes.trade_grade always None
+Discovered by v87. `pnl_compute.py:135` reads
+`getattr(trade, "trade_grade", None)`, but the trade object at
+close-time isn't carrying the grade. Two options:
+
+1. Stamp `trade.trade_grade` at the SAME write site that creates
+   the bot_trades row from the alert (so the grade rides along
+   the whole way to close).
+2. Look up the grade by `alert_id` from the source alert at write
+   time in `pnl_compute.py`.
+
+Without this, the retro tool's grade-A vs grade-C breakdown stays
+empty → can't answer "is the grader broken vs. is the setup
+broken?"
+
+### 🟡 P1 — v19.34.90: phantom-recovery write cleanup
+41% of alert_outcomes are `*_phantom_recovery` rows. Either:
+- they shouldn't be written (the recovery code path is too eager),
+  OR
+- they should be tagged `setup_type="__phantom_recovery__"` so the
+  analytics tool can filter without a string-match heuristic.
+
+Long-term: v19.34.88's cooldown might naturally reduce phantom
+rates (fewer rapid-fire re-entries → fewer downstream confusion).
+
+### 🟡 P1 — OCA bracket-cancel storm (carried from v85)
+17 of 33 scanner signals on 2026-05-22 were rejected as "Parent leg
+cancelled (bracket OCA)" (52% kill rate). Separate from cooldown
+but probably the same blast-radius family.
+
+Investigation steps:
+1. `bracket_lifecycle_events` last 24h, group cancel_reason by
+   symbol
+2. Cross-check `bot_trades.broker_state`
+3. Decide: server-side re-issue, or IB Gateway TIF tweak
+
+### 🟡 P2 — Carried items
+- AI rejection narrator squeeze/scalp repro (needs live narrator
+  output to grep)
+- ScannerQualityPanel top-reason color-hint polish (skipped in v85)
+- Delete `services/__init__.py.v19_34_84_bak` after clean week
+- Lazy-import audit on `services/ai_modules/finbert_sentiment.py`
+- Delete dead `_fetch_finnhub_quote` references in `stock_data.py`
+
+### 🟢 P3 backlog (unchanged)
+- APScheduler nightly auto-`smart_backfill`
+- Tick-level Stop Run Probability ML module
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics service
+- Chart bubble click → fire focus symbol
+- SEC EDGAR 8-K integration
+- Break up `server.py` monolith
 
 **Last shipped**: v19.34.86 (strategy-mix uses closed_at — 2026-05-22,
 live-verified vwap_fade 35.0% win at -0.16R, squeeze 21.6% at -0.02R).

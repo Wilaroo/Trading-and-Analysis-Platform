@@ -1,3 +1,90 @@
+## 2026-05-22 — v19.34.87: setup_retro.py CLI + loop-offender detector (SHIPPED)
+
+### Trigger
+Built immediately after v86 unmasked Strategy Mix data, to answer the
+operator's "which setups should I keep trading?" question with hard
+numbers. The tool then surfaced a much bigger bug than expected.
+
+### What shipped
+`backend/scripts/setup_retro.py` (297 lines, read-only). Reads
+`alert_outcomes` for last N days and emits:
+
+1. Headline table sorted by total_pnl (worst first) with n, win%,
+   avg_R, med_R, total_pnl, grade-A subset, and a verdict per setup
+   (KEEP_FULL_SIZE / KEEP_TIGHTEN_ENTRY / REDUCE_SIZE /
+   PAUSE_AND_REVIEW / INSUFFICIENT_DATA / NEUTRAL)
+2. Loop-offender section: any (symbol, setup) pair that hit
+   stop_loss >= N times within window_min minutes
+3. Per-setup detail for concerning verdicts: grade × win × avg_r
+   breakdown + worst-5 closes with symbol/R/grade/reason
+
+Flags: `--setup`, `--days`, `--min-n`, `--concerning-only`, `--dedup`
+(default OFF), `--include-phantom` (default OFF), `--env-path`.
+
+### Findings on first run (last 30d, 180 docs total)
+
+**41% contamination**: 74/180 docs have `close_reason` containing
+"phantom" (orphan-recovery artifacts). Filtered out by default;
+restored with `--include-phantom`.
+
+**Loop offender pattern (the real bug — files v19.34.88 as new P0)**:
+
+```
+ETHU  daily_squeeze        5 stops  -6.00R  22min span  on 2026-05-14
+CHWY  accumulation_entry   5 stops  -5.56R  22min span  on 2026-05-14
+AJG   accumulation_entry   6 stops  -3.85R  27min span  on 2026-05-14
+BALL  accumulation_entry   5 stops  -2.27R  22min span  on 2026-05-14
+```
+
+21 consecutive stops in ~25 min for -17.68R = roughly $15-25k of
+losses on a single 25-minute window because the bot re-enters the
+same (symbol, setup) immediately after stopping out. The
+"Recent-rejection cooldown" surfaced in v85 is per-alert-id, not
+per-(symbol, setup_base), so a fresh alert from the scanner bypasses
+it completely.
+
+**Verdict landscape post-cleanup**:
+
+```
+daily_squeeze      n=14   0.0% win  -0.49R  $-13,958.60  PAUSE_AND_REVIEW
+vwap_fade          n=13  30.8% win  -0.03R  $ -6,272.06  NEUTRAL
+accumulation_entry n=39  17.9% win  -0.23R  $+154,834.57 PAUSE_AND_REVIEW (huge winners offsetting bleed)
+squeeze            n=20  20.0% win  +0.02R  $   +146.53  PAUSE_AND_REVIEW
+vwap_continuation  n= 5  80.0% win  +0.24R  $   +569.15  INSUFFICIENT_DATA (best risk-reward)
+reconciled_orphan  n= 3  66.7% win  +0.39R  $    -33.44  INSUFFICIENT_DATA (v82 reconciler IS paying for itself)
+daily_breakout     n= 2   0.0% win  +0.00R  $+36,575.79  INSUFFICIENT_DATA (one monster)
+```
+
+vwap_fade is NOT bleeding (v86's initial -0.16R was BBWI phantom
+drag). Real concern is daily_squeeze (-0.49R avg, 0% win) and the
+re-entry loop pattern on accumulation_entry / daily_squeeze.
+
+**Separate bugs noted for follow-up**:
+- `trade_grade` is `None` on ALL 180 docs → writers aren't stamping
+  the grade. Either pnl_compute.py needs to read trade.trade_grade
+  before close, or grades live in a sibling collection. This is why
+  every grade-A breakdown row shows `n=0`.
+- The 297-line script is committed via heredoc-friendly format
+  (each section pasteable independently). Pattern that worked for
+  this session: 4 sub-blocks of cat >> heredoc, syntax check per
+  step, fix any ANSI/escape mangling with chr(27).
+
+### Deployment
+- `backend/scripts/setup_retro.py` (new file, 297 lines)
+- Commit `6a037eb4` on `origin/main`
+- Linear history: v82 → v83 → v84 → v85 → v86 → v87
+
+### Verification
+- `python3 backend/scripts/setup_retro.py --help` works
+- Live run produced the headline + loop offenders + detail sections
+  with real prod data
+- Output matches operator's mental model (vwap_continuation feels
+  good, daily_squeeze feels bad — tool agrees)
+
+---
+
+
+
 ## 2026-05-22 — v19.34.86: strategy-mix joins alert_outcomes on closed_at (SHIPPED)
 
 ### Trigger
