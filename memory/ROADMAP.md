@@ -4,7 +4,87 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.84+ priority queue
+## 🚀 Next session — v19.34.87+ priority queue
+
+**Last shipped**: v19.34.86 (strategy-mix uses closed_at — 2026-05-22,
+live-verified vwap_fade 35.0% win at -0.16R, squeeze 21.6% at -0.02R).
+**Prior**: v19.34.85 (V5 UI honesty pass: SIGNAL PASS pill + scalp-SMB
+suppression), v19.34.84, v19.34.83, v19.34.82 Phase A/B.
+
+### ✅ SHIPPED — full P2.3 V5 UI cluster
+| ID | Issue | Resolution |
+|---|---|---|
+| P2.3-A | Top Movers "no live data" | Auto-healed by v82; verified by frontend rebuild |
+| P2.3-B | Strategy Mix freq% column | Auto-healed (stale browser bundle); rebuild fixed |
+| P2.3-C | Strategy Mix win%/avg-R dashed | v19.34.86 (`$match` field rename) |
+| P2.3-D | "SCANNER 0%" pill misleading | v19.34.85 (`SIGNAL PASS` relabel) |
+| P2.3-E | Scalp positions show "SMB B" | v19.34.85 (`isScalpPosition` predicate) |
+
+### 🔴 P0 — Look hard at why setups bleed (NEW, surfaced by v86)
+Strategy Mix now tells the truth, and the truth is loud:
+
+- **vwap_fade**: 35.0% win × -0.16R avg (n=20) — marginal LOSER
+- **squeeze**: 21.6% win × -0.02R avg (n=51) — break-even, but win
+  rate that low is a smell. Either the entry filter is too permissive
+  (admits too many marginal setups) or stops are getting tagged
+  pre-thesis.
+
+Action: build a per-setup retro tool. Pull the 20-50 closed
+`bot_trades` per setup_type, compute the joint distribution of
+{entry_signal_strength × R-realized}, and overlay against the alert's
+original `trade_grade`. If `grade=A` setups still lose, the grader is
+wrong; if `grade=B/C` setups are dragging the avg, tighten the gate.
+
+### 🟡 P1 — OCA bracket-cancel storm (NEW, surfaced by v85)
+17 of 33 scanner signals today were rejected as
+**"Parent leg cancelled (bracket OCA)"** — that's a 52% kill rate from a
+broker-side cancellation pattern. The orphan-GTC system already detects
+mismatches at boot (`mismatch=2` for SCHW today), but the live cancel
+storm appears AFTER the bracket is placed. Likely the same family as
+v19.34.66 (bracket-stacking) but a different trigger.
+
+Investigation steps:
+1. `bracket_lifecycle_events` last 24h — filter `cancel_reason`
+   distribution and group by symbol
+2. Cross-check with `bot_trades.broker_state` for the 17 rejected
+   alerts — see if they all share a stop-tagging pattern or all hit
+   the same throttle
+3. Decide: server-side fix (re-issue logic) or IB Gateway-side
+   (TIF / cancel-cascade settings)
+
+### 🟡 P2 — AI rejection narrator squeeze/scalp-only (P2.3-F deferred)
+The original ROADMAP claim: "narrator still believes `squeeze` is
+scalp-only despite intraday promotion." Static analysis turned up no
+single string asserting this; needs a live repro. Next session: ask
+operator to paste an example narrator output for a squeeze rejection
+so we can grep the exact phrase.
+
+### 🟡 P2 — V87: top-reason color-hint patch
+Land the ScannerQualityPanel category-color sidecar that the v85
+patch script skipped (DGX's exact formatter differs from /app). Pure
+polish, no behavior change.
+
+### 🟡 P2 — v19.34.85 follow-ups (carried)
+- Delete `services/__init__.py.v19_34_84_bak` after a clean trading
+  week.
+- Lazy-import audit on `services/ai_modules/finbert_sentiment.py`.
+- Delete dead `_fetch_finnhub_quote` references in `stock_data.py`.
+
+### 🟡 P3 — backend hot-reload for dev
+Production-style run (`nohup .venv/python server.py`) requires a full
+restart for every backend change. During RTH that means a 30-60s
+window of UI freeze. Consider running under `uvicorn --reload` with
+`--reload-dir backend/routers` only (avoid scanner.py / position_manager.py
+reloads which would tear down live IB connections).
+
+### 🟢 P3 backlog (unchanged)
+- APScheduler nightly auto-`smart_backfill`
+- Tick-level Stop Run Probability ML module
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics service
+- Chart bubble click → fire focus symbol
+- SEC EDGAR 8-K integration
+- Break up `server.py` monolith
 
 **Last shipped**: v19.34.84 (quote_resub_watchdog v82 test suite + lazy
 services/__init__.py — 2026-05-22, 8/8 pytest green).

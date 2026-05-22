@@ -1,3 +1,151 @@
+## 2026-05-22 — v19.34.86: strategy-mix joins alert_outcomes on closed_at (SHIPPED)
+
+### Trigger
+P2.3-C from the V5 UI cluster: Strategy Mix card's `win %` and `avg R/30d`
+columns rendered as dash (`—`) for EVERY setup_type, even for buckets
+where `count > 0`. Operator's lived experience: "the freq column works,
+the outcomes column never has anything."
+
+### Root cause
+`backend/routers/scanner.py:459` `$match` clause filtered `alert_outcomes`
+by a non-existent field:
+
+```python
+{"$match": {"timestamp": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}}
+```
+
+But the two writers BOTH stamp `closed_at`, never `timestamp`:
+
+- `services/enhanced_scanner.py:1820` (workflow review path) →
+  `created_at` + `closed_at`
+- `services/pnl_compute.py:143` (`_record_alert_outcome_bestEffort`, the
+  modern v19.34.130 unified close path) → `closed_at` only
+
+Result: 180/180 alert_outcomes docs failed the `timestamp` predicate.
+Aggregate returned an empty list. Reader had real data, query had wrong
+field name, columns silently dashed.
+
+### Fix
+One-line change in `routers/scanner.py`:
+
+```diff
+-    {"$match": {"timestamp": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
++    {"$match": {"closed_at": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
+```
+
+Plus a v19.34.86 sentinel comment explaining the field-name asymmetry
+so the next pair of eyes doesn't repeat the mistake.
+
+### Verification
+Live `/api/scanner/strategy-mix?n=100` post-restart (sha b7dd149f):
+
+```
+vwap_fade          22%   n=22   win=35.0%   avg_r=-0.16   outcomes=20
+squeeze            20%   n=20   win=21.6%   avg_r=-0.02   outcomes=51
+mean_reversion     13%   n=13   win= 0.0%   avg_r= -0.0   outcomes= 4
+vwap_continuation   5%   n= 5   win=66.7%   avg_r= 0.19   outcomes= 6
+gap_fade            2%   n= 2   win=33.3%   avg_r=-0.08   outcomes= 3
+```
+
+Buckets with no historical closes (off_sides, second_chance,
+fashionably_late) correctly stay `None` and render as dash.
+
+### Notable signal surfaced
+The two highest-frequency setups today have NEGATIVE 30d avg-R:
+
+- **vwap_fade**: 35.0% win × -0.16R (n=20) → marginally unprofitable
+- **squeeze**: 21.6% win × -0.02R (n=51) → roughly break-even but
+  the win rate is unusually low; either the entry filter is too loose
+  or the stop placement is biased
+
+Queued as P2 follow-up: per-setup retro analysis to decide whether to
+tighten entry gates or pause the setup family.
+
+### Deployment
+- `backend/routers/scanner.py`: one-line `$match` field change
+- Required backend restart (FastAPI not configured for hot-reload in
+  this prod-style run — `nohup .venv/python server.py` style)
+- Commit `b7dd149f` on `origin/main`. Backend SHA confirmed live.
+
+---
+
+
+## 2026-05-22 — v19.34.85: V5 UI honesty pass (SHIPPED)
+
+### Trigger
+P2.3-D + P2.3-E from the V5 UI cluster. Two operator misreads:
+
+1. **"SCANNER 0%" pill**: read as "scanner is broken / 0% healthy"
+   when the metric is actually *signal pass-through rate*
+   (accepted_bot_trades / scanner_signals). Today's smoking gun:
+   33 scanner signals, 0 accepted, but the dominant rejector was
+   **17 × "Parent leg cancelled (bracket OCA)"** — a BROKER
+   category event, not a scanner-quality problem. Pill made the
+   operator look in the wrong direction.
+
+2. **Scalp positions carrying "SMB X" grade chips**: SMB rubric is
+   calibrated for 1-6h intraday-swing holds; a clean +0.4R scalp
+   could score "SMB B" with zero of the intraday traits the grade
+   measures. False signal pollution.
+
+### What shipped
+
+**`ScannerQualityPanel.jsx` (3 of 4 fix sites landed via patch script)**
+
+- Pill main label: `SCANNER {pct}%` → `SIGNAL PASS {pct}%`
+- Loading state: `SCANNER …` → `SIGNAL PASS …`
+- Error state: `SCANNER ?` → `SIGNAL PASS ?`
+- (Skipped: the top-reason category-color sidecar on DGX has a
+  slightly different formatter than /app's; the relabel is the
+  important behavior, the color polish is queued for v87.)
+
+**`OpenPositionsV5.jsx` (both sites landed)**
+
+Added `SCALP_SETUPS` const + `isScalpPosition()` predicate.
+Detection priority:
+
+1. `pos.timeframe === 'scalp'` (cleanest signal once v19.34.62
+   lands the backend stamp)
+2. `pos.trade_style === 'scalp'` (same — set by tqs_engine)
+3. `pos.setup_type` ∈ `{gap_fade(_long/_short), fashionably_late(_long/
+   _short), second_chance(_long/_short), backside(_long/_short),
+   vwap_fade_short, vwap_fade_scalp}`
+
+Applied to two render sites:
+
+- `modelTrailLine()` — model-trail sub-line in the row header
+- Group-member SMB chip — detail row inside grouped positions
+
+### Adjacent P2.3 items resolved by frontend rebuild (no code change)
+
+**P2.3-A "Top Movers shows no live data"** — auto-healed by v82 quote
+pipeline restoration. Verified: `/api/live/briefing-top-movers` returns
+12/12 success snapshots with prices + bar counts. After
+`yarn build` + Ctrl+Shift+R the panel populated with
+`ARKK +1.31% · WBD -1.09% · MRVL -0.25% · COR -0.19% · CF +...`.
+
+**P2.3-B "Strategy Mix freq% column missing"** — same fix path: the
+freq%/count columns were already correct in the backend, the stale
+browser bundle was masking them. Populated post-refresh:
+`vwap_fade 38% (38) · mean_reversion 37% (37) · off_sides 25% (25)`.
+The remaining win%/avg-R columns were tracked separately as P2.3-C
+and resolved by v19.34.86.
+
+### Deployment
+- Patch script `/tmp/v19_34_85_ui_honesty.py` (idempotent, ~150 lines,
+  pasted to DGX via single-quoted heredoc — same pattern that worked
+  for v82 watchdog tests).
+- `yarn build` 12.77s, no errors.
+- Commit `68247579` on `origin/main`.
+
+### Future polish queued for v87
+- DGX patch the top-reason category-color hint that didn't match the
+  /app anchor verbatim. Cosmetic only — the primary relabel is live.
+
+---
+
+
+
 ## 2026-05-22 — v19.34.84: quote_resub_watchdog v82 test suite + lazy services/__init__.py (SHIPPED)
 
 ### Trigger
