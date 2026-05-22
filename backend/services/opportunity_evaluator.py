@@ -107,6 +107,59 @@ class OpportunityEvaluator:
                     _ttl_err,
                 )
 
+            # ── v19.34.88 — Per-(symbol, setup_base) post-stop cooldown ──
+            # If this (symbol, setup_base) hit a stop_loss in the last
+            # POST_STOP_COOLDOWN_MINUTES (default 30), refuse the new
+            # entry. Setup-type normalisation drops _long/_short suffix
+            # so the cooldown traps re-entries in either direction.
+            #
+            # Surfaced via record_rejection so the SIGNAL PASS pill
+            # and rejection-analytics dashboard show the count.
+            #
+            # Origin: v19.34.87 setup_retro found 21 stops in 25min
+            # across ETHU/CHWY/AJG/BALL on 2026-05-14 for -17.68R.
+            # Fail-OPEN on any exception so a bug here can't lock the
+            # bot out of trading.
+            try:
+                from services.post_stop_cooldown import get_registry
+                _remaining = get_registry().seconds_remaining(symbol, setup_type)
+                if _remaining is not None and _remaining > 0:
+                    logger.warning(
+                        "🧊 [v19.34.88 post-stop-cooldown] Refusing %s %s — "
+                        "stopped in last %.0fs (cooldown %.0fs remaining).",
+                        symbol, setup_type,
+                        (1800.0 - _remaining), _remaining,
+                    )
+                    try:
+                        bot.record_rejection(
+                            symbol=symbol, setup_type=setup_type,
+                            direction=direction_str,
+                            reason_code="post_stop_cooldown",
+                            context={
+                                "cooldown_remaining_seconds": round(_remaining, 1),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(bot, "_db", None),
+                            gate="post_stop_cooldown",
+                            symbol=symbol, setup_type=setup_type,
+                            direction=direction_str,
+                            reason=f"post_stop_cooldown: {_remaining:.0f}s remaining",
+                            context={"cooldown_remaining_seconds": round(_remaining, 1)},
+                        )
+                    except Exception:
+                        pass
+                    return None
+            except Exception as _psc_err:
+                logger.debug(
+                    "[v19.34.88 post-stop-cooldown] gate crashed (fail-open): %s",
+                    _psc_err,
+                )
+
             # ── v19.34.123 — Per-(symbol, direction) open-exposure cap ────
             # Setup-type-AGNOSTIC. The Feb 2026 incident showed the bot
             # firing 28 separate RJF SHORT entries in 76 minutes because
