@@ -1,13 +1,26 @@
 /**
  * ScannerQualityPanel — v19.34.41 (Feb 2026)
  *
- * Compact V5 panel showing today's Scanner Quality Score plus the
+ * v19.34.85 — Label honesty pass. Pre-fix the pill read "SCANNER X%"
+ * which operators reasonably misread as "the scanner is broken / X%
+ * healthy" whenever the score dropped. The metric is actually
+ * "signal pass-through rate" — what fraction of scanner-generated
+ * signals survived ALL downstream gates and became working/filled
+ * bot_trades. A score of 0% can mean the scanner is firing 100
+ * great signals all being killed by an OCA-cancel storm downstream
+ * (today's case: 17/33 = 52% rejected as "Parent leg cancelled
+ * (bracket OCA)" — that's a BROKER bug, not a scanner bug).
+ *
+ * Renamed pill to "SIGNAL PASS X%" + promoted the top rejection
+ * reason inline so the operator sees WHY signals are being lost.
+ *
+ * Compact V5 panel showing today's signal pass-through rate plus the
  * top rejection reasons. Sits next to PortfolioHealthPill / health
  * chips in the V5 status-strip row.
  *
  * Data source: GET /api/system/rejection-analytics
  *
- * The "Scanner Quality Score" is the fraction of scanner-generated
+ * The "Signal Pass" score is the fraction of scanner-generated
  * signals that survived to a working/filled bot_trade, with the
  * denominator restricted to signals lost to SCANNER-attributable
  * causes (stale alerts, live-price gate, cooldowns, TTL). Broker- and
@@ -114,7 +127,7 @@ export const ScannerQualityPanel = () => {
         title={`Scanner-quality fetch failed: ${error}`}
       >
         <Gauge className="w-3 h-3" />
-        <span>SCANNER ?</span>
+        <span>SIGNAL PASS ?</span>
       </div>
     );
   }
@@ -126,7 +139,7 @@ export const ScannerQualityPanel = () => {
         className="flex items-center gap-2 px-3 py-1 bg-zinc-950/60 text-[14px] leading-none whitespace-nowrap border border-zinc-700/50 text-zinc-500"
       >
         <Gauge className="w-3 h-3 animate-pulse" />
-        <span>SCANNER …</span>
+        <span>SIGNAL PASS …</span>
       </div>
     );
   }
@@ -149,14 +162,17 @@ export const ScannerQualityPanel = () => {
           data-testid="scanner-quality-panel-label"
           className="font-semibold uppercase tracking-wide"
         >
-          SCANNER {formatPct(scorePct)}
+          SIGNAL PASS {formatPct(scorePct)}
         </span>
         <span className="text-zinc-400 v5-mono">
           {totals.accepted}/{totals.scanner_signals}
         </span>
         {topReasons.length > 0 && (
-          <span className="text-zinc-500 truncate max-w-[180px]" data-testid="scanner-quality-panel-toplabel">
-            · top: {topReasons[0].label} ({topReasons[0].count})
+          <span
+            className={`truncate max-w-[220px] ${CATEGORY_COLOR[topReasons[0].category] || 'text-zinc-500'}`}
+            data-testid="scanner-quality-panel-toplabel"
+          >
+            · {CATEGORY_LABEL[topReasons[0].category] || 'top'}: {topReasons[0].label} ({topReasons[0].count})
           </span>
         )}
       </button>

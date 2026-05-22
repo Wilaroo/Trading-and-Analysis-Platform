@@ -170,6 +170,36 @@ const tierLabel = (pos) => {
   return `${style} ${dirText}`;
 };
 
+// v19.34.85 — Scalp positions should never carry an "SMB" grade chip.
+// SMB grading rubric (size·setup·conviction) is calibrated for
+// intraday-swing horizons (1-6h holds); applying it to a 5-30 minute
+// scalp produces garbage signal (a clean scalp at +0.4R can score
+// "SMB B" even though the trade had zero of the intraday traits the
+// grade measures). Suppress the chip when the position is a scalp.
+//
+// Detection priority (cheap → expensive):
+//   1) explicit `timeframe === 'scalp'` (cleanest signal once
+//      v19.34.62 lands the backend stamp)
+//   2) `trade_style === 'scalp'` (same — set by tqs_engine)
+//   3) `setup_type` ∈ SCALP_SETUPS (covers today's positions where
+//      trade_style still stamps generic 'trade_2_hold')
+const SCALP_SETUPS = new Set([
+  'gap_fade', 'gap_fade_long', 'gap_fade_short',
+  'fashionably_late', 'fashionably_late_long', 'fashionably_late_short',
+  'second_chance', 'second_chance_long', 'second_chance_short',
+  'backside', 'backside_long', 'backside_short',
+  'vwap_fade_short', 'vwap_fade_scalp',
+]);
+const isScalpPosition = (pos) => {
+  if (!pos) return false;
+  const tf = String(pos.timeframe || '').toLowerCase();
+  if (tf === 'scalp') return true;
+  const ts = String(pos.trade_style || '').toLowerCase();
+  if (ts === 'scalp') return true;
+  const su = String(pos.setup_type || pos.setup_variant || '').toLowerCase();
+  return SCALP_SETUPS.has(su);
+};
+
 // Synthesize a "model trail / why" sub-line from whatever the bot wrote
 // onto the trade. Mirrors the mockup line:
 //   "TFT trails SL → $166.40 · PT $172 · CNN-LSTM 72% bull"
@@ -195,7 +225,8 @@ const modelTrailLine = (pos) => {
   if (reasoning.length > 0) {
     const first = String(reasoning[0]).slice(0, 60);
     parts.push(first);
-  } else if (pos.smb_grade) {
+  } else if (pos.smb_grade && !isScalpPosition(pos)) {
+    // v19.34.85 — scalps suppress the SMB chip (rubric mismatch).
     parts.push(`SMB ${pos.smb_grade}`);
   }
   return parts.join(' · ');
@@ -733,7 +764,7 @@ const GroupMemberRow = ({ member, idx }) => {
           <span>{Math.round(Math.abs(Number(member.shares ?? 0)))}sh</span>
           <span className="text-zinc-500">@</span>
           <span>${formatPx(member.entry_price)}</span>
-          {member.smb_grade && (
+          {member.smb_grade && !isScalpPosition(member) && (
             <span className="px-1 py-0 bg-zinc-800 text-zinc-400 text-[12px] uppercase rounded">
               SMB {member.smb_grade}
             </span>
