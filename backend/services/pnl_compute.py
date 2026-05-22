@@ -132,7 +132,11 @@ def _record_alert_outcome_bestEffort(
         "pnl": realized,
         "net_pnl": pnl.get("net_pnl", 0.0),
         "r_multiple": r_multiple,
-        "trade_grade": getattr(trade, "trade_grade", None),
+        # v19.34.89 — fall back to smb_grade (canonical SMB grade lives there)
+        "trade_grade": (
+            getattr(trade, "trade_grade", None)
+            or getattr(trade, "smb_grade", None)
+        ),
         "entry_price": getattr(trade, "fill_price", None),
         "exit_price": exit_price,
         "exit_price_source": exit_source,
