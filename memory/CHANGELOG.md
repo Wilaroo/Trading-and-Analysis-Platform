@@ -1,3 +1,68 @@
+## 2026-02-?? — v19.34.89.1: forensics + clean retro analyzers (SHIPPED — DGX `911496c8`)
+
+### Trigger
+After v89's `setup_retro` showed alarming buckets (`squeeze × A` =
+0/7 wins, `daily_squeeze × B` = 0/14 wins, -$13,958), instinct said
+"blocklist these". Operator instead asked: investigate trade
+parameters before suppressing. That call exposed a far bigger bug.
+
+### What shipped
+- **`backend/scripts/bucket_forensics_v89.py`** — dumps every trade
+  in the bleeding buckets with R:R ratio, slippage %, hold duration,
+  hour-of-day, close-reason distribution, loop offenders, full
+  per-trade table
+- **`backend/scripts/setup_retro_v90_1.py`** — re-buckets
+  `alert_outcomes` excluding state-management close reasons
+  (consolidated_*, shrunk_to_zero_*, oca_closed_externally_*,
+  wrong_direction_phantom_*, external_close_*, operator_external_*,
+  manual_state_reset_*, manual_flatten_*, emergency_flatten_*).
+  Real outcomes only: stop_loss, target_hit, partial_target,
+  eod_*close, trailing_stop.
+
+### Findings (this is where the story changes)
+1. **69% of 180 historical "outcomes" were bot-state noise**, not
+   real strategy outcomes. The bot was bookkeeping ghost
+   positions that never traded for real.
+2. The v89 "0/7 losing squeeze × A" finding was 100% FAKE — all
+   162 of those trades closed via state-management reasons, NEVER
+   reached a stop or target.
+3. After cleaning, the ONLY real losing bucket of size is
+   `accumulation_entry × B`: 23 trades, 13% win, **-10.70R total
+   (~$500/mo)**. Modest, not catastrophic. Defer blocklist.
+4. **65% of REAL broker-routed trades never had a TP order placed
+   at IB.** Of 1,247 real broker trades, only 442 (35.4%) had
+   `target_order_id` ever populated. The bot stamps
+   `target_prices=[X]` in the DB but the take-profit leg of the
+   OCA bracket fails to attach.
+5. Specific close-reason breakdown is conclusive:
+   - `stop_loss`: 126 closes — **only 1 had a TP order** (stop
+     fired alone on broken brackets)
+   - `consolidated_*`, `external_close_*`, `shrunk_to_zero_*`,
+     `orphaned_*`, `phantom_auto_swept_*`, `zombie_*`,
+     `manual_state_reset_*`, `eod_close`: **100% no-order** —
+     pure bot-state ghosts
+   - `target_hit`: 11 closes, **ZERO with a TP order placed** —
+     bot is inferring target hits from quotes without any
+     broker order present (likely false positives)
+6. **Code locus traced**: `BOT_ORDER_PATH=direct` →
+   `trade_executor_service._ib_bracket` →
+   `ib_direct_service.place_bracket_order` →
+   `_place_bracket_two_step` → `place_oca_stop_target`. The OCA
+   attach step is where the TP leg is being silently dropped.
+7. **Recent days show partial recovery** (May 13–22: 17.6% →
+   44.6% TP placement). v19.34.37/38/39 patches helped, didn't
+   fully close. Today's log clean of `"OCA attach failed"` and
+   `"filled_naked_brackets_missing"` strings.
+
+### v19.34.90 next session
+Read `place_oca_stop_target` end-to-end. Find silent failure point
+in TP `LimitOrder` placement (swallowed exception, race with
+parent fill, or min-tick/price-band rejection). Add structured
+logging, patch the bug, add `tp_placement_rate_24h` telemetry.
+
+---
+
+
 ## 2026-02-?? — v19.34.89: alert_outcomes.trade_grade fallback to smb_grade (SHIPPED)
 
 ### Trigger

@@ -6,26 +6,63 @@ Open priorities, deferred ideas, and backlog. Move items to
 ---
 ## 🚀 Next session — v19.34.90+ priority queue
 
-**Last shipped**: v19.34.89 (alert_outcomes.trade_grade fallback +
-backfill — 17 tests passing; 180/180 rows backfilled on DGX;
-grader-vs-setup analysis now unlocked).
-**Prior**: v88 (post-stop cooldown), v87 (setup_retro CLI),
-v86 (strategy-mix closed_at), v85 (UI honesty).
+**Last shipped**: v19.34.89.1 (forensics + clean retro analyzers —
+committed `911496c8`). Plus v89 (alert_outcomes.trade_grade fallback +
+180-row backfill) and v88 (post-stop cooldown).
 
-### 🚨 LIVE FINDING from v89 retro (must triage in next session)
-Post-backfill `setup_retro.py` exposes 2 catastrophically losing
-grade buckets:
-- `squeeze` × Grade-**A**: 7 trades, **0% win**, -0.02R
-- `daily_squeeze` × Grade-**B**: 14 trades, **0% win**, -0.49R,
-  -$13,958 net
-- `accumulation_entry` × Grade-**B**: 39 trades, only 17.9% win,
-  but +$154k net (fat-tail driven)
-Action: in v90 or its follow-up, either (a) suppress these two
-(setup × grade) combos in the scanner, or (b) re-train the grader.
+### 🚨 MASSIVE STRUCTURAL FINDING from v89.1 forensics (top priority)
+The "0/7 losing squeeze×A" finding from v89 retro was a MEASUREMENT
+ARTEFACT, not a strategy problem. Forensics revealed:
 
-### 🔴 P0 — v19.34.89: alert_outcomes.trade_grade always None ✅ DONE
-Shipped 2026-02. Writer falls back to `smb_grade`; backfill copied
-180/180 historical rows; tests guard the regression.
+- **69% of "trade outcomes" are pure bot-state noise** (consolidated,
+  shrunk_to_zero, oca_closed_externally, phantom_swept, orphan
+  cleanup, zombie cleanup, manual_state_reset, etc.). They were never
+  real outcomes — the bot was bookkeeping ghost positions.
+- After excluding noise via `setup_retro_v90_1.py`, the ONLY real
+  losing bucket of size is `accumulation_entry × B` (23 trades, 13%
+  win, -10.70R total = ~$500/mo). NOT the squeeze×A panic from v89.
+- **Root cause: 65% of real broker trades never had a take-profit
+  order placed at IB.** The bot stamps `target_prices=[X]` in the
+  DB but the second leg of the bracket fails to attach. Confirmed:
+  - 1,247 real broker trades
+  - Only 442 (35.4%) ever had `target_order_id` populated (sticky
+    metric); only 261 (21%) have the list still populated post-close
+- **Code locus traced**: `BOT_ORDER_PATH=direct` (set in DGX .env)
+  → `trade_executor_service._ib_bracket` → `ib_direct_service.
+  place_bracket_order` → `_place_bracket_two_step` →
+  `place_oca_stop_target`. The OCA attach step is where the TP leg
+  is being dropped.
+- **Today's log is clean** (zero `"OCA attach failed"` or
+  `"filled_naked_brackets_missing"` in last 24h). Suggests v37/v38/
+  v39 patches helped but didn't fully close the gap (recent days
+  show partial fix: 17.6% → 33.8% → 44.6% TP placement rate).
+
+### 🔴 v19.34.90 P0 — Fix `place_oca_stop_target` TP-leg attach
+**File**: `backend/services/ib_direct_service.py`
+**Function**: `place_oca_stop_target` (around line 1774, per grep)
+**Steps for next session**:
+1. Read full function body end-to-end
+2. Identify the silent failure point — likely either:
+   - Swallowed exception in target `LimitOrder` placement
+   - Race with parent fill (target submitted before parent fully
+     settles in IB's bracketing state)
+   - Min-tick or price-band rejection that returns silently
+3. Add structured logging so EVERY OCA attach attempt logs its
+   outcome with reason code
+4. Patch the root cause
+5. Add `bracket_completion_telemetry`: 60s job that computes
+   tp_placement_rate_24h, alerts if it drops below 80%
+6. Re-run `bucket_forensics_v89.py` post-fix to confirm
+   `target_hit` close reasons start firing again
+
+### 🟡 v19.34.91 (after v90) — accumulation_entry × B blocklist
+Once v90 unfucks the measurement layer, IF accumulation_entry × B is
+STILL losing on real outcomes, suppress via `opportunity_evaluator`
+gate. Don't blocklist before v90 — the data is currently lying.
+
+### 🔴 v19.34.89: alert_outcomes.trade_grade always None ✅ DONE
+Shipped. Writer falls back to `smb_grade`; backfill copied 180/180
+historical rows; tests guard the regression.
 
 ### 🟢 NEXT TRADING SESSION — verify v88 in production
 Three things to check ~30 min after market open:
