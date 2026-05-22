@@ -154,6 +154,25 @@ def _record_alert_outcome_bestEffort(
     except Exception as e:
         logger.debug("[pnl_compute] alert_outcomes upsert failed: %s", e)
 
+    # v19.34.88 — Post-stop cooldown stamp. On any close whose reason
+    # starts with "stop" (stop_loss, stop_loss_phantom_recovery,
+    # stop_loss_trailing, etc.), record the (symbol, setup_base) pair
+    # into the in-memory cooldown registry so opportunity_evaluator
+    # can refuse same-symbol+setup re-entries for the next
+    # POST_STOP_COOLDOWN_MINUTES window.
+    try:
+        if str(reason or "").lower().startswith("stop"):
+            from services.post_stop_cooldown import get_registry
+            get_registry().record_stop(
+                symbol=getattr(trade, "symbol", None),
+                setup_type=getattr(trade, "setup_type", None),
+            )
+    except Exception as _cd_err:
+        logger.debug(
+            "[v19.34.88 post-stop-cooldown] stamp failed (non-fatal): %s",
+            _cd_err,
+        )
+
 
 def compute_close_pnl(
     *,

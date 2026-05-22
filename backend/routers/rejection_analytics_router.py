@@ -33,6 +33,7 @@ REASON_MAP: Dict[str, Dict[str, str]] = {
     "live_price_gate":    {"label": "Live-price gate (>2.5% from alert)",   "category": CAT_SCANNER_QUALITY},
     "cooldown":           {"label": "Recent-rejection cooldown",            "category": CAT_SCANNER_QUALITY},
     "rejection_cooldown": {"label": "Recent-rejection cooldown",            "category": CAT_SCANNER_QUALITY},
+    "post_stop_cooldown": {"label": "Post-stop cooldown (same symbol+setup)", "category": CAT_POLICY},
     "ttl_expired":        {"label": "Setup TTL expired",                    "category": CAT_SCANNER_QUALITY},
     "broker_rejected":    {"label": "Broker rejected (uncategorised)",      "category": CAT_BROKER},
     "execution_exception": {"label": "Execution exception",                 "category": CAT_BROKER},
