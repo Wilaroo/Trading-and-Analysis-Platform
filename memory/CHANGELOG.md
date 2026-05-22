@@ -1,3 +1,58 @@
+## 2026-02-?? — v19.34.89: alert_outcomes.trade_grade fallback to smb_grade (SHIPPED)
+
+### Trigger
+After v87/v88 shipped, `backend/scripts/setup_retro.py` showed an
+EMPTY Grade A vs Grade C breakdown. DB diagnostic on DGX confirmed:
+
+- `bot_trades.smb_grade = "B"` (populated by setup_grader at signal time)
+- `bot_trades.trade_grade = None`
+- `alert_outcomes.trade_grade = None` across ~180 historical docs
+
+Root cause: `pnl_compute._record_alert_outcome_bestEffort` was
+reading ONLY `getattr(trade, "trade_grade", None)`. Nothing in the
+codebase copies `smb_grade → trade_grade` before close, so the
+writer always wrote None and broke the A/B/C analytics.
+
+### What shipped
+
+**Writer fix — `services/pnl_compute.py`** (~6 line diff):
+```python
+"trade_grade": (
+    getattr(trade, "trade_grade", None)
+    or getattr(trade, "smb_grade", None)
+),
+```
+`trade_grade` still wins when explicitly set (override path); falls
+through to `smb_grade` whenever it's missing / None / "".
+
+**Backfill script — `backend/scripts/backfill_alert_outcomes_trade_grade_v19_34_89.py`**:
+- Scans `alert_outcomes` for `trade_grade in (None, "", missing)`
+- Joins to `bot_trades` on `trade_id` (falls back to `alert_id`)
+- Copies `smb_grade → trade_grade`, stamps `backfilled_by = "backfill_v19_34_89"`
+  for idempotency
+- Dry-run by default; `--apply` to actually write
+- Prints scan summary + grade distribution before/after
+
+**Tests — `backend/tests/test_alert_outcomes_trade_grade_fallback_v19_34_89.py`**:
+4 cases, all GREEN locally:
+- `test_smb_grade_used_when_trade_grade_absent`
+- `test_trade_grade_preferred_over_smb_grade`
+- `test_none_when_neither_attribute_set`
+- `test_trade_grade_none_falls_through_to_smb_grade`
+
+### Regression bar
+Existing `test_pnl_compute_coverage_v19_34_123.py` still 13/13 GREEN.
+
+### Operator action required on DGX
+1. Pull the patch / backfill / test files.
+2. Run dry-run backfill, inspect grade distribution.
+3. Run with `--apply` to update ~180 historical rows.
+4. Re-run `python3 backend/scripts/setup_retro.py` — Grade A/B/C
+   buckets now populate with win% / avg-R per bucket.
+
+---
+
+
 ## 2026-05-22 — v19.34.88: per-(symbol, setup_base) post-stop cooldown (SHIPPED + LIVE)
 
 ### Trigger

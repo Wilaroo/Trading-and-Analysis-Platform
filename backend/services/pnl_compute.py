@@ -132,7 +132,16 @@ def _record_alert_outcome_bestEffort(
         "pnl": realized,
         "net_pnl": pnl.get("net_pnl", 0.0),
         "r_multiple": r_multiple,
-        "trade_grade": getattr(trade, "trade_grade", None),
+        # v19.34.89 — trade_grade fallback chain.
+        # Historical bug: writer read ONLY `trade.trade_grade`, but the
+        # canonical SMB grade (set by setup_grader at signal time) lives
+        # on `trade.smb_grade`. Result: ~180 `alert_outcomes` docs had
+        # `trade_grade=None`, breaking `setup_retro.py`'s A/B/C bucket
+        # analysis. Fall back to `smb_grade` when `trade_grade` is unset.
+        "trade_grade": (
+            getattr(trade, "trade_grade", None)
+            or getattr(trade, "smb_grade", None)
+        ),
         "entry_price": getattr(trade, "fill_price", None),
         "exit_price": exit_price,
         "exit_price_source": exit_source,
