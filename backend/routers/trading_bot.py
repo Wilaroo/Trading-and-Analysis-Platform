@@ -7170,10 +7170,272 @@ async def bracket_stacking_audit():
         "clean_symbols": clean_symbols,
         "note": (
             "Read-only diagnostic. To cancel excess legs, use the TWS UI "
-            "or wait for v19.34.78 auto-cancel endpoint (pending audit "
-            "verification)."
+            "or POST /api/trading-bot/bracket-stacking-cancel (v19.34.79+)."
         ),
     }
+
+
+# ── v19.34.79 (2026-05-22) — Bracket-stacking auto-cancel ─────────────
+#
+# The action counterpart to `GET /bracket-stacking-audit`. Walks each
+# symbol the audit flags, picks the most recent complete OCA pair
+# matching position size as the "keep" set, cancels all other stop /
+# target legs via `ib_direct_service.cancel_order()`.
+#
+# Why this exists: GM/LIN-style incidents where IB had N×K target legs
+# for N shares — if one filled, the others remained working and flipped
+# the position direction. The audit (v19.34.77) flagged them; this
+# endpoint is what actually heals them.
+#
+# Safety contract (see AGENTS.md §0 rule #1 — bracket cancellation is a
+# safety-critical path):
+#   - Defaults to dry_run=True so first call returns a plan, not actions
+#   - Refuses to cancel any leg that would leave a position naked
+#   - Skips symbols where bot tracks 0 shares (no protection needed)
+#   - 200ms sleep between cancellations to avoid IB pacing burst
+#   - Each cancel goes through ib_direct_service.cancel_order (the same
+#     canonical path used by `_cancel_ib_bracket_orders`)
+class BracketStackingCancelRequest(BaseModel):
+    dry_run: bool = True
+    symbols: Optional[List[str]] = None  # if set, restrict to these symbols
+
+
+@router.post("/bracket-stacking-cancel")
+async def bracket_stacking_cancel(payload: BracketStackingCancelRequest):
+    """v19.34.79 — Auto-cancel excess bracket legs flagged by the
+    bracket-stacking-audit. Picks the most recent complete OCA pair as
+    the "keep" set, cancels everything else.
+
+    Request body:
+      {
+        "dry_run": true,                          # default true
+        "symbols": ["GM", "LIN"]                  # optional filter
+      }
+
+    Response shape:
+      {
+        "success": true,
+        "dry_run": true,
+        "as_of": "<iso>",
+        "symbols_processed": [
+          {
+            "symbol": "GM",
+            "kept_oca_group": "ADOPT-OCA-GM-abc123",
+            "kept_legs": [{"order_id": 451, "qty": 80, "kind": "stop"}, ...],
+            "cancelled_legs": [{"order_id": 449, "qty": 40, "kind": "stop", "status": "cancel_ok"}, ...],
+            "refused_reason": null,               # or "would_leave_naked" / "pos_qty_zero"
+          },
+          ...
+        ],
+        "totals": {"cancelled": 3, "kept": 2, "refused_symbols": 0},
+      }
+    """
+    if _trading_bot is None:
+        raise HTTPException(503, "trading bot service not initialized")
+
+    # Reuse the audit endpoint's output as the source of truth for
+    # what's excess. Single source of truth = no drift between what the
+    # operator sees in the audit UI and what gets cancelled.
+    audit = await bracket_stacking_audit()
+    audit_symbols = audit.get("symbols") or []
+
+    # Optional symbol filter (operator can scope manual calls to a
+    # single problem symbol, e.g. "just fix GM").
+    if payload.symbols:
+        wanted = {s.upper().strip() for s in payload.symbols}
+        audit_symbols = [s for s in audit_symbols if s["symbol"] in wanted]
+
+    # IB direct service for the actual cancel calls.
+    from services.ib_direct_service import get_ib_direct_service
+    ib_direct = get_ib_direct_service() if not payload.dry_run else None
+
+    symbols_out: List[Dict[str, Any]] = []
+    total_cancelled = 0
+    total_kept = 0
+    total_refused = 0
+
+    for row in audit_symbols:
+        sym = row["symbol"]
+        pos_qty = abs(int(row.get("bot_position_qty") or 0))
+        stop_legs = list(row.get("stop_legs") or [])
+        target_legs = list(row.get("target_legs") or [])
+
+        # Skip if bot tracks no shares — no protection needed.
+        if pos_qty == 0:
+            symbols_out.append({
+                "symbol": sym,
+                "kept_oca_group": None,
+                "kept_legs": [],
+                "cancelled_legs": [],
+                "refused_reason": "pos_qty_zero",
+            })
+            total_refused += 1
+            continue
+
+        excess_stop = int(row.get("excess_stop_qty") or 0)
+        excess_tgt = int(row.get("excess_target_qty") or 0)
+        if excess_stop == 0 and excess_tgt == 0:
+            # Clean symbol shouldn't be in the audit output, but defend.
+            continue
+
+        # ── Pick the keep-set ───────────────────────────────────────
+        # Group legs by oca_group. A "complete pair" = an oca_group with
+        # BOTH a stop and a target leg, each ≈ pos_qty. Pick the most
+        # recent (highest order_id) complete pair as canonical.
+        oca_pairs: Dict[str, Dict[str, Any]] = {}
+        for leg in stop_legs:
+            g = leg.get("oca_group") or f"_no_oca_stop_{leg.get('order_id')}"
+            oca_pairs.setdefault(g, {"stop": None, "target": None, "max_oid": 0})
+            oca_pairs[g]["stop"] = leg
+            try:
+                oca_pairs[g]["max_oid"] = max(oca_pairs[g]["max_oid"], int(leg.get("order_id") or 0))
+            except (TypeError, ValueError):
+                pass
+        for leg in target_legs:
+            g = leg.get("oca_group") or f"_no_oca_tgt_{leg.get('order_id')}"
+            oca_pairs.setdefault(g, {"stop": None, "target": None, "max_oid": 0})
+            oca_pairs[g]["target"] = leg
+            try:
+                oca_pairs[g]["max_oid"] = max(oca_pairs[g]["max_oid"], int(leg.get("order_id") or 0))
+            except (TypeError, ValueError):
+                pass
+
+        # Rank candidates: prefer (1) complete pair, (2) qty match to pos_qty, (3) highest oid.
+        def _pair_score(pair: Dict[str, Any]) -> tuple:
+            has_both = (pair.get("stop") is not None) and (pair.get("target") is not None)
+            stop_q = int((pair.get("stop") or {}).get("qty") or 0)
+            tgt_q = int((pair.get("target") or {}).get("qty") or 0)
+            qty_match = 0
+            if has_both:
+                qty_match = -abs(stop_q - pos_qty) + -abs(tgt_q - pos_qty)
+            elif pair.get("stop") is not None:
+                qty_match = -abs(stop_q - pos_qty)
+            elif pair.get("target") is not None:
+                qty_match = -abs(tgt_q - pos_qty)
+            return (1 if has_both else 0, qty_match, pair.get("max_oid", 0))
+
+        best_group = max(oca_pairs.keys(), key=lambda g: _pair_score(oca_pairs[g]))
+        kept_pair = oca_pairs[best_group]
+
+        # Refuse to leave a position naked. If the chosen pair has no
+        # stop leg AT ALL, skip cancellation for this symbol — let the
+        # naked-sweep re-issue a fresh bracket first.
+        if kept_pair.get("stop") is None:
+            symbols_out.append({
+                "symbol": sym,
+                "kept_oca_group": None,
+                "kept_legs": [],
+                "cancelled_legs": [],
+                "refused_reason": "would_leave_naked_no_stop_to_keep",
+            })
+            total_refused += 1
+            logger.warning(
+                f"[v19.34.79 bracket-cancel] REFUSED {sym}: no stop "
+                f"leg in any OCA group — naked-sweep should re-issue "
+                f"first. excess_stop={excess_stop}, excess_tgt={excess_tgt}."
+            )
+            continue
+
+        # Build kept + cancel lists.
+        kept_legs_out: List[Dict[str, Any]] = []
+        if kept_pair.get("stop") is not None:
+            kept_legs_out.append({
+                "order_id": kept_pair["stop"].get("order_id"),
+                "qty": int(kept_pair["stop"].get("qty") or 0),
+                "kind": "stop",
+            })
+        if kept_pair.get("target") is not None:
+            kept_legs_out.append({
+                "order_id": kept_pair["target"].get("order_id"),
+                "qty": int(kept_pair["target"].get("qty") or 0),
+                "kind": "target",
+            })
+        kept_oids = {int(_l.get("order_id") or 0) for _l in (kept_pair.get("stop"), kept_pair.get("target")) if _l}
+
+        to_cancel: List[tuple] = []  # list of (leg, kind)
+        for leg in stop_legs:
+            try:
+                if int(leg.get("order_id") or 0) not in kept_oids:
+                    to_cancel.append((leg, "stop"))
+            except (TypeError, ValueError):
+                continue
+        for leg in target_legs:
+            try:
+                if int(leg.get("order_id") or 0) not in kept_oids:
+                    to_cancel.append((leg, "target"))
+            except (TypeError, ValueError):
+                continue
+
+        cancelled_out: List[Dict[str, Any]] = []
+        for leg, kind in to_cancel:
+            oid_raw = leg.get("order_id")
+            try:
+                oid = int(oid_raw)
+            except (TypeError, ValueError):
+                cancelled_out.append({
+                    "order_id": oid_raw,
+                    "qty": int(leg.get("qty") or 0),
+                    "kind": kind,
+                    "status": "skip_bad_order_id",
+                })
+                continue
+
+            if payload.dry_run:
+                cancelled_out.append({
+                    "order_id": oid,
+                    "qty": int(leg.get("qty") or 0),
+                    "kind": kind,
+                    "status": "dry_run_planned",
+                })
+                continue
+
+            try:
+                res = await ib_direct.cancel_order(oid)
+                status = "cancel_ok" if (res or {}).get("success") else f"cancel_err: {(res or {}).get('error')!r}"
+                cancelled_out.append({
+                    "order_id": oid,
+                    "qty": int(leg.get("qty") or 0),
+                    "kind": kind,
+                    "status": status,
+                })
+                if (res or {}).get("success"):
+                    total_cancelled += 1
+                # 200ms pacing to avoid IB cancel-burst.
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.exception(
+                    f"[v19.34.79 bracket-cancel] cancel_order failed "
+                    f"for {sym} oid={oid}: {type(e).__name__}: {e}"
+                )
+                cancelled_out.append({
+                    "order_id": oid,
+                    "qty": int(leg.get("qty") or 0),
+                    "kind": kind,
+                    "status": f"cancel_exception: {type(e).__name__}",
+                })
+
+        symbols_out.append({
+            "symbol": sym,
+            "kept_oca_group": best_group,
+            "kept_legs": kept_legs_out,
+            "cancelled_legs": cancelled_out,
+            "refused_reason": None,
+        })
+        total_kept += len(kept_legs_out)
+
+    return {
+        "success": True,
+        "dry_run": payload.dry_run,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "symbols_processed": symbols_out,
+        "totals": {
+            "cancelled": total_cancelled,
+            "kept": total_kept,
+            "refused_symbols": total_refused,
+            "symbols_in_audit": len(audit_symbols),
+        },
+    }
+
 
 
 
