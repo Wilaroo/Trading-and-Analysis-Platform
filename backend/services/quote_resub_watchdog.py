@@ -209,14 +209,14 @@ async def quote_resub_watchdog_loop(
 ) -> None:
     """Main loop. Spawned from TradingBotService.start()."""
     if not _enabled():
-        logger.info(
+        logger.warning(
             "[v19.34.80 quote-resub-watchdog] DISABLED via env "
             "(QUOTE_RESUB_WATCHDOG_ENABLED=false)"
         )
         return
 
     interval = _interval()
-    logger.info(
+    logger.warning(
         "[v19.34.80 quote-resub-watchdog] ENABLED (interval=%.0fs, "
         "escalate_after=%d failed cycles)",
         interval, _escalate_after(),
