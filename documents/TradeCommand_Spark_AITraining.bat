@@ -216,11 +216,13 @@ echo [5/8] Starting IB Data Pusher (live market data)...
 
 :: Kill existing pusher
 taskkill /F /FI "WINDOWTITLE eq [IB PUSHER]*" >nul 2>&1
-timeout /t 1 /nobreak >nul
+:: v19.34.83 - give IB Gateway time to fully ready the API port
+:: before pusher tries reqMktData (kills cold-start race).
+timeout /t 6 /nobreak >nul
 
 if exist "%SCRIPTS_DIR%\ib_data_pusher.py" (
     start "[IB PUSHER] Market Data" cmd /k "title [IB PUSHER] Market Data Feed to Spark && color 0E && cd /d %SCRIPTS_DIR% && set IB_PUSHER_L1_AUTO_TOP_N=%IB_PUSHER_L1_AUTO_TOP_N% && echo. && echo ===================================================== && echo   [IB PUSHER] Real-Time Market Data && echo   Target: DGX Spark (%SPARK_BACKEND%) && echo   Client ID: %IB_PUSHER_CLIENT_ID% ^| Color: YELLOW && echo ===================================================== && echo. && python ib_data_pusher.py --cloud-url %SPARK_BACKEND% --symbols %IB_SYMBOLS% --client-id %IB_PUSHER_CLIENT_ID%"
-    echo        Data pusher started (client ID: %IB_PUSHER_CLIENT_ID%)
+    echo        Data pusher started ^(client ID: %IB_PUSHER_CLIENT_ID%^)
 ) else (
     echo        [SKIP] ib_data_pusher.py not found
 )
@@ -243,25 +245,25 @@ if not exist "%SCRIPTS_DIR%\ib_historical_collector.py" (
 :: Launch collectors with staggered start (2 sec apart)
 if %NUM_COLLECTORS% GEQ 1 (
     start /MIN "[COLLECTOR 1] Turbo" cmd /k "title [COLLECTOR 1] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_1% --turbo"
-    echo        Collector 1 started (client ID: %IB_COLLECTOR_ID_1%)
+    echo        Collector 1 started ^(client ID: %IB_COLLECTOR_ID_1%^)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 2 (
     start /MIN "[COLLECTOR 2] Turbo" cmd /k "title [COLLECTOR 2] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_2% --turbo"
-    echo        Collector 2 started (client ID: %IB_COLLECTOR_ID_2%)
+    echo        Collector 2 started ^(client ID: %IB_COLLECTOR_ID_2%^)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 3 (
     start /MIN "[COLLECTOR 3] Turbo" cmd /k "title [COLLECTOR 3] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_3% --turbo"
-    echo        Collector 3 started (client ID: %IB_COLLECTOR_ID_3%)
+    echo        Collector 3 started ^(client ID: %IB_COLLECTOR_ID_3%^)
     timeout /t 2 /nobreak >nul
 )
 
 if %NUM_COLLECTORS% GEQ 4 (
     start /MIN "[COLLECTOR 4] Turbo" cmd /k "title [COLLECTOR 4] Historical Data (Turbo) && color 0C && cd /d %SCRIPTS_DIR% && python ib_historical_collector.py --cloud-url %SPARK_BACKEND% --client-id %IB_COLLECTOR_ID_4% --turbo"
-    echo        Collector 4 started (client ID: %IB_COLLECTOR_ID_4%)
+    echo        Collector 4 started ^(client ID: %IB_COLLECTOR_ID_4%^)
 )
 
 echo        Collectors idle until you trigger collection from NIA UI
