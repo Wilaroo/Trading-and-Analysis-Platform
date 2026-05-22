@@ -4,24 +4,49 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.78+ priority queue
+## 🚀 Next session — v19.34.82+ priority queue
 
-**Last shipped**: v19.34.78 (PRD.md cross-reference for Emergent auto-load — 2026-05-22).
+**Last shipped**: v19.34.82 (TZ-safe quote pipeline + watchdog redesign — 2026-05-22, LIVE-VERIFIED).
 
-### 🔴 P0 — Bracket-stacking auto-cancel endpoint
-GM/LIN-style excess target legs (N×K targets for N shares). Audit endpoint
-already flags them: `GET /api/trading-bot/bracket-stacking-audit`.
-**Action needed**: build `POST /api/trading-bot/bracket-stacking-cancel`
-that takes the audit output and cancels the loser legs (keep the one
-closest to entry; cancel the rest within the same OCA group). Tie to
-`_periodic_bracket_state_reconcile` so it auto-runs every 30s after boot.
+### 🟡 P2 — `StartTrading.bat` cleanup (v19.34.83)
+Two bugs found while deploying v82:
 
-### 🔴 P1 — Quote-resub watchdog actual recovery
-Current `_stale_resub_set` triggers `pusher.subscribe_symbols()` via RPC
-every 60s but quotes still go 4.9hr stale. Likely a Windows pusher-side
-handler issue. Add diagnostic in `ib_data_pusher.py` to log subscription
-state per symbol; if not in IB's subscription cache despite the RPC call,
-force-reconnect the pusher socket.
+1. **Parser bug**: unescaped `)` inside `echo` lines (5 spots: pusher
+   start + 4 collector starts) prematurely closes IF-blocks. Result:
+   misleading `[SKIP] ib_data_pusher.py not found` prints even on success.
+   Fix: change `(client ID: %VAR%)` → `^(client ID: %VAR%^)` in all 5 echo
+   lines.
+2. **Pusher cold-start race**: step 5 launches pusher before IB Gateway
+   finishes API handshake → pusher exits immediately, window closes.
+   Fix: add `timeout /t 6 /nobreak >nul` between the `taskkill` and the
+   `start` in step 5 (gives Gateway time after `:4002` listens).
+
+### 🟡 P2 — v82 watchdog test rewrite
+v80 tests at `backend/tests/test_quote_resub_watchdog_v19_34_80.py`
+exercised the old `_stale_resub_set` API which v82 removed. Tests now
+fail-collect (also blocked by venv-less pytest missing `finnhub`).
+
+Action: create `test_quote_resub_watchdog_v19_34_82.py` covering:
+* `_open_trade_symbols(bot)` extraction
+* `missing_from_subs` divergence → unsub+resub triggered
+* `snapshot_failed` divergence → unsub+resub triggered
+* Escalation after N failed attempts → event row written
+* `_force_resub` exception swallow path
+* Empty `_open_trades` → state cleared
+Use mock `rpc` exposing `subscriptions()`, `quote_snapshot()`,
+`subscribe_symbols()`, `unsubscribe_symbols()`, `is_configured()`.
+
+### 🟢 P3 — Windows pusher file cleanup
+Delete 3 stray `ib_data_pusher.py` copies outside the canonical
+`documents/scripts/` path (verified via SHA256 — all older than the
+canonical, ~ 3-month-old strays). Keep only the canonical for clarity.
+
+### 🟢 P3 — IB market-data entitlement check
+IB Gateway shows `MarketDataFarm: OK (delayed waiting)` /
+`HistoricalDataFarm: OK Delayed`. Verify paper account is intended to
+run on delayed data or whether real-time subscription should be added.
+
+### 🔴 P1 — Quote-resub watchdog actual recovery (DONE ✅ — v19.34.82)
 
 ### 🟡 P2 — UI bug cluster
 - Top Movers panel: "no live data" while pusher status is green

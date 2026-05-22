@@ -1,3 +1,132 @@
+## 2026-05-22 — v19.34.82: Timezone-safe quote pipeline + watchdog redesign (LIVE-VERIFIED)
+
+### Trigger
+Live incident 2026-05-22 ~10:00 ET: UAL position orphaned with "4-hour
+stale quote" warnings while market was actively trading. Investigation
+revealed a layered failure:
+
+1. **Wire-format TZ mismatch (Phase A)**: Windows pusher (`ib_data_pusher.py`)
+   emitted naive ET timestamps in quote payloads (`datetime.now().isoformat()`).
+   DGX `position_manager.py:537` parsed naive strings as UTC, yielding a
+   constant +4h apparent age on every quote. Triggered the orphan path
+   on every position regardless of actual feed health.
+
+2. **Pusher state divergence**: UAL was confirmed absent from
+   `/rpc/subscriptions` despite bot tracking it. After force-resub,
+   `/rpc/subscribe` returned `added=[UAL]` but `/rpc/quote-snapshot`
+   still returned `success:false, error=symbol_not_subscribed` —
+   proving the pusher has an INTERNAL split-brain between its
+   subscription registry and its live quote buffer.
+
+3. **Watchdog blind spot**: v19.34.80 watchdog read
+   `position_manager._stale_resub_set` which `position_manager` itself
+   cleared every 60s in its own manage-loop. Race condition meant
+   the watchdog observed an empty set most ticks.
+
+### What shipped
+
+**Phase A — Pusher emits aware-UTC `Z`-suffixed timestamps**
+(`documents/scripts/ib_data_pusher.py`)
+
+Single-line change at the `quotes_buffer[symbol]` builder (line 348):
+```python
+# OLD
+"timestamp": datetime.now().isoformat()
+# NEW
+"timestamp": datetime.now(_tz_v82.utc).isoformat().replace('+00:00', 'Z')
+```
+Eliminates the naive-ET wire format. Every downstream `fromisoformat()`
+call now returns aware-UTC automatically. Live-verified post-restart:
+`SPY ts: 2026-05-22T15:33:33.191763Z  ends-in-Z: True`.
+
+**Phase B.1 — TZ-defensive parse in position_manager**
+(`backend/services/position_manager.py:531-545`)
+
+Belt+suspenders for any quote that still arrives in legacy naive format.
+Localizes naive datetimes to `America/New_York` before subtracting
+from UTC `datetime.now(timezone.utc)`. Aware strings (post-A) pass
+through unchanged.
+
+**Phase B.2 — Watchdog redesign (`quote_resub_watchdog.py`)**
+
+Removed dependency on `position_manager._stale_resub_set`. v82 design:
+
+* **Source A**: `bot._open_trades` symbol set (bot's tracking intent).
+* **Source B**: `rpc.subscriptions(force_refresh=True)` (pusher's
+  registry).
+* **Source C**: `rpc.quote_snapshot(sym)` per tracked symbol (pusher's
+  live buffer state).
+
+Two divergence kinds detected:
+* `missing_from_subs`: symbol bot tracks but pusher has no subscription
+  for. Forces unsub+resub to trigger fresh `reqMktData`.
+* `snapshot_failed`: symbol in subscription registry but quote-snapshot
+  returns `success:false`. Catches the pusher internal split-brain
+  observed live with UAL.
+
+Both kinds → `unsubscribe + 0.5s sleep + subscribe` cycle. After
+`QUOTE_RESUB_WATCHDOG_ESCALATE_AFTER` (default 3) consecutive failed
+attempts for the same symbol → writes
+`quote_resub_watchdog_events` row severity=high with `divergence_kind`
+field for UI surfacing.
+
+### Deployment workflow
+
+Patches applied during live market hours via two-side commit/push/pull:
+
+1. Windows: commit `documents/scripts/ib_data_pusher.py` (Phase A) → push.
+2. DGX: `git pull` → no conflict (disjoint paths).
+3. DGX: commit `backend/services/position_manager.py` +
+   `backend/services/quote_resub_watchdog.py` (Phase B) → push.
+4. Windows: `git pull` → both sides synced at HEAD `1c76b4d5`.
+5. Full restart via `StartTrading.bat` (its `git pull` step is a no-op
+   at this point).
+
+Repository commits:
+* `6f1f8195` v19.34.82 Phase A
+* `1c76b4d5` v19.34.82 Phase B
+
+### Side-quest: 10197 IB competing-session debugging
+
+During post-restart smoke testing, all symbols started reporting
+`Error 10197: No market data during competing live session`. Pusher's
+HTTP push pipe was healthy (positions/orders/account flowing) but
+quote buffer stayed at 0. Root cause was an external IB session
+(mobile app / web Client Portal / phantom server lock) holding the
+L1 market-data lock. Resolved by a full IB Gateway logout/login
+cycle + closing all external IB clients. Unrelated to v82 — but a
+good reminder that **only client IDs calling `reqMktData` trigger
+10197** (ID 15 in our setup); order-execution (ID 11) and historical
+collectors (IDs 16-19) are immune.
+
+### Discovered during deployment — punted to backlog
+
+* **`StartTrading.bat` parser bug**: unescaped `)` inside `echo`
+  statements closes IF-blocks prematurely, causing misleading
+  `[SKIP] ib_data_pusher.py not found` to print even when launch
+  succeeded. Affects 5 echo lines (pusher + 4 collectors). Fix: escape
+  as `^)`. P2.
+* **Pusher cold-start race**: `.bat` step 5 launches pusher before
+  IB Gateway is fully API-ready, occasionally causing immediate
+  pusher exit. Fix: add `timeout /t 6` between step 4 and step 5. P2.
+* **Stale `ib_data_pusher.py` copies** on Windows (3 strays outside
+  the canonical `documents/scripts/`). P3 cleanup — delete after
+  next clean week.
+* **MarketDataFarm: "delayed waiting"** in IB Gateway status — verify
+  paper account market-data entitlement is intentional. P3 FYI.
+* **v80 watchdog tests fail to collect** under venv-less pytest
+  invocation (`finnhub` not in system python). P2 — write
+  `test_quote_resub_watchdog_v19_34_82.py` against new API surface.
+
+### Live verification snapshot (post-deploy)
+
+* Pusher: `415 quotes, 19 positions, 165 account fields, 0 news, 32 open orders` per push cycle
+* Quote timestamps: aware-UTC with `Z` suffix
+* IB Gateway: API Client = 6 connected (IDs 11, 15, 16, 17, 18, 19)
+* TradeCommand UI: `PUSHER GREEN 1s ago`, 16 live positions, brackets OK
+* Backend: PID 3598362 healthy on `/api/health`
+
+
 ## 2026-05-22 — v19.34.78: PRD.md cross-reference → AGENTS.md (Emergent auto-load)
 
 ### Trigger
