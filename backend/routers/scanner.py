@@ -456,7 +456,7 @@ def get_strategy_mix(n: int = 100):
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         cutoff_iso = cutoff.isoformat()
         pipeline = [
-            {"$match": {"timestamp": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
+            {"$match": {"closed_at": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
             {"$group": {
                 "_id": "$setup_type",
                 "total": {"$sum": 1},
