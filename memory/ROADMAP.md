@@ -4,7 +4,85 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.88+ priority queue
+## 🚀 Next session — v19.34.89+ priority queue
+
+**Last shipped**: v19.34.88 (per-(symbol, setup_base) post-stop
+cooldown — 2026-05-22, 21 tests passing, LIVE on backend SHA
+720c62b1).
+**Prior**: v87 (setup_retro CLI), v86 (strategy-mix closed_at),
+v85 (UI honesty), v84, v83.
+
+### 🟢 NEXT TRADING SESSION — verify v88 in production
+Three things to check ~30 min after market open:
+1. Tail `/tmp/sentcom-backend.log` for `🧊 [v19.34.88
+   post-stop-cooldown]` warnings — every first stop_loss should
+   stamp; every blocked re-entry should fire this line.
+2. `curl /api/system/rejection-analytics` — `by_category.policy`
+   should have non-zero `post_stop_cooldown` count if anything
+   stopped today.
+3. Re-run `python3 backend/scripts/setup_retro.py --days 7` after
+   a couple trading days. Loop-offender count should drop to ~0.
+
+If verification looks good, the v88 P0 is closed and the next
+P0 is **v89: alert_outcomes.trade_grade always None**.
+
+### 🔴 P0 — v19.34.89: alert_outcomes.trade_grade always None
+Found during v87 setup_retro run: all 180 outcome docs have
+`trade_grade=None`. Either:
+1. Stamp `trade.trade_grade` at the SAME write site that creates
+   the bot_trades row from the alert (so the grade rides along
+   the whole way to close).
+2. Look up the grade by `alert_id` from the source alert at write
+   time in `pnl_compute.py:_record_alert_outcome_bestEffort`.
+
+Without this, the retro tool's grade-A vs grade-C breakdown stays
+empty → can't answer "is the grader broken vs. is the setup
+broken?"
+
+### 🟡 P1 — v19.34.90: phantom-recovery write cleanup
+41% of alert_outcomes are `*_phantom_recovery` rows (v87 finding).
+v88's cooldown should naturally reduce phantom rates (fewer
+rapid-fire re-entries → fewer downstream confusion). After v88
+runs for a week, re-measure the phantom %. If still high, then:
+- Either the recovery code path is too eager (don't write to
+  alert_outcomes for recovery artifacts), OR
+- Tag them `setup_type="__phantom_recovery__"` so the analytics
+  tool can filter without a string-match heuristic.
+
+### 🟡 P1 — OCA bracket-cancel storm (carried from v85)
+17 of 33 scanner signals on 2026-05-22 were rejected as "Parent
+leg cancelled (bracket OCA)" (52% kill rate). Separate from
+cooldown but probably same broker-side blast-radius family.
+
+Investigation steps:
+1. `bracket_lifecycle_events` last 24h, group cancel_reason by
+   symbol
+2. Cross-check `bot_trades.broker_state`
+3. Decide: server-side re-issue, or IB Gateway TIF tweak
+
+### 🟡 P2 — UI: surface active cooldowns
+Add a small V5 chip next to SIGNAL PASS: `🧊 Cooldowns: N` showing
+how many (symbol, setup) pairs are currently in cooldown. Source:
+new GET endpoint that returns `get_registry().snapshot()`. Becomes
+useful when the operator sees a scanner alert for a symbol the
+bot won't enter — quick "yes that's the cooldown" answer.
+
+### 🟡 P2 — Carried items
+- AI rejection narrator squeeze/scalp repro (needs live narrator
+  output to grep)
+- ScannerQualityPanel top-reason color-hint polish (skipped in v85)
+- Delete `services/__init__.py.v19_34_84_bak` after clean week
+- Lazy-import audit on `services/ai_modules/finbert_sentiment.py`
+- Delete dead `_fetch_finnhub_quote` references in `stock_data.py`
+
+### 🟢 P3 backlog (unchanged)
+- APScheduler nightly auto-`smart_backfill`
+- Tick-level Stop Run Probability ML module
+- Setup-landscape EOD self-grading tracker
+- Mean-reversion metrics service
+- Chart bubble click → fire focus symbol
+- SEC EDGAR 8-K integration
+- Break up `server.py` monolith
 
 **Last shipped**: v19.34.87 (setup_retro.py CLI + loop-offender
 detector — 2026-05-22, surfaced -17.68R lost in 25min from 21 stops

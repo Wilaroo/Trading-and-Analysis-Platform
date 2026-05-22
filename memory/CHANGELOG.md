@@ -1,3 +1,86 @@
+## 2026-05-22 — v19.34.88: per-(symbol, setup_base) post-stop cooldown (SHIPPED + LIVE)
+
+### Trigger
+v87's setup_retro found 21 stop_loss closes in ~25 min across
+ETHU/CHWY/AJG/BALL on 2026-05-14 for -17.68R (~$15-25k). Root
+cause: the existing "Recent-rejection cooldown" gates on
+`alert_id`, but every fresh scanner pulse mints a new alert_id, so
+the cooldown was effectively per-pulse, not per-symbol.
+
+### What shipped
+
+**`services/post_stop_cooldown.py`** (new module, ~140 lines):
+- In-memory dict keyed on `(symbol_upper, setup_base)` → epoch_ts
+- Setup-type normalised via `_base()` (drops _long/_short suffix)
+  so direction is NOT part of the key — got stopped going long,
+  going short on the same level minutes later is the same bad idea
+- Thread-safe via `threading.Lock`
+- Singleton via `get_registry()`
+- Auto-evicts entries older than `2 × cooldown_window`
+- Public API: `record_stop()`, `seconds_remaining()`,
+  `is_in_cooldown()`, `snapshot()`, `clear()`
+
+**Writer hook** in `services/pnl_compute.py:_record_alert_outcome_bestEffort`:
+At every close whose reason starts with "stop" (stop_loss,
+stop_loss_phantom_recovery, stop_loss_trailing, etc.), call
+`record_stop()` with the trade's symbol + setup_type.
+
+**Reader gate** in `services/opportunity_evaluator.py:evaluate_opportunity`,
+inserted between v19.34.44 stale-alert-TTL block and v19.34.123
+open-exposure cap:
+- Check `seconds_remaining(symbol, setup_type)`
+- If positive: refuse the new entry, log 🧊 warning, call
+  `bot.record_rejection(reason_code="post_stop_cooldown")` and
+  `record_trade_drop(gate="post_stop_cooldown")`
+- Fail-OPEN on any exception so a bug here can't lock the bot
+  out of trading
+
+**REASON_MAP entry** in `routers/rejection_analytics_router.py`:
+`"post_stop_cooldown" → {"label": "Post-stop cooldown (same
+symbol+setup)", "category": CAT_POLICY}` — surfaces in the
+SIGNAL PASS pill's `by_category` count.
+
+**Test suite** at `backend/tests/test_post_stop_cooldown_v88.py`
+(21 tests, all passing in 0.05s):
+- `_base()` normalisation: 7 cases (long, short, no suffix, None,
+  empty, _l, uppercase mixing)
+- writer/reader contract: 7 cases (no-stop, recorded-stop,
+  long+short share bucket, different setup doesn't share, case
+  insensitive, window expiry, seconds_remaining math)
+- None-handling: symbol-None is no-op, setup-None still traps
+- env knobs: 3 cases (`POST_STOP_COOLDOWN_ENABLED=false`,
+  `_MINUTES=0`, `_MINUTES=5`)
+- snapshot diagnostic
+- **historical replay** of ETHU 2026-05-14 → 4 of 5 stops blocked
+
+### Env knobs
+- `POST_STOP_COOLDOWN_ENABLED` (default `true`) — kill switch
+- `POST_STOP_COOLDOWN_MINUTES` (default `30`) — dial duration
+
+### Deployment
+- Commit `720c62b1` on `origin/main`
+- Backend restarted; live at SHA `720c62b1`; listener bound
+- Linear history: v82 → v83 → v84 → v85 → v86 → v87 → v88
+
+### Verification path (next trading session)
+1. Watch for `🧊 [v19.34.88 post-stop-cooldown] Refusing ...` log
+   lines on the next stop-loss event
+2. Check `/api/system/rejection-analytics` for non-zero
+   `post_stop_cooldown` count under `by_category.policy`
+3. Re-run `python3 backend/scripts/setup_retro.py --days 7` after
+   a few trading days — loop-offender count should drop sharply
+
+### What's NOT in v88 (scope discipline)
+- No UI badge for "X cooldowns active" — could be v90 polish
+- No bracket-OCA storm investigation (v85 found 17/33 OCA
+  cancels; separate but related bug)
+- No `trade_grade` writer fix (still all None on outcome rows;
+  filed as v19.34.89)
+
+---
+
+
+
 ## 2026-05-22 — v19.34.87: setup_retro.py CLI + loop-offender detector (SHIPPED)
 
 ### Trigger
