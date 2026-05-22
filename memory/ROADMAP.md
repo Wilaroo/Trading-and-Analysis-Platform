@@ -4,13 +4,28 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.89+ priority queue
+## 🚀 Next session — v19.34.90+ priority queue
 
-**Last shipped**: v19.34.88 (per-(symbol, setup_base) post-stop
-cooldown — 2026-05-22, 21 tests passing, LIVE on backend SHA
-720c62b1).
-**Prior**: v87 (setup_retro CLI), v86 (strategy-mix closed_at),
-v85 (UI honesty), v84, v83.
+**Last shipped**: v19.34.89 (alert_outcomes.trade_grade fallback +
+backfill — 17 tests passing; 180/180 rows backfilled on DGX;
+grader-vs-setup analysis now unlocked).
+**Prior**: v88 (post-stop cooldown), v87 (setup_retro CLI),
+v86 (strategy-mix closed_at), v85 (UI honesty).
+
+### 🚨 LIVE FINDING from v89 retro (must triage in next session)
+Post-backfill `setup_retro.py` exposes 2 catastrophically losing
+grade buckets:
+- `squeeze` × Grade-**A**: 7 trades, **0% win**, -0.02R
+- `daily_squeeze` × Grade-**B**: 14 trades, **0% win**, -0.49R,
+  -$13,958 net
+- `accumulation_entry` × Grade-**B**: 39 trades, only 17.9% win,
+  but +$154k net (fat-tail driven)
+Action: in v90 or its follow-up, either (a) suppress these two
+(setup × grade) combos in the scanner, or (b) re-train the grader.
+
+### 🔴 P0 — v19.34.89: alert_outcomes.trade_grade always None ✅ DONE
+Shipped 2026-02. Writer falls back to `smb_grade`; backfill copied
+180/180 historical rows; tests guard the regression.
 
 ### 🟢 NEXT TRADING SESSION — verify v88 in production
 Three things to check ~30 min after market open:
