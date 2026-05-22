@@ -530,11 +530,21 @@ class PositionManager:
                                         quote_age_s = max(0.0, time.time() - float(pushed_at))
                                     elif isinstance(pushed_at, str):
                                         from datetime import datetime as _dt, timezone as _tz
-                                        # ISO fmt → epoch
+                                        try:
+                                            from zoneinfo import ZoneInfo as _ZI
+                                            _NY_TZ = _ZI("America/New_York")
+                                        except Exception:
+                                            _NY_TZ = None
+                                        # v19.34.82 — Pre-A patch Windows pusher
+                                        # emitted naive ET timestamps. After A:
+                                        # pusher emits UTC+Z (aware). This block
+                                        # handles BOTH: aware strings keep their
+                                        # tz; naive strings fall back to ET
+                                        # localization (legacy-safe).
                                         dt = _dt.fromisoformat(pushed_at.replace("Z", "+00:00"))
                                         if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=_tz.utc)
-                                        quote_age_s = max(0.0, (_dt.now(_tz.utc) - dt).total_seconds())
+                                            dt = dt.replace(tzinfo=_NY_TZ) if _NY_TZ is not None else dt.replace(tzinfo=_tz.utc)
+                                        quote_age_s = max(0.0, (_dt.now(_tz.utc) - dt.astimezone(_tz.utc)).total_seconds())
                             except Exception:
                                 quote_age_s = None  # treat as fresh on parse error
 
