@@ -762,6 +762,29 @@ class BotTrade:
     # Now threaded all the way through scanner → bot → evaluator → trade.
     alert_id: Optional[str] = None
 
+    # ── v19.34.163 — Bracket churn telemetry + cooldown fields ───────────
+    # Cumulative, monotonic; cleanup paths MUST NOT reset these. Drive
+    # the v90 P0 bracket-churn audit and `bracket_completion_telemetry`
+    # alert job (P3 backlog).
+    #   target_ever_attached     True after the FIRST successful TP attach.
+    #                            Lets `pnl-by-style` distinguish "TP never
+    #                            placed" (the actual bug) from "TP placed
+    #                            but didn't hit". Never resets.
+    #   bracket_attach_count     Increments on every successful naked-
+    #                            sweep reissue (and any other successful
+    #                            attach path that calls _stamp_bracket_attach).
+    #                            Used by ops dashboards + churn audit.
+    #   last_bracket_attach_at   ISO-UTC timestamp of the most recent
+    #                            successful attach. Read by Guard 2 in
+    #                            `_naked_position_sweep` to suppress
+    #                            re-detection within NAKED_REISSUE_COOLDOWN_S
+    #                            (default 90s) — covers IB async-callback
+    #                            latency before the new STP shows up in
+    #                            pusher/ib_direct snapshots.
+    target_ever_attached: bool = False
+    bracket_attach_count: int = 0
+    last_bracket_attach_at: Optional[str] = None
+
     def __post_init__(self):
         """v19.34.57 — Audit-gap closer: stamp `trade_type` at construction.
 
@@ -5012,6 +5035,50 @@ class TradingBotService:
             )
         # ─────────── /PATCH E ───────────
 
+        # ─────────── v19.34.163 PATCH F — Tier-mismatch blind-guard ───────────
+        # When BOT_ORDER_PATH=direct, orders are placed via `ib_direct`
+        # (clientId=11 on DGX). The Windows pusher's `openTrades()`
+        # snapshot uses its OWN clientId and — without
+        # `reqAutoOpenOrders(True)` on the pusher side — IB Gateway
+        # only returns orders belonging to the requesting client.
+        # Result: the pusher snapshot is structurally BLIND to every
+        # bracket we place via ib_direct. The 7-day audit (2026-05-26)
+        # showed 928 naked_sweep_reissue events, 97% triggered by
+        # self_cascade — i.e. the sweep saw its own just-placed stop
+        # missing from a blind snapshot and reissued forever.
+        # Worst offenders: COR (144 reissues / 3h), UAL (101 / 4.5h).
+        #
+        # Fix: if Tier 1 (ib_direct) fell through and we landed on
+        # Tier 3 (pusher_orders_snapshot) while running direct mode,
+        # SKIP the entire sweep. We lose naked detection for one
+        # cycle (~60s) but we don't generate ghost OCA pairs at IB.
+        # The proper fix is v19.34.164 (persistent ib_direct or
+        # pusher reqAutoOpenOrders); this guard stops the bleed
+        # until then.
+        try:
+            _order_path = (os.environ.get("BOT_ORDER_PATH", "pusher")
+                           or "pusher").strip().lower()
+            if (_order_path == "direct"
+                    and (source_info or {}).get("tier") == "pusher_orders_snapshot"):
+                result["skipped_reason"] = "tier3_blind_to_ib_direct_orders"
+                result["source_tier"] = "pusher_orders_snapshot"
+                result["order_path"] = _order_path
+                print(
+                    f"[v19.34.163 naked-sweep] SKIP — BOT_ORDER_PATH=direct "
+                    f"but resolver fell through to pusher_orders_snapshot "
+                    f"(ib_direct disconnected). Pusher snapshot cannot see "
+                    f"ib_direct's orders → would trigger false-naked cascade. "
+                    f"Re-arm ib_direct connection to restore detection.",
+                    flush=True,
+                )
+                return result
+        except Exception as _tier_err:
+            print(
+                f"[v19.34.163 naked-sweep] tier-mismatch guard check failed "
+                f"(continuing): {_tier_err}", flush=True,
+            )
+        # ─────────── /PATCH F ───────────
+
         # Skip if executor is in non-LIVE mode (simulator/paper has no
         # actual IB orders, though pusher-mode is also "LIVE").
         mode_str = (
@@ -5081,6 +5148,40 @@ class TradingBotService:
                 if rs <= 0:
                     continue
                 result["checked"] += 1
+
+                # ── v19.34.163 PATCH G — Recent-reissue cooldown ─────
+                # Even when Tier 1 (ib_direct) is healthy, IB's
+                # EWrapper.openOrder callback fires AFTER the
+                # placeOrder return. There's a ~1-5s window where
+                # `_ib.trades()` may not yet reflect the just-placed
+                # STP. If the next 60s sweep tick lands in that
+                # window the trade reads naked again. Suppress
+                # re-detection for NAKED_REISSUE_COOLDOWN_S (default
+                # 90s) after the last successful attach so we never
+                # double-fire on async-callback latency.
+                try:
+                    _last_attach = getattr(trade, "last_bracket_attach_at", None)
+                    if _last_attach:
+                        _last_dt = datetime.fromisoformat(
+                            str(_last_attach).replace("Z", "+00:00")
+                        )
+                        _age_s = (datetime.now(timezone.utc) - _last_dt).total_seconds()
+                        _cooldown_s = float(
+                            os.environ.get("NAKED_REISSUE_COOLDOWN_S", 90.0)
+                        )
+                        if 0 <= _age_s < _cooldown_s:
+                            result.setdefault("cooldown_skips", 0)
+                            result["cooldown_skips"] += 1
+                            continue
+                except Exception as _cooldown_err:
+                    # Cooldown failure must NEVER suppress naked
+                    # detection — fall through to the original path.
+                    print(
+                        f"[v19.34.163 naked-sweep] cooldown check failed "
+                        f"for {tid} (continuing to naked detection): "
+                        f"{_cooldown_err}", flush=True,
+                    )
+                # ─────────── /PATCH G ───────────
 
                 # v19.34.73 — Skip if a healthier sibling owns
                 # (symbol, direction). This trade is a phantom.
@@ -5221,6 +5322,34 @@ class TradingBotService:
                         except Exception:
                             pass
                     trade.oca_group = oca_result.get("oca_group")
+                    # ── v19.34.163 PATCH H — Cumulative telemetry ────
+                    # Three monotonic fields, NEVER reset by cleanup
+                    # sweeps. Drive the v90 P0 churn audit + future
+                    # `bracket_completion_telemetry` alert job.
+                    try:
+                        trade.bracket_attach_count = int(
+                            getattr(trade, "bracket_attach_count", 0) or 0
+                        ) + 1
+                        # Only flip target_ever_attached when we
+                        # genuinely placed a target (tgt_id present).
+                        # `partial=True` (stop-only, no TP) intentionally
+                        # does NOT flip this — distinguishes "TP placed
+                        # at least once" from "stop-only forever".
+                        if tgt_id is not None and not getattr(
+                            trade, "target_ever_attached", False
+                        ):
+                            trade.target_ever_attached = True
+                        trade.last_bracket_attach_at = (
+                            datetime.now(timezone.utc).isoformat()
+                        )
+                    except Exception as _telem_err:
+                        # Telemetry MUST NOT block the trade path.
+                        print(
+                            f"[v19.34.163 naked-sweep] telemetry update "
+                            f"failed for {tid} (continuing): {_telem_err}",
+                            flush=True,
+                        )
+                    # ─────────── /PATCH H ───────────
                     # Persist new order IDs.
                     try:
                         save_fn = getattr(self, "_save_trade", None) or getattr(self, "_persist_trade", None)
