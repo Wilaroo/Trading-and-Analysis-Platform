@@ -41,6 +41,8 @@ import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
 // position's symbol so the operator can see what the scanner is
 // thinking without having to expand the row.
 import PositionThoughtsInline from './PositionThoughtsInline';
+// v19.34.160 — single source of truth for "is this a scalp?"
+import { isScalpStyle } from '../../../utils/tradeStyleMeta';
 // v19.34.72 — Operator Close panel (Market/Limit + percentage).
 import CloseTradeModal from './CloseTradeModal';
 // v19.34.159 — "Why this size?" hover/click pill that surfaces the
@@ -181,28 +183,17 @@ const tierLabel = (pos) => {
 // "SMB B" even though the trade had zero of the intraday traits the
 // grade measures). Suppress the chip when the position is a scalp.
 //
-// Detection priority (cheap → expensive):
-//   1) explicit `timeframe === 'scalp'` (cleanest signal once
-//      v19.34.62 lands the backend stamp)
-//   2) `trade_style === 'scalp'` (same — set by tqs_engine)
-//   3) `setup_type` ∈ SCALP_SETUPS (covers today's positions where
-//      trade_style still stamps generic 'trade_2_hold')
-const SCALP_SETUPS = new Set([
-  'gap_fade', 'gap_fade_long', 'gap_fade_short',
-  'fashionably_late', 'fashionably_late_long', 'fashionably_late_short',
-  'second_chance', 'second_chance_long', 'second_chance_short',
-  'backside', 'backside_long', 'backside_short',
-  'vwap_fade_short', 'vwap_fade_scalp',
-]);
-const isScalpPosition = (pos) => {
-  if (!pos) return false;
-  const tf = String(pos.timeframe || '').toLowerCase();
-  if (tf === 'scalp') return true;
-  const ts = String(pos.trade_style || '').toLowerCase();
-  if (ts === 'scalp') return true;
-  const su = String(pos.setup_type || pos.setup_variant || '').toLowerCase();
-  return SCALP_SETUPS.has(su);
-};
+// v19.34.160 — Unified detection. Pre-fix this file maintained its own
+// hardcoded SCALP_SETUPS list (14 setups) that drifted from the
+// canonical SETUP_TO_STYLE scalp bucket (23 setups) in
+// tradeStyleMeta.js. A `vwap_fade_long` / `mean_reversion_long`
+// position passed isScalpPosition() as FALSE (suffix mismatch) but the
+// TradeStyleChip resolved it as "scalp" via the new suffix-stripping
+// SETUP_TO_STYLE lookup. Now both consult the single source of truth
+// `isScalpStyle()`, which also picks up `timeframe='scalp'` (already
+// stamped by the bot on USO etc.) and any `_long`/`_short` directional
+// variants automatically.
+const isScalpPosition = (pos) => !!pos && isScalpStyle(pos);
 
 // Synthesize a "model trail / why" sub-line from whatever the bot wrote
 // onto the trade. Mirrors the mockup line:

@@ -143,8 +143,8 @@ const STYLE_ALIAS = {
 /**
  * Resolve a normalised style key from a trade-shaped object.
  * Order of precedence: explicit `trade_style` → `scan_tier` → `tier`
- * → derive from `setup_type` via SETUP_TO_STYLE. Returns "unknown"
- * when none match.
+ * → `timeframe` → derive from `setup_type` via SETUP_TO_STYLE. Returns
+ * "unknown" when none match.
  *
  * v19.34.32 — When `trade_style` is the GENERIC fallback `trade_2_hold`
  * (the default the backend stamps on every alert that didn't pick a
@@ -152,8 +152,40 @@ const STYLE_ALIAS = {
  * Without this, every daily-timeframe setup (daily_squeeze,
  * accumulation_entry, day_2_continuation, …) was being mislabelled as
  * `intraday` because `trade_2_hold` aliases to `intraday`.
+ *
+ * v19.34.160 — Two fixes for "scalp positions labelled INTRADAY":
+ *   1) Strip directional suffixes (`_long`, `_short`, `_buy`, `_sell`)
+ *      from `setup_type` / `setup_variant` before SETUP_TO_STYLE
+ *      lookup. Pre-fix, `vwap_fade_long` and `mean_reversion_long`
+ *      missed the base table (which only had `vwap_fade` /
+ *      `mean_reversion`) and fell through to the `trade_2_hold` →
+ *      intraday alias.
+ *   2) Include `row.timeframe` in the lookup chain. The bot already
+ *      stamps `timeframe='scalp'` (e.g. USO vwap_fade_long position)
+ *      but `resolveTradeStyle` never consulted it.
  */
 const GENERIC_TRADE_STYLES = new Set(['trade_2_hold']);
+
+// v19.34.160 — Directional suffixes stripped before SETUP_TO_STYLE lookup.
+// Mirrors the convention used by isScalpStyle / OpenPositionsV5.SCALP_SETUPS:
+// `gap_fade_long` shares the same bucket as `gap_fade`.
+const DIRECTIONAL_SUFFIXES = ['_long', '_short', '_buy', '_sell'];
+
+const stripDirectionalSuffix = (key) => {
+  for (const suf of DIRECTIONAL_SUFFIXES) {
+    if (key.endsWith(suf)) return key.slice(0, -suf.length);
+  }
+  return key;
+};
+
+const setupLookup = (raw) => {
+  if (!raw) return null;
+  const k = String(raw).trim().toLowerCase();
+  if (!k) return null;
+  if (SETUP_TO_STYLE[k]) return SETUP_TO_STYLE[k];
+  const stripped = stripDirectionalSuffix(k);
+  return stripped !== k ? (SETUP_TO_STYLE[stripped] || null) : null;
+};
 
 export const resolveTradeStyle = (row = {}) => {
   const norm = (v) => String(v || '').trim().toLowerCase();
@@ -167,9 +199,8 @@ export const resolveTradeStyle = (row = {}) => {
   // v19.34.32 — setup-type wins over the generic `trade_2_hold` default.
   // v19.34.X (Feb 2026) — setup_variant (granular SMB name) preferred
   // over the broader setup_type when both are present.
-  const variantKey = row.setup_variant ? SETUP_TO_STYLE[norm(row.setup_variant)] : null;
-  const setupKey = variantKey
-    || (row.setup_type ? SETUP_TO_STYLE[norm(row.setup_type)] : null);
+  // v19.34.160 — both lookups now strip directional suffixes.
+  const setupKey = setupLookup(row.setup_variant) || setupLookup(row.setup_type);
   const tradeStyleNorm = norm(row.trade_style);
   if (setupKey && GENERIC_TRADE_STYLES.has(tradeStyleNorm)) {
     return setupKey;
@@ -179,10 +210,16 @@ export const resolveTradeStyle = (row = {}) => {
     || tryKey(row.scan_tier)
     || tryKey(row.tier)
     || tryKey(row.symbol_tier)
+    || tryKey(row.timeframe)        // v19.34.160 — bot stamps timeframe='scalp'
     || setupKey
     || 'unknown'
   );
 };
+
+// v19.34.160 — Single source of truth for "is this a scalp position?".
+// Replaces the divergent OpenPositionsV5.isScalpPosition() hardcoded list
+// which only knew about 14 setups vs SETUP_TO_STYLE's 23.
+export const isScalpStyle = (row) => resolveTradeStyle(row) === 'scalp';
 
 /**
  * Convenience: returns the full meta block (label/horizon/tone) for
@@ -235,4 +272,5 @@ export default {
   resolveTradeStyle,
   getTradeStyleMeta,
   humanizeSetupName,
+  isScalpStyle,
 };
