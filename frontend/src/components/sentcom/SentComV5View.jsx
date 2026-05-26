@@ -42,6 +42,8 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
 import { PortfolioHealthPill } from './v5/PortfolioHealthPill';
 import { ScannerQualityPanel } from './v5/ScannerQualityPanel';
+// v19.34.161 — Per-style P&L card (Scalp / Intraday / Swing / Investment / Position).
+import { PnLByStyleCard } from './v5/PnLByStyleCard';
 import { StrategyMixCard } from './v5/StrategyMixCard';
 import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
 import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
@@ -605,6 +607,9 @@ export const SentComV5View = ({
         </PanelErrorBoundary>
         <PanelErrorBoundary label="scanner-quality" compact>
           <ScannerQualityPanel />
+        </PanelErrorBoundary>
+        <PanelErrorBoundary label="pnl-by-style" compact>
+          <PnLByStyleCard />
         </PanelErrorBoundary>
         <PanelErrorBoundary label="cost-basis-sync" compact>
           <CostBasisSyncTile />

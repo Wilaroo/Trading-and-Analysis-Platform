@@ -3053,6 +3053,162 @@ def get_open_trades():
     return {"success": True, "count": len(trades), "trades": trades}
 
 
+# ── v19.34.161 — Per-Style P&L card endpoint ────────────────────────────
+@router.get("/pnl-by-style")
+def get_pnl_by_style(days: int = Query(1, ge=1, le=365)):
+    """Per-trade-style realized-P&L aggregation for the V5 dashboard card.
+
+    Buckets closed trades from `alert_outcomes` (the canonical
+    R-multiple ledger, fed by both enhanced_scanner and pnl_compute)
+    into the 6 trade-style buckets defined in
+    `services/trade_style_classifier.py` — single source of truth
+    shared with the frontend's `tradeStyleMeta.js`.
+
+    Query:
+      days: lookback window in calendar days (default 1 = today;
+            max 365). The card defaults `today=1`, `recent=30`.
+
+    Response:
+    {
+        "success": true,
+        "days": 1,
+        "as_of": "2026-02-13T...Z",
+        "totals": {"n": 12, "win_pct": 50.0, "total_r": 1.45, "total_pnl": 245.30},
+        "styles": [
+            {
+                "style": "scalp",
+                "label": "Scalp",
+                "n": 3, "wins": 2, "losses": 1, "scratches": 0,
+                "win_pct": 66.7, "avg_r": 0.42, "total_r": 1.25,
+                "total_pnl": 145.0,
+                "top_setups": [
+                    {"setup": "vwap_fade", "n": 2, "avg_r": 0.55, "total_r": 1.10}
+                ]
+            },
+            ...
+        ]
+    }
+
+    Read-only. Never blocks the trading loop.
+    """
+    if not _trading_bot or _trading_bot._db is None:
+        raise HTTPException(status_code=503, detail="Trading bot DB not initialized")
+
+    from services.trade_style_classifier import (
+        TRADE_STYLE_META, style_bucket_for_setup, _strip_directional_suffix,
+    )
+    from collections import defaultdict
+    from datetime import timedelta
+    import statistics
+
+    # Cutoff: closed_at >= now - days*86400. ISO-8601 strings are
+    # lexicographically chronological so a plain $gte comparison works.
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    try:
+        docs = list(_trading_bot._db.alert_outcomes.find(
+            {"closed_at": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}},
+            {"_id": 0, "setup_type": 1, "trade_style": 1, "timeframe": 1,
+             "r_multiple": 1, "outcome": 1, "pnl": 1, "net_pnl": 1,
+             "symbol": 1, "closed_at": 1},
+        ))
+    except Exception as e:
+        logger.warning("[pnl-by-style] mongo read failed: %s", e)
+        raise HTTPException(status_code=503, detail=f"alert_outcomes read failed: {e}")
+
+    # Bucket by style.
+    by_style: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for d in docs:
+        style = style_bucket_for_setup(
+            d.get("setup_type"),
+            d.get("trade_style"),
+            d.get("timeframe"),
+        )
+        by_style[style].append(d)
+
+    # Emit deterministic order: scalp → intraday → multi_day → swing →
+    # investment → position → unknown. Skip unknown if it's empty.
+    STYLE_ORDER = ["scalp", "intraday", "multi_day", "swing", "investment", "position", "unknown"]
+
+    styles_out = []
+    grand_n, grand_wins, grand_r, grand_pnl = 0, 0, 0.0, 0.0
+    for style in STYLE_ORDER:
+        rows = by_style.get(style, [])
+        if not rows and style == "unknown":
+            continue
+        n = len(rows)
+        rs = [float(r["r_multiple"]) for r in rows if r.get("r_multiple") is not None]
+        pnls = [float(r.get("net_pnl") or r.get("pnl") or 0.0) for r in rows]
+        wins = sum(1 for r in rs if r > 0)
+        losses = sum(1 for r in rs if r < 0)
+        scratches = sum(1 for r in rs if r == 0)
+        total_r = sum(rs)
+        total_pnl = sum(pnls)
+        avg_r = statistics.fmean(rs) if rs else 0.0
+        win_pct = (100.0 * wins / n) if n else 0.0
+
+        # Top contributing setups within this style (max 3 by total_r).
+        per_setup: Dict[str, Dict[str, Any]] = defaultdict(
+            lambda: {"n": 0, "rs": [], "pnl": 0.0}
+        )
+        for r in rows:
+            base = _strip_directional_suffix(str(r.get("setup_type") or "").lower())
+            per_setup[base]["n"] += 1
+            if r.get("r_multiple") is not None:
+                per_setup[base]["rs"].append(float(r["r_multiple"]))
+            per_setup[base]["pnl"] += float(r.get("net_pnl") or r.get("pnl") or 0.0)
+        top_setups = sorted(
+            (
+                {
+                    "setup": k,
+                    "n": v["n"],
+                    "avg_r": (statistics.fmean(v["rs"]) if v["rs"] else 0.0),
+                    "total_r": sum(v["rs"]),
+                    "total_pnl": v["pnl"],
+                }
+                for k, v in per_setup.items()
+            ),
+            key=lambda x: x["total_r"],
+            reverse=True,
+        )[:3]
+
+        styles_out.append({
+            "style": style,
+            "label": TRADE_STYLE_META[style]["label"],
+            "horizon": TRADE_STYLE_META[style]["horizon"],
+            "n": n,
+            "wins": wins,
+            "losses": losses,
+            "scratches": scratches,
+            "win_pct": round(win_pct, 1),
+            "avg_r": round(avg_r, 3),
+            "total_r": round(total_r, 3),
+            "total_pnl": round(total_pnl, 2),
+            "top_setups": top_setups,
+        })
+
+        grand_n += n
+        grand_wins += wins
+        grand_r += total_r
+        grand_pnl += total_pnl
+
+    totals = {
+        "n": grand_n,
+        "wins": grand_wins,
+        "win_pct": round((100.0 * grand_wins / grand_n) if grand_n else 0.0, 1),
+        "total_r": round(grand_r, 3),
+        "total_pnl": round(grand_pnl, 2),
+    }
+
+    return {
+        "success": True,
+        "days": days,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "totals": totals,
+        "styles": styles_out,
+    }
+
+
 @router.get("/trades/closed")
 def get_closed_trades(
     limit: int = Query(50, ge=1, le=500),
