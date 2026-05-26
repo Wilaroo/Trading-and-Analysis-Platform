@@ -1932,6 +1932,18 @@ class OpportunityEvaluator:
                 mult_ctx["volatility"] = pos_m.get("volatility", 1.0)
                 mult_ctx["regime"]     = pos_m.get("regime", 1.0)
                 mult_ctx["vp_path"]    = pos_m.get("vp_path", 1.0)
+                # v19.34.159 — surface v156 grade-scaling + v157 mean-reversion
+                # regime fields that previously landed in `position_multipliers`
+                # but never propagated to `entry_context.multipliers`. Operator
+                # needs these for the "Why this size?" UI tooltip so every fill
+                # explains its own sizing chain (grade × regime × MR-fit).
+                # Defensive: each key is only emitted when present, so legacy
+                # trades (pre-v156) still render cleanly.
+                for _k in ("grade", "grade_multiplier",
+                          "mr_regime", "mr_multiplier",
+                          "mr_hurst", "mr_half_life_bars", "mr_reason"):
+                    if _k in pos_m and pos_m[_k] is not None:
+                        mult_ctx[_k] = pos_m[_k]
 
             sg = multipliers_meta.get("stop_guard") or {}
             if isinstance(sg, dict) and sg:

@@ -43,6 +43,10 @@ import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
 import PositionThoughtsInline from './PositionThoughtsInline';
 // v19.34.72 — Operator Close panel (Market/Limit + percentage).
 import CloseTradeModal from './CloseTradeModal';
+// v19.34.159 — "Why this size?" hover/click pill that surfaces the
+// v156 grade-scaling × v157 MR-regime sizing chain stamped on every
+// fill in `entry_context.multipliers`.
+import WhyThisSizePill from './WhyThisSizePill';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -617,6 +621,9 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             {position.market_regime && (
               <span>· regime {position.market_regime}</span>
             )}
+            {/* v19.34.159 — sizing-chain explainer (only renders when
+                entry_context.multipliers has at least one v156/v157 key). */}
+            <WhyThisSizePill multipliers={position?.entry_context?.multipliers} />
           </div>
 
           {/* v19.34.11 — Bracket lifecycle history (lazy-loaded on click) */}
