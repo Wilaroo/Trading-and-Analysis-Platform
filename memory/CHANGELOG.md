@@ -1,3 +1,77 @@
+## 2026-02-?? — v19.34.153: P0 EOD ghost-flatten + T-2/T-1 fallbacks (READY-FOR-DGX-APPLY)
+
+### Trigger
+2026-05-XX EOD: bot's `check_eod_close` ran at 3:55 ET and closed only
+3 of 23 IB-side positions. The other 20 were "ghosts" — filled at IB
+but missing from `bot._open_trades` (broken bracket plumbing dropped
+them on entry). Operator had to manually flatten the rest in TWS to
+avoid overnight margin exposure. `check_position_memory_disagreement`
+already *detected* this case (v19.34.152) but only emitted an alarm —
+it never closed the positions.
+
+### What shipped
+- **`backend/services/ib_direct_service.py`** — new
+  `place_emergency_mkt_close(symbol, qty, action, ...)`:
+    * Cancels every open working order for the symbol first
+      (eliminates the OCA-race / Reg-T storm that caused the 4:01 PM
+      cancel cascade on the 2026-05-XX incident).
+    * Submits a raw DAY MKT close for the requested qty/action.
+    * Waits up to 8s for terminal status and returns a dict matching
+      the `place_close_market` contract.
+- **`backend/services/position_manager.py`** — four new methods +
+  `check_eod_close` integration:
+    * `_recent_swing_symbols_safe(bot, symbols)` — tight swing
+      exception (operator choice 3B): only `close_at_eod=False` rows
+      with `executed_at` within the last 48h count as legitimate
+      hold-overs. Stale / abandoned swing rows can no longer mask a
+      genuine ghost.
+    * `_flatten_ghost_positions(bot, reason=...)` — snapshots IB
+      ground truth via `_ib_position_snapshot_safe()`, computes
+      `ghosts = ib_positions − bot._open_trades − recent_swing`,
+      fires emergency MKT closes in parallel, persists an
+      `eod_ghost_flatten` row to `bot_events`, broadcasts a WS event.
+      Per-symbol-per-day fire cap (3 retries max; successful fires
+      never re-fire) → no order-rate blowup.
+    * `_eod_t_minus_2_escalate(bot)` — at 3:58 ET / 12:58 half-day,
+      forces a MKT close on any tracked intraday trade still open.
+      Idempotent per day.
+    * `_eod_t_minus_1_alert(bot)` — at 3:59 ET / 12:59 half-day,
+      loud `CRITICAL` operator alert via log + WS + `emit_stream_event`
+      if anything (tracked or ghost) is still open. Idempotent per day.
+- **`check_eod_close` flow** rewired (operator choice 2B): the
+  `_eod_close_executed_today` early-return now sits AFTER the
+  ghost-flatten / T-2 / T-1 block, so a successful main close pass at
+  3:55 does NOT short-circuit late-arriving-ghost recovery between
+  3:55 and 4:00.
+- **`backend/scripts/eod_ghost_dry_run.py`** — operator dry-run tool.
+  Default mode is READ-ONLY: prints which IB symbols would be flagged
+  as ghosts and which exact emergency MKT (`BUY n`/`SELL n`) would
+  fire. Pass `--live` to actually submit (off-hours these will queue
+  and not execute, perfect smoke test).
+- **`backend/tests/test_eod_ghost_flatten_v19_34_153.py`** — 7
+  offline unit tests covering: empty-IB no-op, tracked-symbol skip,
+  long-ghost SELL, short-ghost BUY, recent-swing skip, "successful
+  fire does not repeat", "failed fire retries 3× then permanent skip".
+  All 7 pass in the fork container; no DGX hardware required.
+
+### Operator workflow on DGX
+```
+git pull
+PYTHONPATH=backend python3 backend/scripts/eod_ghost_dry_run.py
+# Confirm no false positives in printed ghost set, then optionally:
+PYTHONPATH=backend python3 backend/scripts/eod_ghost_dry_run.py --live
+sudo supervisorctl restart backend  # only if backend doesn't hot-reload
+```
+
+### Verification (operator-side, next session)
+* Pre-market: run dry-run with NO open positions → expects
+  `Ghost positions detected: 0`.
+* Mid-session: open one tracked trade, then manually remove it from
+  `bot._open_trades` (or wait for a real bracket-attach failure to
+  produce a ghost) → at 3:55 ET ghost-flatten should fire and an
+  `eod_ghost_flatten` row should land in `bot_events`.
+
+
 ## 2026-02-?? — v19.34.89.1: forensics + clean retro analyzers (SHIPPED — DGX `911496c8`)
 
 ### Trigger

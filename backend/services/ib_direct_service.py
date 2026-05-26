@@ -720,6 +720,162 @@ class IBDirectService:
                     "error": f"ib_direct_close_error: {str(e)[:200]}",
                     "broker": "ib_direct", "simulated": False}
 
+    # ── v19.34.153 (P0 EOD ghost-flatten) ────────────────────────────────
+    # Minimal raw MKT-close path used by EOD ghost-flatten + T-2 escalation.
+    # Differs from `place_close_market` in that it takes raw (symbol, qty,
+    # action) — NOT a `BotTrade` object — because by definition ghost
+    # positions exist at IB but NOT in `bot._open_trades`, so there is no
+    # `BotTrade` to feed `place_close_market`.
+    #
+    # Behaviour:
+    #   1. Cancel ALL working orders for the symbol (eliminates the OCA-
+    #      race / Reg-T storm that broke the 4:01 PM 2026-05-XX session).
+    #   2. Submit a single DAY MKT order for the requested qty/action.
+    #   3. Optionally wait for terminal status (default 8s) so the caller
+    #      can decide whether to escalate or alarm.
+    async def place_emergency_mkt_close(
+        self,
+        symbol: str,
+        qty: int,
+        action: str,                # "BUY" (cover short) | "SELL" (close long)
+        *,
+        wait_for_fill_s: float = 8.0,
+        sec_type: str = "STK",
+        exchange: str = "SMART",
+        currency: str = "USD",
+        cancel_working_first: bool = True,
+    ) -> Dict[str, Any]:
+        """v19.34.153 — Raw emergency MKT close for ghost positions.
+        Returns the same dict shape as `place_close_market`.
+        """
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected",
+                    "broker": "ib_direct", "simulated": False}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode",
+                    "broker": "ib_direct", "simulated": False}
+        if not self.is_authorized_to_trade():
+            return {"success": False,
+                    "error": "ib_direct_not_authorized_managed_accounts_empty",
+                    "broker": "ib_direct", "simulated": False}
+
+        sym = str(symbol).upper().strip()
+        try:
+            q = int(abs(int(qty)))
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"bad qty: {qty}",
+                    "broker": "ib_direct", "simulated": False}
+        if q <= 0:
+            return {"success": False, "error": f"non-positive qty: {qty}",
+                    "broker": "ib_direct", "simulated": False}
+        act = (action or "").upper().strip()
+        if act not in ("BUY", "SELL"):
+            return {"success": False, "error": f"bad action: {action}",
+                    "broker": "ib_direct", "simulated": False}
+
+        # Step 1 — cancel any working orders on this symbol so the MKT
+        # doesn't collide with a half-attached bracket / dangling stop.
+        cancelled_ids: List[int] = []
+        if cancel_working_first:
+            try:
+                for t in list(self._ib.trades()):
+                    try:
+                        if (str(t.contract.symbol).upper() != sym):
+                            continue
+                        st = (t.orderStatus.status or "").lower() if t.orderStatus else ""
+                        if st in ("filled", "cancelled", "apicancelled",
+                                  "inactive", "rejected"):
+                            continue
+                        self._ib.cancelOrder(t.order)
+                        cancelled_ids.append(int(t.order.orderId))
+                    except Exception:
+                        continue
+                if cancelled_ids:
+                    logger.info(
+                        "[v19.34.153 EMERGENCY-MKT] %s: cancelled %d working "
+                        "order(s) pre-flatten: %s",
+                        sym, len(cancelled_ids), cancelled_ids,
+                    )
+                    # Give IB a moment to register the cancels.
+                    await asyncio.sleep(0.4)
+            except Exception as cancel_err:
+                logger.warning(
+                    "[v19.34.153 EMERGENCY-MKT] %s: pre-cancel sweep failed: %s",
+                    sym, cancel_err,
+                )
+
+        # Step 2 — submit MKT.
+        try:
+            contract = Stock(sym, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            order = MarketOrder(act, q)
+            try:
+                order.tif = "DAY"
+            except Exception:
+                pass
+            close_trade = self._ib.placeOrder(contract, order)
+            ib_order_id = int(close_trade.order.orderId)
+
+            deadline = asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
+            ib_status = "submitted"
+            filled_qty = 0
+            avg_fill = 0.0
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(0.25)
+                status_obj = close_trade.orderStatus
+                if status_obj is None:
+                    continue
+                ib_status = (status_obj.status or "submitted").lower()
+                filled_qty = int(status_obj.filled or 0)
+                avg_fill = float(status_obj.avgFillPrice or 0.0)
+                if ib_status in ("filled", "cancelled", "apicancelled",
+                                 "inactive", "rejected"):
+                    break
+                if filled_qty >= q:
+                    ib_status = "filled"
+                    break
+
+            if ib_status == "filled":
+                status_out, success = "filled", True
+            elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
+                status_out, success = "rejected", False
+            elif 0 < filled_qty < q:
+                status_out, success = "partial", True
+            else:
+                status_out, success = "submitted", False
+
+            logger.warning(
+                "[v19.34.153 EMERGENCY-MKT] %s %s qty=%d -> order_id=%d "
+                "status=%s filled=%d avg=%.4f cancelled_pre=%s",
+                sym, act, q, ib_order_id, status_out,
+                filled_qty, avg_fill, cancelled_ids,
+            )
+            return {
+                "success": success,
+                "order_id": ib_order_id,
+                "ib_order_id": ib_order_id,
+                "fill_price": (avg_fill if filled_qty > 0 else None),
+                "filled_qty": filled_qty,
+                "remaining_qty": max(0, q - filled_qty),
+                "status": status_out,
+                "broker": "ib_direct",
+                "simulated": False,
+                "cancelled_pre_flatten": cancelled_ids,
+                "symbol": sym,
+                "action": act,
+                "qty": q,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.153 EMERGENCY-MKT] place_emergency_mkt_close failed "
+                "for %s %s %d: %s", sym, act, q, e,
+            )
+            return {"success": False,
+                    "error": f"ib_direct_emergency_mkt_error: {str(e)[:200]}",
+                    "broker": "ib_direct", "simulated": False,
+                    "cancelled_pre_flatten": cancelled_ids,
+                    "symbol": sym, "action": act, "qty": q}
+
     async def place_close_limit(
         self,
         trade,
