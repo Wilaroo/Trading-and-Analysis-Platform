@@ -19,10 +19,14 @@ Six checks
                    bars roll up cleanly from the underlying `1 min`
                    bars (open=first.open, close=last.close,
                    high=max.high, low=min.low, vol=sum.volume).
-5.  UNIVERSE       Compare `smart_watchlist` collection (the bot's
-                   active scanner universe) to the symbols actually
-                   delivering bars in the last 24h. Lists missing
-                   subscriptions.
+5.  UNIVERSE       Compare `symbol_adv_cache` (the bot's tiered
+                   scanner universe — `intraday`, `swing`,
+                   `investment` tiers filtered by
+                   `unqualifiable!=True` AND `avg_dollar_volume>0`)
+                   to the symbols actually delivering bars at the
+                   tier's EXPECTED bar size in the lookback window.
+                   Reports per-tier missing + any "ghost
+                   subscriptions" (delivered but not in any tier).
 6.  QUARTER_SLICE  Optional via `--quarter Q1|Q2|Q3|Q4 --year 2025`.
                    Re-runs checks 1-3 over the specified calendar
                    quarter — useful for postmortem of bar-pipeline
@@ -379,37 +383,119 @@ def check_aggregation_consistency(db, *, sample_size: int = 5) -> dict:
 
 
 def check_universe(db, *, lookback_hours: int = 24) -> dict:
-    """Check 5: smart_watchlist vs symbols delivering bars."""
-    # Universe — the bot's active scanner watchlist.
-    universe_docs = list(db.smart_watchlist.find(
-        {"_type": "watchlist_item"},
-        {"_id": 0, "symbol": 1, "pinned": 1, "expires_at": 1},
-    ))
-    universe = {(d.get("symbol") or "").upper() for d in universe_docs if d.get("symbol")}
+    """Check 5: `symbol_adv_cache` tier-segmented universe vs symbols
+    actually delivering bars at the expected bar size for each tier.
 
+    Tier → expected bar size(s) mapping (per `bar_poll_service.py` /
+    `ib_historical_collector.collect_data_plan`):
+      • intraday   → "1 min" + "5 mins"   (highest cadence)
+      • swing      → "15 mins" + "1 hour"
+      • investment → "1 day"
+
+    A symbol is "missing" if it's in the qualified ADV tier
+    (`unqualifiable != True`, `avg_dollar_volume > 0`) BUT no bars of
+    any expected bar_size for that tier landed in the lookback window.
+    `smart_watchlist` is intentionally NOT used here — it's a
+    hybrid manual/auto pin list, not the scanner's bar-subscription
+    source. v19.34.155 P2-2 caught this incorrect assumption.
+    """
     cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
-    delivered = set(
-        (s or "").upper()
-        for s in db.ib_historical_data.distinct(
-            "symbol", {"collected_at": {"$gte": cutoff_iso}}
+
+    TIER_BAR_SIZES = {
+        "intraday":   ["1 min", "5 mins"],
+        "swing":      ["15 mins", "1 hour"],
+        "investment": ["1 day"],
+    }
+
+    tier_breakdown: Dict[str, Dict[str, Any]] = {}
+    sev = PASS
+    all_missing_combined: List[dict] = []
+    universe_total = 0
+
+    for tier, bar_sizes in TIER_BAR_SIZES.items():
+        try:
+            universe = {
+                (d.get("symbol") or "").upper()
+                for d in db.symbol_adv_cache.find(
+                    {"tier": tier,
+                     "unqualifiable": {"$ne": True},
+                     "avg_dollar_volume": {"$gt": 0}},
+                    {"_id": 0, "symbol": 1},
+                )
+                if d.get("symbol")
+            }
+        except Exception as e:
+            tier_breakdown[tier] = {
+                "error": f"symbol_adv_cache read failed: {type(e).__name__}: {str(e)[:120]}",
+                "universe_size": 0, "delivered": 0, "missing_count": 0,
+                "missing_top": [],
+            }
+            sev = _max_sev(sev, WARN)
+            continue
+
+        delivered = set(
+            (s or "").upper()
+            for s in db.ib_historical_data.distinct(
+                "symbol",
+                {"bar_size": {"$in": bar_sizes},
+                 "collected_at": {"$gte": cutoff_iso}},
+            )
+            if s
         )
-        if s
-    )
 
-    missing = sorted(universe - delivered)
-    extra = sorted(delivered - universe)
+        missing = sorted(universe - delivered)
+        universe_total += len(universe)
+        if missing:
+            sev = _max_sev(sev, WARN)
+            all_missing_combined.extend(
+                {"symbol": m, "tier": tier} for m in missing[:20]
+            )
+        tier_breakdown[tier] = {
+            "universe_size": len(universe),
+            "delivered_in_window": len(delivered & universe),
+            "missing_count": len(missing),
+            "missing_top": missing[:20],
+            "expected_bar_sizes": bar_sizes,
+        }
 
-    sev = WARN if missing else PASS
+    # Extra check: any symbols delivering bars but NOT in ANY tier of
+    # the cache (would be a "ghost subscription" — pipeline pulling
+    # data for something the scanner doesn't want).
+    try:
+        all_qualified = {
+            (d.get("symbol") or "").upper()
+            for d in db.symbol_adv_cache.find(
+                {"unqualifiable": {"$ne": True}, "avg_dollar_volume": {"$gt": 0}},
+                {"_id": 0, "symbol": 1},
+            )
+            if d.get("symbol")
+        }
+        all_delivered = set(
+            (s or "").upper()
+            for s in db.ib_historical_data.distinct(
+                "symbol", {"collected_at": {"$gte": cutoff_iso}},
+            )
+            if s
+        )
+        ghost_subscriptions = sorted(all_delivered - all_qualified)
+    except Exception:
+        ghost_subscriptions = []
+
     return {
         "check": "UNIVERSE",
         "severity": sev,
-        "summary": (f"{len(missing)} of {len(universe)} watchlist symbols had "
-                    f"NO bars in last {lookback_hours}h"),
-        "universe_size": len(universe),
-        "delivered_in_window": len(delivered),
-        "missing_from_pipeline_top": missing[:20],
-        "extra_not_in_watchlist_top": extra[:20],
+        "summary": (
+            "adv-cache tiers: " +
+            ", ".join(
+                f"{t}={tb.get('missing_count', '?')}/{tb.get('universe_size', '?')} missing"
+                for t, tb in tier_breakdown.items()
+            )
+        ),
         "lookback_hours": lookback_hours,
+        "universe_total_qualified": universe_total,
+        "tiers": tier_breakdown,
+        "ghost_subscriptions_top": ghost_subscriptions[:20],
+        "ghost_subscription_count": len(ghost_subscriptions),
     }
 
 
@@ -488,14 +574,27 @@ def _print_report(report: dict) -> None:
                 ms = ", ".join(f.get("mismatches") or [])
                 print(f"          • {f['symbol']:<8} {f.get('date')}  {ms or f.get('issue')}")
         elif c["check"] == "UNIVERSE":
-            if c.get("missing_from_pipeline_top"):
-                print(f"          missing from pipeline: "
-                      f"{', '.join(c['missing_from_pipeline_top'][:10])}"
-                      + ("…" if len(c['missing_from_pipeline_top']) > 10 else ""))
-            if c.get("extra_not_in_watchlist_top"):
-                print(f"          extra (delivered but not watch'd): "
-                      f"{', '.join(c['extra_not_in_watchlist_top'][:10])}"
-                      + ("…" if len(c['extra_not_in_watchlist_top']) > 10 else ""))
+            for tier, tb in (c.get("tiers") or {}).items():
+                if tb.get("error"):
+                    print(f"          ⚠ {tier}: {tb['error']}")
+                    continue
+                miss_top = tb.get("missing_top") or []
+                exp_bars = ",".join(tb.get("expected_bar_sizes") or [])
+                print(f"          {tier:<10} universe={tb['universe_size']:<5} "
+                      f"delivered={tb['delivered_in_window']:<5} "
+                      f"missing={tb['missing_count']}  (bars: {exp_bars})")
+                if miss_top:
+                    sample = ", ".join(miss_top[:8])
+                    if len(miss_top) > 8:
+                        sample += "…"
+                    print(f"            missing: {sample}")
+            if c.get("ghost_subscription_count", 0) > 0:
+                ghosts = c.get("ghost_subscriptions_top") or []
+                sample = ", ".join(ghosts[:8])
+                if len(ghosts) > 8:
+                    sample += "…"
+                print(f"          ghost subs (delivered but not in any tier): "
+                      f"{c['ghost_subscription_count']} → {sample}")
         elif c["check"] == "QUARTER_SLICE" and c.get("low_volume_top"):
             for f in c["low_volume_top"][:5]:
                 print(f"          • {f['symbol']:<8} {f['day']}  count={f['count']}")

@@ -42,10 +42,15 @@ producing PASS / WARN / FAIL with detail:
      close=last.close, high=max.high, low=min.low, volume ±10%).
      Catches the kind of aggregation join bug the restoration phase
      was meant to eliminate.
-  5. **UNIVERSE** — `smart_watchlist` collection (the bot's active
-     scanner universe, `_type=watchlist_item`) vs symbols actually
-     delivering bars in the last 24h. Lists missing subscriptions
-     AND extra symbols delivered without a watchlist entry.
+  5. **UNIVERSE** — **`symbol_adv_cache`** (the bot's tiered scanner
+     universe: `intraday` / `swing` / `investment`, filtered by
+     `unqualifiable != True` AND `avg_dollar_volume > 0`) vs symbols
+     actually delivering bars at each tier's EXPECTED bar size in
+     the lookback window. Reports per-tier missing AND any "ghost
+     subscriptions" (delivered but not in any tier). v1 of this
+     diagnostic incorrectly used `smart_watchlist` — that's a hybrid
+     manual/auto pin list, NOT the scanner's bar-subscription source;
+     operator caught it in review. Corrected the same day.
   6. **QUARTER_SLICE** (optional via `--quarter Q1|Q2|Q3|Q4 --year YYYY`):
      re-runs RTH-volume coverage over a full calendar quarter. Useful
      for postmortem of pipeline restoration history.
