@@ -969,8 +969,19 @@ class TradingBotService:
         # — see `check_eod_close` filter); swing/position trades are
         # explicitly kept overnight.
         self._eod_close_enabled = True
+        # v19.34.154 — EOD close window shifted 3:55 ET → 3:45 ET to beat
+        # IBKR's Reg-T SMA calculation at 3:50 ET. Per operator's IBKR
+        # research (2026-02-XX session): IBKR switches from intraday-
+        # margin to overnight-Reg-T at 3:50 ET and starts force-
+        # liquidating any account in deficit between 3:50-4:00 ET. The
+        # bot's 3:55 close was fighting that auto-liquidator, generating
+        # the 180×/min Error-201 cancel storms operator observed. Closing
+        # intraday/scalp positions at 3:45 ET (the Soft Edge Margin
+        # cutoff) gives IB headroom for its own 3:50 calc and eliminates
+        # the storm. Swing/position trades (`close_at_eod=False`) are
+        # untouched — they're explicitly held overnight.
         self._eod_close_hour = 15  # 3 PM ET
-        self._eod_close_minute = 55  # 3:55 PM ET
+        self._eod_close_minute = 45  # 3:45 PM ET (was 55 — pre-v19.34.154)
         self._eod_close_executed_today = False
         # ── v19.34.113 — EOD setup grading ──────────────────────────
         # Fires 15 min after the EOD close (16:10 ET) so every scalp/

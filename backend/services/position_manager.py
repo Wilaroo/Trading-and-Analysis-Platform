@@ -1081,17 +1081,40 @@ class PositionManager:
                     f"v19.34.153: ghost-flatten failed inside check_eod_close: {gf_err}"
                 )
 
-            # T-2 min escalate (e.g. 15:58 ET regular, 12:58 half-day):
-            # if any tracked intraday trade is still open, force MKT.
-            t2_h = market_close_hour - 1
-            if now_et.hour == t2_h and now_et.minute >= 58:
+            # ── v19.34.154 — T-offsets are now RELATIVE to eod_minute ──
+            # Pre-v154 these were hardcoded to `>= 58 / >= 59` (assuming
+            # market_close_hour-1). With EOD shifted from 3:55→3:45 to
+            # beat IBKR's 3:50 Reg-T calc, we need the escalation to
+            # also shift. Anchor everything to `eod_minute` so the
+            # cascade scales with whatever close time is configured:
+            #   eod_minute + 2  → T-2 force-MKT on tracked stragglers
+            #   eod_minute + 3  → T-1 operator alert
+            # For the v154 default (eod_minute=45), this fires at:
+            #   3:47 ET — force MKT
+            #   3:48 ET — operator alert
+            # → 2 full minutes of headroom before IBKR's 3:50 Reg-T calc.
+            # Half-day fallback still uses market_close_hour-1 minute 58/59
+            # because half-days don't have the Reg-T deadline issue
+            # (closes at 1:00 with no overnight rollover concern).
+            if is_half_day:
+                # Half-day path unchanged (pre-v154 behaviour).
+                t2_h = market_close_hour - 1
+                fire_t2 = (now_et.hour == t2_h and now_et.minute >= 58)
+                fire_t1 = (now_et.hour == t2_h and now_et.minute >= 59)
+            else:
+                # Regular-day: relative to eod_minute.
+                t2_minute = eod_minute + 2
+                t1_minute = eod_minute + 3
+                fire_t2 = (now_et.hour == eod_hour and now_et.minute >= t2_minute)
+                fire_t1 = (now_et.hour == eod_hour and now_et.minute >= t1_minute)
+
+            if fire_t2:
                 try:
                     await self._eod_t_minus_2_escalate(bot)
                 except Exception as t2_err:
                     logger.error(f"v19.34.153: T-2 escalate failed: {t2_err}")
 
-            # T-1 min alert (e.g. 15:59 ET / 12:59 half-day).
-            if now_et.hour == t2_h and now_et.minute >= 59:
+            if fire_t1:
                 try:
                     await self._eod_t_minus_1_alert(bot)
                 except Exception as t1_err:
@@ -1212,7 +1235,29 @@ class PositionManager:
                 )
                 return ("fail", trade.symbol)
 
-        results = await asyncio.gather(*(_close_one(p) for p in eod_trades.items()))
+        # v19.34.154 — Sort by InitMarginReq proxy DESC (largest first).
+        # Operator choice 3:43 ET defensive flatten 2a: close the largest-
+        # margin positions first so each successful close maximally
+        # restores Reg-T headroom before IBKR's 3:50 ET calc. For Reg-T
+        # on stocks, InitMargin ≈ 50% of notional, so `shares × entry_px`
+        # is a reliable proxy without needing a fresh IB account query.
+        # Ties broken by symbol for deterministic test behaviour.
+        def _margin_proxy(tt):
+            _tid, _trade = tt
+            try:
+                shares = abs(int(getattr(_trade, "remaining_shares", 0)
+                                  or getattr(_trade, "shares", 0)))
+                px = float(getattr(_trade, "entry_price", 0)
+                           or getattr(_trade, "entry_avg", 0)
+                           or 0.0)
+                return shares * px
+            except Exception:
+                return 0.0
+        eod_items_sorted = sorted(
+            eod_trades.items(),
+            key=lambda kv: (-_margin_proxy(kv), kv[1].symbol),
+        )
+        results = await asyncio.gather(*(_close_one(p) for p in eod_items_sorted))
         closed_count = sum(1 for r in results if r[0] == "ok")
         total_pnl = sum(r[1] for r in results if r[0] == "ok")
         failed_symbols = [r[1] for r in results if r[0] == "fail"]

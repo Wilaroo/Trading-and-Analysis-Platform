@@ -1,3 +1,141 @@
+## 2026-02-?? — v19.34.154: P1 bracket plumbing + Reg-T compliance (READY-FOR-DGX-APPLY)
+
+### Trigger
+Two related P1s from the post-v19.34.153 backlog:
+  1. **TP-leg fails to attach ~65% of the time** — `place_oca_stop_target`
+     stamped `success=True` as soon as both `placeOrder` calls returned,
+     but IB could (and frequently did) reject the LMT asynchronously
+     ~100-2000ms later (Reg-T 201, price-band 110, HTB 203, etc.).
+     The bot then treated the position as bracketed when it was naked
+     at IB.
+  2. **Reconciler thrash + Reg-T error storms** — when the LMT vanished
+     from IB's working orders, the reconciler re-attached on every
+     tick (180×/min observed on COR 2026-05-XX). Each retry blew up
+     Reg-T further, snowballing into a full session-ending cascade.
+
+Plus the user's critical operational insight: **IBKR switches from
+intraday-margin to overnight-Reg-T at 3:50 ET, with the Soft Edge
+Margin grace period expiring at 3:45 ET.** Our 3:55 ET EOD close was
+five full minutes inside IBKR's force-liquidation window, which was
+where the Error-201 storms were actually coming from.
+
+### What shipped (5 components, all independently tested)
+
+1. **EOD close window shifted 3:55 → 3:45 ET**
+   * `backend/services/trading_bot_service.py`: `_eod_close_minute` default
+     changed from 55 to 45. Closes intraday/scalp positions BEFORE IBKR's
+     Reg-T calc, not during it.
+   * `backend/services/position_manager.py` `check_eod_close`: T-offsets
+     (force-MKT escalate, operator alert) are now RELATIVE to `eod_minute`
+     instead of hardcoded to `>= 58/59`. With v154 defaults this gives:
+     3:45 close → 3:47 force-MKT → 3:48 operator alert → 3:50 IBKR Reg-T calc.
+     Half-day path (12:55 close) is preserved.
+   * Main close pass now sorts `eod_trades` by `shares × entry_price` DESC
+     (proxy for InitMarginReq) so the largest-margin positions close first
+     — maximises Reg-T headroom per successful fill (operator choice 2a).
+
+2. **IB `errorEvent` capture layer** (foundation for #3 & #4)
+   * `backend/services/ib_direct_service.py`: new `_order_errors: Dict[int, list]`
+     populated by an `errorEvent` callback subscribed in `connect()`. Maps
+     `reqId` (= IB orderId) to `[(error_code, error_msg, ts), ...]` with
+     a 5-min ring-buffer and 16-entry per-order cap.
+   * New helpers `get_order_errors(order_id, drain=False)` and
+     `has_permanent_failure_error(order_id) -> Optional[int]` (returns
+     the code if 201 / 203 / 110 / 320 / 321 / 103, else None).
+
+3. **`place_oca_stop_target` post-place polling**
+   * After both `placeOrder` calls, polls for `IB_BRACKET_POLL_S` (default
+     1.5s) checking BOTH `orderStatus` AND `_order_errors` for terminal
+     reject codes.
+   * Returns enriched dict: `stop_status`, `target_status`,
+     `stop_error_code`, `target_error_code`, `permanent_failure`,
+     `stop_terminal_reject`.
+   * **STP terminal reject** → automatically cancels the TP (prevents
+     one-sided exposure), returns `success=False`. Caller is expected
+     to emergency-flatten the now-naked position.
+   * **TP terminal reject with permanent code** → STP stays alive,
+     returns `success=True` + `partial=True`. Caller may retry later.
+   * **TP terminal reject with no permanent code** (operator-cancelled,
+     OCA-survivor-cancel, etc.) → same as above; not a permablock.
+
+4. **`backend/services/bracket_attach_governor.py`** (NEW)
+   * Process-singleton via `get_governor()`. Three guard-rails:
+     * **Hard 3:45 ET cutoff** — no bracket attempts past 15:45 ET
+       (configurable via `BRACKET_GOV_CUTOFF_HOUR/MINUTE` env vars).
+     * **Permanent block on IB error 201 / 203 / 110 / 320 / 321 / 103**
+       — symbol is locked for the rest of the trading day. Per-day
+       state, auto-pruned at day rollover.
+     * **Attempt cap** — 5 failed attempts in a 300s rolling window
+       per symbol (configurable). Successful attaches DO NOT
+       contribute to the cap.
+   * `mark_logged(symbol)` returns True-once-per-day → reconciler no
+     longer spams the backend log on every manage tick when a symbol
+     is blocked.
+   * `unblock(symbol)` for operator override.
+
+5. **`backend/services/trade_executor_service.py` `attach_oca_stop_target`
+   integration**
+   * Pre-attach: calls `governor.should_attempt_attach(symbol)`. If
+     blocked, returns `{"success": False, "governor_blocked": True,
+     "governor_reason": "..."}` WITHOUT touching IB. Reconciler
+     existing failure-handling logs and retries on next tick (which
+     will also be blocked) — no IB order rate hit.
+   * Post-attach: calls `governor.record_outcome(symbol, oca_result)`.
+     If `stop_terminal_reject=True` (STP leg rejected), automatically
+     fires `ib_direct.place_emergency_mkt_close(symbol, qty, action)`
+     to flatten the naked position. Result stamped on
+     `oca_result["emergency_flatten_result"]` for postmortem.
+
+### New API endpoints
+* `GET  /api/trading-bot/bracket-attach/state` — read-only governor snapshot
+  (today's blocks + attempt counts + config).
+* `POST /api/trading-bot/bracket-attach/unblock` — operator override,
+  body `{"symbol": "BMNR"}`.
+
+### New scripts
+* `backend/scripts/bracket_governor_dry_run.py` — pretty-prints the
+  governor state via the new GET endpoint. `--json` for raw output.
+
+### Tests (all offline, no DGX required)
+* `tests/test_bracket_attach_governor_v154.py` — 13 cases covering all
+  three guard-rails + operator override + log-dedup.
+* `tests/test_place_oca_stop_target_polling_v154.py` — 5 cases with a
+  fake `_ib` stub: happy path, TP 201 → partial, STP 201 → cancel TP +
+  success=False, TP cancel-no-code → partial-not-permablock, polling
+  bound.
+* Existing v153 ghost-flatten suite (7 cases) still passes.
+* **Total: 25/25 tests passing in 4.5s.**
+
+### Operator workflow on DGX
+```
+git pull
+sudo supervisorctl restart backend   # required because trading_bot.py + ib_direct_service.py touched
+
+# Sanity check (anytime):
+PYTHONPATH=backend python3 backend/scripts/bracket_governor_dry_run.py
+
+# If a symbol gets stuck blocked (operator confident the Reg-T condition cleared):
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"symbol":"COR"}' \
+     $REACT_APP_BACKEND_URL/api/trading-bot/bracket-attach/unblock
+
+# Bracket-attach poll window tunable (default 1.5s):
+export IB_BRACKET_POLL_S=2.0   # slower-fill venues; safer reject detection
+```
+
+### Expected operator-visible behaviour change
+* **3:45 ET (regular session):** All intraday/scalp closes fire IMMEDIATELY
+  (largest-margin first). 3:47 ET force-MKT for stragglers. 3:48 ET
+  operator alert if anything remains. By 3:50 ET when IBKR computes
+  Reg-T, the account should be flat on intraday positions.
+* **Bracket attach failures stop spinning.** A symbol that hits Error 201
+  is permablocked for the day → reconciler skips it. No more 180×/min
+  cancel storms.
+* **STP-leg rejects auto-flatten.** A position whose stop fails to attach
+  is immediately closed via emergency MKT (operator no longer needs to
+  catch this manually in TWS).
+
+
 ## 2026-02-?? — v19.34.153: P0 EOD ghost-flatten + T-2/T-1 fallbacks (READY-FOR-DGX-APPLY)
 
 ### Trigger
