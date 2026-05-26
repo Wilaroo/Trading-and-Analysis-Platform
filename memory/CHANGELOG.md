@@ -1,3 +1,31 @@
+## 2026-02-?? — v19.34.158: Test-isolation fix for v153 ghost-flatten + v154 polling co-execution (SHIPPED-TO-DGX)
+
+### Trigger
+When running the full v153→v157 test suite in a single `pytest` invocation,
+the 5 `test_place_oca_stop_target_polling_v154.py` cases errored with
+`ImportError: cannot import name 'IBDirectService' from 'services.ib_direct_service' (unknown location)`,
+even though each file passed individually. Root cause: `test_eod_ghost_flatten_v19_34_153.py`
+runs alphabetically first and seeded `sys.modules["services.ib_direct_service"]`
+with a bare `types.ModuleType` stub. The stub had no `IBDirectService` class,
+so the polling test's later `from services.ib_direct_service import IBDirectService`
+imported the poisoned stub instead of the real module.
+
+### What shipped
+**File: `backend/tests/test_eod_ghost_flatten_v19_34_153.py`** (+9/-3 LOC)
+* Force-import the REAL `services.ib_direct_service` module *first*, then
+  patch only the `get_ib_direct_service` factory attribute on it.
+* Falls back to the original `ModuleType` stub only if the real import
+  fails (i.e. when `ib_async` isn't installed — preserves CI portability).
+
+### Tests
+* Full v153→v157 suite: **114/114 passing in 4.66s** (workspace + DGX).
+* Single-file runs still pass (no regression in isolation).
+
+### Operator workflow on DGX
+Applied via paste.rs patch `https://paste.rs/ro1hg` → `git apply` →
+confirmed by user: `114 passed, 1 warning in 4.56s`.
+
+
 ## 2026-02-?? — v19.34.157: P3-C Mean-Reversion Metrics Service (READY-FOR-DGX-APPLY)
 
 ### Trigger
