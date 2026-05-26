@@ -61,10 +61,20 @@ def _install_ibdirect_stub(emergency_results):
             idx = min(len(calls) - 1, len(emergency_results) - 1)
             return emergency_results[idx]
 
-    mod = sys.modules.get("services.ib_direct_service")
-    if mod is None:
-        mod = types.ModuleType("services.ib_direct_service")
-        sys.modules["services.ib_direct_service"] = mod
+    # Force-import the REAL module first so its IBDirectService class
+    # remains importable for other test files in the same pytest run
+    # (e.g. test_place_oca_stop_target_polling_v154.py imports
+    # `IBDirectService` directly). Pre-fix this fixture created a bare
+    # ModuleType stub that shadowed the real module for the rest of the
+    # session.
+    try:
+        import services.ib_direct_service as _real_ids  # noqa: F401
+        mod = sys.modules["services.ib_direct_service"]
+    except Exception:
+        mod = sys.modules.get("services.ib_direct_service")
+        if mod is None:
+            mod = types.ModuleType("services.ib_direct_service")
+            sys.modules["services.ib_direct_service"] = mod
     stub_svc = _StubSvc()
     mod.get_ib_direct_service = lambda: stub_svc
     return calls
