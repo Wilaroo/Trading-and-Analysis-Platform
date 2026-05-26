@@ -1044,10 +1044,6 @@ class PositionManager:
             bot._eod_close_executed_today = False
             bot._last_eod_check_date = today_str
 
-        # Skip if already executed today (and ALL closes succeeded — see P0 #3)
-        if bot._eod_close_executed_today:
-            return
-
         # Only run on weekdays during market hours
         if now_et.weekday() >= 5:
             return
@@ -1077,6 +1073,68 @@ class PositionManager:
 
         # Not yet time to close
         if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
+            return
+
+        # ── v19.34.153 P0 EOD ghost-flatten + T-2/T-1 fallbacks ──────
+        # Operator choice 2B: ghost-flatten ALWAYS runs while in the
+        # EOD window, even if `_eod_close_executed_today=True`, so a
+        # late-arriving ghost (e.g. a bracket parent that fills at
+        # 3:57 ET after the main close pass ran at 3:55 ET) still
+        # gets flatted before 4:00 ET.
+        if now_et.hour < market_close_hour:
+            try:
+                await self._flatten_ghost_positions(
+                    bot, reason=f"eod_window_{now_et.strftime('%H%M')}",
+                )
+            except Exception as gf_err:
+                logger.error(
+                    f"v19.34.153: ghost-flatten failed inside check_eod_close: {gf_err}"
+                )
+
+            # ── v19.34.154 — T-offsets are now RELATIVE to eod_minute ──
+            # Pre-v154 these were hardcoded to `>= 58 / >= 59` (assuming
+            # market_close_hour-1). With EOD shifted from 3:55→3:45 to
+            # beat IBKR's 3:50 Reg-T calc, we need the escalation to
+            # also shift. Anchor everything to `eod_minute` so the
+            # cascade scales with whatever close time is configured:
+            #   eod_minute + 2  → T-2 force-MKT on tracked stragglers
+            #   eod_minute + 3  → T-1 operator alert
+            # For the v154 default (eod_minute=45), this fires at:
+            #   3:47 ET — force MKT
+            #   3:48 ET — operator alert
+            # → 2 full minutes of headroom before IBKR's 3:50 Reg-T calc.
+            # Half-day fallback still uses market_close_hour-1 minute 58/59
+            # because half-days don't have the Reg-T deadline issue
+            # (closes at 1:00 with no overnight rollover concern).
+            if is_half_day:
+                # Half-day path unchanged (pre-v154 behaviour).
+                t2_h = market_close_hour - 1
+                fire_t2 = (now_et.hour == t2_h and now_et.minute >= 58)
+                fire_t1 = (now_et.hour == t2_h and now_et.minute >= 59)
+            else:
+                # Regular-day: relative to eod_minute.
+                t2_minute = eod_minute + 2
+                t1_minute = eod_minute + 3
+                fire_t2 = (now_et.hour == eod_hour and now_et.minute >= t2_minute)
+                fire_t1 = (now_et.hour == eod_hour and now_et.minute >= t1_minute)
+
+            if fire_t2:
+                try:
+                    await self._eod_t_minus_2_escalate(bot)
+                except Exception as t2_err:
+                    logger.error(f"v19.34.153: T-2 escalate failed: {t2_err}")
+
+            if fire_t1:
+                try:
+                    await self._eod_t_minus_1_alert(bot)
+                except Exception as t1_err:
+                    logger.error(f"v19.34.153: T-1 alert failed: {t1_err}")
+
+        # v19.34.153 — moved AFTER ghost-flatten/T-2/T-1 (was at top of
+        # function) so a successful main close pass does NOT short-
+        # circuit late-arriving-ghost recovery (operator choice 2B).
+        # Skip the main intraday close pass if already executed today.
+        if bot._eod_close_executed_today:
             return
 
         # P0 #4 — past market close with positions still open is an EMERGENCY.
@@ -1187,7 +1245,29 @@ class PositionManager:
                 )
                 return ("fail", trade.symbol)
 
-        results = await asyncio.gather(*(_close_one(p) for p in eod_trades.items()))
+        # v19.34.154 — Sort by InitMarginReq proxy DESC (largest first).
+        # Operator choice 3:43 ET defensive flatten 2a: close the largest-
+        # margin positions first so each successful close maximally
+        # restores Reg-T headroom before IBKR's 3:50 ET calc. For Reg-T
+        # on stocks, InitMargin ≈ 50% of notional, so `shares × entry_px`
+        # is a reliable proxy without needing a fresh IB account query.
+        # Ties broken by symbol for deterministic test behaviour.
+        def _margin_proxy(tt):
+            _tid, _trade = tt
+            try:
+                shares = abs(int(getattr(_trade, "remaining_shares", 0)
+                                  or getattr(_trade, "shares", 0)))
+                px = float(getattr(_trade, "entry_price", 0)
+                           or getattr(_trade, "entry_avg", 0)
+                           or 0.0)
+                return shares * px
+            except Exception:
+                return 0.0
+        eod_items_sorted = sorted(
+            eod_trades.items(),
+            key=lambda kv: (-_margin_proxy(kv), kv[1].symbol),
+        )
+        results = await asyncio.gather(*(_close_one(p) for p in eod_items_sorted))
         closed_count = sum(1 for r in results if r[0] == "ok")
         total_pnl = sum(r[1] for r in results if r[0] == "ok")
         failed_symbols = [r[1] for r in results if r[0] == "fail"]
@@ -1470,6 +1550,419 @@ class PositionManager:
             })
         except Exception as alarm_err:
             logger.warning(f"v19.34.152 alarm emit failed: {alarm_err}")
+
+    # ── v19.34.153 (P0 EOD ghost-flatten) ────────────────────────────────
+    # The 2026-05-XX incident: EOD auto-close fired at 3:55 ET, closed
+    # 3 of 23 IB-side positions, then stalled. The remaining 20 stayed
+    # open because they were "ghosts" — filled at IB but missing from
+    # `bot._open_trades` (broken bracket plumbing dropped them). The
+    # existing `check_position_memory_disagreement` flagged this but
+    # only alarmed — it never actually closed the positions.
+    #
+    # These three helpers fix that:
+    #   * `_recent_swing_symbols_safe`  — tight swing exception (today/
+    #     yesterday entry only, per operator choice 3B).
+    #   * `_flatten_ghost_positions`    — finds ghosts + fires emergency
+    #     MKT closes via the new `place_emergency_mkt_close` path.
+    #   * `_eod_t_minus_2_escalate`     — at T-2 min (3:58 ET / 12:58 ET
+    #     on half-days), forces a MKT close on any tracked intraday
+    #     trade still open.
+    #   * `_eod_t_minus_1_alert`        — at T-1 min, persistent operator
+    #     alert if anything remains open.
+
+    async def _recent_swing_symbols_safe(
+        self, bot: 'TradingBotService',
+        symbols: list,
+    ) -> set:
+        """v19.34.153 — Return set of symbols that legitimately should
+        be held overnight as swing/position trades. Tighter than the
+        v19.34.152 disagreement-checker: requires `close_at_eod=False`
+        AND an `executed_at` within the last ~48h. This prevents stale
+        / abandoned swing rows from masking a genuine ghost.
+        """
+        if not bot._db or not symbols:
+            return set()
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        try:
+            cursor = await asyncio.to_thread(
+                lambda: list(bot._db.bot_trades.find(
+                    {
+                        "symbol": {"$in": [s.upper() for s in symbols]},
+                        "status": {"$in": ["open", "partial", "OPEN", "PARTIAL"]},
+                        "close_at_eod": False,
+                        "executed_at": {"$gte": cutoff},
+                    },
+                    {"_id": 0, "symbol": 1},
+                ))
+            )
+            return {(r.get("symbol") or "").upper() for r in cursor}
+        except Exception as e:
+            logger.debug(f"v19.34.153: recent_swing lookup failed: {e}")
+            return set()
+
+    async def _flatten_ghost_positions(
+        self, bot: 'TradingBotService',
+        *,
+        reason: str = "eod_ghost_flatten",
+    ) -> dict:
+        """v19.34.153 — Snapshot IB ground truth, find symbols held at
+        IB but missing from `bot._open_trades` AND not a recent swing,
+        then fire an emergency MKT close for each. Returns a summary
+        dict for logging / persistence.
+
+        ALWAYS-RUN (operator choice 2B): not gated by
+        `_eod_close_executed_today` — retries every manage tick until
+        IB shows flat. Per-symbol-per-day dedup via
+        `_ghost_flatten_fired` keeps the order rate sane.
+        """
+        if not hasattr(bot, "_ghost_flatten_fired"):
+            bot._ghost_flatten_fired = {}
+
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+
+        # Clean stale day-buckets to bound memory.
+        for old_date in list(bot._ghost_flatten_fired.keys()):
+            if old_date != today_str:
+                bot._ghost_flatten_fired.pop(old_date, None)
+        fired_today = bot._ghost_flatten_fired.setdefault(today_str, {})
+
+        ib_positions = self._ib_position_snapshot_safe()
+        if not ib_positions:
+            return {"ghosts_found": 0, "flattened": [], "skipped": [], "errors": []}
+
+        bot_symbols = {
+            (getattr(t, "symbol", "") or "").upper()
+            for t in bot._open_trades.values()
+        }
+
+        # Unknown candidates = IB positions not in bot memory.
+        candidates = []
+        for p in ib_positions:
+            sym = (p.get("symbol") or "").upper()
+            if not sym or sym in bot_symbols:
+                continue
+            try:
+                qty = float(p.get("position") or 0)
+            except (TypeError, ValueError):
+                qty = 0.0
+            if abs(qty) < 1:
+                continue
+            candidates.append({"symbol": sym, "qty": qty})
+
+        if not candidates:
+            return {"ghosts_found": 0, "flattened": [], "skipped": [], "errors": []}
+
+        # Tight swing exception — today/yesterday entries only.
+        swing_safe = await self._recent_swing_symbols_safe(
+            bot, [c["symbol"] for c in candidates]
+        )
+
+        ghosts = [c for c in candidates if c["symbol"] not in swing_safe]
+        skipped = [c for c in candidates if c["symbol"] in swing_safe]
+
+        if not ghosts:
+            return {"ghosts_found": 0, "flattened": [], "skipped": skipped, "errors": []}
+
+        logger.error(
+            "🚨 [v19.34.153 GHOST-FLATTEN] %d ghost(s) detected: %s — firing "
+            "emergency MKT closes (reason=%s).",
+            len(ghosts),
+            [(g["symbol"], int(g["qty"])) for g in ghosts],
+            reason,
+        )
+
+        # Lazy import the direct service.
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+        except Exception as e:
+            logger.error(f"v19.34.153: ib_direct_service import failed: {e}")
+            return {
+                "ghosts_found": len(ghosts), "flattened": [],
+                "skipped": skipped,
+                "errors": [{"symbol": "*", "error": "ib_direct_import_failed"}],
+            }
+        svc = get_ib_direct_service()
+        if not (svc.is_available() and svc.is_connected()):
+            logger.error(
+                "v19.34.153: ib_direct not connected — cannot flatten %d "
+                "ghost(s).", len(ghosts),
+            )
+            try:
+                await bot._broadcast_event({
+                    "type": "eod_ghost_flatten_blocked",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "ghosts": [(g["symbol"], int(g["qty"])) for g in ghosts],
+                    "reason": "ib_direct_not_connected",
+                })
+            except Exception:
+                pass
+            return {
+                "ghosts_found": len(ghosts), "flattened": [],
+                "skipped": skipped,
+                "errors": [{"symbol": "*", "error": "ib_direct_not_connected"}],
+            }
+
+        flattened: list = []
+        errors: list = []
+
+        async def _flatten_one(ghost):
+            sym = ghost["symbol"]
+            qty = ghost["qty"]
+            # Per-symbol-per-day fire cap: if we already fired AND it
+            # was filled, skip; otherwise retry up to 3x.
+            prev = fired_today.get(sym, {"fires": 0, "filled": False})
+            if prev.get("filled"):
+                return None
+            if prev.get("fires", 0) >= 3:
+                return {"symbol": sym, "error": "max_retries_exceeded",
+                        "fires": prev.get("fires")}
+            action = "SELL" if qty > 0 else "BUY"
+            try:
+                result = await svc.place_emergency_mkt_close(
+                    symbol=sym,
+                    qty=int(abs(round(qty))),
+                    action=action,
+                    wait_for_fill_s=8.0,
+                )
+            except Exception as fe:
+                result = {"success": False, "error": f"flatten_exception: {fe}"}
+            prev["fires"] = prev.get("fires", 0) + 1
+            prev["last_status"] = result.get("status")
+            prev["last_order_id"] = result.get("order_id")
+            prev["filled"] = bool(result.get("success") and
+                                  result.get("status") == "filled")
+            fired_today[sym] = prev
+            return {
+                "symbol": sym,
+                "qty": qty,
+                "action": action,
+                "result": result,
+            }
+
+        outcomes = await asyncio.gather(
+            *[_flatten_one(g) for g in ghosts],
+            return_exceptions=False,
+        )
+        for o in outcomes:
+            if o is None:
+                continue
+            if o.get("error"):
+                errors.append(o)
+            elif o.get("result", {}).get("success"):
+                flattened.append(o)
+            else:
+                errors.append({
+                    "symbol": o["symbol"],
+                    "error": o.get("result", {}).get("error", "unknown"),
+                    "status": o.get("result", {}).get("status"),
+                })
+
+        # Persist a bot_event row for postmortem.
+        if bot._db:
+            try:
+                await asyncio.to_thread(
+                    bot._db.bot_events.insert_one,
+                    {
+                        "event_type": "eod_ghost_flatten",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "date": today_str,
+                        "reason": reason,
+                        "ghosts_found": len(ghosts),
+                        "flattened_count": len(flattened),
+                        "error_count": len(errors),
+                        "flattened": [
+                            {
+                                "symbol": f["symbol"],
+                                "qty": f["qty"],
+                                "action": f["action"],
+                                "order_id": f.get("result", {}).get("order_id"),
+                                "status": f.get("result", {}).get("status"),
+                            }
+                            for f in flattened
+                        ],
+                        "errors": errors,
+                        "skipped_swing": [s["symbol"] for s in skipped],
+                    },
+                )
+            except Exception as pe:
+                logger.warning(f"v19.34.153: ghost_flatten persist failed: {pe}")
+
+        # Stream alarm.
+        try:
+            await bot._broadcast_event({
+                "type": "eod_ghost_flatten",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "reason": reason,
+                "ghosts_found": len(ghosts),
+                "flattened": [(f["symbol"], int(f["qty"])) for f in flattened],
+                "errors": errors,
+                "skipped_swing": [s["symbol"] for s in skipped],
+            })
+        except Exception:
+            pass
+
+        return {
+            "ghosts_found": len(ghosts),
+            "flattened": flattened,
+            "skipped": skipped,
+            "errors": errors,
+        }
+
+    async def _eod_t_minus_2_escalate(
+        self, bot: 'TradingBotService',
+    ) -> dict:
+        """v19.34.153 — At T-2 min before market close, force MKT close
+        on any tracked intraday trade still open. Idempotent via
+        `_eod_t_minus_2_fired_today`.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        if getattr(bot, "_eod_t_minus_2_fired_today", None) == today_str:
+            return {"escalated": [], "errors": [], "noop": True}
+
+        still_open = [
+            (tid, t) for tid, t in list(bot._open_trades.items())
+            if getattr(t, "close_at_eod", True)
+        ]
+        if not still_open:
+            bot._eod_t_minus_2_fired_today = today_str
+            return {"escalated": [], "errors": [], "noop": True}
+
+        logger.error(
+            "🚨 [v19.34.153 T-2 ESCALATE] %d intraday trade(s) still open at "
+            "T-2 min — forcing MKT closes: %s",
+            len(still_open),
+            [t.symbol for _tid, t in still_open],
+        )
+
+        escalated: list = []
+        errors: list = []
+        async def _force_close(tid_trade):
+            tid, trade = tid_trade
+            try:
+                ok = await self.close_trade(tid, bot, reason="eod_t_minus_2_force_mkt")
+                if ok:
+                    escalated.append(trade.symbol)
+                else:
+                    errors.append({"symbol": trade.symbol, "error": "close_trade_returned_false"})
+            except Exception as e:
+                errors.append({"symbol": getattr(trade, "symbol", "?"),
+                               "error": f"close_exception: {str(e)[:160]}"})
+
+        await asyncio.gather(*[_force_close(tt) for tt in still_open],
+                             return_exceptions=False)
+        bot._eod_t_minus_2_fired_today = today_str
+
+        if bot._db:
+            try:
+                await asyncio.to_thread(
+                    bot._db.bot_events.insert_one,
+                    {
+                        "event_type": "eod_t_minus_2_escalate",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "date": today_str,
+                        "escalated": escalated,
+                        "errors": errors,
+                    },
+                )
+            except Exception as pe:
+                logger.warning(f"v19.34.153: t-2 persist failed: {pe}")
+        try:
+            await bot._broadcast_event({
+                "type": "eod_t_minus_2_escalate",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "escalated": escalated,
+                "errors": errors,
+            })
+        except Exception:
+            pass
+        return {"escalated": escalated, "errors": errors}
+
+    async def _eod_t_minus_1_alert(
+        self, bot: 'TradingBotService',
+    ) -> None:
+        """v19.34.153 — Loud operator alert at T-1 min if ANY position
+        (tracked or ghost) is still open. Idempotent per day."""
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        if getattr(bot, "_eod_t_minus_1_alerted_today", None) == today_str:
+            return
+
+        ib_positions = self._ib_position_snapshot_safe()
+        tracked_open = [
+            t for t in bot._open_trades.values()
+            if getattr(t, "close_at_eod", True)
+        ]
+        ib_open = [
+            (p.get("symbol"), float(p.get("position") or 0))
+            for p in ib_positions
+            if abs(float(p.get("position") or 0)) > 0
+        ]
+        if not tracked_open and not ib_open:
+            bot._eod_t_minus_1_alerted_today = today_str
+            return
+
+        logger.error(
+            "🚨 [v19.34.153 T-1 ALERT] Market closes in ~60s. tracked_open=%d "
+            "ib_open=%d  tracked=%s  ib=%s",
+            len(tracked_open), len(ib_open),
+            [t.symbol for t in tracked_open],
+            ib_open,
+        )
+        bot._eod_t_minus_1_alerted_today = today_str
+        if bot._db:
+            try:
+                await asyncio.to_thread(
+                    bot._db.bot_events.insert_one,
+                    {
+                        "event_type": "eod_t_minus_1_alert",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "date": today_str,
+                        "tracked_open": [t.symbol for t in tracked_open],
+                        "ib_open": ib_open,
+                    },
+                )
+            except Exception as pe:
+                logger.warning(f"v19.34.153: t-1 persist failed: {pe}")
+        try:
+            await bot._broadcast_event({
+                "type": "eod_t_minus_1_alert",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "tracked_open": [t.symbol for t in tracked_open],
+                "ib_open": ib_open,
+                "severity": "CRITICAL",
+            })
+        except Exception:
+            pass
+        try:
+            from services.sentcom_service import emit_stream_event
+            await emit_stream_event({
+                "kind": "alarm",
+                "event": "eod_t_minus_1_alert",
+                "text": (
+                    f"🚨 [CRITICAL T-1] {len(tracked_open)} tracked + "
+                    f"{len(ib_open)} IB position(s) still open with <60s to "
+                    "close. CHECK TWS NOW."
+                ),
+                "metadata": {
+                    "tracked": [t.symbol for t in tracked_open],
+                    "ib": ib_open,
+                    "severity": "CRITICAL",
+                },
+            })
+        except Exception:
+            pass
 
     async def _run_eod_orphan_sweep(self, bot: 'TradingBotService'):
         """v19.34.151 — runs the orphan-order + pending-intraday-entry

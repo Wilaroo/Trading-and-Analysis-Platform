@@ -909,6 +909,61 @@ class TradeExecutorService:
         if not self._ensure_initialized():
             return {"success": False, "error": "Executor not initialized"}
 
+        # ── v19.34.154 — bracket-attach governor pre-check ───────────
+        # Three gates: (1) past 3:45 ET Reg-T Soft Edge cutoff;
+        # (2) symbol permanently blocked from a prior IB Error 201 etc.;
+        # (3) generic attempt cap. Skip the entire IB submit path
+        # cleanly so we don't generate the 180×/min Reg-T storm the
+        # operator observed pre-v154.
+        try:
+            from services.bracket_attach_governor import get_governor as _get_gov
+            _gov = _get_gov()
+            ok, _reason = _gov.should_attempt_attach(
+                getattr(trade, "symbol", "") or "",
+            )
+            if not ok:
+                sym = (getattr(trade, "symbol", "") or "?").upper()
+                if _gov.mark_logged(sym):
+                    logger.error(
+                        "[v19.34.154 GOVERNOR-BLOCK] %s attach_oca_stop_target "
+                        "skipped: %s — position remains UNPROTECTED at IB. "
+                        "Operator must flatten in TWS or POST "
+                        "/api/trading-bot/bracket-attach/unblock to retry.",
+                        sym, _reason,
+                    )
+                    # Best-effort stream alarm so the V5 HUD surfaces it.
+                    try:
+                        import asyncio as _aio
+                        from services.sentcom_service import emit_stream_event
+                        _aio.create_task(emit_stream_event({
+                            "kind": "alarm",
+                            "event": "bracket_attach_blocked",
+                            "symbol": sym,
+                            "text": (
+                                f"🚨 [CRITICAL] Bracket attach BLOCKED for "
+                                f"{sym}: {_reason}. Position UNPROTECTED at IB."
+                            ),
+                            "metadata": {"reason": _reason, "symbol": sym},
+                        }))
+                    except Exception:
+                        pass
+                return {
+                    "success": False,
+                    "error": f"bracket_attach_blocked:{_reason}",
+                    "stop_order_id": None,
+                    "target_order_id": None,
+                    "oca_group": None,
+                    "governor_blocked": True,
+                    "governor_reason": _reason,
+                }
+        except Exception as _gov_err:
+            # Governor failure must NOT block trading — log and fall
+            # through to the original code path.
+            logger.warning(
+                "[v19.34.154 GOVERNOR] should_attempt_attach raised "
+                "(%s); falling through to attach attempt.", _gov_err,
+            )
+
         if self._mode != ExecutorMode.LIVE:
             # PAPER (Alpaca) doesn't support OCA the same way — fall back
             # to stop-only for now. Alpaca bracket support is tracked
@@ -942,11 +997,54 @@ class TradeExecutorService:
                     "ib_direct (BOT_ORDER_PATH=direct) for %s",
                     getattr(trade, "symbol", "?"),
                 )
-                return await ib_direct.place_oca_stop_target(
+                oca_result = await ib_direct.place_oca_stop_target(
                     trade,
                     time_in_force=leg_tif,
                     outside_rth=leg_outside_rth,
                 )
+                # v19.34.154 — record outcome with the governor + handle
+                # STP-leg terminal reject by firing emergency MKT flatten
+                # on the now-naked position (operator choice 5B: a stop-
+                # less position is catastrophic, never retry just close).
+                try:
+                    from services.bracket_attach_governor import get_governor as _get_gov
+                    _gov = _get_gov()
+                    _summary = _gov.record_outcome(
+                        getattr(trade, "symbol", "") or "",
+                        oca_result,
+                    )
+                    if _summary.get("stop_terminal_reject"):
+                        logger.critical(
+                            "[v19.34.154] %s: STP leg terminal-rejected (code=%s) "
+                            "— firing emergency MKT flatten on naked position.",
+                            getattr(trade, "symbol", "?"),
+                            (oca_result or {}).get("stop_error_code"),
+                        )
+                        try:
+                            sym = (getattr(trade, "symbol", "") or "").upper()
+                            shares = int(abs(int(getattr(trade, "remaining_shares", 0)
+                                                  or getattr(trade, "shares", 0))))
+                            direction = (getattr(trade.direction, "value", None)
+                                         or str(trade.direction)).lower()
+                            action = "SELL" if direction == "long" else "BUY"
+                            if sym and shares > 0:
+                                flat_res = await ib_direct.place_emergency_mkt_close(
+                                    symbol=sym, qty=shares, action=action,
+                                    wait_for_fill_s=8.0,
+                                )
+                                oca_result["emergency_flatten_result"] = flat_res
+                        except Exception as flat_err:
+                            logger.error(
+                                "[v19.34.154] emergency flatten after STP reject "
+                                "FAILED for %s: %s — position remains naked.",
+                                getattr(trade, "symbol", "?"), flat_err,
+                            )
+                except Exception as _gov_err:
+                    logger.warning(
+                        "[v19.34.154] governor.record_outcome raised: %s",
+                        _gov_err,
+                    )
+                return oca_result
             except Exception as e:
                 logger.critical(
                     "[v19.34.28 PATCH-L2a] ib_direct.place_oca_stop_target "

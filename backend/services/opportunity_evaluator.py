@@ -20,6 +20,56 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.156 (P3-A) — Grade-based position-size multiplier ────────
+# A-grade setups trade full size; lower grades downscale proportionally.
+# Operator choices:
+#   Q1b: D=0.1× (vanishingly small, real money for learning — not skip)
+#   Q2b: unknown/missing → treated as D (strict, no silent default-to-B)
+# Tunable via env: `POSITION_SIZE_GRADE_{A,B,C,D}_MULT`.
+_GRADE_MULTIPLIER_DEFAULTS = {
+    "A": 1.0,
+    "B": 0.7,
+    "C": 0.3,
+    "D": 0.1,
+}
+
+
+def _resolve_grade_multiplier(grade: Optional[str]) -> Tuple[float, str]:
+    """Return (multiplier, normalized_grade) for the given grade string.
+
+    Normalization rules:
+      • None / empty / "?" / non-string → treated as "D" (strict default
+        per operator choice Q2b).
+      • Letter is upper-cased and only the first character considered
+        (so "A-", "A+", "a", "A grade" all collapse to "A").
+      • Letters outside {A,B,C,D} → "D" (strict).
+    """
+    import os as _os
+
+    def _envf(key: str, default: float) -> float:
+        v = _os.environ.get(key)
+        if v in (None, ""):
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    table = {
+        "A": _envf("POSITION_SIZE_GRADE_A_MULT", _GRADE_MULTIPLIER_DEFAULTS["A"]),
+        "B": _envf("POSITION_SIZE_GRADE_B_MULT", _GRADE_MULTIPLIER_DEFAULTS["B"]),
+        "C": _envf("POSITION_SIZE_GRADE_C_MULT", _GRADE_MULTIPLIER_DEFAULTS["C"]),
+        "D": _envf("POSITION_SIZE_GRADE_D_MULT", _GRADE_MULTIPLIER_DEFAULTS["D"]),
+    }
+    if not isinstance(grade, str) or not grade.strip():
+        return (table["D"], "D")
+    g = grade.strip()[0].upper()
+    if g not in table:
+        return (table["D"], "D")
+    return (table[g], g)
+
+
+
 class OpportunityEvaluator:
     """Evaluates scanner alerts and builds fully-qualified trade objects."""
 
@@ -742,16 +792,30 @@ class OpportunityEvaluator:
                 logger.debug(f"target-snap skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
 
             # Calculate position size with volatility adjustment + Volume-Profile path multiplier (2026-04-28e)
+            # + v19.34.156 grade-based scaler (P3-A) + v19.34.157 MR regime scaler (P3-C).
             symbol_for_vp = alert.get("symbol") if isinstance(alert, dict) else None
             if isinstance(alert, dict):
                 scanner_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
+                # v19.34.156 — `smb_grade` is the canonical field; fall back
+                # to `trade_grade` for legacy alert paths. Q2b: missing /
+                # unknown grades fall to D inside `_resolve_grade_multiplier`,
+                # NOT silently to B — operator wants strict grade routing.
+                alert_grade = alert.get("smb_grade") or alert.get("trade_grade")
+                # v19.34.157 — setup_type drives the MR family lookup
+                # (MR vs momentum vs breakout). Unknown setups produce a
+                # neutral 1.0× multiplier (never blocks).
+                alert_setup_type = alert.get("setup_type")
             else:
                 scanner_bs = "5 mins"
+                alert_grade = None
+                alert_setup_type = None
             position_multipliers: Dict[str, Any] = {}
             shares, risk_amount = self.calculate_position_size(
                 entry_price, stop_price, direction, bot, atr, atr_percent,
                 symbol=symbol_for_vp, bar_size=scanner_bs,
                 multipliers_out=position_multipliers,
+                grade=alert_grade,
+                setup_type=alert_setup_type,
             )
 
             # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
@@ -1185,7 +1249,7 @@ class OpportunityEvaluator:
 
     # ==================== HELPERS ====================
 
-    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None) -> Tuple[int, float]:
+    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None, grade: Optional[str] = None, setup_type: Optional[str] = None) -> Tuple[int, float]:
         """Calculate position size based on risk management rules with volatility and market regime adjustment.
 
         2026-04-28e: also applies a Volume-Profile path multiplier — if the
@@ -1194,9 +1258,18 @@ class OpportunityEvaluator:
         silently when `symbol` is None (legacy callers) or the profile
         can't be computed.
 
+        v19.34.156 (P3-A): also applies a `grade_multiplier` so A-grade
+        setups trade full size and lower grades downscale proportionally:
+          A = 1.0× | B = 0.7× | C = 0.3× | D / unknown = 0.1× (strict)
+        Operator-tunable via env: `POSITION_SIZE_GRADE_{A,B,C,D}_MULT`.
+        Per operator choice Q1b/Q2b, D and unknown both fall to 0.1× so
+        every alert ALWAYS sizes — no silent "skip on missing grade"
+        path. The vanishingly-small position is intentional: keeps real
+        capital on the line for learning without meaningful risk.
+
         If `multipliers_out` (a dict) is supplied, the function records
         per-multiplier values into it under keys `volatility`, `regime`,
-        `vp_path` (each a float, default 1.0) — used by
+        `vp_path`, `grade`, `grade_multiplier` — used by
         `build_entry_context` to surface multiplier provenance for
         post-trade analytics.
         """
@@ -1257,6 +1330,54 @@ class OpportunityEvaluator:
         except Exception as exc:
             # Non-fatal: never let the profile lookup block trade execution.
             logger.debug(f"VP path multiplier skipped for {symbol}: {exc}")
+
+        # ── v19.34.156 (P3-A) Grade multiplier ───────────────────────
+        # Sized AFTER vp_path so all the prior gates (volatility, regime,
+        # vp_path) have already shaped `adjusted_max_risk` — the grade
+        # then applies a clean A/B/C/D scalar on top. Surfaced in
+        # `multipliers_out` for postmortem analytics.
+        grade_multiplier, normalized_grade = _resolve_grade_multiplier(grade)
+        if grade_multiplier != 1.0:
+            adjusted_max_risk *= grade_multiplier
+            logger.debug(
+                f"Position size adjusted by grade ({normalized_grade}): "
+                f"{grade_multiplier:.0%}"
+            )
+
+        # ── v19.34.157 (P3-C) Mean-Reversion regime multiplier ──────
+        # Looks up the (symbol, bar_size) MR metrics cache and applies
+        # a setup-vs-regime alignment scalar:
+        #   MR setups in MR_STRONG → 1.3×   |   MR in TRENDING → 0.5×
+        #   Momentum in TRENDING   → 1.2×   |   Momentum in MR  → 0.7×
+        #   Breakout in TRENDING   → 1.1×   |   Breakout in MR  → 0.8×
+        # NEUTRAL / unknown setup always 1.0×. Operator choice 3a:
+        # this is sizing-only, NOT a hard veto.  No-data → 1.0× (never
+        # blocks a trade because the MR signal isn't available yet).
+        mr_multiplier = 1.0
+        mr_regime = "NEUTRAL"
+        mr_reason = "no_lookup"
+        mr_hurst: Optional[float] = None
+        mr_half_life: Optional[float] = None
+        try:
+            db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+            if symbol and db is not None:
+                from services.mean_reversion_metrics import (
+                    compute_mr_metrics, get_mr_multiplier,
+                )
+                _mr = compute_mr_metrics(db, symbol, bar_size=bar_size)
+                mr_multiplier, mr_reason = get_mr_multiplier(_mr, setup_type)
+                mr_regime = _mr.get("regime_tag") or "NEUTRAL"
+                mr_hurst = _mr.get("hurst")
+                mr_half_life = _mr.get("half_life_bars")
+                if mr_multiplier != 1.0:
+                    adjusted_max_risk *= mr_multiplier
+                    logger.debug(
+                        f"Position size adjusted by MR regime "
+                        f"({mr_reason}): {mr_multiplier:.0%}"
+                    )
+        except Exception as mr_err:
+            # Never let the MR lookup block trade execution.
+            logger.debug(f"MR regime multiplier skipped for {symbol}: {mr_err}")
 
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
@@ -1364,6 +1485,15 @@ class OpportunityEvaluator:
                 "volatility": round(volatility_multiplier, 3),
                 "regime": round(regime_multiplier, 3),
                 "vp_path": round(vp_path_multiplier, 3),
+                # v19.34.156 (P3-A) — grade provenance for post-trade analytics
+                "grade": normalized_grade,
+                "grade_multiplier": round(grade_multiplier, 3),
+                # v19.34.157 (P3-C) — MR-regime provenance
+                "mr_regime": mr_regime,
+                "mr_multiplier": round(mr_multiplier, 3),
+                "mr_hurst": round(mr_hurst, 3) if isinstance(mr_hurst, (int, float)) else None,
+                "mr_half_life_bars": round(mr_half_life, 2) if isinstance(mr_half_life, (int, float)) else None,
+                "mr_reason": mr_reason,
             })
         return shares, risk_amount
 
@@ -1797,6 +1927,18 @@ class OpportunityEvaluator:
                 mult_ctx["volatility"] = pos_m.get("volatility", 1.0)
                 mult_ctx["regime"]     = pos_m.get("regime", 1.0)
                 mult_ctx["vp_path"]    = pos_m.get("vp_path", 1.0)
+                # v19.34.159 — surface v156 grade-scaling + v157 mean-reversion
+                # regime fields that previously landed in `position_multipliers`
+                # but never propagated to `entry_context.multipliers`. Operator
+                # needs these for the "Why this size?" UI tooltip so every fill
+                # explains its own sizing chain (grade × regime × MR-fit).
+                # Defensive: each key is only emitted when present, so legacy
+                # trades (pre-v156) still render cleanly.
+                for _k in ("grade", "grade_multiplier",
+                          "mr_regime", "mr_multiplier",
+                          "mr_hurst", "mr_half_life_bars", "mr_reason"):
+                    if _k in pos_m and pos_m[_k] is not None:
+                        mult_ctx[_k] = pos_m[_k]
 
             sg = multipliers_meta.get("stop_guard") or {}
             if isinstance(sg, dict) and sg:

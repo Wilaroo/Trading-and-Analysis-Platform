@@ -9067,3 +9067,48 @@ async def orphan_reconcile_status() -> Dict[str, Any]:
         "task_exception": task_exception,
         "diag": diag,
     }
+
+
+# ─── v19.34.154 BRACKET-ATTACH GOVERNOR endpoints ───────────────────────
+
+class BracketUnblockRequest(BaseModel):
+    symbol: str
+
+
+@router.get("/bracket-attach/state")
+async def bracket_attach_state() -> Dict[str, Any]:
+    """v19.34.154 — Read-only view of the bracket-attach governor.
+
+    Returns today's per-symbol attempt counts (total + in-window) and
+    the permanent-block map (symbols that hit Error 201 / 203 / 110
+    etc. and any symbols past the max-attempts cap). Operator can use
+    this to decide whether to manually `unblock` a symbol so the
+    reconciler can retry the OCA attach.
+    """
+    try:
+        from services.bracket_attach_governor import get_governor
+        gov = get_governor()
+        return {"success": True, "state": gov.get_state()}
+    except Exception as e:
+        logger.exception("bracket_attach_state failed")
+        raise HTTPException(500, f"bracket_attach_state error: {e}")
+
+
+@router.post("/bracket-attach/unblock")
+async def bracket_attach_unblock(req: BracketUnblockRequest) -> Dict[str, Any]:
+    """v19.34.154 — Operator override: lift a permanent block on a
+    symbol so the reconciler can retry the OCA attach on its next tick.
+    Does NOT clear the attempt-history (the attempt-cap will still
+    kick in on rapid re-failures).
+    """
+    if not req.symbol:
+        raise HTTPException(400, "symbol is required")
+    try:
+        from services.bracket_attach_governor import get_governor
+        gov = get_governor()
+        res = gov.unblock(req.symbol)
+        return {"success": True, "result": res}
+    except Exception as e:
+        logger.exception("bracket_attach_unblock failed")
+        raise HTTPException(500, f"bracket_attach_unblock error: {e}")
+

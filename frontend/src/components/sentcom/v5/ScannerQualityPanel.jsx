@@ -1,11 +1,50 @@
 /**
- * ScannerQualityPanel -- v19.34.41 (Feb 2026)
+ * ScannerQualityPanel — v19.34.41 (Feb 2026)
  *
- * Compact V5 panel showing today's Scanner Quality Score plus the
- * top rejection reasons. Sits next to PortfolioHealthPill in the V5
- * status-strip row.
+ * v19.34.155 — Colour-hint polish (P2-1). Pre-fix the score pill's
+ * tinted palette didn't extend to the category strip (plain
+ * `bg-zinc-900` blocks) or to the per-reason rows (no accent at all).
+ * Three unifying maps (`CATEGORY_TINT`, `CATEGORY_DOT`,
+ * `CATEGORY_LEFT_ACCENT`) now give every category a consistent
+ * shade across:
+ *   • Score pill (existing)
+ *   • Category strip pills (NEW tint)
+ *   • Reason rows (NEW left-border accent + matched dot)
+ * Net result: the breakdown reads as a single visual system, the
+ * operator can scan "is this a broker problem or a scanner problem?"
+ * in under a second.
+ *
+ * v19.34.85 — Label honesty pass. Pre-fix the pill read "SCANNER X%"
+ * which operators reasonably misread as "the scanner is broken / X%
+ * healthy" whenever the score dropped. The metric is actually
+ * "signal pass-through rate" — what fraction of scanner-generated
+ * signals survived ALL downstream gates and became working/filled
+ * bot_trades. A score of 0% can mean the scanner is firing 100
+ * great signals all being killed by an OCA-cancel storm downstream
+ * (today's case: 17/33 = 52% rejected as "Parent leg cancelled
+ * (bracket OCA)" — that's a BROKER bug, not a scanner bug).
+ *
+ * Renamed pill to "SIGNAL PASS X%" + promoted the top rejection
+ * reason inline so the operator sees WHY signals are being lost.
+ *
+ * Compact V5 panel showing today's signal pass-through rate plus the
+ * top rejection reasons. Sits next to PortfolioHealthPill / health
+ * chips in the V5 status-strip row.
  *
  * Data source: GET /api/system/rejection-analytics
+ *
+ * The "Signal Pass" score is the fraction of scanner-generated
+ * signals that survived to a working/filled bot_trade, with the
+ * denominator restricted to signals lost to SCANNER-attributable
+ * causes (stale alerts, live-price gate, cooldowns, TTL). Broker- and
+ * policy-category rejections are surfaced but don't penalise the
+ * score — those are downstream issues, not scanner quality.
+ *
+ * Color scheme:
+ *   excellent (>=90%) → emerald
+ *   good      (>=75%) → sky
+ *   fair      (>=50%) → amber
+ *   poor      (<50%)  → rose
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Gauge } from 'lucide-react';
@@ -26,6 +65,35 @@ const CATEGORY_COLOR = {
   other:           'text-zinc-400',
 };
 
+// v19.34.155 — colour-hint polish. Pre-fix the category-strip pills and
+// reason rows had no shared visual rhythm with the score pill — the dot
+// was `bg-{c}-400`, text was `text-{c}-300`, no tint or accent on rows.
+// These three maps unify a single accent palette per category:
+//   • -500/15 background tint   (matches score pill)
+//   • -500/30 border            (matches score pill)
+//   • -400 dot                  (slightly brighter than text)
+//   • -500/60 left-border accent on reason rows  (instant-scan filter)
+const CATEGORY_TINT = {
+  scanner_quality: 'bg-amber-500/15 border-amber-500/30',
+  broker:          'bg-rose-500/15 border-rose-500/30',
+  policy:          'bg-sky-500/15 border-sky-500/30',
+  other:           'bg-zinc-700/20 border-zinc-700/40',
+};
+
+const CATEGORY_DOT = {
+  scanner_quality: 'bg-amber-400',
+  broker:          'bg-rose-400',
+  policy:          'bg-sky-400',
+  other:           'bg-zinc-500',
+};
+
+const CATEGORY_LEFT_ACCENT = {
+  scanner_quality: 'border-l-amber-500/60',
+  broker:          'border-l-rose-500/60',
+  policy:          'border-l-sky-500/60',
+  other:           'border-l-zinc-600/60',
+};
+
 const CATEGORY_LABEL = {
   scanner_quality: 'Scanner',
   broker:          'Broker',
@@ -34,7 +102,7 @@ const CATEGORY_LABEL = {
 };
 
 const formatPct = (n) => {
-  if (typeof n !== 'number' || Number.isNaN(n)) return '--';
+  if (typeof n !== 'number' || Number.isNaN(n)) return '—';
   return `${Math.round(n)}%`;
 };
 
@@ -64,7 +132,7 @@ export const ScannerQualityPanel = () => {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 30000);
+    const id = setInterval(refresh, 30_000); // poll every 30s
     return () => clearInterval(id);
   }, [refresh]);
 
@@ -74,19 +142,21 @@ export const ScannerQualityPanel = () => {
   const byReason = data?.by_reason || [];
   const byCategory = data?.by_category || {};
 
+  // Top 3 reasons for compact pill display
   const topReasons = useMemo(() => byReason.slice(0, 3), [byReason]);
 
   const pillClass = BUCKET_COLOR[bucket] || BUCKET_COLOR.excellent;
 
+  // Hover tooltip (multi-line; same convention as PortfolioHealthPill)
   const tooltip = useMemo(() => {
     const lines = [
-      `Trading date: ${data?.trading_date_et || '--'}`,
+      `Trading date: ${data?.trading_date_et || '—'}`,
       `Accepted: ${totals.accepted}  Rejected: ${totals.rejected}  Signals: ${totals.scanner_signals}`,
-      '--',
+      '──',
       `Scanner-quality rejections: ${byCategory.scanner_quality ?? 0}`,
       `Broker rejections:          ${byCategory.broker ?? 0}`,
       `Policy rejections:          ${byCategory.policy ?? 0}`,
-      ...(byReason.length > 0 ? ['--', ...byReason.slice(0, 8).map(r => `${r.label}: ${r.count}`)] : []),
+      ...(byReason.length > 0 ? ['──', ...byReason.slice(0, 8).map(r => `${r.label}: ${r.count}`)] : []),
     ];
     return lines.join('\n');
   }, [data, totals, byCategory, byReason]);
@@ -99,7 +169,7 @@ export const ScannerQualityPanel = () => {
         title={`Scanner-quality fetch failed: ${error}`}
       >
         <Gauge className="w-3 h-3" />
-        <span>SCANNER ?</span>
+        <span>SIGNAL PASS ?</span>
       </div>
     );
   }
@@ -111,7 +181,7 @@ export const ScannerQualityPanel = () => {
         className="flex items-center gap-2 px-3 py-1 bg-zinc-950/60 text-[14px] leading-none whitespace-nowrap border border-zinc-700/50 text-zinc-500"
       >
         <Gauge className="w-3 h-3 animate-pulse" />
-        <span>SCANNER ...</span>
+        <span>SIGNAL PASS …</span>
       </div>
     );
   }
@@ -122,6 +192,7 @@ export const ScannerQualityPanel = () => {
       className="relative bg-zinc-950/60 text-[14px] leading-none"
       title={tooltip}
     >
+      {/* Pill row */}
       <button
         type="button"
         onClick={() => setExpanded(v => !v)}
@@ -133,18 +204,22 @@ export const ScannerQualityPanel = () => {
           data-testid="scanner-quality-panel-label"
           className="font-semibold uppercase tracking-wide"
         >
-          SCANNER {formatPct(scorePct)}
+          SIGNAL PASS {formatPct(scorePct)}
         </span>
         <span className="text-zinc-400 v5-mono">
           {totals.accepted}/{totals.scanner_signals}
         </span>
         {topReasons.length > 0 && (
-          <span className="text-zinc-500 truncate max-w-[180px]" data-testid="scanner-quality-panel-toplabel">
-            top: {topReasons[0].label} ({topReasons[0].count})
+          <span
+            className={`truncate max-w-[220px] ${CATEGORY_COLOR[topReasons[0].category] || 'text-zinc-500'}`}
+            data-testid="scanner-quality-panel-toplabel"
+          >
+            · {CATEGORY_LABEL[topReasons[0].category] || 'top'}: {topReasons[0].label} ({topReasons[0].count})
           </span>
         )}
       </button>
 
+      {/* Expanded drawer */}
       {expanded && (
         <div
           data-testid="scanner-quality-panel-drawer"
@@ -152,7 +227,7 @@ export const ScannerQualityPanel = () => {
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-zinc-500 uppercase tracking-wider text-[12px]">
-              Today's rejection breakdown -- {data?.trading_date_et}
+              Today's rejection breakdown — {data?.trading_date_et}
             </span>
             <button
               type="button"
@@ -161,10 +236,11 @@ export const ScannerQualityPanel = () => {
               className="text-zinc-500 hover:text-zinc-200 text-[12px]"
               title="Refresh now"
             >
-              refresh
+              ↻
             </button>
           </div>
 
+          {/* Totals row */}
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div className="bg-zinc-900 border border-zinc-800 px-2 py-1">
               <div className="text-[11px] text-zinc-500">Accepted</div>
@@ -180,18 +256,20 @@ export const ScannerQualityPanel = () => {
             </div>
           </div>
 
+          {/* By-category strip */}
           <div className="flex gap-2 mb-3 flex-wrap">
             {Object.entries(byCategory).map(([cat, count]) => (
               <div
                 key={cat}
                 data-testid={`scanner-quality-panel-cat-${cat}`}
-                className={`px-2 py-0.5 bg-zinc-900 border border-zinc-800 ${CATEGORY_COLOR[cat] || 'text-zinc-400'}`}
+                className={`px-2 py-0.5 border ${CATEGORY_TINT[cat] || CATEGORY_TINT.other} ${CATEGORY_COLOR[cat] || 'text-zinc-400'}`}
               >
                 {CATEGORY_LABEL[cat] || cat}: <span className="v5-mono">{count}</span>
               </div>
             ))}
           </div>
 
+          {/* Top reasons table */}
           {byReason.length === 0 ? (
             <div className="text-zinc-500 italic">No rejections today.</div>
           ) : (
@@ -203,14 +281,10 @@ export const ScannerQualityPanel = () => {
                 <div
                   key={r.reason_key}
                   data-testid={`scanner-quality-panel-reason-${r.reason_key}`}
-                  className="flex items-center justify-between gap-2 px-2 py-1 bg-zinc-900/60 border border-zinc-800"
+                  className={`flex items-center justify-between gap-2 px-2 py-1 bg-zinc-900/60 border border-zinc-800 border-l-2 ${CATEGORY_LEFT_ACCENT[r.category] || CATEGORY_LEFT_ACCENT.other}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-full ${
-                      r.category === 'scanner_quality' ? 'bg-amber-400' :
-                      r.category === 'broker' ? 'bg-rose-400' :
-                      r.category === 'policy' ? 'bg-sky-400' : 'bg-zinc-500'
-                    }`} />
+                    <span className={`w-2 h-2 rounded-full ${CATEGORY_DOT[r.category] || CATEGORY_DOT.other}`} />
                     <span className="truncate text-zinc-200">{r.label}</span>
                     <span className={`text-[10px] uppercase tracking-wider ${CATEGORY_COLOR[r.category]}`}>
                       {CATEGORY_LABEL[r.category] || r.category}
@@ -222,6 +296,7 @@ export const ScannerQualityPanel = () => {
             </div>
           )}
 
+          {/* Footer hint */}
           <div className="mt-2 text-[11px] text-zinc-600 italic">
             Score formula: accepted / (accepted + scanner-quality rejections).
             Broker/Policy rejections shown but don't penalise the score.

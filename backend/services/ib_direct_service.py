@@ -157,6 +157,22 @@ class IBDirectService:
         self._heartbeat_failures_total: int = 0
         # v19.34.42 -- IB minTick cache (fixes Error 110 rejections).
         self._min_tick_cache: dict = {}
+        # ── v19.34.154 — per-order IB errorEvent capture ──────────────
+        # ib_async fires `errorEvent(reqId, errorCode, errorString,
+        # contract)` for every IB Error message. Pre-v154 we ignored
+        # them, so an async LMT rejection (Error 201 Reg-T, 202 cancelled,
+        # 203 invalid, 110 price band, etc.) silently cancelled the
+        # bracket leg while `place_oca_stop_target` had already returned
+        # success=True. This dict maps `reqId` (= IB orderId) to a
+        # bounded list of `(error_code, error_msg, ts)` tuples. Cleared
+        # opportunistically when the buffer grows past
+        # `_ORDER_ERROR_CAP_PER_ORDER`. `place_oca_stop_target`'s new
+        # post-place polling and the bracket-attach governor read from
+        # this dict to classify rejections as permanent (e.g. Reg-T)
+        # vs transient.
+        self._order_errors: Dict[int, list] = {}
+        self._ORDER_ERROR_CAP_PER_ORDER = 16
+        self._ORDER_ERROR_RETENTION_S = 300  # 5-min ring buffer
 
     # ── connection lifecycle ──────────────────────────────────────────
 
@@ -180,6 +196,58 @@ class IBDirectService:
         callbacks. Conservative default: False until we have evidence.
         """
         return self._connected and self._authorized_to_trade
+
+    # ── v19.34.154 — order-error capture helpers ─────────────────────
+    def get_order_errors(self, order_id: int, *, drain: bool = False) -> list:
+        """Return errorEvent callbacks captured for this IB orderId.
+
+        Each entry is `(error_code:int, error_msg:str, ts:float)`. If
+        `drain=True`, also clears the buffer for that order so the
+        caller can poll repeatedly without reprocessing old events.
+        Empty list if nothing captured.
+        """
+        try:
+            oid = int(order_id)
+        except (TypeError, ValueError):
+            return []
+        # Best-effort retention prune: drop entries older than the
+        # retention window so the per-order buffer doesn't accumulate
+        # stale messages on long-lived orders (GTC stops).
+        now = time.time()
+        retention = float(self._ORDER_ERROR_RETENTION_S)
+        buf = self._order_errors.get(oid, [])
+        if buf:
+            fresh = [e for e in buf if (now - e[2]) <= retention]
+            if len(fresh) != len(buf):
+                self._order_errors[oid] = fresh
+                buf = fresh
+        if not buf:
+            return []
+        snapshot = list(buf)
+        if drain:
+            self._order_errors.pop(oid, None)
+        return snapshot
+
+    def has_permanent_failure_error(self, order_id: int) -> Optional[int]:
+        """Returns the IB error code if the captured error history for
+        this order contains a PERMANENT-failure code, else None.
+
+        Permanent codes (will NOT clear without operator action):
+          • 201 — REG-T margin call (15-order cap / would lead to call)
+          • 203 — security not available for trading (HTB restriction)
+          • 320 — server error processing message (often duplicate id)
+          • 321 — server error validating request (malformed order)
+          • 110 — price doesn't conform to variable tick (rounding bug)
+          • 103 — duplicate order id
+        Other codes (200, 202, 399, etc.) are transient and may resolve.
+        """
+        PERMANENT_CODES = {201, 203, 320, 321, 110, 103}
+        for code, _msg, _ts in self.get_order_errors(order_id):
+            if code in PERMANENT_CODES:
+                return code
+        return None
+
+
 
     async def connect(self) -> Dict[str, Any]:
         """Idempotent connect. Returns a status dict either way."""
@@ -241,6 +309,42 @@ class IBDirectService:
                     logger.warning(
                         "v19.34.54 [IB-DIRECT] could not register "
                         "disconnectedEvent handler: %s", _ev_err,
+                    )
+
+                # v19.34.154 — register the errorEvent handler. ib_async
+                # signature: errorEvent(reqId, errorCode, errorString, contract).
+                # We stash by reqId (= IB orderId) so post-place polling
+                # and the bracket-attach governor can classify each
+                # rejection. We DO NOT log every event here at INFO —
+                # IB sprays informational codes (2104/2106/2158
+                # "market data farm connection ok", etc.) that aren't
+                # actionable; the governor / poll logic filters by code.
+                try:
+                    def _on_error(reqId, errorCode, errorString, contract=None):
+                        try:
+                            rid = int(reqId)
+                        except (TypeError, ValueError):
+                            return
+                        if rid <= 0:
+                            return  # Non-order error (connection-level).
+                        try:
+                            ec = int(errorCode)
+                        except (TypeError, ValueError):
+                            ec = -1
+                        ts = time.time()
+                        buf = self._order_errors.setdefault(rid, [])
+                        buf.append((ec, str(errorString)[:240], ts))
+                        # Cap per-order buffer to avoid runaway memory if
+                        # an order generates a storm of error callbacks
+                        # (we've observed Reg-T error 201 firing 5×/order
+                        # on cancel storms).
+                        if len(buf) > self._ORDER_ERROR_CAP_PER_ORDER:
+                            del buf[: len(buf) - self._ORDER_ERROR_CAP_PER_ORDER]
+                    self._ib.errorEvent += _on_error
+                except Exception as _err_ev_err:
+                    logger.warning(
+                        "v19.34.154 [IB-DIRECT] could not register "
+                        "errorEvent handler: %s", _err_ev_err,
                     )
 
                 # Probe trade authorization. `managedAccounts` is empty
@@ -719,6 +823,162 @@ class IBDirectService:
             return {"success": False,
                     "error": f"ib_direct_close_error: {str(e)[:200]}",
                     "broker": "ib_direct", "simulated": False}
+
+    # ── v19.34.153 (P0 EOD ghost-flatten) ────────────────────────────────
+    # Minimal raw MKT-close path used by EOD ghost-flatten + T-2 escalation.
+    # Differs from `place_close_market` in that it takes raw (symbol, qty,
+    # action) — NOT a `BotTrade` object — because by definition ghost
+    # positions exist at IB but NOT in `bot._open_trades`, so there is no
+    # `BotTrade` to feed `place_close_market`.
+    #
+    # Behaviour:
+    #   1. Cancel ALL working orders for the symbol (eliminates the OCA-
+    #      race / Reg-T storm that broke the 4:01 PM 2026-05-XX session).
+    #   2. Submit a single DAY MKT order for the requested qty/action.
+    #   3. Optionally wait for terminal status (default 8s) so the caller
+    #      can decide whether to escalate or alarm.
+    async def place_emergency_mkt_close(
+        self,
+        symbol: str,
+        qty: int,
+        action: str,                # "BUY" (cover short) | "SELL" (close long)
+        *,
+        wait_for_fill_s: float = 8.0,
+        sec_type: str = "STK",
+        exchange: str = "SMART",
+        currency: str = "USD",
+        cancel_working_first: bool = True,
+    ) -> Dict[str, Any]:
+        """v19.34.153 — Raw emergency MKT close for ghost positions.
+        Returns the same dict shape as `place_close_market`.
+        """
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected",
+                    "broker": "ib_direct", "simulated": False}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode",
+                    "broker": "ib_direct", "simulated": False}
+        if not self.is_authorized_to_trade():
+            return {"success": False,
+                    "error": "ib_direct_not_authorized_managed_accounts_empty",
+                    "broker": "ib_direct", "simulated": False}
+
+        sym = str(symbol).upper().strip()
+        try:
+            q = int(abs(int(qty)))
+        except (TypeError, ValueError):
+            return {"success": False, "error": f"bad qty: {qty}",
+                    "broker": "ib_direct", "simulated": False}
+        if q <= 0:
+            return {"success": False, "error": f"non-positive qty: {qty}",
+                    "broker": "ib_direct", "simulated": False}
+        act = (action or "").upper().strip()
+        if act not in ("BUY", "SELL"):
+            return {"success": False, "error": f"bad action: {action}",
+                    "broker": "ib_direct", "simulated": False}
+
+        # Step 1 — cancel any working orders on this symbol so the MKT
+        # doesn't collide with a half-attached bracket / dangling stop.
+        cancelled_ids: List[int] = []
+        if cancel_working_first:
+            try:
+                for t in list(self._ib.trades()):
+                    try:
+                        if (str(t.contract.symbol).upper() != sym):
+                            continue
+                        st = (t.orderStatus.status or "").lower() if t.orderStatus else ""
+                        if st in ("filled", "cancelled", "apicancelled",
+                                  "inactive", "rejected"):
+                            continue
+                        self._ib.cancelOrder(t.order)
+                        cancelled_ids.append(int(t.order.orderId))
+                    except Exception:
+                        continue
+                if cancelled_ids:
+                    logger.info(
+                        "[v19.34.153 EMERGENCY-MKT] %s: cancelled %d working "
+                        "order(s) pre-flatten: %s",
+                        sym, len(cancelled_ids), cancelled_ids,
+                    )
+                    # Give IB a moment to register the cancels.
+                    await asyncio.sleep(0.4)
+            except Exception as cancel_err:
+                logger.warning(
+                    "[v19.34.153 EMERGENCY-MKT] %s: pre-cancel sweep failed: %s",
+                    sym, cancel_err,
+                )
+
+        # Step 2 — submit MKT.
+        try:
+            contract = Stock(sym, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            order = MarketOrder(act, q)
+            try:
+                order.tif = "DAY"
+            except Exception:
+                pass
+            close_trade = self._ib.placeOrder(contract, order)
+            ib_order_id = int(close_trade.order.orderId)
+
+            deadline = asyncio.get_event_loop().time() + max(0.5, float(wait_for_fill_s))
+            ib_status = "submitted"
+            filled_qty = 0
+            avg_fill = 0.0
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(0.25)
+                status_obj = close_trade.orderStatus
+                if status_obj is None:
+                    continue
+                ib_status = (status_obj.status or "submitted").lower()
+                filled_qty = int(status_obj.filled or 0)
+                avg_fill = float(status_obj.avgFillPrice or 0.0)
+                if ib_status in ("filled", "cancelled", "apicancelled",
+                                 "inactive", "rejected"):
+                    break
+                if filled_qty >= q:
+                    ib_status = "filled"
+                    break
+
+            if ib_status == "filled":
+                status_out, success = "filled", True
+            elif ib_status in ("cancelled", "apicancelled", "inactive", "rejected"):
+                status_out, success = "rejected", False
+            elif 0 < filled_qty < q:
+                status_out, success = "partial", True
+            else:
+                status_out, success = "submitted", False
+
+            logger.warning(
+                "[v19.34.153 EMERGENCY-MKT] %s %s qty=%d -> order_id=%d "
+                "status=%s filled=%d avg=%.4f cancelled_pre=%s",
+                sym, act, q, ib_order_id, status_out,
+                filled_qty, avg_fill, cancelled_ids,
+            )
+            return {
+                "success": success,
+                "order_id": ib_order_id,
+                "ib_order_id": ib_order_id,
+                "fill_price": (avg_fill if filled_qty > 0 else None),
+                "filled_qty": filled_qty,
+                "remaining_qty": max(0, q - filled_qty),
+                "status": status_out,
+                "broker": "ib_direct",
+                "simulated": False,
+                "cancelled_pre_flatten": cancelled_ids,
+                "symbol": sym,
+                "action": act,
+                "qty": q,
+            }
+        except Exception as e:
+            logger.error(
+                "[v19.34.153 EMERGENCY-MKT] place_emergency_mkt_close failed "
+                "for %s %s %d: %s", sym, act, q, e,
+            )
+            return {"success": False,
+                    "error": f"ib_direct_emergency_mkt_error: {str(e)[:200]}",
+                    "broker": "ib_direct", "simulated": False,
+                    "cancelled_pre_flatten": cancelled_ids,
+                    "symbol": sym, "action": act, "qty": q}
 
     async def place_close_limit(
         self,
@@ -1879,24 +2139,127 @@ class IBDirectService:
                     symbol, e, stop_id,
                 )
 
-            logger.warning(
-                "[v19.34.28 PATCH-L2a ADOPT-OCA] %s trade=%s: stop=%s ($%.2f) "
-                "+ target=%s ($%.2f) oca=%s",
-                symbol, getattr(trade, "id", "?"), stop_id, stop_px,
-                target_id or "FAILED", target_px, oca_group,
+            # ── v19.34.154 — post-place polling for async rejections ──
+            # `placeOrder` returns immediately; IB can still reject the
+            # leg asynchronously (Reg-T 201, price band 110, HTB 203,
+            # OCA-conflict 202, etc.) within the next ~100-2000ms. Pre-
+            # v154 we ignored this window and stamped success=True with
+            # both order_ids, then the reconciler later spammed
+            # re-attaches when the LMT vanished. Now: poll for up to
+            # `IB_BRACKET_POLL_S` (default 1.5s) checking BOTH
+            # `orderStatus` and our v154 errorEvent buffer for terminal
+            # rejects. Classify each leg.
+            try:
+                poll_s = float(os.environ.get("IB_BRACKET_POLL_S", "1.5"))
+            except (TypeError, ValueError):
+                poll_s = 1.5
+            poll_deadline = asyncio.get_event_loop().time() + max(0.2, poll_s)
+
+            def _leg_terminal_status(orderstatus_obj) -> Optional[str]:
+                if orderstatus_obj is None:
+                    return None
+                st = (orderstatus_obj.status or "").lower()
+                if st in ("cancelled", "apicancelled", "inactive", "rejected"):
+                    return st
+                return None
+
+            stop_status = "working"
+            target_status = "working" if target_id else "submit_failed"
+            stop_error_code: Optional[int] = None
+            target_error_code: Optional[int] = None
+
+            while asyncio.get_event_loop().time() < poll_deadline:
+                await asyncio.sleep(0.15)
+                # Stop leg
+                if stop_status == "working":
+                    perm = self.has_permanent_failure_error(stop_id) if stop_id else None
+                    term = _leg_terminal_status(getattr(stop_trade, "orderStatus", None)) if stop_id else None
+                    if perm is not None:
+                        stop_status = "permanent_reject"
+                        stop_error_code = perm
+                    elif term:
+                        stop_status = f"terminal_{term}"
+                # Target leg
+                if target_id and target_status == "working":
+                    perm = self.has_permanent_failure_error(target_id)
+                    term = _leg_terminal_status(getattr(target_trade, "orderStatus", None))
+                    if perm is not None:
+                        target_status = "permanent_reject"
+                        target_error_code = perm
+                    elif term:
+                        target_status = f"terminal_{term}"
+                # Bail early if BOTH legs reached a non-working state.
+                if stop_status != "working" and target_status not in ("working",):
+                    break
+
+            # Final classification of permanent_failure: any leg with a
+            # permanent IB error code is bracket-blocking.
+            permanent_failure = bool(
+                stop_error_code in {201, 203, 320, 321, 110, 103}
+                or target_error_code in {201, 203, 320, 321, 110, 103}
             )
 
+            # If STP terminal-rejected, cancel the TP (don't leave a
+            # one-sided target — operator choice 5B: STP-leg reject is
+            # CATASTROPHIC, caller will fire emergency MKT flatten).
+            if (stop_status != "working" and stop_status != "submitted"
+                    and stop_status not in ("",) and target_id):
+                try:
+                    self._ib.cancelOrder(target_trade.order)
+                    logger.error(
+                        "[v19.34.154] %s: STP terminal-rejected (%s code=%s); "
+                        "cancelled TP order %s to prevent one-sided exposure.",
+                        symbol, stop_status, stop_error_code, target_id,
+                    )
+                    target_status = "cancelled_after_stop_fail"
+                except Exception as ce:
+                    logger.warning(
+                        "[v19.34.154] %s: cancelOrder for TP after STP fail "
+                        "raised: %s", symbol, ce,
+                    )
+
+            logger.warning(
+                "[v19.34.154 PLACE-OCA] %s trade=%s: stop=%s ($%.2f) status=%s "
+                "err=%s + target=%s ($%.2f) status=%s err=%s oca=%s "
+                "permanent_failure=%s",
+                symbol, getattr(trade, "id", "?"),
+                stop_id, stop_px, stop_status, stop_error_code,
+                target_id or "FAILED", target_px, target_status, target_error_code,
+                oca_group, permanent_failure,
+            )
+
+            # success=True ONLY if STP is working AND (TP is working OR
+            # target_status acknowledges a non-permanent submit-failure
+            # the caller can retry). STP being terminal-rejected always
+            # → success=False so reconciler emergency-flattens the
+            # naked position. Use PER-LEG checks (not the global
+            # permanent_failure) so a TP-only Error 201 still allows
+            # the STP to live and the overall result to be partial=True.
+            stp_perm = isinstance(stop_error_code, int) and stop_error_code in {201, 203, 320, 321, 110, 103}
+            tgt_perm = isinstance(target_error_code, int) and target_error_code in {201, 203, 320, 321, 110, 103}
+            stp_alive = stop_status == "working" and not stp_perm
+            tp_alive = (target_status == "working") and not tgt_perm
+            overall_success = stp_alive
+            partial = stp_alive and not tp_alive
+
             return {
-                "success": True,
+                "success": overall_success,
                 "stop_order_id": stop_id,
-                "target_order_id": target_id,
+                "target_order_id": target_id if tp_alive else None,
                 "stop_price": stop_px,
                 "target_price": target_px,
                 "oca_group": oca_group,
-                "errors": [target_error] if target_error else [],
+                "errors": [e for e in [target_error] if e],
                 "broker": "ib_direct",
                 "simulated": False,
-                "partial": target_id is None,
+                "partial": partial,
+                # v19.34.154 new fields:
+                "stop_status": stop_status,
+                "target_status": target_status,
+                "stop_error_code": stop_error_code,
+                "target_error_code": target_error_code,
+                "permanent_failure": permanent_failure,
+                "stop_terminal_reject": not stp_alive,
             }
         except Exception as e:
             logger.error(
