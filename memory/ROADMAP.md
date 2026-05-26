@@ -4,11 +4,44 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.90+ priority queue
+## 🚀 Next session — v19.34.161+ priority queue
 
-**Last shipped**: v19.34.89.1 (forensics + clean retro analyzers —
-committed `911496c8`). Plus v89 (alert_outcomes.trade_grade fallback +
-180-row backfill) and v88 (post-stop cooldown).
+**Last shipped**: v19.34.160 (unified scalp detection — directional
+suffix stripping + timeframe consultation + isScalpStyle single source
+of truth) committed `e8e2221d`, pushed to origin/main. Plus v19.34.159
+"Why this size?" tooltip and v153→158 wave (EOD ghost-flatten, bracket
+governor, grade+MR sizing, test isolation fix).
+
+### 🟡 v19.34.161 P1 — Per-Style P&L Card
+**Pitch**: Now that scalp positions self-classify cleanly (v160),
+combined with v156 grade scaling + v157 MR regime + v159 transparency,
+the next operator-facing telemetry win is a **per-style P&L breakdown
+card** on the V5 dashboard.
+
+**Why it matters**: today the operator sees "today's R = +3.2" but
+can't tell whether that came from disciplined scalps or one lucky
+swing. Breaking it down by style answers the critical strategic
+question every evening: *"is the bot making money on scalps vs
+intraday vs swing, and should I tilt the scanner mix tomorrow?"*
+
+**Scope**:
+- New `GET /api/trading-bot/pnl-by-style` endpoint. Returns today's
+  closed-trade R sum + win-rate + count bucketed by
+  `resolveTradeStyle()`-equivalent backend logic (likely
+  `tradeStyleMeta.py` sibling or call into `smb_integration`).
+- New V5 card `PnLByStyleCard.jsx` — compact 5-row layout (Scalp /
+  Intraday / Swing / Investment / Position) with sparkline + R sum +
+  win% per row. Color-code rows by P&L sign.
+- Click-through expansion → drill into the contributing trades.
+- Mid-day refresh every 60s; full recompute at 4PM ET close.
+
+**Acceptance**:
+- Card visible on V5 dashboard immediately after morning open
+  (zero-state shows "0 trades closed yet today").
+- Numbers match `setup_retro.py --today --by-style` (already exists
+  per ROADMAP).
+- Scalp row picks up USO + BP (v160 fix) — would have shown 0 trades
+  pre-v160 even when scalps closed.
 
 ### 🚨 MASSIVE STRUCTURAL FINDING from v89.1 forensics (top priority)
 The "0/7 losing squeeze×A" finding from v89 retro was a MEASUREMENT
