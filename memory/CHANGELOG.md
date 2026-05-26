@@ -1,3 +1,80 @@
+## 2026-02-?? — v19.34.160: Unified scalp detection (SHIPPED-TO-DGX, COMMIT e8e2221d)
+
+### Trigger
+Operator caught 2 open positions (USO `vwap_fade_long`, BP
+`mean_reversion_long`) labelled as `INTRA` in the V5 open-positions
+panel — both are textbook scalp setups. Diagnosis revealed two
+overlapping bugs in `resolveTradeStyle()`:
+
+1. **Directional-suffix blindness.** SETUP_TO_STYLE in
+   `tradeStyleMeta.js` only had base names (`vwap_fade`,
+   `mean_reversion`, `rubber_band`, `gap_fade` …) — directional
+   variants (`_long`, `_short`) missed the table and fell through to
+   `STYLE_ALIAS['trade_2_hold']` → `intraday`. The bot stamps
+   `trade_style='trade_2_hold'` as the generic default on every fill,
+   so every directional-variant scalp got mislabelled.
+2. **`timeframe` ignored.** The bot already stamps
+   `timeframe='scalp'` on USO (cleanest signal), but
+   `resolveTradeStyle` never consulted it.
+
+Compounding, `OpenPositionsV5.jsx` maintained its OWN `SCALP_SETUPS`
+hardcoded list (14 setups, manually curated) for SMB-grade-chip
+suppression. It drifted from `SETUP_TO_STYLE`'s 23-setup scalp bucket,
+so even when the TradeStyleChip eventually rendered "SCALP" the SMB
+grade chip stayed visible — making the row visually inconsistent
+with itself.
+
+### What shipped
+
+**1. `frontend/src/utils/tradeStyleMeta.js`** (+67/-15 LOC)
+  * New helper `stripDirectionalSuffix(key)` strips `_long`/`_short`/
+    `_buy`/`_sell` (data-driven via DIRECTIONAL_SUFFIXES const).
+  * New `setupLookup(raw)` tries the raw key first, then the stripped
+    fallback. Used for both `setup_variant` and `setup_type`.
+  * `resolveTradeStyle()` consults `row.timeframe` in the fallback
+    chain (after `tier` / `symbol_tier`, before `setupKey`).
+  * New named export `isScalpStyle(row) → bool` — single source of
+    truth for "is this a scalp position?".
+
+**2. `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`** (-25/+5 LOC)
+  * Deletes the divergent `SCALP_SETUPS` hardcoded list (14 entries)
+    and inline `isScalpPosition()` (~10 LOC body).
+  * Replaces with a one-liner: `const isScalpPosition = (pos) => !!pos
+    && isScalpStyle(pos);`.
+
+**3. `frontend/src/utils/__tests__/tradeStyleMeta.smoke.js`** (+34/+4 LOC)
+  Adds 16 new cases:
+  * Directional-suffix → scalp: `vwap_fade_long`, `vwap_fade_short`,
+    `mean_reversion_long`, `mean_reversion_short`, `gap_fade_long`,
+    `rubber_band_long`, `rubber_band_short`.
+  * `setup_variant` directional variant.
+  * Non-scalp directional variant respects its actual bucket
+    (`breakout_long → intraday`).
+  * `timeframe='scalp'` alone resolves to scalp (case-insensitive).
+  * **Regression guards**: `squeeze → intraday`,
+    `vwap_continuation → intraday`, `accumulation_entry → swing` —
+    these reflect the 16 of 20 live DGX positions that must NOT
+    flip buckets after the fix.
+
+  Plus 4 new assertions for `isScalpStyle()`.
+
+  **38/38 cases + 9 assertions passing in 26ms.**
+
+### Operator workflow on DGX
+Patched via 3-file overwrite (paste.rs) due to local file drift.
+Committed locally as e8e2221d. Hard-refresh required.
+
+### Verification
+Live DGX positions before/after:
+| Symbol | setup_type             | timeframe | Before | After  |
+|--------|------------------------|-----------|--------|--------|
+| USO    | vwap_fade_long         | scalp     | INTRA  | SCALP  |
+| BP     | mean_reversion_long    | —         | INTRA  | SCALP  |
+| 13×    | squeeze                | —         | INTRA  | INTRA  |
+| AMRZ   | accumulation_entry     | —         | SWING  | SWING  |
+| ADI/SNPS | vwap_continuation    | —         | INTRA  | INTRA  |
+
+
 ## 2026-02-?? — v19.34.159: "Why this size?" V5 tooltip (SHIPPED-TO-DGX, COMMIT 8032be10)
 
 ### Trigger
