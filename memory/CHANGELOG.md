@@ -1,3 +1,94 @@
+## 2026-02-?? — v19.34.156: P3-A grade-based position-sizing scaler (READY-FOR-DGX-APPLY)
+
+### Trigger
+Operator wants smaller positions on lower-grade setups so the bot
+learns from full-A-grade winners with full edge while accumulating
+data on B/C/D-grade plays at de-risked size. Pre-v156 every setup
+sized identically regardless of `smb_grade` — A-grade conviction
+plays got the same dollars as marginal D-grade reaches.
+
+### What shipped
+**File: `backend/services/opportunity_evaluator.py`** (+57 LOC, 1 call-
+site patched, 1 new helper).
+
+1. **New pure helper `_resolve_grade_multiplier(grade)`** at the
+   top of the module. Maps a grade string to `(multiplier, normalized)`:
+     * A → 1.0× (full size)
+     * B → 0.7×
+     * C → 0.3×
+     * **D → 0.1×** (vanishingly small but NON-ZERO — operator choice
+       Q1b: keeps real capital on the line for learning instead of
+       skipping the alert silently).
+     * **Unknown / None / non-string → D** (operator choice Q2b:
+       strict, no silent fallback to B).
+   Tunable via env vars `POSITION_SIZE_GRADE_{A,B,C,D}_MULT`. Malformed
+   env values fall back to hardcoded defaults (never crash).
+
+2. **`OpportunityEvaluator.calculate_position_size()` accepts `grade=`
+   kwarg** and applies the multiplier AFTER the existing
+   volatility / regime / vp_path chain. The grade scalar therefore
+   compounds with the other gates — an A-graded high-vol setup in
+   a downtrend still gets shrunk by regime+vp; the grade just
+   refuses to add MORE size to a low-conviction setup.
+
+3. **Caller patched** (line ~770 in `evaluate_opportunity`):
+   `alert_grade = alert.get("smb_grade") or alert.get("trade_grade")`
+   passed through. Per Q2b, falsy values fall to D inside the helper.
+
+4. **Postmortem provenance**: `multipliers_out["grade"]` (normalized
+   letter) and `multipliers_out["grade_multiplier"]` (float) now flow
+   into `build_entry_context` alongside the existing
+   `volatility / regime / vp_path` keys, so every trade explanation
+   surfaces WHY it was sized the way it was.
+
+### Tests
+* `backend/tests/test_grade_position_sizing_v19_34_156.py` — **21 cases**:
+   * All 4 letter grades (A/B/C/D) → expected multiplier + normalization.
+   * Unknown / None / empty / non-string → D (strict).
+   * Lowercase + suffixed grades (`a`, `A+`, `A-`, `A grade`) → first-
+     letter normalization.
+   * Env override changes multiplier + bad env value falls to default.
+   * **End-to-end parametric**: 6 grade values → expected share counts
+     from `calculate_position_size()` with a minimal bot stub.
+   * Legacy caller (no `grade=` kwarg) → still produces D-graded size,
+     never crashes.
+   * Composition: grade × volatility multipliers compose multiplicatively
+     (A vs C with same vol_mult → ratio ≈ 0.3).
+
+* **Full suite: 61/61 passing** across v153 (ghost-flatten 7) +
+  v154 (governor 13 + polling 5) + v155 (diagnostic 15) + v156 (21).
+
+### Operator workflow on DGX
+```
+git pull
+sudo supervisorctl restart backend   # opportunity_evaluator.py is hot-reloadable, but restart guarantees env vars pick up if you tune them
+
+# Default multipliers (no env vars needed): A=1.0, B=0.7, C=0.3, D=0.1.
+# To tune later (e.g. make D slightly larger as you gain confidence):
+export POSITION_SIZE_GRADE_D_MULT=0.2
+sudo supervisorctl restart backend
+
+# Verify on next live trade — `entry_context.position_multipliers`
+# in the trade-explanation panel now shows `grade=<A|B|C|D>` and
+# `grade_multiplier=<float>` alongside the existing vol/regime/vp.
+```
+
+### Verification once a live trade fires
+Look at the trade's `entry_context` JSON (visible in V5 trade-detail
+drawer or via `GET /api/trading-bot/trades/{id}`):
+```json
+{
+  "position_multipliers": {
+    "volatility": 1.0,
+    "regime": 1.0,
+    "vp_path": 1.0,
+    "grade": "B",                  // ← v19.34.156 NEW
+    "grade_multiplier": 0.7        // ← v19.34.156 NEW
+  }
+}
+```
+
+
 ## 2026-02-?? — v19.34.155: P2-1 ScannerQualityPanel polish + P2-2 Bar Pipeline Diagnostic (READY-FOR-DGX-APPLY)
 
 ### P2-1 — ScannerQualityPanel colour-hint polish
