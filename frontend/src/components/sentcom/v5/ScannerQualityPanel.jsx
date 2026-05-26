@@ -1,6 +1,19 @@
 /**
  * ScannerQualityPanel — v19.34.41 (Feb 2026)
  *
+ * v19.34.155 — Colour-hint polish (P2-1). Pre-fix the score pill's
+ * tinted palette didn't extend to the category strip (plain
+ * `bg-zinc-900` blocks) or to the per-reason rows (no accent at all).
+ * Three unifying maps (`CATEGORY_TINT`, `CATEGORY_DOT`,
+ * `CATEGORY_LEFT_ACCENT`) now give every category a consistent
+ * shade across:
+ *   • Score pill (existing)
+ *   • Category strip pills (NEW tint)
+ *   • Reason rows (NEW left-border accent + matched dot)
+ * Net result: the breakdown reads as a single visual system, the
+ * operator can scan "is this a broker problem or a scanner problem?"
+ * in under a second.
+ *
  * v19.34.85 — Label honesty pass. Pre-fix the pill read "SCANNER X%"
  * which operators reasonably misread as "the scanner is broken / X%
  * healthy" whenever the score dropped. The metric is actually
@@ -50,6 +63,35 @@ const CATEGORY_COLOR = {
   broker:          'text-rose-300',
   policy:          'text-sky-300',
   other:           'text-zinc-400',
+};
+
+// v19.34.155 — colour-hint polish. Pre-fix the category-strip pills and
+// reason rows had no shared visual rhythm with the score pill — the dot
+// was `bg-{c}-400`, text was `text-{c}-300`, no tint or accent on rows.
+// These three maps unify a single accent palette per category:
+//   • -500/15 background tint   (matches score pill)
+//   • -500/30 border            (matches score pill)
+//   • -400 dot                  (slightly brighter than text)
+//   • -500/60 left-border accent on reason rows  (instant-scan filter)
+const CATEGORY_TINT = {
+  scanner_quality: 'bg-amber-500/15 border-amber-500/30',
+  broker:          'bg-rose-500/15 border-rose-500/30',
+  policy:          'bg-sky-500/15 border-sky-500/30',
+  other:           'bg-zinc-700/20 border-zinc-700/40',
+};
+
+const CATEGORY_DOT = {
+  scanner_quality: 'bg-amber-400',
+  broker:          'bg-rose-400',
+  policy:          'bg-sky-400',
+  other:           'bg-zinc-500',
+};
+
+const CATEGORY_LEFT_ACCENT = {
+  scanner_quality: 'border-l-amber-500/60',
+  broker:          'border-l-rose-500/60',
+  policy:          'border-l-sky-500/60',
+  other:           'border-l-zinc-600/60',
 };
 
 const CATEGORY_LABEL = {
@@ -220,7 +262,7 @@ export const ScannerQualityPanel = () => {
               <div
                 key={cat}
                 data-testid={`scanner-quality-panel-cat-${cat}`}
-                className={`px-2 py-0.5 bg-zinc-900 border border-zinc-800 ${CATEGORY_COLOR[cat] || 'text-zinc-400'}`}
+                className={`px-2 py-0.5 border ${CATEGORY_TINT[cat] || CATEGORY_TINT.other} ${CATEGORY_COLOR[cat] || 'text-zinc-400'}`}
               >
                 {CATEGORY_LABEL[cat] || cat}: <span className="v5-mono">{count}</span>
               </div>
@@ -239,14 +281,10 @@ export const ScannerQualityPanel = () => {
                 <div
                   key={r.reason_key}
                   data-testid={`scanner-quality-panel-reason-${r.reason_key}`}
-                  className="flex items-center justify-between gap-2 px-2 py-1 bg-zinc-900/60 border border-zinc-800"
+                  className={`flex items-center justify-between gap-2 px-2 py-1 bg-zinc-900/60 border border-zinc-800 border-l-2 ${CATEGORY_LEFT_ACCENT[r.category] || CATEGORY_LEFT_ACCENT.other}`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-full ${
-                      r.category === 'scanner_quality' ? 'bg-amber-400' :
-                      r.category === 'broker' ? 'bg-rose-400' :
-                      r.category === 'policy' ? 'bg-sky-400' : 'bg-zinc-500'
-                    }`} />
+                    <span className={`w-2 h-2 rounded-full ${CATEGORY_DOT[r.category] || CATEGORY_DOT.other}`} />
                     <span className="truncate text-zinc-200">{r.label}</span>
                     <span className={`text-[10px] uppercase tracking-wider ${CATEGORY_COLOR[r.category]}`}>
                       {CATEGORY_LABEL[r.category] || r.category}

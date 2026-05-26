@@ -1,3 +1,88 @@
+## 2026-02-?? — v19.34.155: P2-1 ScannerQualityPanel polish + P2-2 Bar Pipeline Diagnostic (READY-FOR-DGX-APPLY)
+
+### P2-1 — ScannerQualityPanel colour-hint polish
+File: `frontend/src/components/sentcom/v5/ScannerQualityPanel.jsx`.
+
+Three small inconsistencies cleaned up so the panel reads as one
+visual system instead of three loosely-related blocks:
+  * Reason-row dots used `bg-{c}-400` while the matching text used
+    `text-{c}-300` (one shade off, looked muddy on hover).
+  * Category-strip pills (`Scanner: 5`, `Broker: 12`, …) had a flat
+    `bg-zinc-900` background, no tinted accent — they visually
+    disconnected from the score-pill above.
+  * Per-reason rows had no left-border accent, so the operator had to
+    READ each row to figure out whether it was a Scanner/Broker/Policy
+    rejection instead of scanning by colour.
+
+Fix: introduced three sibling maps that pair with the existing
+`CATEGORY_COLOR`:
+  * `CATEGORY_TINT`   — `bg-{c}-500/15 border-{c}-500/30` per category
+                        (matches the score pill's tint depth).
+  * `CATEGORY_DOT`    — `-400` saturation for dots, matched against
+                        `-300` text saturation.
+  * `CATEGORY_LEFT_ACCENT` — `border-l-{c}-500/60` on each reason row.
+
+Net code change: +25 LOC, no behaviour change. Lint passed
+(`✅ No issues found`). Hot reload picked up cleanly in the fork.
+
+### P2-2 — Bar Pipeline Restoration Verification (Phase D)
+File: `backend/scripts/bar_pipeline_diagnostic_phase_d.py` (NEW).
+
+Read-only diagnostic over `ib_historical_data`. Six checks each
+producing PASS / WARN / FAIL with detail:
+
+  1. **RECENCY** — latest `collected_at` per `(symbol, bar_size)` over
+     a configurable lookback. WARN if > `sla_minutes` stale.
+  2. **RTH_VOLUME** — count of `1 min` bars per RTH day per symbol.
+     PASS ≥ 370 (95% of 390-min session), WARN 300-370, FAIL < 300.
+  3. **GAPS** — runs of ≥ N consecutive missing minute-bars during
+     RTH (09:30-16:00 ET). WARN < 15-min gaps, FAIL ≥ 15-min gaps.
+  4. **AGG_CONSISTENT** — sampled (symbol, day) 5-min bars verified
+     to roll up cleanly from underlying 1-min bars (open=first.open,
+     close=last.close, high=max.high, low=min.low, volume ±10%).
+     Catches the kind of aggregation join bug the restoration phase
+     was meant to eliminate.
+  5. **UNIVERSE** — `smart_watchlist` collection (the bot's active
+     scanner universe, `_type=watchlist_item`) vs symbols actually
+     delivering bars in the last 24h. Lists missing subscriptions
+     AND extra symbols delivered without a watchlist entry.
+  6. **QUARTER_SLICE** (optional via `--quarter Q1|Q2|Q3|Q4 --year YYYY`):
+     re-runs RTH-volume coverage over a full calendar quarter. Useful
+     for postmortem of pipeline restoration history.
+
+Exit code maps to overall severity (0=PASS, 1=WARN, 2=FAIL) so it
+slots cleanly into cron / CI / smoke-tests.
+
+Output: pretty-printed report by default; `--json` for postmortem
+ingestion. Read-only — never mutates the DB.
+
+### Tests
+* `backend/tests/test_bar_pipeline_diagnostic_phase_d.py` (NEW) —
+  16 cases covering all date-string formats (`ISO`, `T`-separated,
+  `US/Eastern` suffix, compact YYYYMMDD, Python datetime passthrough,
+  epoch seconds, garbage), all four quarter windows, severity
+  comparator edge cases.
+* **Total now passing: 40 / 40 in 4.55s.** (v153 ghost-flatten 7 +
+  v154 governor 13 + v154 polling 5 + v155 diagnostic 15.)
+
+### Operator workflow on DGX
+```
+git pull
+# Frontend rebuild (panel is in the static build the DGX serves):
+cd frontend && yarn build && cd ..
+sudo supervisorctl restart backend   # only if backend collection-name env changed (no for this commit)
+
+# Run the bar-pipeline diagnostic (read-only, safe anytime):
+PYTHONPATH=backend python3 backend/scripts/bar_pipeline_diagnostic_phase_d.py
+
+# Quarterly postmortem (e.g. for the period when the pipeline was down):
+PYTHONPATH=backend python3 backend/scripts/bar_pipeline_diagnostic_phase_d.py --quarter Q4 --year 2025
+
+# CI-friendly:
+PYTHONPATH=backend python3 backend/scripts/bar_pipeline_diagnostic_phase_d.py --json > /tmp/bar_health.json
+```
+
+
 ## 2026-02-?? — v19.34.154: P1 bracket plumbing + Reg-T compliance (READY-FOR-DGX-APPLY)
 
 ### Trigger
