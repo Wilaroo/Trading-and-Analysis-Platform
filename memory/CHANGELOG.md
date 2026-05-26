@@ -1,3 +1,59 @@
+## 2026-02-?? — v19.34.159: "Why this size?" V5 tooltip (SHIPPED-TO-DGX, COMMIT 8032be10)
+
+### Trigger
+v156 stamps `grade` + `grade_multiplier` and v157 stamps `mr_regime` +
+`mr_multiplier` + `mr_hurst` + `mr_half_life_bars` + `mr_reason` into
+`multipliers_out`, but operators had no UI surface to inspect WHY a
+given fill was sized the way it was — the sizing chain was
+write-only telemetry until now.
+
+### What shipped
+
+**1. `backend/services/opportunity_evaluator.py`** (+12 LOC) —
+`build_entry_context` now also propagates `grade`, `grade_multiplier`,
+`mr_regime`, `mr_multiplier`, `mr_hurst`, `mr_half_life_bars`,
+`mr_reason` from `multipliers_meta["position"]` into
+`entry_context.multipliers`. Defensive: each key is only emitted when
+present + non-None, so pre-v156 trades render cleanly on the frontend.
+
+**2. `frontend/src/components/sentcom/v5/WhyThisSizePill.jsx`** (NEW,
+176 LOC) — compact `Σ WHY 0.xx×` pill that renders in the
+open-position footer next to the grade/setup chips. Shows the live
+product of all five sizing scalars in the pill label, and on click
+opens a popover with the full breakdown:
+  * Grade × {0.1, 0.3, 0.7, 1.0}× (with letter detail)
+  * Volatility × X
+  * Regime × X
+  * VP path × X
+  * MR regime × X (with regime tag detail)
+  * Hurst / Half-life raw values (when present)
+  * **Final × Y** color-coded amber (Y<1) or emerald (Y>1)
+  * MR reason string footer (italics)
+
+Renders nothing when none of the keys are present (legacy trades).
+
+**3. `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`**
+(+7 LOC) — Wires `<WhyThisSizePill multipliers={position?.entry_context?.multipliers}/>`
+into the setup-grade footer row.
+
+### Tests
+`backend/tests/test_entry_context_multipliers_v19_34_159.py` (NEW,
+6 cases):
+  * Legacy pre-v156 trade only surfaces vol/regime/vp_path.
+  * v156-only fields propagate (grade + grade_multiplier).
+  * v157-only fields propagate (mr_*).
+  * Full chain (v156+v157+vol/regime/vp_path) all surface.
+  * `None` values are filtered (so frontend `mult != null` checks stay honest).
+  * `multipliers_meta=None` → no `multipliers` key in ctx.
+
+**Full suite: 120/120 passing in 4.90s.**
+
+### Operator workflow on DGX
+Applied via single git commit. After next live fill, hover the
+`Σ WHY 0.xx×` pill in the open-position row footer for the
+multiplier-chain breakdown.
+
+
 ## 2026-02-?? — v19.34.158: Test-isolation fix for v153 ghost-flatten + v154 polling co-execution (SHIPPED-TO-DGX)
 
 ### Trigger
