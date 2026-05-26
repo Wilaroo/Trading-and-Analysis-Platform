@@ -1228,9 +1228,39 @@ class PositionManager:
         # (matches max_open_positions); even with IB-side serialization on
         # the order queue, the AWAITS happen in parallel so the total
         # latency stays bounded by single-trade latency, not N × latency.
+        # ── v19.34.162 EOD fast-path opt-in ─────────────────────────────
+        # When BOT_EOD_PATH=v162, EOD closes use `_eod_close_one_fast`
+        # which SKIPS the v19.34.31 Patch B pre-close cancellation.
+        # That patch queued 2 cancels per position (stop + target)
+        # before firing the MKT close — at 10s timeout each on a
+        # single-worker queue, 24 positions = up to 480s of cancel
+        # work that completely blocked today's (2026-05-26) EOD pass
+        # with 24 open positions.
+        #
+        # The pre-cancel is redundant for OCA-attached children: when
+        # the MKT close fills, IB auto-cancels the survivor child
+        # (that's what OCA *is*). The Patch B comment cites "OCA
+        # bracket-stacking on 2026-05-14" but the v19.34.31 stacking
+        # bug was rooted in adoption duplicate-attaches, not in
+        # OCA-cancel timing on close. Skipping the pre-cancel is
+        # safe; the orphan sweep at the end of EOD picks up anything
+        # IB doesn't auto-cancel (extremely rare).
+        #
+        # Rollback: unset BOT_EOD_PATH (or set to anything other than
+        # "v162") to revert to the legacy `close_trade` path.
+        eod_path = _os.environ.get("BOT_EOD_PATH", "").lower().strip()
+        use_fast_path = (eod_path == "v162")
+
         async def _close_one(tid_trade):
             tid, trade = tid_trade
             try:
+                if use_fast_path:
+                    logger.info(
+                        f"  📤 EOD CLOSE [v162]: {trade.symbol} - "
+                        f"{trade.direction.value} {trade.remaining_shares} shares"
+                    )
+                    ok, pnl = await self._eod_close_one_fast(tid, trade, bot)
+                    return ("ok", pnl) if ok else ("fail", trade.symbol)
                 logger.info(f"  📤 EOD CLOSE: {trade.symbol} - {trade.direction.value} {trade.remaining_shares} shares")
                 # P0 #1 — close_trade returns a BOOL, not a dict. Treat the
                 # bool correctly; capture realized_pnl from the trade object
@@ -1271,6 +1301,17 @@ class PositionManager:
         closed_count = sum(1 for r in results if r[0] == "ok")
         total_pnl = sum(r[1] for r in results if r[0] == "ok")
         failed_symbols = [r[1] for r in results if r[0] == "fail"]
+
+        # v19.34.162 — Post-flatten orphan-bracket sweep (fast-path only).
+        # IB's OCA mechanism normally auto-cancels survivor children when
+        # the MKT close fills, but a race / manual TWS edit can leave
+        # orphans. The sweep queues cancels for any still-live child
+        # orders — non-blocking, never blocks the close path.
+        if use_fast_path:
+            try:
+                await self._eod_orphan_cancel_sweep(bot)
+            except Exception as e:
+                logger.warning(f"[v162 sweep] non-fatal: {e}")
 
         # P0 #3 — only mark executed if EVERY close succeeded. If any
         # failed, leave the flag False so next tick retries — manage loop
@@ -2549,6 +2590,202 @@ class PositionManager:
             f"({ib_signed:+.0f} signed). Closing only what IB actually holds."
         )
         return ib_abs
+
+    # ── v19.34.162 EOD fast-path ────────────────────────────────────────
+    async def _eod_close_one_fast(
+        self, trade_id: str, trade, bot: 'TradingBotService'
+    ):
+        """Skinny EOD close that fires MKT immediately, no pre-cancel.
+
+        Rationale: today's (2026-05-26) EOD pass froze with 24 positions
+        still open. Root cause was the v19.34.31 Patch B pre-close
+        cancellation: it queued 2 IB cancels per position on a
+        1-worker, 10s-timeout queue. With 24 positions = 48 cancels ×
+        10s = up to 480s of cancel work blocking the actual flatten.
+
+        IB's OCA mechanism auto-cancels surviving child orders when
+        the parent fills. We don't pre-cancel — the broker does it for
+        us as soon as our MKT close fills.
+
+        Returns ``(ok: bool, realized_pnl: float)``.
+        """
+        from services.trading_bot_service import TradeDirection, TradeStatus
+
+        if trade_id not in bot._open_trades:
+            return False, 0.0
+
+        shares_to_close = (
+            trade.remaining_shares
+            if trade.remaining_shares > 0
+            else trade.shares
+        )
+
+        # v19.34.27 phantom-share clamp — preserved verbatim.
+        try:
+            shares_to_close = await self._clamp_shares_to_ib_position(
+                trade, shares_to_close, reason="eod_auto_close_v162"
+            )
+        except Exception as clamp_err:
+            logger.debug(
+                f"_eod_close_one_fast: phantom-share clamp errored for "
+                f"{trade.symbol} ({clamp_err}); using bot-tracked count "
+                f"{shares_to_close}"
+            )
+
+        if shares_to_close == 0:
+            logger.warning(
+                f"[v162 EOD] {trade.symbol}: clamped to 0 shares (phantom), "
+                f"marking trade {trade_id} CLOSED locally."
+            )
+            from services.pnl_compute import apply_close_pnl
+            apply_close_pnl(
+                trade,
+                reason="eod_auto_close_v162_phantom_recovery",
+                exit_price=getattr(trade, "current_price", None),
+            )
+            trade.status = TradeStatus.CLOSED
+            del bot._open_trades[trade_id]
+            bot._closed_trades.append(trade)
+            try:
+                await bot._save_trade(trade)
+            except Exception:
+                pass
+            return True, getattr(trade, "realized_pnl", 0.0)
+
+        try:
+            original_shares = trade.shares
+            trade.shares = shares_to_close
+
+            if not bot._trade_executor:
+                logger.error(
+                    f"[v162 EOD] {trade.symbol}: bot._trade_executor is None — "
+                    f"cannot place MKT close. Operator must flatten in TWS."
+                )
+                trade.shares = original_shares
+                return False, 0.0
+
+            result = await bot._trade_executor.close_position(trade)
+            trade.shares = original_shares
+
+            if not result.get("success"):
+                err = result.get("error", "unknown")
+                logger.error(
+                    f"[v162 EOD] {trade.symbol}: executor refused MKT close "
+                    f"({shares_to_close}sh): {err}"
+                )
+                try:
+                    trade._last_close_error = str(err)[:300]
+                    trade._last_close_error_at = datetime.now(timezone.utc).isoformat()
+                except Exception:
+                    pass
+                return False, 0.0
+
+            trade.exit_price = result.get("fill_price", trade.current_price)
+
+            if trade.direction == TradeDirection.LONG:
+                final_pnl = (trade.exit_price - trade.fill_price) * shares_to_close
+            else:
+                final_pnl = (trade.fill_price - trade.exit_price) * shares_to_close
+            trade.realized_pnl += final_pnl
+            try:
+                bot._apply_commission(trade, shares_to_close)
+            except Exception:
+                pass
+
+            trade.status = TradeStatus.CLOSED
+            trade.closed_at = datetime.now(timezone.utc).isoformat()
+            trade.close_reason = "eod_auto_close_v162"
+            trade.unrealized_pnl = 0
+            trade.remaining_shares = 0
+
+            bot._daily_stats.net_pnl += trade.net_pnl
+            if trade.realized_pnl > 0:
+                bot._daily_stats.trades_won += 1
+                bot._daily_stats.largest_win = max(
+                    bot._daily_stats.largest_win, trade.realized_pnl
+                )
+            else:
+                bot._daily_stats.trades_lost += 1
+                bot._daily_stats.largest_loss = min(
+                    bot._daily_stats.largest_loss, trade.realized_pnl
+                )
+            total = bot._daily_stats.trades_won + bot._daily_stats.trades_lost
+            bot._daily_stats.win_rate = (
+                bot._daily_stats.trades_won / total * 100
+            ) if total > 0 else 0
+
+            del bot._open_trades[trade_id]
+            bot._closed_trades.append(trade)
+
+            try:
+                await bot._save_trade(trade)
+            except Exception as e:
+                logger.warning(f"[v162 EOD] {trade.symbol} save failed: {e}")
+            try:
+                if bot._db is not None:
+                    bot._db.bracket_lifecycle_events.insert_one({
+                        "phase": "eod_flatten_v162",
+                        "success": True,
+                        "trade_id": trade_id,
+                        "symbol": trade.symbol,
+                        "shares_closed": shares_to_close,
+                        "exit_price": trade.exit_price,
+                        "realized_pnl": trade.realized_pnl,
+                        "created_at": datetime.now(timezone.utc),
+                    })
+            except Exception:
+                pass
+
+            return True, getattr(trade, "realized_pnl", 0.0)
+
+        except Exception as e:
+            logger.exception(
+                f"[v162 EOD] {trade.symbol}: unexpected error during fast "
+                f"close ({type(e).__name__}: {e})"
+            )
+            return False, 0.0
+
+    async def _eod_orphan_cancel_sweep(self, bot: 'TradingBotService'):
+        """Post-flatten orphan-bracket sweep — v19.34.162.
+
+        Runs AFTER all EOD MKT closes have fired. In the common case
+        IB's OCA auto-cancels the survivor children when the MKT fills,
+        so this sweep finds nothing to do. The rare orphans (race
+        conditions, manual TWS edits) get queued for cancellation
+        without blocking the flatten path.
+        """
+        try:
+            from routers.ib import _pushed_ib_data, queue_cancellation
+        except Exception as e:
+            logger.debug(f"[v162 sweep] import failed: {e}")
+            return
+
+        orders = (_pushed_ib_data or {}).get("orders") or []
+        if isinstance(orders, dict):
+            orders = orders.get("orders", [])
+        if not orders:
+            return
+
+        queued = 0
+        for ob in orders:
+            try:
+                status = (ob.get("status") or "").strip()
+                if status not in ("PreSubmitted", "Submitted"):
+                    continue
+                oid = ob.get("order_id") or ob.get("orderId")
+                if oid is None:
+                    continue
+                sym = (ob.get("symbol") or "").upper()
+                queue_cancellation(
+                    ib_order_id=int(oid),
+                    reason=f"v162 EOD orphan sweep ({sym or 'unknown'})",
+                    requested_by="position_manager_eod_v162",
+                )
+                queued += 1
+            except Exception:
+                continue
+        if queued:
+            logger.info(f"[v162 sweep] queued {queued} orphan cancel(s)")
 
 
     async def close_trade(self, trade_id: str, bot: 'TradingBotService', reason: str = "manual"):
