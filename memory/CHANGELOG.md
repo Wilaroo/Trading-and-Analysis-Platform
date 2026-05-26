@@ -1,3 +1,129 @@
+## 2026-02-?? — v19.34.157: P3-C Mean-Reversion Metrics Service (READY-FOR-DGX-APPLY)
+
+### Trigger
+Operator wants the bot to know WHEN a setup is statistically in-regime
+vs out-of-regime. Pre-v157 the sizer treated every setup identically
+— a gap-fade (MR) in a parabolic uptrend got the same dollars as a
+gap-fade in a range-bound chop, even though the former is a
+statistically losing trade and the latter is the bread-and-butter
+win. P3-A grade scaling solved "conviction"; P3-C solves "regime fit".
+
+### What shipped
+
+**1. NEW `backend/services/mean_reversion_metrics.py`** — pure logic,
+no FastAPI / no DB writes (mirrors the `smart_levels_service` pattern).
+Two public functions:
+
+  * `compute_mr_metrics(db, symbol, bar_size, lookback_bars=500)` →
+    `{symbol, bar_size, computed_at, n_bars, hurst, half_life_bars,
+       current_z, vwap_z, regime_tag, reversion_score, reason}`.
+    Cache TTL 10 min via Mongo collection `mean_reversion_metrics`
+    (composite unique key on `(symbol, bar_size)`).
+  * `get_mr_multiplier(metrics, setup_type)` →
+    `(multiplier, reason)`.
+
+  Statistical methods (numpy-only — already in env):
+    * **Hurst exponent** via R/S analysis on log-returns. Initial
+      cut incorrectly ran R/S on price LEVELS — that consistently
+      misreports random walks as H≈0.8 (cumulative-deviation bias).
+      Caught by the white-noise unit test before any DGX exposure.
+    * **Half-life** via AR(1) regression: `Δp = α + β·p_{t-1} + ε`,
+      `half_life = -ln(2)/ln(1+β)`. Returns None when β ≥ 0
+      (trending) or when half-life > 200 bars (effectively
+      trending).
+    * **Current z-score** of last close vs rolling mean/std.
+    * **VWAP z-score** intraday only (1m/5m bars). Reuses
+      `feature_engine.calc_vwap()` so the calc matches the rest of
+      the codebase (operator confirmed during planning Q5).
+
+  Regime tags:
+    * `MR_STRONG` — Hurst ≤ 0.45 AND half-life ≤ 20 bars
+    * `MR_WEAK`   — Hurst ≤ 0.50 OR half-life 20-40 bars
+    * `TRENDING`  — Hurst ≥ 0.55
+    * `NEUTRAL`   — everything else (including no_signal)
+
+  Setup-family classification (auto-mapped from existing setup_types):
+    * `mean_reversion`: rubber_band_*, vwap_reclaim_*, mean_reversion,
+       vwap_fade
+    * `momentum`: gap_and_go, momentum_continuation,
+       short_squeeze_*, vwap_continuation
+    * `breakout`: breakout_*, hod_breakout, first_vwap_pullback
+    * Anything else → `unknown` (neutral 1.0× regardless of regime)
+
+  Multiplier table (operator choice 2a — modest 0.5×-1.3× range):
+    |                 | MR_STRONG | MR_WEAK | NEUTRAL | TRENDING |
+    | mean_reversion  |   1.3×    |  1.1×   |  1.0×   |   0.5×   |
+    | momentum        |   0.7×    |  0.9×   |  1.0×   |   1.2×   |
+    | breakout        |   0.8×    |  0.95×  |  1.0×   |   1.1×   |
+    | unknown         |   1.0×    |  1.0×   |  1.0×   |   1.0×   |
+
+  Operator choice 3a: sizing-only, NOT a hard veto. A 0.5× MR setup
+  in a TRENDING regime still trades; operator can review the trade
+  explanation and decide whether to skip manually.
+
+**2. `backend/services/opportunity_evaluator.py` integration**
+  * `calculate_position_size()` gains a `setup_type=` kwarg.
+  * Looks up the MR metrics for `(symbol, bar_size)`, applies the
+    multiplier AFTER the grade scalar (so grade × MR-regime compound).
+  * Surfaces in `multipliers_out`:
+      `mr_regime`, `mr_multiplier`, `mr_hurst`, `mr_half_life_bars`,
+      `mr_reason`.
+  * Caller patched at `evaluate_opportunity` to pass
+    `alert.get("setup_type")`. None / unknown setups fall through to
+    neutral 1.0× (never blocks).
+
+**3. NEW `backend/scripts/mr_metrics_inspect.py`** — operator dry-run.
+  * `PYTHONPATH=backend python3 backend/scripts/mr_metrics_inspect.py AAPL`
+  * Comma-separated symbol list, `--bar-size`, `--fresh` (bypass
+    cache), `--json` flags supported.
+  * Prints regime, hurst, half-life, z-scores, score, reason + how
+    each setup family would size in that regime. Verified end-to-
+    end against the fork's empty DB (returns NEUTRAL +
+    no_bars_in_history cleanly).
+
+### Tests
+* `backend/tests/test_mean_reversion_metrics.py` (NEW) — **53 cases**
+  covering: setup-family classification (18 cases), Hurst on
+  synthetic white noise / trending / MR series, half-life on OU
+  process + trends + short series, regime classifier across all
+  branches, full multiplier table (14 parametrized + 3 edge cases),
+  end-to-end `compute_mr_metrics` with a stub Mongo against
+  synthetic MR / trending / empty data.
+
+* **Full suite: 114 / 114 passing in 4.66s** across:
+    v153 ghost-flatten (7) + v154 governor (13) + v154 polling (5)
+    + v155 diagnostic (15) + v156 grade (21) + v157 MR (53).
+
+### Operator workflow on DGX
+```
+git pull
+sudo supervisorctl restart backend                                     # opportunity_evaluator + new module pickup
+
+# Inspect MR regime for a single symbol:
+PYTHONPATH=backend python3 backend/scripts/mr_metrics_inspect.py AAPL
+
+# Multiple symbols + bypass cache (forces recompute):
+PYTHONPATH=backend python3 backend/scripts/mr_metrics_inspect.py AAPL,MSFT,TSLA --fresh
+
+# Daily bar size for swing-trade regime check:
+PYTHONPATH=backend python3 backend/scripts/mr_metrics_inspect.py AAPL --bar-size "1 day"
+```
+
+### Verification once a live trade fires
+Trade's `entry_context.position_multipliers` now carries:
+```json
+{
+  "volatility": 1.0, "regime": 1.0, "vp_path": 1.0,
+  "grade": "B", "grade_multiplier": 0.7,                  // v156
+  "mr_regime": "MR_STRONG",                                // v157 NEW
+  "mr_multiplier": 1.3,                                    // v157 NEW
+  "mr_hurst": 0.42,                                        // v157 NEW
+  "mr_half_life_bars": 8.3,                                // v157 NEW
+  "mr_reason": "family=mean_reversion|regime=MR_STRONG|mult=1.3"  // v157 NEW
+}
+```
+
+
 ## 2026-02-?? — v19.34.156: P3-A grade-based position-sizing scaler (READY-FOR-DGX-APPLY)
 
 ### Trigger

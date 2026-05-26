@@ -797,7 +797,7 @@ class OpportunityEvaluator:
                 logger.debug(f"target-snap skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
 
             # Calculate position size with volatility adjustment + Volume-Profile path multiplier (2026-04-28e)
-            # + v19.34.156 grade-based scaler (P3-A).
+            # + v19.34.156 grade-based scaler (P3-A) + v19.34.157 MR regime scaler (P3-C).
             symbol_for_vp = alert.get("symbol") if isinstance(alert, dict) else None
             if isinstance(alert, dict):
                 scanner_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
@@ -806,15 +806,21 @@ class OpportunityEvaluator:
                 # unknown grades fall to D inside `_resolve_grade_multiplier`,
                 # NOT silently to B — operator wants strict grade routing.
                 alert_grade = alert.get("smb_grade") or alert.get("trade_grade")
+                # v19.34.157 — setup_type drives the MR family lookup
+                # (MR vs momentum vs breakout). Unknown setups produce a
+                # neutral 1.0× multiplier (never blocks).
+                alert_setup_type = alert.get("setup_type")
             else:
                 scanner_bs = "5 mins"
                 alert_grade = None
+                alert_setup_type = None
             position_multipliers: Dict[str, Any] = {}
             shares, risk_amount = self.calculate_position_size(
                 entry_price, stop_price, direction, bot, atr, atr_percent,
                 symbol=symbol_for_vp, bar_size=scanner_bs,
                 multipliers_out=position_multipliers,
                 grade=alert_grade,
+                setup_type=alert_setup_type,
             )
 
             # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
@@ -1248,7 +1254,7 @@ class OpportunityEvaluator:
 
     # ==================== HELPERS ====================
 
-    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None, grade: Optional[str] = None) -> Tuple[int, float]:
+    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None, grade: Optional[str] = None, setup_type: Optional[str] = None) -> Tuple[int, float]:
         """Calculate position size based on risk management rules with volatility and market regime adjustment.
 
         2026-04-28e: also applies a Volume-Profile path multiplier — if the
@@ -1342,6 +1348,41 @@ class OpportunityEvaluator:
                 f"Position size adjusted by grade ({normalized_grade}): "
                 f"{grade_multiplier:.0%}"
             )
+
+        # ── v19.34.157 (P3-C) Mean-Reversion regime multiplier ──────
+        # Looks up the (symbol, bar_size) MR metrics cache and applies
+        # a setup-vs-regime alignment scalar:
+        #   MR setups in MR_STRONG → 1.3×   |   MR in TRENDING → 0.5×
+        #   Momentum in TRENDING   → 1.2×   |   Momentum in MR  → 0.7×
+        #   Breakout in TRENDING   → 1.1×   |   Breakout in MR  → 0.8×
+        # NEUTRAL / unknown setup always 1.0×. Operator choice 3a:
+        # this is sizing-only, NOT a hard veto.  No-data → 1.0× (never
+        # blocks a trade because the MR signal isn't available yet).
+        mr_multiplier = 1.0
+        mr_regime = "NEUTRAL"
+        mr_reason = "no_lookup"
+        mr_hurst: Optional[float] = None
+        mr_half_life: Optional[float] = None
+        try:
+            db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+            if symbol and db is not None:
+                from services.mean_reversion_metrics import (
+                    compute_mr_metrics, get_mr_multiplier,
+                )
+                _mr = compute_mr_metrics(db, symbol, bar_size=bar_size)
+                mr_multiplier, mr_reason = get_mr_multiplier(_mr, setup_type)
+                mr_regime = _mr.get("regime_tag") or "NEUTRAL"
+                mr_hurst = _mr.get("hurst")
+                mr_half_life = _mr.get("half_life_bars")
+                if mr_multiplier != 1.0:
+                    adjusted_max_risk *= mr_multiplier
+                    logger.debug(
+                        f"Position size adjusted by MR regime "
+                        f"({mr_reason}): {mr_multiplier:.0%}"
+                    )
+        except Exception as mr_err:
+            # Never let the MR lookup block trade execution.
+            logger.debug(f"MR regime multiplier skipped for {symbol}: {mr_err}")
 
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
@@ -1452,6 +1493,12 @@ class OpportunityEvaluator:
                 # v19.34.156 (P3-A) — grade provenance for post-trade analytics
                 "grade": normalized_grade,
                 "grade_multiplier": round(grade_multiplier, 3),
+                # v19.34.157 (P3-C) — MR-regime provenance
+                "mr_regime": mr_regime,
+                "mr_multiplier": round(mr_multiplier, 3),
+                "mr_hurst": round(mr_hurst, 3) if isinstance(mr_hurst, (int, float)) else None,
+                "mr_half_life_bars": round(mr_half_life, 2) if isinstance(mr_half_life, (int, float)) else None,
+                "mr_reason": mr_reason,
             })
         return shares, risk_amount
 
