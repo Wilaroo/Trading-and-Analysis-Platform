@@ -4,15 +4,64 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — v19.34.161+ priority queue
+## 🚀 Next session — post-v19.34.163 priority queue
 
-**Last shipped**: v19.34.160 (unified scalp detection — directional
-suffix stripping + timeframe consultation + isScalpStyle single source
-of truth) committed `e8e2221d`, pushed to origin/main. Plus v19.34.159
-"Why this size?" tooltip and v153→158 wave (EOD ghost-flatten, bracket
-governor, grade+MR sizing, test isolation fix).
+**Last shipped (2026-05-26 session):**
+- **v19.34.161** (`5ec56ab3`) — Per-Style P&L card + SL/TP audit script + EOD watcher
+- **v19.34.162** (`a925997f`) — EOD Fast-Path (flatten MKT first, cancel OCA after).
+  `BOT_EOD_PATH=v162` toggle live in `.env`.
+- **v19.34.163-rc1** (`e80ba502`) — Bracket churn fix (3 guards in
+  `_naked_position_sweep`): tier-mismatch blind-guard, recent-reissue
+  cooldown, cumulative telemetry. 183/183 tests passing.
 
-### 🟡 v19.34.161 P1 — Per-Style P&L Card
+**Pending operator verification (next live session):**
+- 🔴 (P0 verify) Live EOD Fast-Path at 15:45 ET — confirm no cancel-queue
+  deadlock, watch for `phase: "eod_flatten_v162"` in
+  `bracket_lifecycle_events`
+- 🔴 (P0 verify) Bracket churn audit post-session — re-run
+  `bracket_churn_audit_v19_34_163.py --days 1`, expect **0 offenders**
+  (was 25 in 7d window pre-fix)
+- 🟡 (P1 verify) ib_direct stays connected through the session — check
+  `/api/system/ib-direct/status` `drop_count_total` at EOD
+
+### 🟢 v19.34.164 — Persistent ib_direct (DEFERRED, possibly unnecessary)
+**Pitch**: Watchdog (v19.34.54) + heartbeat (v19.34.58) already exist
+and work. The only ib_direct drops observed in 2026-05-26 session were
+restart-induced during dev (empty-error grace-window failures). If
+tomorrow's live session shows zero genuine flaps + zero churn audit
+offenders, this is NOT needed. If we see real drops, the work is:
+- Investigate WHY drop happens (Gateway daily restart? "Logged in
+  elsewhere" kick? Network NAT idle eviction?)
+- Add clientId randomization/rotation if conflicts seen
+- Add a UI status pill in V5 strip for ib_direct connection state
+
+**Decision point**: AFTER tomorrow's live session. Defer pending data.
+
+### 🟡 v19.34.165 — `bracket_completion_telemetry` 60s alert job (P3→P2 promoted)
+Now that v163 introduced cumulative `target_ever_attached` +
+`bracket_attach_count` fields, this becomes feasible. Job scans
+`bot_trades` every 60s; alerts via stream when:
+- TP-place-rate (fraction of trades with `target_ever_attached=True`)
+  drops below 80%
+- Any individual trade's `bracket_attach_count` exceeds threshold (5)
+  — early-warning for the loops v163 just prevented
+
+### 🟡 v19.34.166 — V6 UI status pill consolidation (P1, original)
+Hide noisy `ORPHAN` / `STALE` / `RECONCILED` badges in V5
+`OpenPositionsV5.jsx` since bot now auto-heals them. Replace with a
+single global "Safety" pill that turns yellow only when an actual
+unresolved drift exists. Operator's original request from previous
+session.
+
+### 🟢 v19.34.167+ — V6 UI Refactor Variant C (P1, larger scope)
+Full V5 → V6 migration (4-pane layout). See
+`memory/V6_NEXT_LOCKED_SPEC.md`. Multi-session effort.
+
+---
+
+## Earlier roadmap below this line ↓↓↓
+
+
 **Pitch**: Now that scalp positions self-classify cleanly (v160),
 combined with v156 grade scaling + v157 MR regime + v159 transparency,
 the next operator-facing telemetry win is a **per-style P&L breakdown

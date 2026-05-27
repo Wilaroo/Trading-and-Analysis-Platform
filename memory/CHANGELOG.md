@@ -1,4 +1,124 @@
-## 2026-02-?? — v19.34.160: Unified scalp detection (SHIPPED-TO-DGX, COMMIT e8e2221d)
+## 2026-05-26 — v19.34.163-rc1: Bracket churn fix (SHIPPED, COMMIT e80ba502)
+
+### Trigger
+7-day audit on 2026-05-26 (`backend/scripts/bracket_churn_audit_v19_34_163.py`)
+surfaced **928 `naked_sweep_reissue` events**, **97% triggered by
+`self_cascade`**: the sweep's previous event was its own
+just-placed reissue. Worst offenders: **COR 144 reissues / 3h** (every
+60s, constant `remaining_shares=55`), **UAL 101 reissues / 4.5h** (constant
+`remaining_shares=210`). 16 trades simultaneously cascaded at 2026-05-21
+17:44 UTC for 37 straight minutes. All "successful" — `ib_live_order_count`
+piled up to **76** dead bracket orders at IB.
+
+### Root cause
+`BOT_ORDER_PATH=direct` places orders via `ib_direct._ib.placeOrder()`
+(clientId=11 on DGX). The Windows pusher polls IB Gateway with **its own**
+clientId — by default, IB returns only that client's orders unless
+`reqAutoOpenOrders(True)` was called. Result: pusher's
+`_pushed_ib_data["orders"]` snapshot is **structurally blind** to
+ib_direct's orders. When `ib_direct.is_connected()` returns False
+(transient drops + the empty-error grace-window after our own restarts),
+`_fetch_ib_open_orders()` falls from Tier 1 (`ib_direct._ib.trades()`)
+through to Tier 3 (`pusher_orders_snapshot`) → blank view → every trade
+flagged naked → reissue → loop forever.
+
+### Diagnostic verification
+- `_fetch_ib_open_orders()` confirmed `tier=pusher_orders_snapshot count=0`
+  while `ib_direct.is_connected()=False`
+- `/api/system/ib-direct/status`: `drop_count_total=1`,
+  `reconnect_failures_total=6`, watchdog running, heartbeat healthy at
+  drop time. Reconnects fail with empty error strings during the IB
+  Gateway clientId-grace window (~30-60s after ungraceful close)
+- Operator confirmed flap pattern is restart-induced, not flap-in-prod
+
+### What shipped
+
+**1. `backend/services/trading_bot_service.py`** (+129 LoC)
+
+*Three guards in `_naked_position_sweep`:*
+
+  * **Guard 1 (PATCH F) — Tier-mismatch blind-guard**
+    After `_fetch_ib_open_orders()`, if `BOT_ORDER_PATH=direct` AND
+    `source_info.tier == "pusher_orders_snapshot"` → skip the entire
+    sweep with `skipped_reason="tier3_blind_to_ib_direct_orders"`. Stops
+    the cascade dead. We lose detection for one 60s cycle but don't
+    generate ghost OCA pairs at IB.
+
+  * **Guard 2 (PATCH G) — Recent-reissue cooldown**
+    Per-trade `NAKED_REISSUE_COOLDOWN_S` (default 90s) check via
+    `trade.last_bracket_attach_at` before naked detection. Covers IB
+    async EWrapper.openOrder callback latency between place and
+    snapshot visibility (~1-5s window) regardless of tier.
+
+  * **Guard 3 (PATCH H) — Cumulative monotonic telemetry**
+    Three new BotTrade dataclass fields, NEVER reset by cleanup:
+      - `target_ever_attached: bool` (flips True only when tgt_id present)
+      - `bracket_attach_count: int` (++ on every successful reissue)
+      - `last_bracket_attach_at: Optional[str]` (ISO-UTC)
+    Drive the audit script + future `bracket_completion_telemetry`
+    alert job (P3 backlog).
+
+**2. `backend/tests/test_bracket_churn_v19_34_163.py`** (+451 LoC, 14 tests)
+   - 4 tests for Guard 1 (direct+tier3 skips, direct+tier1 proceeds,
+     pusher+tier3 proceeds, env-unset proceeds)
+   - 4 tests for Guard 2 (recent attach skips, old attach proceeds,
+     no prior attach proceeds, parse failure falls through to detection)
+   - 4 tests for Guard 3 (first attach initializes, subsequent preserves
+     `target_ever_attached=True` even on stop-only re-attach, failed
+     reissue doesn't touch telemetry, stop-only first-attach keeps
+     `target_ever_attached=False`)
+   - 2 tests for BotTrade defaults + to_dict() inclusion via asdict()
+
+**3. `backend/scripts/bracket_churn_audit_v19_34_163.py`** (+254 LoC, NEW)
+   - Read-only diagnostic for `bracket_lifecycle_events`
+   - `--sample-schema` mode dumps a sample event + distinct phases
+   - `--days N --top K` groups offenders by `trade_id` with ≥N
+     reissues, classifies each reissue's trigger by preceding-phase
+   - `--verbose` adds full per-trade timeline for top 5 offenders
+   - Categories: self_cascade, reconciler_collision, cancel_path,
+     throttle_then_retry, compute_recompute, submit_failed,
+     scale_out_followup, eod_window, close_path, post_completion, unknown
+   - **Initial run output**: 805/830 = 97.0% self_cascade — confirms
+     the root cause
+
+### Audit confirmation that nothing else breaks
+- ✅ Only `trading_bot_service.py` modified (+129 LoC) — no other order
+  paths touched
+- ✅ `_bracket_attach_in_cooldown` mechanism in `position_reconciler.py`
+  **untouched** — runs in parallel for its own orphan-adoption path
+- ✅ `bracket_reissue_service.py` (scale-in/scale-out cancel-and-reissue)
+  **untouched**
+- ✅ `attach_oca_stop_target` in `trade_executor_service.py` **untouched**
+- ✅ `ib_direct.place_oca_stop_target` **untouched**
+- ✅ EOD fast-path (v162) **untouched**
+- ✅ BotTrade dataclass extended with safe defaults (`False`, `0`, `None`)
+  — backward-compatible with all existing constructors
+- ✅ `to_dict()` picks up new fields via `asdict()` automatically
+- ✅ Old trades loaded from Mongo without these fields → `getattr` with
+  defaults returns safe values
+
+### Tests
+**183 passed** (158 previous + 14 new + 11 extra-related). One pre-existing
+unrelated failure in `test_v19_34_111_queue_idempotency_and_attach_cooldown.py`
+(static source check on unmodified `position_reconciler.py`).
+
+### Verified post-deploy
+- `[v127 naked-sweep] first sweep complete: ...source_tier: 'ib_direct'`
+  → Tier 1 healthy after backend restart, Guard 1 dormant (correct)
+- API + backend boot clean, no tracebacks
+
+### Pending — v19.34.164 (DEFERRED)
+**Persistent ib_direct connection (Option A).** Watchdog already exists
+(v19.34.54) and is working. Heartbeat already exists (v19.34.58, 30s
+interval). The only flaps observed were restart-induced during dev session,
+not production drops. Defer until tomorrow's live EOD verification produces
+real flap data. If churn audit shows 0 self_cascade offenders → v164 not
+needed; v163's guards are sufficient.
+
+---
+
+## 2026-05-26 — v19.34.162: EOD Fast-Path (SHIPPED, COMMIT a925997f)
+
 
 ### Trigger
 Operator caught 2 open positions (USO `vwap_fade_long`, BP
