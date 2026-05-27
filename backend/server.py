@@ -4940,6 +4940,26 @@ async def get_script(script_name: str):
     return PlainTextResponse(content, media_type="text/plain")
 
 
+@app.get("/api/market-regime/composite")
+async def get_market_regime_composite():
+    """v19.34.167.1 — Surface the SPY/QQQ/IWM composite regime computed
+    by the scanner. Returns the current MarketRegime label plus the
+    per-index breakdown (`agreement`, `divergence_flag`, votes, etc.)
+    that the gating logic uses internally."""
+    from services.enhanced_scanner import get_enhanced_scanner
+    try:
+        scanner = get_enhanced_scanner()
+        regime_value = scanner._market_regime.value if scanner._market_regime else "unknown"
+        return {
+            "success": True,
+            "regime": regime_value,
+            "metadata": scanner._market_data or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "regime": "unknown", "metadata": {}}
+
+
 if __name__ == "__main__":
     import uvicorn
     loop_type = "uvloop" if _has_uvloop else "auto"
