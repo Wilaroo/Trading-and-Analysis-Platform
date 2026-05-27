@@ -593,12 +593,53 @@ class RealTimeTechnicalService:
         above_ema9 = current_price > ema_9
         above_ema20 = current_price > ema_20
         
-        # Trend determination
-        if above_ema9 and above_ema20 and ema_9 > ema_20:
+        # === Trend determination (v19.34.166 — tolerance + macro context) ===
+        # The original classifier (pre-v166) used strict binary `>` against
+        # EMA9/EMA20, which flips uptrend↔downtrend tick-by-tick when price
+        # hovers within pennies of the EMAs. On 2026-05-27 the audit found
+        # SPY classified as "downtrend" while sitting $0.07 below EMA9 on a
+        # +0.48% gap-up day with price 7% above EMA50/SMA200 — clearly a
+        # consolidation in an uptrend, not a downtrend. That misclass
+        # poisoned the scanner's `_market_regime` (80% of alerts tagged
+        # `strong_downtrend`) and silenced every setup that requires
+        # `trend == "uptrend"` (incl. 9_ema_scalp dormant since 2026-04-07).
+        #
+        # v166 fix has two pieces (per operator decision Q1c):
+        #   1. Tolerance band (Q2b = 0.25%): distances within ±0.25% of an
+        #      EMA count as "at" — neither above nor below — so micro-noise
+        #      doesn't flip the classification.
+        #   2. Macro-context override: if price > EMA50 AND EMA50 > SMA200
+        #      (strong long-term uptrend structure), we never return
+        #      "downtrend"; the strongest classification a noisy intraday
+        #      print can earn in that posture is "sideways". Symmetric
+        #      check for the bear side.
+        _TREND_TOLERANCE_PCT = 0.25  # v166 — operator-approved Q2b
+        _at_ema9  = abs(dist_from_ema9)  <= _TREND_TOLERANCE_PCT
+        _at_ema20 = abs(dist_from_ema20) <= _TREND_TOLERANCE_PCT
+        # "Effective" above/below treats anything inside the tolerance band
+        # as neither above nor below — that's the noise-suppression layer.
+        _eff_above_ema9  = above_ema9  and not _at_ema9
+        _eff_above_ema20 = above_ema20 and not _at_ema20
+        _eff_below_ema9  = (not above_ema9)  and not _at_ema9
+        _eff_below_ema20 = (not above_ema20) and not _at_ema20
+
+        # Macro structure — > EMA50 + EMA50 > SMA200 = secular uptrend
+        _macro_uptrend   = (current_price > ema_50 > 0) and (ema_50 > sma_200 > 0)
+        _macro_downtrend = (current_price < ema_50) and (ema_50 < sma_200) \
+            and ema_50 > 0 and sma_200 > 0
+
+        if _eff_above_ema9 and _eff_above_ema20 and ema_9 > ema_20:
             trend = "uptrend"
-        elif not above_ema9 and not above_ema20 and ema_9 < ema_20:
-            trend = "downtrend"
+        elif _eff_below_ema9 and _eff_below_ema20 and ema_9 < ema_20:
+            # Macro-context veto: a fractional intraday print below EMA9/20
+            # in an otherwise-strong secular uptrend is consolidation, not
+            # a downtrend. Bug discovered 2026-05-27 — SPY case.
+            trend = "sideways" if _macro_uptrend else "downtrend"
         else:
+            trend = "sideways"
+        # If we DID say "uptrend" but macro structure is clearly bearish,
+        # downgrade to "sideways" (the inverse of the macro-up veto above).
+        if trend == "uptrend" and _macro_downtrend:
             trend = "sideways"
         
         # Extension analysis (for rubber band setups)
