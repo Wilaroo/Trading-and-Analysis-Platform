@@ -972,6 +972,7 @@ class EnhancedBackgroundScanner:
         # Market context
         self._market_regime: MarketRegime = MarketRegime.RANGE_BOUND
         self._spy_data: Optional[Dict] = None
+        self._market_data: Optional[Dict] = None  # v19.34.167 — per-index breakdown
         
         # Strategy win-rate tracking
         self._strategy_stats: Dict[str, StrategyStats] = {}
@@ -1911,42 +1912,168 @@ class EnhancedBackgroundScanner:
         return TimeWindow.CLOSE  # 15:00-16:00
     
     async def _update_market_context(self):
-        """Update market regime based on SPY analysis"""
+        """v19.34.167 — composite market regime from SPY+QQQ+IWM snapshots.
+
+        Replaces the SPY-only classifier (which was prone to false
+        STRONG_DOWNTREND tags when SPY had a micro-pullback but tech/
+        small-caps were holding up). Now votes across the 3 broad indexes
+        and surfaces divergence + per-index breakdown in `self._market_data`.
+
+        Voting rules (matching operator-approved policy 2026-05-27):
+          - Unanimous (3/3) → STRONG_UPTREND / STRONG_DOWNTREND
+          - Majority (2/3) up → MOMENTUM (less conviction)
+          - Majority (2/3) down → FADE (less conviction)
+          - Mixed → RANGE_BOUND (or FADE if SPY-quiet + extreme RSI)
+          - Any index daily_range > 2% → VOLATILE wins
+        """
         try:
-            spy_snapshot = await self.technical_service.get_technical_snapshot("SPY")
-            if not spy_snapshot:
+            # Fetch all 3 snapshots in parallel — one IB roundtrip each.
+            spy_snap, qqq_snap, iwm_snap = await asyncio.gather(
+                self.technical_service.get_technical_snapshot("SPY"),
+                self.technical_service.get_technical_snapshot("QQQ"),
+                self.technical_service.get_technical_snapshot("IWM"),
+                return_exceptions=True,
+            )
+
+            def _coerce(s):
+                return s if (s is not None and not isinstance(s, BaseException)) else None
+
+            spy = _coerce(spy_snap)
+            qqq = _coerce(qqq_snap)
+            iwm = _coerce(iwm_snap)
+
+            # Without SPY at minimum we can't classify reliably.
+            if spy is None:
+                logger.warning("v167: SPY snapshot unavailable; regime unchanged")
                 return
-            
-            self._spy_data = spy_snapshot
-            
-            # Determine regime based on SPY characteristics
-            dist_from_vwap = spy_snapshot.dist_from_vwap
-            rsi = spy_snapshot.rsi_14
-            daily_range = spy_snapshot.daily_range_pct
-            trend = spy_snapshot.trend
-            
-            # High volatility
-            if daily_range > 2.0:
-                self._market_regime = MarketRegime.VOLATILE
-            # Strong uptrend
-            elif trend == "uptrend" and spy_snapshot.above_vwap and spy_snapshot.above_ema9:
-                if rsi > 60:
-                    self._market_regime = MarketRegime.MOMENTUM
-                else:
-                    self._market_regime = MarketRegime.STRONG_UPTREND
-            # Strong downtrend
-            elif trend == "downtrend" and not spy_snapshot.above_vwap:
-                self._market_regime = MarketRegime.STRONG_DOWNTREND
-            # Range bound / fade
-            elif abs(dist_from_vwap) < 0.5 and daily_range < 1.0:
-                self._market_regime = MarketRegime.FADE if rsi > 55 or rsi < 45 else MarketRegime.RANGE_BOUND
-            else:
-                self._market_regime = MarketRegime.RANGE_BOUND
-            
-            logger.debug(f"Market regime updated: {self._market_regime.value}")
-            
+
+            # Keep _spy_data for backwards-compat with downstream consumers.
+            self._spy_data = spy
+
+            regime, metadata = self._classify_market_regime(spy, qqq, iwm)
+            self._market_regime = regime
+            self._market_data = metadata  # NEW: per-index breakdown
+
+            logger.debug(
+                f"Market regime updated: {regime.value} | "
+                f"agreement={metadata['index_agreement']} | "
+                f"divergence={metadata['divergence_flag']}"
+            )
         except Exception as e:
             logger.warning(f"Could not update market context: {e}")
+
+    def _classify_market_regime(self, spy, qqq, iwm):
+        """v19.34.167 — pure classifier (no I/O) for SPY/QQQ/IWM composite.
+
+        Returns (MarketRegime, metadata_dict). Metadata contains:
+          - indices_valid (1..3)
+          - index_agreement: unanimous_up / unanimous_down / majority_up /
+                             majority_down / mixed
+          - divergence_flag: True if the 3 indexes disagree on `trend`
+          - uptrend_votes, downtrend_votes
+          - max_daily_range_pct
+          - per_index: {spy: {...}, qqq: {...}, iwm: {...}} (None entries OK)
+
+        Falls back to v19.34.166 single-SPY logic if QQQ/IWM unavailable.
+        """
+        indices = [s for s in (spy, qqq, iwm) if s is not None]
+        if not indices:
+            return MarketRegime.RANGE_BOUND, {"error": "no index data"}
+
+        n = len(indices)
+        max_range = max(s.daily_range_pct for s in indices)
+
+        uptrend_votes = sum(1 for s in indices if s.trend == "uptrend")
+        downtrend_votes = sum(1 for s in indices if s.trend == "downtrend")
+        above_vwap_count = sum(1 for s in indices if s.above_vwap)
+        above_ema9_count = sum(1 for s in indices if s.above_ema9)
+        not_above_vwap_count = n - above_vwap_count
+
+        # Divergence: indexes disagree on direction
+        distinct_trends = {s.trend for s in indices}
+        divergence_flag = len(distinct_trends) > 1
+
+        if uptrend_votes == n:
+            agreement = "unanimous_up"
+        elif downtrend_votes == n:
+            agreement = "unanimous_down"
+        elif uptrend_votes >= 2:
+            agreement = "majority_up"
+        elif downtrend_votes >= 2:
+            agreement = "majority_down"
+        else:
+            agreement = "mixed"
+
+        per_index = {}
+        for label, s in (("spy", spy), ("qqq", qqq), ("iwm", iwm)):
+            if s is None:
+                per_index[label] = None
+            else:
+                per_index[label] = {
+                    "trend": s.trend,
+                    "above_vwap": s.above_vwap,
+                    "above_ema9": s.above_ema9,
+                    "rsi": round(s.rsi_14, 1),
+                    "daily_range_pct": round(s.daily_range_pct, 2),
+                    "dist_from_vwap": round(s.dist_from_vwap, 2),
+                }
+
+        metadata = {
+            "indices_valid": n,
+            "index_agreement": agreement,
+            "divergence_flag": divergence_flag,
+            "uptrend_votes": uptrend_votes,
+            "downtrend_votes": downtrend_votes,
+            "max_daily_range_pct": round(max_range, 2),
+            "per_index": per_index,
+        }
+
+        # Rule 1: Volatility wins (any index breaking 2% daily range).
+        if max_range > 2.0:
+            return MarketRegime.VOLATILE, metadata
+
+        # Single-index degraded mode → v166 logic verbatim so we degrade
+        # gracefully if QQQ/IWM are unavailable.
+        if n == 1:
+            s = indices[0]
+            if s.trend == "uptrend" and s.above_vwap and s.above_ema9:
+                return ((MarketRegime.MOMENTUM if s.rsi_14 > 60
+                         else MarketRegime.STRONG_UPTREND), metadata)
+            if s.trend == "downtrend" and not s.above_vwap:
+                return MarketRegime.STRONG_DOWNTREND, metadata
+            if abs(s.dist_from_vwap) < 0.5 and s.daily_range_pct < 1.0:
+                return ((MarketRegime.FADE if (s.rsi_14 > 55 or s.rsi_14 < 45)
+                         else MarketRegime.RANGE_BOUND), metadata)
+            return MarketRegime.RANGE_BOUND, metadata
+
+        # Multi-index path (2 or 3 indices)
+        spy_rsi = spy.rsi_14 if spy is not None else 50.0
+        spy_dist_vwap = spy.dist_from_vwap if spy is not None else 0.0
+
+        # Rule 2: Unanimous up — STRONG_UPTREND, downgrade to MOMENTUM if
+        # SPY overbought (consistent w/ pre-v167 behavior at rsi>60).
+        if uptrend_votes == n and above_vwap_count == n and above_ema9_count == n:
+            return ((MarketRegime.MOMENTUM if spy_rsi > 60
+                     else MarketRegime.STRONG_UPTREND), metadata)
+
+        # Rule 3: Unanimous down + VWAP confirmation — STRONG_DOWNTREND.
+        if downtrend_votes == n and not_above_vwap_count == n:
+            return MarketRegime.STRONG_DOWNTREND, metadata
+
+        # Rule 4: Majority up (2/3) with VWAP support — MOMENTUM (degraded).
+        if uptrend_votes >= 2 and above_vwap_count >= 2:
+            return MarketRegime.MOMENTUM, metadata
+
+        # Rule 5: Majority down (2/3) — FADE (less conviction than STRONG_DOWN).
+        if downtrend_votes >= 2:
+            return MarketRegime.FADE, metadata
+
+        # Rule 6: Quiet tape + extreme SPY RSI = FADE; else RANGE_BOUND.
+        if abs(spy_dist_vwap) < 0.5 and max_range < 1.0:
+            return ((MarketRegime.FADE if (spy_rsi > 55 or spy_rsi < 45)
+                     else MarketRegime.RANGE_BOUND), metadata)
+
+        return MarketRegime.RANGE_BOUND, metadata
     
     def _is_setup_valid_now(self, setup_type: str) -> bool:
         """Check if setup is valid for current time and market regime"""
