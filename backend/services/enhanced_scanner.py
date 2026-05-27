@@ -1954,6 +1954,13 @@ class EnhancedBackgroundScanner:
             self._market_regime = regime
             self._market_data = metadata  # NEW: per-index breakdown
 
+            # v19.34.168 — persist on regime/agreement/divergence change
+            try:
+                from services.regime_persistence_service import record_if_changed
+                record_if_changed(self.db, regime.value, metadata)
+            except Exception as e:
+                logger.debug(f"regime persistence skipped: {e}")
+
             logger.debug(
                 f"Market regime updated: {regime.value} | "
                 f"agreement={metadata['index_agreement']} | "
