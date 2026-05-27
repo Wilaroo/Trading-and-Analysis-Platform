@@ -1402,6 +1402,45 @@ class TradingBotService:
                 }))
         except Exception as exc:
             logger.debug(f"record_rejection: stream emit failed: {exc}")
+
+        # ── v19.34.164 — Persist to MongoDB `trade_drops` collection ──
+        # Operator-discovered May 2026: ~90% of trade rejections were
+        # invisible to the Diagnostics tab because `record_rejection`
+        # only wrote to an in-memory UI stream. `9_ema_scalp` alerts
+        # (251 in 30d) emitted by the scanner were vanishing entirely.
+        #
+        # `record_trade_drop` is fire-and-forget (best-effort Mongo
+        # write + in-memory ring buffer fallback). The 120s dedup
+        # window above means duplicate (symbol, setup_type, reason_code)
+        # rejections within ~2min are suppressed before we even reach
+        # this point, so the DB write inherits the same dedup for free.
+        try:
+            from services.trade_drop_recorder import record_trade_drop
+            _ctx_for_drop: Dict[str, Any] = {"narrative": narrative[:300]}
+            if isinstance(ctx, dict):
+                for _k, _v in ctx.items():
+                    try:
+                        # Truncate over-long string values to keep
+                        # the doc small (Mongo 16MB cap is generous
+                        # but per-doc bloat slows the audit endpoint).
+                        if isinstance(_v, str) and len(_v) > 500:
+                            _ctx_for_drop[_k] = _v[:500]
+                        else:
+                            _ctx_for_drop[_k] = _v
+                    except Exception:
+                        pass
+            record_trade_drop(
+                getattr(self, "_db", None),
+                gate=reason_code,
+                symbol=symbol,
+                setup_type=setup_type,
+                direction=direction,
+                reason=narrative[:500],
+                context=_ctx_for_drop,
+            )
+        except Exception as exc:
+            logger.debug(f"record_rejection: trade_drops persist failed: {exc}")
+
         return narrative
 
     def _compose_rejection_narrative(
@@ -4142,7 +4181,25 @@ class TradingBotService:
                 # rejections every cycle was flooding the Deep Feed with
                 # noise while the alerts themselves are still consumed by
                 # gameplan_service for next-day watchlists.
+                #
+                # v19.34.164: write directly to `trade_drops` (bypassing
+                # record_rejection which would re-flood Bot's Brain). The
+                # Diagnostics tab now sees these drops while the live UI
+                # stream stays quiet.
                 if alert.setup_type in self._watchlist_only_setups:
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(self, "_db", None),
+                            gate="watchlist_only_skip",
+                            symbol=alert.symbol,
+                            setup_type=alert.setup_type,
+                            direction=alert.direction or "long",
+                            reason="watchlist-only setup (EOD carry/proximity warn) — not live-tradable",
+                            context={"alert_priority": alert.priority.value if alert.priority else None},
+                        )
+                    except Exception:
+                        pass
                     continue
 
                 # Check if setup is enabled.

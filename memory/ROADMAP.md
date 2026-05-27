@@ -4,35 +4,19 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — pick up here (Diagnostics tab data accuracy)
+## 🚀 Next session — pick up here (Diagnostics Funnel rewrite)
 
-**Investigation complete (2026-05-26 evening session) — no code shipped yet.**
+**v19.34.164 SHIPPED 2026-05-27** (see CHANGELOG). Trade-drop persistence
+is now wired through `record_rejection()`; the Diagnostics tab and
+Rejection Analytics router will start showing real data after the next
+trading session.
 
-Scout artifacts (committed to `backend/scripts/`):
-- `diagnostics_tab_audit.py`
-- `shadow_decisions_audit.py`
-- `find_alert_drop_points_v19_34_164.py`
-
-### 🔴 v19.34.164 Patch A — Drop-site instrumentation (TOMORROW MORNING)
-**Pre-locked scope** (~330 LoC, ~1 hour of focused work):
-- 12 `record_trade_drop()` calls into `opportunity_evaluator.py`
-- 1 call into `trading_bot_service.py` L4146
-- 12 entries into `KNOWN_GATES` (`trade_drop_recorder.py`)
-- 12 entries into `REASON_MAP` (`rejection_analytics_router.py`)
-- New pytest with one case per new gate
-
-Gate names + line numbers + categories are all enumerated in
-`memory/CHANGELOG.md` under the "2026-05-26 (LATE EVENING)" entry.
-
-**IMPORTANT: User DGX has 5-line drift** from /app workspace; use
-3-line context anchors in patches, not raw line numbers.
-
-### 🟡 v19.34.165 Patch B — Persist scanner emit counter
-After Patch A is in, persist a per-alert row in `scanner_emits` (TTL-7d)
+### 🔴 v19.34.165 — Persist scanner emit counter (NEXT UP)
+Now unblocked. Persist a per-alert row in `scanner_emits` (TTL-7d)
 inside `enhanced_scanner._process_new_alert()`. Required so the Funnel
-rewrite (Patch C) can compute true pre-shadow drop ratio.
+rewrite (v19.34.166) can compute the true Stage 0 → Stage 1 drop ratio.
 
-### 🟡 v19.34.166 Patch C — Funnel rewrite to 6 stages
+### 🟡 v19.34.166 — Funnel rewrite to 6 stages
 Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 1. **Scanner emitted** (from `scanner_emits`)
 2. **Bot acted** (from `trade_drops` where decision="fired" OR
@@ -46,7 +30,7 @@ Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 Plus a "Drop Reasons" stacked-bar sidecar between stages 1 and 2 using
 `trade_drops.gate` distribution.
 
-### 🟡 v19.34.167 Patch D — Module Scorecard repair
+### 🟡 v19.34.167 — Module Scorecard repair
 Either (recommended) compute scorecard live from `shadow_decisions` +
 `bot_trades` join, OR resurrect the `shadow_module_performance` writer.
 Also fix institutional/timeseries field paths

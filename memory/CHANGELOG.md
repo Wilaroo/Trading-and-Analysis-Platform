@@ -1,3 +1,69 @@
+## 2026-05-27 — v19.34.164 Trade-Drop Persistence (READY TO APPLY)
+
+### Trigger
+Operator-discovered May 2026: 251 `9_ema_scalp` alerts emitted by scanner
+in last 30d → 0 trades, 0 rows in `trade_drops`. Root cause traced to
+`record_rejection()` only writing to in-memory UI buffer + sentcom stream
+— never to the `trade_drops` MongoDB collection that drives the
+Diagnostics tab. ~90% of trade rejections were invisible.
+
+### Patch (`v19.34.164` — paste.rs: https://paste.rs/YlL34)
+Operator-approved scope (Q1a all-in-one, Q2a fire-and-forget, Q3a
+per-minute dedup, Q4a paste.rs diff).
+
+**Edits (4 files modified, 1 new test):**
+1. `backend/services/trading_bot_service.py` —
+   - `record_rejection()` now appends a `record_trade_drop()` call at
+     the tail of the non-suppressed path. Fire-and-forget; inherits
+     the existing 120s in-memory dedup so a noisy scanner re-emitting
+     the same `(symbol, setup_type, reason_code)` every 30s does NOT
+     pollute trade_drops. Narrative is carried into the row's
+     `context["narrative"]` so operators reading trade_drops directly
+     see the full "why I passed" line.
+   - `_get_trade_alerts` watchlist-only `continue` (L4145) now writes
+     directly to `trade_drops` via gate `watchlist_only_skip` (bypasses
+     record_rejection so the Deep Feed stays quiet but the Diagnostics
+     tab still sees the drop).
+2. `backend/services/opportunity_evaluator.py` —
+   - Removed redundant explicit `record_trade_drop()` calls at the
+     `stale_alert_ttl` and `post_stop_cooldown` sites (now handled by
+     `record_rejection` itself; explicit duplicates would double-count).
+   - Added `record_rejection(reason_code="ai_verdict_reject")` at the
+     legacy AI assistant REJECT path (non-autonomous mode) — previously
+     a silent `return None`.
+3. `backend/services/trade_drop_recorder.py` —
+   - `KNOWN_GATES` expanded from 10 → 31 reason_codes (all gates the
+     bot actually emits via `record_rejection`).
+4. `backend/routers/rejection_analytics_router.py` —
+   - `REASON_MAP` expanded with 21 new keys + categories so the
+     Rejection Analytics UI labels them correctly.
+5. `backend/tests/test_record_rejection_persists_v19_34_164.py` — **NEW**
+   - 8 tests covering: persistence write, schema correctness, 120s dedup
+     suppression, dedup tuple isolation, KNOWN_GATES coverage,
+     REASON_MAP coverage, db=None survival, insert-exception survival.
+
+### Test status
+- New: 8/8 passing locally on /app sandbox.
+- Regression: v19.34.163 bracket-churn suite still 14/14 passing →
+  combined 22/22.
+- Lint clean on all 4 modified files (pre-existing warnings unchanged).
+
+### Deployment
+Operator pulls via `paste.rs` curl + `git apply` workflow on DGX.
+Restart backend to load the new persistence path.
+
+### Expected impact
+- `db.trade_drops.count_documents({gate: "..."})` becomes non-zero
+  for every reason_code (was effectively only `stale_alert_ttl` +
+  `post_stop_cooldown` before).
+- `9_ema_scalp` alerts that scanner emits now visible in
+  `trade_drops` with whatever reason actually killed them (likely
+  `rr_below_min`, `gate_skip`, or `smart_filter_skip`).
+- Unblocks v19.34.165 (Diagnostics Funnel Stage-0/Stage-1 rewrite).
+
+---
+
+
 ## 2026-05-26 (LATE EVENING) — Diagnostics Tab Data Accuracy Investigation
 
 ### Trigger
