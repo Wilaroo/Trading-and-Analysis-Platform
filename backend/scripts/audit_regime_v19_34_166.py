@@ -70,6 +70,35 @@ def fetch(url: str, timeout: int = 8) -> dict:
         return {"_error": str(e)}
 
 
+def _flatten_spy_snapshot(snap: dict) -> dict:
+    """v166: /api/technicals/SPY returns NESTED dicts (moving_averages,
+    distances, position, volatility, ...), but _recompute_scanner_regime
+    expects FLAT keys matching the scanner's TechnicalSnapshot dataclass.
+    Project the nested shape onto the flat one so the audit can compare
+    apples to apples."""
+    flat = dict(snap)  # copy top-level
+    pos = snap.get("position") or {}
+    dist = snap.get("distances") or {}
+    vol = snap.get("volatility") or {}
+    mom = snap.get("momentum") or {}
+    mav = snap.get("moving_averages") or {}
+    pri = snap.get("price") or {}
+    flat.setdefault("trend", pos.get("trend"))
+    flat.setdefault("above_vwap", pos.get("above_vwap"))
+    flat.setdefault("above_ema9", pos.get("above_ema9"))
+    flat.setdefault("above_ema20", pos.get("above_ema20"))
+    flat.setdefault("dist_from_vwap", dist.get("from_vwap"))
+    flat.setdefault("dist_from_ema9", dist.get("from_ema9"))
+    flat.setdefault("dist_from_ema20", dist.get("from_ema20"))
+    flat.setdefault("daily_range_pct", vol.get("daily_range_pct"))
+    flat.setdefault("rsi_14", mom.get("rsi"))
+    flat.setdefault("vwap", mav.get("vwap"))
+    flat.setdefault("ema_9", mav.get("ema_9"))
+    flat.setdefault("ema_20", mav.get("ema_20"))
+    flat.setdefault("current_price", pri.get("current"))
+    return flat
+
+
 def _recompute_scanner_regime(snap: dict) -> str:
     """Replay the EXACT logic from enhanced_scanner._update_market_context
     (L1928-1944) against a SPY snapshot dict so we can flag drift between
@@ -146,12 +175,12 @@ def main() -> int:
                "/api/technicals/SPY"):
         out = fetch(base + ep)
         if "_error" not in out:
-            spy_snap = out
+            spy_snap = _flatten_spy_snapshot(out)
             print(f"  SPY snapshot from {ep}:")
             for k in ("current_price", "vwap", "ema_9", "ema_20",
                       "rsi_14", "dist_from_vwap", "daily_range_pct",
                       "trend", "above_vwap", "above_ema9"):
-                if k in spy_snap:
+                if k in spy_snap and spy_snap[k] is not None:
                     print(f"    {k:<22}  {spy_snap[k]}")
             break
     if not spy_snap:
@@ -183,19 +212,32 @@ def main() -> int:
             print(f"  {sym:<5}  ⚠ no quote endpoint responded")
 
     # ─── E. Mongo 30-day regime history ───────────────────────────────
-    hr("E. `market_regime` collection — last 30 days of state transitions")
-    if "market_regime" not in db.list_collection_names():
-        print(f"  Collection `market_regime` does NOT exist in `{db_name}`.")
+    hr("E. `market_regime_state` collection — last 30 days of state transitions")
+    # v166 fix: engine writes to `market_regime_state` (upserted per-day),
+    # NOT `market_regime`. Audit pre-v166 was looking at the wrong name.
+    coll_name = None
+    for cand in ("market_regime_state", "market_regime"):
+        if cand in db.list_collection_names():
+            coll_name = cand
+            break
+    if coll_name is None:
+        print(f"  Neither `market_regime_state` nor `market_regime` exist in `{db_name}`.")
         print("  → Engine is not persisting; we have NO historical record.")
     else:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        rows = list(db.market_regime.find(
-            {"last_updated": {"$gte": cutoff}},
-            {"_id": 0, "last_updated": 1, "state": 1, "composite_score": 1},
-        ).sort("last_updated", 1))
+        print(f"  Reading from collection: {coll_name}")
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=30)
+        rows = list(db[coll_name].find(
+            {"$or": [
+                {"timestamp": {"$gte": cutoff_dt}},
+                {"last_updated": {"$gte": cutoff_dt.isoformat()}},
+                {"date": {"$gte": cutoff_dt.strftime("%Y-%m-%d")}},
+            ]},
+            {"_id": 0, "date": 1, "timestamp": 1, "last_updated": 1,
+             "state": 1, "composite_score": 1},
+        ).sort("timestamp", 1))
         if not rows:
             print(f"  No rows in last 30 days. Total docs: "
-                  f"{db.market_regime.count_documents({})}")
+                  f"{db[coll_name].count_documents({})}")
         else:
             print(f"  {len(rows)} snapshots over last 30d.")
             last_state = None
