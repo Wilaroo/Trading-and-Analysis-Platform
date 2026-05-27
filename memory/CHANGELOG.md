@@ -1,3 +1,40 @@
+## 2026-05-27 — v19.34.168.1 Composite regime history+stats routing fix
+
+### Trigger
+v168 added `/api/market-regime/history` + `/api/market-regime/stats`
+endpoints as bare `@app.get(...)` decorators in `server.py`. Both
+collided with the existing daily Engine A router (`routers/market_regime.py`
+mounted at prefix `/api/market-regime`): `/history` was shadowed
+(returned daily Engine A's `market_regime_state` rows instead of intraday
+snapshots) and `/stats` returned 404.
+
+### Fix
+- Renamed the new intraday endpoints to live under the `composite/`
+  namespace established by v167.1:
+  - `GET /api/market-regime/composite/history` → reads `regime_snapshots`
+  - `GET /api/market-regime/composite/stats` → % time-in-regime over N hours
+- Both endpoints registered next to the working `/api/market-regime/composite`
+  route at the end of `server.py` so binding is deterministic.
+- Daily Engine A `/api/market-regime/history` still serves `market_regime_state`
+  (no collision, verified via regression curl).
+- `backend/services/regime_persistence_service.py` shipped with TTL=30d index,
+  in-process change detection, history + stats query helpers.
+- Idempotent deploy script `backend/scripts/deploy_v19_34_168_1.py`:
+  strips any prior broken `@app.get("/api/market-regime/history")` /
+  `/stats` decorators before injecting the new routes.
+
+### Tests (`backend/tests/test_v19_34_168_1_endpoint_routing.py`)
+- 8/8 passing: change-detection, divergence-flip persistence, history
+  filter window, stats % calculation, empty-DB handling, and
+  `server.py` namespace verification.
+
+### Verified live on DGX
+- `composite/history?hours=6` → `success:true, source:"regime_snapshots"`
+- `composite/stats?hours=6` → `success:true, "no snapshots in window"`
+  (correct — collection only populates on regime/agreement/divergence flips)
+- `history?days=30` → still returns Engine A composite_score data (no regression)
+
+
 ## 2026-05-27 — v19.34.167 Composite SPY/QQQ/IWM market regime classifier
 
 ### Trigger
