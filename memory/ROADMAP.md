@@ -4,7 +4,90 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — post-v19.34.163 priority queue
+## 🚀 Next session — pick up here (Diagnostics tab data accuracy)
+
+**Investigation complete (2026-05-26 evening session) — no code shipped yet.**
+
+Scout artifacts (committed to `backend/scripts/`):
+- `diagnostics_tab_audit.py`
+- `shadow_decisions_audit.py`
+- `find_alert_drop_points_v19_34_164.py`
+
+### 🔴 v19.34.164 Patch A — Drop-site instrumentation (TOMORROW MORNING)
+**Pre-locked scope** (~330 LoC, ~1 hour of focused work):
+- 12 `record_trade_drop()` calls into `opportunity_evaluator.py`
+- 1 call into `trading_bot_service.py` L4146
+- 12 entries into `KNOWN_GATES` (`trade_drop_recorder.py`)
+- 12 entries into `REASON_MAP` (`rejection_analytics_router.py`)
+- New pytest with one case per new gate
+
+Gate names + line numbers + categories are all enumerated in
+`memory/CHANGELOG.md` under the "2026-05-26 (LATE EVENING)" entry.
+
+**IMPORTANT: User DGX has 5-line drift** from /app workspace; use
+3-line context anchors in patches, not raw line numbers.
+
+### 🟡 v19.34.165 Patch B — Persist scanner emit counter
+After Patch A is in, persist a per-alert row in `scanner_emits` (TTL-7d)
+inside `enhanced_scanner._process_new_alert()`. Required so the Funnel
+rewrite (Patch C) can compute true pre-shadow drop ratio.
+
+### 🟡 v19.34.166 Patch C — Funnel rewrite to 6 stages
+Replace `build_pipeline_funnel` in `services/decision_trail.py`:
+1. **Scanner emitted** (from `scanner_emits`)
+2. **Bot acted** (from `trade_drops` where decision="fired" OR
+   `bot_trades` created in window)
+3. **AI consulted** (current "emitted" → relabel)
+4. **AI passed** ✓ (existing, but add tooltip: "shadow mode — modules
+   observe only, do not block")
+5. **Risk passed** ✓
+6. **Fired** + **Winners** (existing)
+
+Plus a "Drop Reasons" stacked-bar sidecar between stages 1 and 2 using
+`trade_drops.gate` distribution.
+
+### 🟡 v19.34.167 Patch D — Module Scorecard repair
+Either (recommended) compute scorecard live from `shadow_decisions` +
+`bot_trades` join, OR resurrect the `shadow_module_performance` writer.
+Also fix institutional/timeseries field paths
+(`institutional_context` / `timeseries_forecast` / `modules_used` list).
+
+### 🟢 v19.34.168 Patch E — UX polish bundle
+- Standardize range selectors (Today / 3d / 7d / 30d)
+- Add "last refreshed" timestamp + stale-data warning pill per tab
+- Color-code funnel conversion drops (amber >50%, red >75%)
+- Empty-state helpful hints
+- Collapse healthy modules in Scorecard under "+N healthy" expander
+- Stable verdict names in Trade Forensics (replace `phantom_v27` etc.)
+
+### 🟢 v19.34.169+ — Timestamp normalization (defensive, large)
+Migrate 4 collections from string-ISO timestamps to BSON datetime:
+- `bot_trades.created_at`
+- `alert_outcomes.closed_at`
+- `shadow_decisions.trigger_time`
+- `trade_drops.ts` (already has `ts_dt` BSON shadow — can switch readers
+  to use `ts_dt` and deprecate `ts`)
+Plus audit every reader for filter type. Multi-day effort, defer.
+
+### 🔴 v19.34.163 verification — TOMORROW (live trading)
+- Pre-market: confirm `BOT_EOD_PATH=v162`, `BOT_ORDER_PATH=direct`,
+  ib_direct connected, watchdog running
+- During session: monitor that no naked_sweep_reissue events fire
+- Post-EOD: run `bracket_churn_audit_v19_34_163.py --days 1` —
+  expect 0 offenders (was 25 in 7d before v163)
+- 15:45 ET EOD: verify Fast-Path (`phase: "eod_flatten_v162"`) fires
+  cleanly, no cancel-queue deadlock
+
+### 🟢 v19.34.164+ Optional add-on
+`bracket_completion_telemetry` 60s alert job — now feasible thanks to
+v163's cumulative fields (`target_ever_attached`, `bracket_attach_count`,
+`last_bracket_attach_at`). Job scans `bot_trades`, alerts when:
+- TP-place-rate (% of trades with `target_ever_attached=True`) <80%
+- Any individual trade's `bracket_attach_count` >5
+
+---
+
+## 🚀 Earlier session — v19.34.161-163 (SHIPPED 2026-05-26)
 
 **Last shipped (2026-05-26 session):**
 - **v19.34.161** (`5ec56ab3`) — Per-Style P&L card + SL/TP audit script + EOD watcher

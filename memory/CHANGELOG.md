@@ -1,3 +1,144 @@
+## 2026-05-26 (LATE EVENING) — Diagnostics Tab Data Accuracy Investigation
+
+### Trigger
+Operator asked to audit Diagnostics tab data accuracy and presentation.
+
+### Investigation tools created (read-only)
+All 4 scripts uploaded to paste.rs + committed to `backend/scripts/`:
+- `diagnostics_tab_audit.py` — per-collection schema + filter-type validator
+- `shadow_decisions_audit.py` — field-value distribution audit
+- `find_alert_drop_points_v19_34_164.py` — AST scout for v164 Patch A scope
+- (`bracket_churn_audit_v19_34_163.py` from earlier in the day)
+
+### Discoveries (no code changes shipped yet — investigation only)
+
+**1. Pipeline Funnel shows 100% pass-through by design, not by bug**
+- 9663 shadow_decisions, all with `combined_recommendation=proceed`,
+  `risk_assessment.recommendation=proceed`, `was_executed=True`.
+- Root cause: AI modules are in SHADOW MODE — they log opinions but
+  structurally cannot block trades. `consult_on_trade()` defaults
+  `result["proceed"]=True` at line 102 of `trade_consultation.py`.
+- Implication: Funnel stages 2-4 are tautological. Only "282 winners /
+  9663 fired = 2.9% win rate" carries information.
+- **The REAL drop volume lives BEFORE shadow consultation** — inside
+  `opportunity_evaluator.evaluate_opportunity()`.
+
+**2. Module Scorecard `vote_breakdown` looks for wrong module names**
+- Code expects `debate_agents`, `risk_manager`, `institutional`, `timeseries`
+- Actual fields are: `modules_used` list (contains `ai_risk_manager`,
+  `institutional_flow`), `institutional_context` (dict, not votes),
+  `timeseries_forecast` (dict, not votes), `debate_result` (often `{}`).
+- Result: institutional + timeseries permanently show 0 votes.
+
+**3. `shadow_module_performance` collection is EMPTY (0 docs)**
+- Module Scorecard's `modules` list is empty.
+- The legacy aggregator that was supposed to write to this collection
+  stopped at some point. Vote_breakdown lives on live aggregation now;
+  modules list never gets populated.
+- v165 candidate: either resurrect the writer in
+  `learning_connectors_service`, OR retire the collection and compute
+  scorecard live from shadow_decisions + bot_trades join.
+
+**4. `rejection_events` collection EMPTY — but `trade_drops` is alive**
+- `rejection_events` was a phantom — the actual rejection-data
+  collection is `trade_drops` (1058 docs over time, schema has `ts`
+  string ISO + `ts_dt` BSON datetime + `ts_epoch_ms` int).
+- `trade_drops` top gates (all-time):
+    broker_rejected            955   ← POST-trade
+    symbol_cooldown_v19_34_65   38   ← pre-shadow
+    operator_flatten_suppression 34
+    intent_dedup                29
+    safety_guardrail             2
+- **90% of records are POST-trade broker rejections.** Pre-shadow
+  drop instrumentation is severely incomplete.
+
+**5. AST scout found 14 alert drop sites; only 2 instrumented**
+- 13 sites in `opportunity_evaluator.evaluate_opportunity()`:
+  L153 (already instrumented as `stale_alert_ttl`)
+  L206 (already instrumented as `post_stop_cooldown`)
+  L267, 326, 411, 448, 516, 934, 947, 978, 1142, 1195, 1253 — UN-INSTRUMENTED
+- 1 site in `trading_bot_service._get_trade_alerts()`:
+  L4146 (`watchlist_only` continue) — UN-INSTRUMENTED
+- Note: user's DGX has 5-line drift (L201 instead of L206 etc.). Use
+  context anchors when patching, not raw line numbers.
+
+**6. Timestamp type inconsistency across 5 collections (maintenance hazard)**
+| Collection                  | Field          | Type           |
+| --------------------------- | -------------- | -------------- |
+| bot_trades                  | created_at     | string ISO     |
+| alert_outcomes              | closed_at      | string ISO     |
+| shadow_decisions            | trigger_time   | string ISO     |
+| trade_drops                 | ts             | string ISO     |
+| trade_drops                 | ts_dt          | BSON datetime  |
+| bracket_lifecycle_events    | created_at     | BSON datetime  |
+| sentcom_thoughts            | created_at     | BSON datetime  |
+- Future v167 work: normalise to BSON datetime, migrate the string
+  collections via a one-shot script. Multi-day effort, defer until
+  v164-166 stable.
+
+### Plan locked for v19.34.164 (NOT YET WRITTEN — tomorrow morning)
+**Patch A — Drop-site instrumentation** (~330 LoC):
+1. 12 `record_trade_drop()` calls at the un-instrumented sites in
+   `opportunity_evaluator.py` (mirror the existing L138 + L195 pattern).
+2. 1 call in `trading_bot_service._get_trade_alerts()` at the
+   `watchlist_only` continue site.
+3. Extend `KNOWN_GATES` in `trade_drop_recorder.py` with 12 new gate
+   names.
+4. Extend `REASON_MAP` in `rejection_analytics_router.py` with 12
+   matching label+category entries.
+5. New pytest `test_alert_drop_recording_v19_34_164.py` — one case per
+   new gate firing under controlled conditions.
+
+**Gates to add:**
+| Gate name                         | Category         | Source            |
+|-----------------------------------|------------------|-------------------|
+| duplicate_canonical_trade         | scanner_quality  | OE L267           |
+| eod_hard_cutoff                   | policy           | OE L326           |
+| no_price_data                     | scanner_quality  | OE L411           |
+| pre_trade_filter_skip             | scanner_quality  | OE L448           |
+| ai_confidence_gate_skip           | scanner_quality  | OE L516           |
+| risk_cap_saturated                | policy           | OE L934           |
+| zero_shares_after_sizing          | scanner_quality  | OE L947           |
+| rr_below_minimum                  | scanner_quality  | OE L978           |
+| ai_consultation_rejected          | scanner_quality  | OE L1142          |
+| ai_rejected_manual_mode           | policy           | OE L1195          |
+| eval_fallthrough                  | other            | OE L1253          |
+| watchlist_only_setup              | scanner_quality  | TBS L4146         |
+
+### Pending after Patch A
+- **Patch B** (v19.34.165) — Persist scanner emit counter (one doc per
+  alert into `scanner_emits` TTL-7d) so the Funnel can show TRUE
+  pre-shadow drop ratio.
+- **Patch C** (v19.34.166) — Funnel rewrite in
+  `services/decision_trail.build_pipeline_funnel`: 6 stages instead
+  of 5, with stage 1 = scanner emit count, stage 2 = bot acted (from
+  trade_drops decision="fired" / bot_trades created), plus drop-reason
+  breakdown sidecar.
+- **Patch D** (v19.34.167) — Module Scorecard repair (live aggregation
+  from shadow_decisions instead of relying on empty
+  shadow_module_performance collection; fix institutional/timeseries
+  field paths).
+- **Patch E** (v19.34.168) — UX polish: standardize range selectors,
+  add data-freshness pill, color-code conversion drops, empty-state
+  hints.
+
+### Tests run today (no shipping)
+- `bracket_churn_audit_v19_34_163.py` — 25 offenders / 7d, 928 reissues,
+  97% self_cascade
+- `diagnostics_tab_audit.py` — surfaced empty `shadow_module_performance`
+  + `rejection_events`, identified 5-collection timestamp inconsistency
+- `shadow_decisions_audit.py` — confirmed `combined_recommendation`/
+  `was_executed` 100% proceed/True via shadow-mode tautology
+- `find_alert_drop_points_v19_34_164.py` — 14 drop sites, 2 instrumented,
+  12 to-do
+
+### Verified clean post-restart (last status check)
+- v163 backend running PID 2972673, `source_tier=ib_direct` (Tier 1 healthy)
+- 0 naked_sweep_reissue events since v163 deploy at ~21:00 UTC
+- `BOT_EOD_PATH=v162` + `BOT_ORDER_PATH=direct` confirmed in `.env`
+
+---
+
 ## 2026-05-26 — v19.34.163-rc1: Bracket churn fix (SHIPPED, COMMIT e80ba502)
 
 ### Trigger
