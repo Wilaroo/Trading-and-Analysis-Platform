@@ -4,19 +4,30 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
-## 🚀 Next session — pick up here (Diagnostics Funnel rewrite)
+## 🚀 Next session — pick up here
 
-**v19.34.164 SHIPPED 2026-05-27** (see CHANGELOG). Trade-drop persistence
-is now wired through `record_rejection()`; the Diagnostics tab and
-Rejection Analytics router will start showing real data after the next
-trading session.
+**v19.34.164 SHIPPED 2026-05-27** — trade-drop persistence (see CHANGELOG).
+**v19.34.165 SHIPPED 2026-05-27** — 5 momentum playbook setups enabled
+(rs_leader_break, power_trend_stack, pocket_pivot, stage_2_breakout,
+three_week_tight). See CHANGELOG v165 entry for paste.rs URL + parameters.
 
-### 🔴 v19.34.165 — Persist scanner emit counter (NEXT UP)
-Now unblocked. Persist a per-alert row in `scanner_emits` (TTL-7d)
-inside `enhanced_scanner._process_new_alert()`. Required so the Funnel
-rewrite (v19.34.166) can compute the true Stage 0 → Stage 1 drop ratio.
+### 🔴 Post-v165 monitoring (NEXT — operator-facing, no code changes)
+After v165 deploys, ~446 alerts/hour shift from `setup_disabled` to the
+evaluator. Watch for new gate-hit patterns and triage:
+- If `rr_below_min` spikes on a specific setup → tune that setup's
+  effective_min_rr in `RiskParameters` per-setup overrides.
+- If `gate_skip` spikes on a specific setup → that setup's confidence-
+  gate baseline is mistuned for its regime requirements.
+- If a setup actually produces trades, watch first 5-10 fills for
+  position sizing and stop placement — adjust `STRATEGY_CONFIG`
+  trail_pct / scale_out_pcts if needed.
 
-### 🟡 v19.34.166 — Funnel rewrite to 6 stages
+### 🟡 v19.34.166 — Persist scanner emit counter
+Persist a per-alert row in `scanner_emits` (TTL-7d) inside
+`enhanced_scanner._process_new_alert()`. Required so the Funnel rewrite
+(v167) can compute the true Stage 0 → Stage 1 drop ratio.
+
+### 🟡 v19.34.167 — Funnel rewrite to 6 stages
 Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 1. **Scanner emitted** (from `scanner_emits`)
 2. **Bot acted** (from `trade_drops` where decision="fired" OR
@@ -30,7 +41,7 @@ Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 Plus a "Drop Reasons" stacked-bar sidecar between stages 1 and 2 using
 `trade_drops.gate` distribution.
 
-### 🟡 v19.34.167 — Module Scorecard repair
+### 🟡 v19.34.168 — Module Scorecard repair
 Either (recommended) compute scorecard live from `shadow_decisions` +
 `bot_trades` join, OR resurrect the `shadow_module_performance` writer.
 Also fix institutional/timeseries field paths

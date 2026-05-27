@@ -335,6 +335,62 @@ STRATEGY_CONFIG = {
         "scale_out_pcts": [0.2, 0.3, 0.5],
         "close_at_eod": False
     },
+    # ──────────────────────────────────────────────────────────────────
+    # v19.34.165 (2026-05-27) — Momentum-playbook setups newly surfaced
+    # by v19.34.164 trade_drops persistence. Scanner had been emitting
+    # 446 alerts/hour against these names but the bot was silently
+    # dropping them at the setup_disabled gate. Parameters tuned per the
+    # canonical playbook for each setup (O'Neil / Kacher / Weinstein /
+    # Minervini); see CHANGELOG.md v165 entry for source citations.
+    # ──────────────────────────────────────────────────────────────────
+    "rs_leader_break": {
+        # IBD/CAN SLIM relative-strength leader breakout. O'Neil 8-week
+        # hold rule when stock gains 20%+ in first 3 weeks; trail under
+        # 50-day MA otherwise. Same family as base_breakout but with
+        # the RS-leader pre-filter.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],   # partial at 8-10%, 20%, ride
+        "close_at_eod": False,
+    },
+    "stage_2_breakout": {
+        # Weinstein Stage-2 base breakout, weeks-to-months hold.
+        # Trail under the rising 30-week MA; some traders use 1-1.5 ATR.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False,
+    },
+    "three_week_tight": {
+        # Minervini TWT — break above 3-week compressed range on volume.
+        # Hold while constructive; partial at 2R (~20-25% gain), ride
+        # remainder with trailing stop. Slightly tighter trail than a
+        # fresh base breakout because TWT is a continuation pattern
+        # already partway into the move.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.035,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False,
+    },
+    "power_trend_stack": {
+        # Minervini Power-Play / Stage-2 continuation with EMA stack
+        # alignment. Faster mover than fresh-base breakouts so we run
+        # the SWING tier (days to weeks). Stop below the last
+        # contraction low; trail under 10-day MA.
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.03,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False,
+    },
+    "pocket_pivot": {
+        # Kacher pocket pivot — early entry inside a constructive base
+        # when up-volume exceeds the heaviest prior-10-day down-volume.
+        # Days-to-weeks hold, exit if closes below 10-day MA. SWING tier.
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.33, 0.33, 0.34],   # 1R/2R/3R style
+        "close_at_eod": False,
+    },
     "accumulation_entry": {
         "timeframe": TradeTimeframe.POSITION,
         "trail_pct": 0.05,
@@ -966,6 +1022,18 @@ class TradingBotService:
             "up_through_open",       # Reversal through the opening print (long)
             "daily_breakout",        # Daily timeframe breakout (EOD setup)
             "daily_squeeze",         # Daily timeframe squeeze (EOD setup)
+            # ─────────────────────────────────────────────────────────
+            # v19.34.165 (2026-05-27) — 5 momentum-playbook setups the
+            # scanner had been emitting (446 alerts/hr observed via v164
+            # trade_drops persistence) but the bot was silently rejecting
+            # at the setup_disabled gate. Entries also added to
+            # STRATEGY_CONFIG above so they don't fall to DEFAULT.
+            # ─────────────────────────────────────────────────────────
+            "rs_leader_break",       # IBD/CAN SLIM RS leader breakout
+            "power_trend_stack",     # Minervini Power-Play continuation
+            "pocket_pivot",          # Kacher pocket pivot
+            "stage_2_breakout",      # Weinstein Stage-2 base breakout
+            "three_week_tight",      # Minervini 3-week-tight continuation
         ]
 
         # 2026-05-01 v19.20 — WATCHLIST-ONLY setups: these fire from the scanner

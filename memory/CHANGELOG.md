@@ -1,3 +1,88 @@
+## 2026-05-27 — v19.34.165 Five momentum playbook setups enabled (paste.rs: https://paste.rs/ICbHC)
+
+### Trigger
+v19.34.164 trade-drops persistence (this morning) made it visible that the
+scanner was emitting 446 alerts/hour for 5 setup types the bot didn't
+recognize. All were dying at the `setup_disabled` gate inside
+`trading_bot_service._get_trade_alerts` (L4170).
+
+### Distribution observed in first hour post-v164 deploy
+| Setup            | Alerts/hr | Playbook |
+|------------------|-----------|----------|
+| rs_leader_break  | 159       | IBD/CAN SLIM RS leader breakout (O'Neil) |
+| power_trend_stack| 136       | Minervini Power-Play / Stage-2 continuation |
+| pocket_pivot     | 70        | Kacher pocket pivot |
+| stage_2_breakout | 56        | Weinstein Stage-2 base breakout |
+| three_week_tight | 25        | Minervini 3-week-tight continuation |
+
+### Patch
+1. **`STRATEGY_CONFIG`** (`trading_bot_service.py` ~L332) — 5 new entries
+   tuned per playbook. All POSITION or SWING timeframe with
+   `close_at_eod=False` (multi-day momentum plays). Parameters sourced from
+   IBD/O'Neil, Minervini SEPA, Kacher VOSI, and Weinstein Stage Analysis
+   public guidance (see web research log dated 2026-05-27).
+2. **`_enabled_setups`** (`trading_bot_service.py` ~L970) — same 5 names
+   appended so `_get_trade_alerts` stops dropping them at L4170.
+3. **`backend/scripts/enable_v19_34_165_setups.py`** — idempotent one-shot
+   that appends the 5 setups to the LIVE `bot_state.enabled_setups` doc
+   so the change takes effect WITHOUT a backend restart. Use with
+   `--dry-run` to preview.
+4. **`backend/scripts/audit_9_ema_scalp_silence_v19_34_165.py`** — read-only
+   triage for the `9_ema_scalp` scanner dormancy (last emission was
+   2026-03-11). Checks: daily emission histogram, regime gate, time-of-day
+   gate, KOS universe membership.
+5. **`backend/tests/test_v19_34_165_new_setups.py`** — 30 pytest cases
+   (6 properties × 5 setups): membership, STRATEGY_CONFIG schema,
+   trail_pct sanity range, scale_out_pcts sum to 1.0, close_at_eod=False
+   for multi-day plays, timeframe is SWING or POSITION.
+
+### Parameter choices (per-setup rationale)
+- **rs_leader_break** — POSITION, trail 4%, scale [0.2, 0.3, 0.5]. Matches
+  O'Neil 8-week hold rule, 7-8% stop, take partial at 8-10% then 20-25%.
+- **stage_2_breakout** — POSITION, trail 4%, scale [0.2, 0.3, 0.5]. Stop
+  below breakout or 30-week MA per Weinstein.
+- **three_week_tight** — POSITION, trail 3.5%, scale [0.25, 0.25, 0.5].
+  Tighter trail than fresh base because TWT is already partway into move.
+- **power_trend_stack** — SWING, trail 3%, scale [0.25, 0.25, 0.5]. Faster
+  mover than fresh breakouts; stop below last contraction low.
+- **pocket_pivot** — SWING, trail 2.5%, scale [0.33, 0.33, 0.34] (1R/2R/3R).
+  Exit if closes below 10-day MA per Kacher VOSI guidance.
+
+### Test status
+- 30/30 v165 + 8/8 v164 + 14/14 v163 = **52/52 combined passing** locally.
+- Lint clean across all 4 files.
+
+### Deployment (DGX)
+```bash
+curl -s https://paste.rs/ICbHC | git apply -
+DB_NAME=tradecommand python backend/scripts/enable_v19_34_165_setups.py --dry-run
+DB_NAME=tradecommand python backend/scripts/enable_v19_34_165_setups.py
+pytest backend/tests/test_v19_34_165_new_setups.py -v
+./start_backend.sh --force
+# Then ~30min later, verify:
+python /tmp/drop_gates.py   # setup_disabled count should drop ~446/hr
+```
+
+### Expected impact
+- `setup_disabled` drops fall from 412/hr → near-zero for the 5 setups.
+- ~446 alerts/hr now flow into the evaluator. Expect a wave of NEW gate
+  hits (`rr_below_min`, `gate_skip`, `smart_filter_skip`) as the
+  evaluator triages them. That's the GOOD problem — much easier to
+  triage than silent kills.
+- Some alerts will become actual trades. Watch position sizing and
+  stop placement carefully on first-of-kind setups; tune
+  `STRATEGY_CONFIG` if the bot is overscaling or stopping out too quick.
+
+### Side-investigation (`9_ema_scalp` silence)
+Last emission: 2026-03-11 (KOS). Audit script
+`audit_9_ema_scalp_silence_v19_34_165.py` checks 4 likely causes:
+regime gate, universe membership, time-of-day window, scanner detector
+deactivation. Run after market-hours data accumulates and the verdict
+will guide next steps.
+
+---
+
+
 ## 2026-05-27 — v19.34.164 Trade-Drop Persistence (READY TO APPLY)
 
 ### Trigger
