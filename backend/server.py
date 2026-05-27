@@ -4960,6 +4960,52 @@ async def get_market_regime_composite():
         return {"success": False, "error": str(e), "regime": "unknown", "metadata": {}}
 
 
+@app.get("/api/market-regime/composite/history")
+async def get_market_regime_composite_history(hours: int = 24, limit: int = 500):
+    """v19.34.168 — Intraday composite regime snapshot history.
+
+    Reads from the `regime_snapshots` collection (written by the scanner
+    on regime/agreement/divergence transitions). Distinct from the Daily
+    Engine A `/api/market-regime/history` endpoint, which serves
+    `market_regime_state` rows.
+    """
+    from services.regime_persistence_service import query_history
+    try:
+        hours = max(1, min(int(hours), 24 * 30))
+        limit = max(1, min(int(limit), 5000))
+        snapshots = query_history(db, hours=hours, limit=limit)
+        return {
+            "success": True,
+            "hours": hours,
+            "count": len(snapshots),
+            "snapshots": snapshots,
+            "source": "regime_snapshots",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "snapshots": [], "source": "regime_snapshots"}
+
+
+@app.get("/api/market-regime/composite/stats")
+async def get_market_regime_composite_stats(hours: int = 24):
+    """v19.34.168 — % time-in-regime over the last N hours, computed from
+    `regime_snapshots` gaps. Answers questions like 'what fraction of the
+    last 6h was SPY/QQQ/IWM in strong_uptrend vs volatile'.
+    """
+    from services.regime_persistence_service import query_stats
+    try:
+        hours = max(1, min(int(hours), 24 * 30))
+        stats = query_stats(db, hours=hours)
+        return {
+            "success": True,
+            "source": "regime_snapshots",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **stats,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "source": "regime_snapshots"}
+
+
 if __name__ == "__main__":
     import uvicorn
     loop_type = "uvloop" if _has_uvloop else "auto"
