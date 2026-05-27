@@ -134,22 +134,10 @@ class OpportunityEvaluator:
                                 )
                             except Exception:
                                 pass
-                            try:
-                                from services.trade_drop_recorder import record_trade_drop
-                                record_trade_drop(
-                                    getattr(bot, "_db", None),
-                                    gate="stale_alert_ttl",
-                                    symbol=symbol,
-                                    setup_type=setup_type,
-                                    direction=direction_str,
-                                    reason=f"stale_alert_ttl: age={_age:.1f}s ≥ {_ttl_secs:.0f}s",
-                                    context={
-                                        "alert_age_seconds": round(_age, 2),
-                                        "ttl_seconds": _ttl_secs,
-                                    },
-                                )
-                            except Exception:
-                                pass
+                            # v19.34.164: record_rejection now persists
+                            # to `trade_drops` itself — explicit
+                            # record_trade_drop call removed to avoid
+                            # double-counting.
                             return None
             except Exception as _ttl_err:
                 logger.debug(
@@ -186,18 +174,9 @@ class OpportunityEvaluator:
                         )
                     except Exception:
                         pass
-                    try:
-                        from services.trade_drop_recorder import record_trade_drop
-                        record_trade_drop(
-                            getattr(bot, "_db", None),
-                            gate="post_stop_cooldown",
-                            symbol=symbol, setup_type=setup_type,
-                            direction=direction_str,
-                            reason=f"post_stop_cooldown: {_remaining:.0f}s remaining",
-                            context={"cooldown_remaining_seconds": round(_remaining, 1)},
-                        )
-                    except Exception:
-                        pass
+                    # v19.34.164: record_rejection now persists to
+                    # `trade_drops` itself — explicit record_trade_drop
+                    # call removed to avoid double-counting.
                     return None
             except Exception as _psc_err:
                 logger.debug(
@@ -1187,6 +1166,22 @@ class OpportunityEvaluator:
                             print(f"   🤖 AI REJECTED trade: {ai_result.get('analysis', '')[:150]}")
                             logger.info(f"AI REJECTED trade {symbol}: {ai_result.get('analysis', '')[:100]}")
                             if bot._mode != BotMode.AUTONOMOUS:
+                                # v19.34.164: surface the legacy-AI veto
+                                # so the Diagnostics tab shows why this
+                                # trade died (previously a silent return).
+                                try:
+                                    bot.record_rejection(
+                                        symbol=symbol, setup_type=setup_type,
+                                        direction=direction_str,
+                                        reason_code="ai_verdict_reject",
+                                        context={
+                                            "why": str(ai_result.get("analysis", ""))[:300],
+                                            "verdict": ai_result.get("verdict"),
+                                            "mode": "non_autonomous",
+                                        },
+                                    )
+                                except Exception:
+                                    pass
                                 return None
                             else:
                                 print("   ⚠️ Overriding AI rejection in AUTONOMOUS mode")

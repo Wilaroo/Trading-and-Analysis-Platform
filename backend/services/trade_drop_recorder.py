@@ -75,6 +75,30 @@ KNOWN_GATES = {
     "strategy_simulation_phase",  # strategy still in SIMULATION
     "broker_rejected",          # place_bracket_order/execute_entry returned non-success, non-timeout
     "execution_exception",      # raised exception in execute_trade
+    # v19.34.164 — record_rejection now persists every reason_code to
+    # trade_drops. These are the gates emitted via record_rejection that
+    # were previously invisible to the Diagnostics tab.
+    "post_stop_cooldown",       # v19.34.88 per-(symbol, setup_base) stop-cooldown
+    "symbol_direction_open_cap_v123",  # v19.34.123 setup-agnostic open-exposure cap
+    "eod_no_new_entries",       # v19.29 EOD hard cut at 15:55 ET
+    "no_price",                 # no IB pusher / Alpaca quote available
+    "smart_filter_skip",        # smart strategy filter (historical win-rate) SKIP
+    "gate_skip",                # AI confidence gate SKIP
+    "symbol_exposure_saturated",  # per-symbol exposure cap reached
+    "position_size_zero",       # position sizer returned 0 shares
+    "rr_below_min",             # R:R below setup-specific floor
+    "ai_consultation_block",    # AI consultation proceed=False
+    "ai_verdict_reject",        # legacy AI assistant REJECT verdict (non-autonomous)
+    "evaluator_exception",      # exception inside _evaluate_opportunity
+    "evaluator_veto_unknown",   # catch-all (evaluator returned None w/o specific reason)
+    "max_open_positions",       # max_open_positions cap reached
+    "dedup_cooldown",           # alert_deduplicator cooldown active
+    "dedup_open_position",      # alert_deduplicator open-position dedup
+    "position_exists",          # safety-net: open trade already exists for symbol
+    "pending_trade_exists",     # pending trade already exists for symbol
+    "setup_disabled",           # alert's setup_type not in _enabled_setups
+    "watchlist_only_skip",      # alert from a watchlist-only setup (silent)
+    "scanner_paused",           # scanner globally paused via guardrails
 }
 
 

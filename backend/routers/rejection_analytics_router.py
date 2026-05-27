@@ -57,6 +57,30 @@ REASON_MAP: Dict[str, Dict[str, str]] = {
     "strategy_simulation_phase": {"label": "Strategy in SIMULATION phase",  "category": CAT_POLICY},
     "kill_switch":        {"label": "Kill-switch active",                   "category": CAT_POLICY},
     "eod_blackout":       {"label": "EOD blackout window",                  "category": CAT_POLICY},
+    # v19.34.164 — gates surfaced by `record_rejection` once it began
+    # persisting every rejection to `trade_drops` (May 2026). Order
+    # mirrors the bot's evaluation pipeline so the UI groups them in
+    # logical sections.
+    "symbol_direction_open_cap_v123": {"label": "Already open (symbol+direction cap)", "category": CAT_POLICY},
+    "eod_no_new_entries": {"label": "EOD no-new-entries (≥3:55pm ET)",      "category": CAT_POLICY},
+    "no_price":           {"label": "No live price available",              "category": CAT_SCANNER_QUALITY},
+    "smart_filter_skip":  {"label": "Smart filter SKIP (historical win-rate)", "category": CAT_SCANNER_QUALITY},
+    "gate_skip":          {"label": "Confidence gate SKIP",                  "category": CAT_SCANNER_QUALITY},
+    "symbol_exposure_saturated": {"label": "Per-symbol exposure cap reached", "category": CAT_POLICY},
+    "position_size_zero": {"label": "Position size = 0 shares",              "category": CAT_SCANNER_QUALITY},
+    "rr_below_min":       {"label": "R:R below setup minimum",               "category": CAT_SCANNER_QUALITY},
+    "ai_consultation_block": {"label": "AI consultation BLOCKED",            "category": CAT_SCANNER_QUALITY},
+    "ai_verdict_reject":  {"label": "Legacy AI verdict REJECT",              "category": CAT_SCANNER_QUALITY},
+    "evaluator_exception": {"label": "Evaluator exception",                  "category": CAT_OTHER},
+    "evaluator_veto_unknown": {"label": "Evaluator veto (unspecified)",      "category": CAT_OTHER},
+    "max_open_positions": {"label": "Max open positions reached",            "category": CAT_POLICY},
+    "dedup_cooldown":     {"label": "Alert dedup cooldown (~5min)",          "category": CAT_SCANNER_QUALITY},
+    "dedup_open_position": {"label": "Alert dedup — position open",          "category": CAT_POLICY},
+    "position_exists":    {"label": "Position already exists (safety net)",  "category": CAT_POLICY},
+    "pending_trade_exists": {"label": "Pending trade exists (safety net)",   "category": CAT_POLICY},
+    "setup_disabled":     {"label": "Setup disabled",                        "category": CAT_POLICY},
+    "watchlist_only_skip": {"label": "Watchlist-only setup (silent)",        "category": CAT_OTHER},
+    "scanner_paused":     {"label": "Scanner paused (guardrail)",            "category": CAT_POLICY},
 }
 
 
