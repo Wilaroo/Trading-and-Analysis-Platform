@@ -11,22 +11,25 @@ Open priorities, deferred ideas, and backlog. Move items to
 (rs_leader_break, power_trend_stack, pocket_pivot, stage_2_breakout,
 three_week_tight). See CHANGELOG v165 entry for paste.rs URL + parameters.
 **v19.34.166 SHIPPED 2026-05-27** — trend classifier tolerance band (0.25%)
-+ macro-context veto in `realtime_technical_service.py`. Fixes the SPY
-"strong_downtrend" misclass on +0.48% gap-up days. 9/9 tests passing.
++ macro-context veto in `realtime_technical_service.py`. 9/9 tests passing.
+**v19.34.167 SHIPPED 2026-05-27** — composite SPY/QQQ/IWM market regime
+in `enhanced_scanner._update_market_context`. Majority/unanimous voting +
+divergence detection in `self._market_data`. 14/14 tests passing.
 
-### 🔴 Post-v166 monitoring (NEXT — operator-facing, no code changes)
-- Confirm % of live alerts tagged `strong_downtrend` drops sharply.
-- Watch for `9_ema_scalp` (dormant since 2026-04-07) to start firing
-  during clean uptrend regimes.
-- v165 monitoring continues: watch new gate-hit distribution for the
-  5 freshly-enabled setups (rr_below_min, gate_skip, etc.) and triage.
+### 🔴 Post-v167 monitoring
+- Confirm `9_ema_scalp` and other uptrend-gated setups fire more often
+  on green-tape days
+- Watch new alerts for `market_data.divergence_flag = True` cases — these
+  are the high-risk cases the SPY-only classifier was missing
+- Compare regime distribution before/after v167 deploy (manual check)
 
-### 🟡 v19.34.167 — Persist scanner emit counter
-Persist a per-alert row in `scanner_emits` (TTL-7d) inside
-`enhanced_scanner._process_new_alert()`. Required so the Funnel rewrite
-(v168) can compute the true Stage 0 → Stage 1 drop ratio.
+### 🟡 v19.34.168 — Persistent `regime_snapshots` collection
+Add MongoDB collection capturing scope (market/sector/stock), timeframe
+(short/mid/long), agreement, divergence_flag, per-index breakdown.
+TTL ~7d. Enables diagnostics queries like "% time SPY in uptrend vs
+9_ema_scalp fire rate". ~120 lines including a test.
 
-### 🟡 v19.34.168 — Funnel rewrite to 6 stages
+### 🟡 v19.34.169 — Sector regime + sector-aware setup gating
 Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 1. **Scanner emitted** (from `scanner_emits`)
 2. **Bot acted** (from `trade_drops` where decision="fired" OR
