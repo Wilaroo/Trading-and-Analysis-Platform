@@ -1,3 +1,59 @@
+## 2026-05-27 — v19.34.166 Trend classifier tolerance + macro-context veto
+
+### Trigger
+After v19.34.165 unlocked 5 momentum setups, the audit found that ~80% of
+live alerts on a +0.48% SPY gap-up day were being tagged
+`strong_downtrend` by `realtime_technical_service.get_technical_snapshot`.
+SPY at 749.19 (EMA9=749.26, EMA20=749.65, EMA50=698.44, SMA200=698.44)
+was classified "downtrend" because the original logic at L596-602 used
+strict binary `>` vs EMA9/EMA20 — a 7-cent intraday print below EMA9
+flipped the classification despite price sitting 7% above EMA50 and the
+secular structure being a clean uptrend. The misclass poisoned every
+setup gate that requires `trend == "uptrend"` (incl. `9_ema_scalp`,
+dormant since 2026-04-07).
+
+### Patch (`backend/services/realtime_technical_service.py` L593-643)
+1. **Tolerance band — 0.25%** (`_TREND_TOLERANCE_PCT`). Distances within
+   ±0.25% of an EMA count as "at" — neither above nor below — so noise-
+   level prints don't flip uptrend↔downtrend tick-by-tick.
+2. **Macro-context veto**. If price > EMA50 AND EMA50 > SMA200 (secular
+   uptrend structure), the classifier may NEVER return "downtrend";
+   the strongest reading a noisy intraday print can earn in that
+   posture is "sideways". Symmetric inverse check downgrades a false
+   "uptrend" reading to "sideways" when macro structure is bearish.
+
+### Tests — `backend/tests/test_trend_classifier_v19_34_166.py`
+9/9 passing on DGX (Python 3.12.3):
+- `test_audit_regression_spy_2026_05_27` — canonical SPY case must NOT
+  classify as "downtrend".
+- T1-T5 scenario coverage (consolidation, true uptrend, true downtrend,
+  sideways w/ EMA9>EMA20, sideways w/ EMA9<EMA20).
+- `test_macro_uptrend_vetoes_downtrend` — property: secular uptrend
+  posture vetoes downtrend label.
+- `test_classifier_stable_to_one_cent_perturbation_at_ema_boundary` —
+  the property the original bug violated.
+- `test_live_module_logic_matches_mirror_for_audit_case` — guards
+  against future drift between this test mirror and the real module.
+
+### Deploy
+Transferred to DGX via 23-chunk gzipped+base64 paste workflow (single
+chunk was corrupted by chat-render Q→S substitution; bisected via per-
+chunk md5 verifier, surgically rewritten in place). Backup retained at
+`backend/services/realtime_technical_service.py.pre_v166.bak`.
+
+### Verification
+- pre-patch sha256 `f38efa1ac07888a3...` → post-patch
+  `afba82a9db7bfa60...` (matches canonical v166).
+- 9/9 tests pass.
+
+### Watch next
+- Confirm % of new alerts tagged `strong_downtrend` drops sharply.
+- Watch for `9_ema_scalp` to start firing again during uptrend regimes.
+- Backend restart NOT required (module is imported per-request).
+
+---
+
+
 ## 2026-05-27 — v19.34.165 Five momentum playbook setups enabled (paste.rs: https://paste.rs/ICbHC)
 
 ### Trigger

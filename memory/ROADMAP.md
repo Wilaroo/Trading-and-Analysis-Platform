@@ -10,24 +10,23 @@ Open priorities, deferred ideas, and backlog. Move items to
 **v19.34.165 SHIPPED 2026-05-27** — 5 momentum playbook setups enabled
 (rs_leader_break, power_trend_stack, pocket_pivot, stage_2_breakout,
 three_week_tight). See CHANGELOG v165 entry for paste.rs URL + parameters.
+**v19.34.166 SHIPPED 2026-05-27** — trend classifier tolerance band (0.25%)
++ macro-context veto in `realtime_technical_service.py`. Fixes the SPY
+"strong_downtrend" misclass on +0.48% gap-up days. 9/9 tests passing.
 
-### 🔴 Post-v165 monitoring (NEXT — operator-facing, no code changes)
-After v165 deploys, ~446 alerts/hour shift from `setup_disabled` to the
-evaluator. Watch for new gate-hit patterns and triage:
-- If `rr_below_min` spikes on a specific setup → tune that setup's
-  effective_min_rr in `RiskParameters` per-setup overrides.
-- If `gate_skip` spikes on a specific setup → that setup's confidence-
-  gate baseline is mistuned for its regime requirements.
-- If a setup actually produces trades, watch first 5-10 fills for
-  position sizing and stop placement — adjust `STRATEGY_CONFIG`
-  trail_pct / scale_out_pcts if needed.
+### 🔴 Post-v166 monitoring (NEXT — operator-facing, no code changes)
+- Confirm % of live alerts tagged `strong_downtrend` drops sharply.
+- Watch for `9_ema_scalp` (dormant since 2026-04-07) to start firing
+  during clean uptrend regimes.
+- v165 monitoring continues: watch new gate-hit distribution for the
+  5 freshly-enabled setups (rr_below_min, gate_skip, etc.) and triage.
 
-### 🟡 v19.34.166 — Persist scanner emit counter
+### 🟡 v19.34.167 — Persist scanner emit counter
 Persist a per-alert row in `scanner_emits` (TTL-7d) inside
 `enhanced_scanner._process_new_alert()`. Required so the Funnel rewrite
-(v167) can compute the true Stage 0 → Stage 1 drop ratio.
+(v168) can compute the true Stage 0 → Stage 1 drop ratio.
 
-### 🟡 v19.34.167 — Funnel rewrite to 6 stages
+### 🟡 v19.34.168 — Funnel rewrite to 6 stages
 Replace `build_pipeline_funnel` in `services/decision_trail.py`:
 1. **Scanner emitted** (from `scanner_emits`)
 2. **Bot acted** (from `trade_drops` where decision="fired" OR
