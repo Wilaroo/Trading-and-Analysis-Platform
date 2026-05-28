@@ -1,3 +1,69 @@
+## 2026-05-28 — v19.34.181 + v19.34.182 EOD AUTO-CLOSE RESTORED
+
+### Trigger
+EOD auto-close failed silently on 2026-05-28 — operator had to manually
+flatten all positions in TWS at the close. The v169 heartbeat showed
+0 entries, suggesting `check_eod_close()` was never reached. Initial
+hypothesis (three early `continue`s in scan_loop: daily-loss / trading
+hours / PAUSED) was wrong — diagnostic queries confirmed none had tripped.
+
+### Real Root Cause
+`/tmp/backend.log` showed 10× consecutive lines of:
+```
+⚠️ [TradingBot] _check_eod_close exceeded 5.0s budget — skipping this cycle
+```
+
+The `_EOD_WALL_S = 5.0` asyncio.wait_for timeout in `_scan_loop` was killing
+`check_eod_close()` on every cycle. Reasons EOD needs > 5s:
+- `check_position_memory_disagreement` (IB roundtrip)
+- `_flatten_ghost_positions` sweep
+- Parallel `asyncio.gather` of N IB close calls (~2–5s each)
+
+TimeoutError → "skipping this cycle" → next scan → repeat. The cancellation
+happened BEFORE reaching the heartbeat write at line 1209, explaining the
+0-heartbeat post-mortem.
+
+### Fixes
+**v19.34.181** — Single-line bump in `services/trading_bot_service.py`:
+```python
+_EOD_WALL_S = 5.0  →  _EOD_WALL_S = 60.0
+```
+Also re-canonicalized `bot_config.eod_config` MongoDB document:
+`{enabled: True, close_hour: 15, close_minute: 45}`.
+
+**v19.34.182** — Belt + suspenders. Added dedicated `_eod_supervisor_loop()`
+asyncio task spawned in `TradingBotService.start()`:
+- Ticks every 15s, **independent** of `_scan_loop`.
+- Calls `check_eod_close()`, `check_scalp_decay()`, `_check_eod_grading()`
+  with **NO `asyncio.wait_for` wall** — EOD can take as long as it needs.
+- Idempotent: scan_loop ALSO calls them (60s wall now); both paths safe
+  to run concurrently via `_eod_close_executed_today` flag + grading
+  per-day key.
+- New 16:00 ET hard alarm: if any `close_at_eod=True` position is still
+  open at 4:00 PM ET, fires a CRITICAL `sentcom_thoughts` row
+  (`category="eod_post_close_alarm"`) + WS broadcast.
+- Cancelled cleanly in `TradingBotService.stop()`.
+
+### Verification
+Backend restart confirmed:
+```
+🤖 [TradingBot] Scan loop started - interval: 30s
+🛡️  [TradingBot] v19.34.182 EOD supervisor started (15s cadence, no wait_for wall)
+```
+
+### Files Changed
+- `backend/services/trading_bot_service.py` (v181 sed + v182 patch)
+- `bot_config.eod_config` MongoDB document (canonical 15:45)
+
+### Operational Notes
+- Per `AGENTS.md`, backend restart uses `./start_backend.sh --force` (not
+  supervisorctl). The Windows `.bat` runs `git checkout -- .` on the DGX,
+  so v182's deploy script auto-commits + pushes immediately.
+- Diagnostic script saved at `/tmp/eod_diag.py` for future post-mortems.
+
+---
+
+
 ## 2026-05-28 — v19.34.170 Timestamp normalization + Fundamentals reconnect
 
 ### Trigger
