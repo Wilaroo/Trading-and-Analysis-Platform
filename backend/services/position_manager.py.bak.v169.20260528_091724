@@ -1075,46 +1075,6 @@ class PositionManager:
         if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):
             return
 
-        # ── v19.34.169 — EOD HEARTBEAT (observability) ────────────────
-        # Emit a sentcom_thought once per minute while inside the EOD
-        # window so the operator can SEE the scheduler firing from the
-        # UI. Prior to v169 the EOD code ran silently when there were
-        # no positions to close, which looked identical to "scheduler
-        # never fired". Dedupes per HH:MM stamp via in-process attr.
-        try:
-            hb_stamp = now_et.strftime("%Y-%m-%d %H:%M")
-            last_hb = getattr(bot, "_eod_last_heartbeat_stamp", None)
-            if last_hb != hb_stamp:
-                bot._eod_last_heartbeat_stamp = hb_stamp
-                db = getattr(bot, "_db", None) or getattr(bot, "db", None)
-                if db is not None:
-                    eod_eligible_count = db["bot_trades"].count_documents({
-                        "closed_at": None,
-                        "exit_price": None,
-                        "fill_price": {"$ne": None},
-                        "close_at_eod": True,
-                    })
-                    db["sentcom_thoughts"].insert_one({
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "category": "eod_heartbeat",
-                        "thought": (
-                            f"EOD window tick {hb_stamp} ET — eligible "
-                            f"close_at_eod positions: {eod_eligible_count}, "
-                            f"executed_today={bot._eod_close_executed_today}, "
-                            f"half_day={is_half_day}, "
-                            f"window={eod_hour:02d}:{eod_minute:02d}-{market_close_hour:02d}:00 ET"
-                        ),
-                        "metadata": {
-                            "eligible_positions": eod_eligible_count,
-                            "executed_today": bot._eod_close_executed_today,
-                            "is_half_day": is_half_day,
-                            "eod_hour": eod_hour,
-                            "eod_minute": eod_minute,
-                        },
-                    })
-        except Exception as hb_err:
-            logger.debug(f"v19.34.169: EOD heartbeat write failed: {hb_err}")
-
         # ── v19.34.153 P0 EOD ghost-flatten + T-2/T-1 fallbacks ──────
         # Operator choice 2B: ghost-flatten ALWAYS runs while in the
         # EOD window, even if `_eod_close_executed_today=True`, so a
