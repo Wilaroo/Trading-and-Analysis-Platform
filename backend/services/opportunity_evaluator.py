@@ -86,6 +86,63 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+            # ── v19.34.173 — Setup-grade F-gate ──────────────────────
+            # Block alerts whose setup_type is graded F over the
+            # rolling 30d window. The previous behaviour was
+            # observe-only (label-only, no block). Operator confirmed
+            # default = block. Env-tunable to "micro" (keep current
+            # 0.1x sizing + mark `learning_only=True`) or "full"
+            # (ignore grade — pre-v173 behaviour).
+            #
+            # Trades dropped here land in `trade_drops` with reason
+            # code `setup_grade_f_block` so the operator can see how
+            # many alerts the gate filtered.
+            try:
+                import os as _os_fg
+                _f_policy = (_os_fg.environ.get("F_GRADE_POLICY", "block") or "block").lower().strip()
+                if _f_policy not in ("block", "micro", "full"):
+                    _f_policy = "block"
+                if _f_policy != "full" and setup_type:
+                    from services.setup_grading_service import get_setup_grading_service
+                    _grade_svc = get_setup_grading_service()
+                    _setup_grade = _grade_svc.get_grade_warning(setup_type)
+                    if _setup_grade == "F":
+                        if _f_policy == "block":
+                            try:
+                                bot.record_rejection(
+                                    symbol=symbol, setup_type=setup_type,
+                                    direction=direction_str,
+                                    reason_code="setup_grade_f_block",
+                                    context={
+                                        "policy": "v19.34.173_f_gate_block",
+                                        "rolling_grade": "F",
+                                        "f_grade_policy_env": _f_policy,
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            logger.info(
+                                "🚫 [v19.34.173 F-GATE] Blocking %s %s — setup graded F "
+                                "(F_GRADE_POLICY=block). Set F_GRADE_POLICY=micro to "
+                                "trade at 0.1x size with learning_only=True flag.",
+                                symbol, setup_type,
+                            )
+                            return None
+                        elif _f_policy == "micro":
+                            # Continue evaluating; tag the alert so the
+                            # downstream sizing path AND the grading
+                            # aggregator both know this is a learning-only
+                            # micro trade (excluded from avg_R computation
+                            # to avoid the commission-poisoned feedback loop).
+                            alert["learning_only"] = True
+                            logger.info(
+                                "🧪 [v19.34.173 F-MICRO] %s %s graded F — trading as "
+                                "learning_only at 0.1x. Excluded from grade aggregation.",
+                                symbol, setup_type,
+                            )
+            except Exception as _fg_err:
+                logger.debug(f"v19.34.173 F-gate check error: {_fg_err}")
+
             # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
             # Alerts that sit in the pipeline too long are no longer trading
             # the setup they detected. Kill them at the gate to save the IB
@@ -1848,6 +1905,10 @@ class OpportunityEvaluator:
         ctx["priority"] = alert.get("priority", "medium")
         if isinstance(ctx["priority"], type) and hasattr(ctx["priority"], "value"):
             ctx["priority"] = ctx["priority"].value
+
+        # v19.34.173 — propagate learning_only flag from F-micro alerts so
+        # setup_grading_service._aggregate_day excludes them from avg_R.
+        ctx["learning_only"] = bool(alert.get("learning_only", False))
 
         # 2. Market regime context
         ctx["market_regime"] = regime

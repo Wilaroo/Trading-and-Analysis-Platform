@@ -220,6 +220,20 @@ class SetupGradingService:
             st = trade.get("setup_type")
             if not st:
                 continue
+            # v19.34.173 — exclude learning_only micro trades from
+            # grade aggregation. These are 0.1x-sized F-graded trades
+            # whose realized R is dominated by fixed commission costs
+            # (~0.5% of position on a 1-share trade vs <0.05% at full
+            # size). Including them in avg_R creates a self-perpetuating
+            # feedback loop (F grade keeps trading at micro → keeps
+            # bleeding cost-poisoned R → stays F).
+            #
+            # Flag lives at either `trade.learning_only` (top-level on
+            # newer rows) OR `trade.entry_context.learning_only`
+            # (the propagation path from `build_entry_context`).
+            _ec = trade.get("entry_context") or {}
+            if trade.get("learning_only") is True or _ec.get("learning_only") is True:
+                continue
             by_setup.setdefault(st, []).append(trade)
 
         summaries: List[Dict[str, Any]] = []
