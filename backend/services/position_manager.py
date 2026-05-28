@@ -1065,6 +1065,19 @@ class PositionManager:
 
             async def _decay_one(trade, age_min):
                 symbol = getattr(trade, "symbol", "?")
+                # v19.34.171.1 — close_trade takes (trade_id, reason),
+                # NOT (trade_obj, reason). v171 shipped with the wrong
+                # signature → every flatten attempt raised silently.
+                trade_id = (
+                    getattr(trade, "id", None)
+                    or getattr(trade, "trade_id", None)
+                )
+                if not trade_id:
+                    logger.warning(
+                        f"[v19.34.171 SCALP-DECAY] no trade_id resolvable "
+                        f"for {symbol}; skipping"
+                    )
+                    return
                 try:
                     if hasattr(bot, "_cancel_oca_for_trade"):
                         try:
@@ -1075,7 +1088,7 @@ class PositionManager:
                             )
                     await asyncio.sleep(2.0)
                     if hasattr(bot, "close_trade"):
-                        ok = await bot.close_trade(trade, reason="scalp_time_decay")
+                        ok = await bot.close_trade(trade_id, reason="scalp_time_decay")
                         if ok:
                             logger.info(
                                 f"[v19.34.171 SCALP-DECAY] flattened {symbol} "
