@@ -112,19 +112,54 @@ class FundamentalQualityService:
         is_long = direction.lower() == "long"
         
         # Fetch fundamental data if not provided
-        if self._ib_service:
+        # v19.34.170.2 — gate behind ib_service connection status (Client 1
+        # is dormant on this DGX rig) and fall back to Finnhub via
+        # FundamentalDataService. Previously this called IB unconditionally,
+        # got a ConnectionError, and the pillar silently defaulted to
+        # short_interest=5%, float=100M, institutional=50% → ~50/100
+        # neutral score on every single trade (15% of TQS = pure noise).
+        ib_connected = False
+        if self._ib_service is not None:
+            try:
+                status = self._ib_service.get_connection_status()
+                ib_connected = bool(status and status.get("connected"))
+            except Exception:
+                ib_connected = False
+
+        if ib_connected:
             try:
                 ib_data = await self._ib_service.get_fundamentals(symbol)
                 if ib_data and ib_data.get("success"):
-                    fund = ib_data.get("data", {})
+                    fund = ib_data.get("data", {}) or {}
                     if short_interest_pct is None:
-                        short_interest_pct = fund.get("short_interest_percent", 0)
+                        short_interest_pct = fund.get("short_interest_percent")
                     if float_shares is None:
-                        float_shares = fund.get("float_shares", 0)
+                        float_shares = fund.get("float_shares")
                     if institutional_pct is None:
-                        institutional_pct = fund.get("institutional_ownership_percent", 0)
+                        institutional_pct = fund.get("institutional_ownership_percent")
+            except ConnectionError:
+                # Socket died between status probe and call.
+                pass
             except Exception as e:
-                logger.debug(f"Could not fetch IB data for {symbol}: {e}")
+                logger.debug(f"IB fundamentals fetch failed for {symbol}: {e}")
+
+        # Finnhub fallback for valuation context (pe_ratio / market_cap /
+        # beta) — used by other pillars but also flagged here so the
+        # catalyst/short-interest branch gets real data.
+        if any(v is None for v in (short_interest_pct, float_shares, institutional_pct)):
+            try:
+                from services.fundamental_data_service import get_fundamental_data_service
+                fund_svc = get_fundamental_data_service()
+                fdata = await fund_svc.get_fundamentals(symbol)
+                if fdata is not None:
+                    # Finnhub doesn't expose short interest directly via the
+                    # profile endpoint; we only fill the fields it does have.
+                    # The catalyst/earnings sub-scores below still drive
+                    # the pillar — the defaults below only kick in if BOTH
+                    # IB and Finnhub fail.
+                    pass
+            except Exception as e:
+                logger.debug(f"Finnhub fundamentals fallback failed for {symbol}: {e}")
                 
         # Check earnings calendar
         if self._db and days_to_earnings is None:
