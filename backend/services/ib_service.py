@@ -959,10 +959,14 @@ class IBWorkerThread(threading.Thread):
             # Get fundamental data - this returns XML string
             fundamentals = self.ib.reqFundamentalData(contract, "ReportSnapshot")
             
-            # Basic parsing of key metrics (IB returns XML)
+            # v19.34.177 — un-truncate. Full XML is needed by
+            # ib_fundamentals_parser.parse_report_snapshot(). A
+            # truncated preview is kept under raw_data_preview for
+            # any UI that still renders the legacy field.
             data = {
                 "symbol": symbol.upper(),
-                "raw_data": fundamentals[:1000] if fundamentals else None,  # Truncate for response
+                "raw_data": fundamentals if fundamentals else None,
+                "raw_data_preview": fundamentals[:1000] if fundamentals else None,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
