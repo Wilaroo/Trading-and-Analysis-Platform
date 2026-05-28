@@ -649,6 +649,45 @@ class IBDirectService:
             return {"success": False, "error": str(e)[:200]}
 
 
+    # ── v19.34.176 — IB-native industry / category lookup (Stage A) ──
+    # Used by `sector_tag_service` to replace the Finnhub-based industry
+    # fallback. IB's reqContractDetails returns a `category`/`industry`/
+    # `subcategory` triple sourced from Reuters classifications. Free-form
+    # strings — same shape as Finnhub — fed back through the existing
+    # `_industry_to_etf` resolver, so the GICS→SPDR mapping is unchanged.
+    async def get_contract_industry(self, symbol):
+        """Return ``{'industry': str, 'category': str, 'subcategory': str}``
+        for ``symbol`` via IB ``reqContractDetailsAsync``, or ``None`` on
+        miss / error.
+        """
+        if not self._connected or not self._ib:
+            return None
+        try:
+            from ib_async import Stock
+        except ImportError:
+            return None
+        try:
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            details = await self._ib.reqContractDetailsAsync(contract)
+            if not details:
+                return None
+            cd = details[0]
+            out = {
+                "industry":    (getattr(cd, "industry", "") or "").strip(),
+                "category":    (getattr(cd, "category", "") or "").strip(),
+                "subcategory": (getattr(cd, "subcategory", "") or "").strip(),
+            }
+            if not any(out.values()):
+                return None
+            return out
+        except Exception as exc:
+            logger.debug(
+                "[v19.34.176 get_contract_industry] %s lookup failed: %s",
+                symbol, exc,
+            )
+            return None
+
+
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
     # v19.34.42 -- IB minTick resolution + fp-safe price rounding
     async def _resolve_min_tick(self, contract) -> float:
