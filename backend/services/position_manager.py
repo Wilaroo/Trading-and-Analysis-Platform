@@ -1042,7 +1042,7 @@ class PositionManager:
 
         try:
             scalp_candidates = []
-            for trade in list(bot.trades.values()):
+            for trade in list(bot._open_trades.values()):
                 if getattr(trade, "timeframe", "") != TradeTimeframe.SCALP:
                     continue
                 if getattr(trade, "status", "") not in (TradeStatus.OPEN, "open"):
