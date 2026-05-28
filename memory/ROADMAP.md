@@ -4,6 +4,30 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 ---
+
+## 🆕 Operator request 2026-05-28 — UI Trade Parameter Tuning Panel
+
+**Scope**: Surface tunable trade-engine parameters in the React UI so
+they can be adjusted live without env-var edits + restart cycles.
+**Priority**: P1 — operator productivity, not a market-blocker.
+
+**Initial parameter set to expose** (read/write via API):
+- `MAX_STOP_PCT_POSITION` (default 0.05) — POSITION-tier stop cap
+- `MAX_STOP_PCT_INVESTMENT` (default 0.05) — INVESTMENT-tier stop cap
+- `RiskParameters.max_risk_per_trade` (default $2500) — per-trade $ budget
+- `RiskParameters.starting_capital` — account equity baseline
+- Grade multipliers (A/B/C/D scaling)
+- Per-setup `enabled` toggle (already partially in `bot_state.enabled_setups`)
+- EOD close window (`eod_close_hour`, `eod_close_minute`, half-day flag)
+
+**Implementation sketch**:
+1. New API: `GET /api/bot/params`, `PATCH /api/bot/params` (auth-gated).
+2. Persist to `bot_state.runtime_params` doc; bot reads from there on each
+   tick instead of env directly. Env stays as fallback default.
+3. UI: a "Parameters" tab on the Settings page. One panel per category,
+   with input + Apply button. Audit log entry written on each change.
+
+
 ## 🚀 Next session — pick up here
 
 **v19.34.164 SHIPPED 2026-05-27** — trade-drop persistence (see CHANGELOG).
