@@ -1094,22 +1094,40 @@ class PositionManager:
                         "fill_price": {"$ne": None},
                         "close_at_eod": True,
                     })
+                    # v19.34.170 — normalize sentcom_thoughts schema:
+                    #   * created_at as BSON datetime (matches TTL index +
+                    #     _persist_thought convention; v169 wrote ISO string
+                    #     here which the TTL would never expire)
+                    #   * timestamp as ISO string (matches diagnostics.py
+                    #     `{"timestamp": {"$gte": cutoff_iso}}` queries)
+                    #   * kind + content (canonical schema fields)
+                    #   * top-level `category` kept for the operator's
+                    #     existing `db.sentcom_thoughts.find({category:
+                    #     'eod_heartbeat'})` query shipped in v169
+                    from utils.timestamps import now_bson, now_iso
+                    _eod_thought_text = (
+                        f"EOD window tick {hb_stamp} ET — eligible "
+                        f"close_at_eod positions: {eod_eligible_count}, "
+                        f"executed_today={bot._eod_close_executed_today}, "
+                        f"half_day={is_half_day}, "
+                        f"window={eod_hour:02d}:{eod_minute:02d}-{market_close_hour:02d}:00 ET"
+                    )
                     db["sentcom_thoughts"].insert_one({
-                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "kind": "system",
+                        "content": _eod_thought_text,
+                        "thought": _eod_thought_text,  # legacy alias
                         "category": "eod_heartbeat",
-                        "thought": (
-                            f"EOD window tick {hb_stamp} ET — eligible "
-                            f"close_at_eod positions: {eod_eligible_count}, "
-                            f"executed_today={bot._eod_close_executed_today}, "
-                            f"half_day={is_half_day}, "
-                            f"window={eod_hour:02d}:{eod_minute:02d}-{market_close_hour:02d}:00 ET"
-                        ),
+                        "symbol": None,
+                        "timestamp": now_iso(),
+                        "created_at": now_bson(),
                         "metadata": {
+                            "category": "eod_heartbeat",
                             "eligible_positions": eod_eligible_count,
                             "executed_today": bot._eod_close_executed_today,
                             "is_half_day": is_half_day,
                             "eod_hour": eod_hour,
                             "eod_minute": eod_minute,
+                            "hb_stamp": hb_stamp,
                         },
                     })
         except Exception as hb_err:

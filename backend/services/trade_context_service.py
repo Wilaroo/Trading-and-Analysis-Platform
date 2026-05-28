@@ -241,23 +241,71 @@ class TradeContextService:
             logger.warning(f"Error capturing sector context for {symbol}: {e}")
             
     async def _capture_fundamental_context(self, context: TradeContext, symbol: str):
-        """Capture fundamental data from IB or cache"""
+        """Capture fundamental data from IB (when connected) or Finnhub fallback.
+
+        v19.34.170 — Previously this unconditionally called
+        ``self._ib_service.get_fundamentals(symbol)``, which raises
+        ``ConnectionError("Not connected to IB")`` whenever the
+        ib_insync direct connection is stale (which is most of the
+        time on this DGX install, since the live data path is the IB
+        pusher, not the direct ib_service). That filled the logs with
+        WARN noise and left ``FundamentalContext`` empty.
+
+        Now we:
+          1. Check ``ib_service.get_connection_status()`` first and
+             only call IB when the worker thread reports connected.
+          2. Fall back to the Finnhub-backed
+             ``FundamentalDataService`` so the alert payload still
+             gets ``pe_ratio`` / ``market_cap`` / ``beta``.
+          3. Always look up earnings proximity from the DB regardless
+             of either upstream.
+        """
         fundamentals = FundamentalContext()
-        
+
         try:
-            # Try IB Gateway first
+            ib_connected = False
             if self._ib_service is not None:
-                ib_data = await self._ib_service.get_fundamentals(symbol)
-                
-                if ib_data and ib_data.get('success'):
-                    fund = ib_data.get('data', {})
-                    fundamentals.short_interest_percent = fund.get('short_interest_percent', 0.0)
-                    fundamentals.float_shares = fund.get('float_shares', 0)
-                    fundamentals.institutional_ownership_percent = fund.get('institutional_ownership_percent', 0.0)
-                    fundamentals.pe_ratio = fund.get('pe_ratio')
-                    fundamentals.market_cap = fund.get('market_cap')
-                    
-            # Check for upcoming earnings
+                try:
+                    status = self._ib_service.get_connection_status()
+                    ib_connected = bool(status and status.get("connected"))
+                except Exception as e:
+                    logger.debug(f"IB status probe failed for {symbol}: {e}")
+
+            if ib_connected:
+                try:
+                    ib_data = await self._ib_service.get_fundamentals(symbol)
+                    if ib_data and ib_data.get('success'):
+                        fund = ib_data.get('data', {}) or {}
+                        fundamentals.short_interest_percent = fund.get('short_interest_percent', 0.0)
+                        fundamentals.float_shares = fund.get('float_shares', 0)
+                        fundamentals.institutional_ownership_percent = fund.get('institutional_ownership_percent', 0.0)
+                        fundamentals.pe_ratio = fund.get('pe_ratio')
+                        fundamentals.market_cap = fund.get('market_cap')
+                except ConnectionError as ce:
+                    # Connection dropped between status probe and call.
+                    logger.debug(f"IB went stale mid-fundamentals for {symbol}: {ce}")
+                except Exception as e:
+                    logger.debug(f"IB fundamentals call failed for {symbol}: {e}")
+
+            # Fallback / supplement: Finnhub fundamentals (always
+            # populated for valuation context, since IB's
+            # ReportSnapshot XML isn't parsed by this codebase).
+            if fundamentals.pe_ratio is None or fundamentals.market_cap is None:
+                try:
+                    from services.fundamental_data_service import get_fundamental_data_service
+                    fund_svc = get_fundamental_data_service()
+                    fdata = await fund_svc.get_fundamentals(symbol)
+                    if fdata is not None:
+                        if fundamentals.pe_ratio is None:
+                            fundamentals.pe_ratio = fdata.pe_ratio
+                        if fundamentals.market_cap is None:
+                            # Finnhub returns market cap in millions; keep
+                            # as-is to match the historical IB shape.
+                            fundamentals.market_cap = fdata.market_cap
+                except Exception as e:
+                    logger.debug(f"Finnhub fundamentals fallback failed for {symbol}: {e}")
+
+            # Check for upcoming earnings (DB lookup — independent of IB)
             if self._db is not None:
                 earnings = self._check_earnings_proximity(symbol)
                 if earnings:
@@ -266,10 +314,10 @@ class TradeContextService:
                     if fundamentals.earnings_days_away is not None and fundamentals.earnings_days_away <= 7:
                         fundamentals.has_catalyst = True
                         fundamentals.catalyst_type = "earnings"
-                        
+
         except Exception as e:
             logger.warning(f"Error capturing fundamental context for {symbol}: {e}")
-            
+
         context.fundamentals = fundamentals
         
     def _check_earnings_proximity(self, symbol: str) -> Optional[Dict]:
