@@ -894,6 +894,8 @@ class TradingBotService:
         self._mode = BotMode.AUTONOMOUS  # Start in autonomous mode for auto-trading
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
+        # v19.34.182 — dedicated EOD supervisor task (no wait_for wall)
+        self._eod_supervisor_task: Optional[asyncio.Task] = None
 
         # v19.34.25 — Patches G/H/I (post-2026-02-bot-stampede-disaster).
         # These three timestamps + flag coordinate the startup-gate trio:
@@ -2146,6 +2148,13 @@ class TradingBotService:
         self._patch_f_audit_started_at = None
         self._mode = BotMode.AUTONOMOUS if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
+        # v19.34.182 — independent EOD supervisor. Runs EOD close /
+        # scalp decay / grading every 15s with NO asyncio.wait_for
+        # wall, so a slow IB roundtrip can't kill EOD like v181 fixed
+        # at the scan-loop level. Belt + suspenders: scan_loop ALSO
+        # calls these (with 60s wall); both paths are idempotent
+        # because of _eod_close_executed_today + grading per-day key.
+        self._eod_supervisor_task = asyncio.create_task(self._eod_supervisor_loop())
         # v19.34.123 — Continuous real-time kill-switch monitor.
         # Reads realized PnL directly from `bot_trades` (post-v123 with
         # full PnL coverage on every close path) PLUS live unrealized
@@ -3734,6 +3743,13 @@ class TradingBotService:
                 await self._scan_task
             except asyncio.CancelledError:
                 pass
+        # v19.34.182 — cancel EOD supervisor task on shutdown.
+        if self._eod_supervisor_task:
+            self._eod_supervisor_task.cancel()
+            try:
+                await self._eod_supervisor_task
+            except asyncio.CancelledError:
+                pass
         # v19.31.13 — also cancel the realized-PnL auto-sync background task.
         task = getattr(self, "_pnl_autosync_task", None)
         if task is not None:
@@ -3932,6 +3948,124 @@ class TradingBotService:
                 print(f"❌ [TradingBot] Scan loop error: {e}")
 
             await asyncio.sleep(self._scan_interval)
+    # ── v19.34.182 — EOD Supervisor ──
+    async def _eod_supervisor_loop(self):
+        """v19.34.182 — Dedicated EOD supervisor.
+
+        Runs every 15s, independent of `_scan_loop`. Calls EOD close /
+        scalp decay / EOD grading directly with NO asyncio.wait_for wall.
+
+        Belt-and-suspenders: `_scan_loop` also calls these (with a 60s
+        wall as of v181). Both paths are idempotent — check_eod_close()
+        uses `_eod_close_executed_today` and grading uses a per-day key.
+
+        Also fires a CRITICAL 16:00 ET post-close alarm if any
+        close_at_eod=True position is still open at 4:00 PM ET.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        et_tz = ZoneInfo("America/New_York")
+        post_close_alarm_date = None
+        print("🛡️  [TradingBot] v19.34.182 EOD supervisor started (15s cadence, no wait_for wall)")
+
+        while self._running:
+            try:
+                now_et = datetime.now(et_tz)
+                weekday = now_et.weekday()
+                hour = now_et.hour
+
+                # Only run on weekdays during/near market hours (09:00-17:00 ET).
+                if weekday < 5 and 9 <= hour <= 17:
+                    # === 1. EOD close — no wall. Idempotent.
+                    try:
+                        await self._position_manager.check_eod_close(self)
+                    except Exception as e:
+                        logger.warning(f"[EOD-SUPERVISOR] check_eod_close raised: {type(e).__name__}: {e}")
+
+                    # === 2. Scalp decay — no wall.
+                    try:
+                        await self._position_manager.check_scalp_decay(self)
+                    except Exception as e:
+                        logger.warning(f"[EOD-SUPERVISOR] check_scalp_decay raised: {type(e).__name__}: {e}")
+
+                    # === 3. EOD setup grading. Idempotent per trading-date.
+                    try:
+                        await self._check_eod_grading()
+                    except Exception as e:
+                        logger.warning(f"[EOD-SUPERVISOR] _check_eod_grading raised: {type(e).__name__}: {e}")
+
+                    # === 4. v19.34.182 — 16:00 ET post-close hard alarm.
+                    today_iso = now_et.strftime("%Y-%m-%d")
+                    if hour >= 16 and post_close_alarm_date != today_iso:
+                        try:
+                            stragglers = [
+                                t for t in self._open_trades.values()
+                                if getattr(t, "close_at_eod", False)
+                                and int(getattr(t, "remaining_shares", 0) or 0) > 0
+                            ]
+                            if stragglers:
+                                straggler_syms = sorted({getattr(s, "symbol", "?") for s in stragglers})
+                                alarm_text = (
+                                    f"🚨 [CRITICAL] EOD POST-CLOSE ALARM at "
+                                    f"{now_et.strftime('%H:%M:%S')} ET — "
+                                    f"{len(stragglers)} close_at_eod positions still open "
+                                    f"after 4:00 PM: {', '.join(straggler_syms[:10])}"
+                                    f"{'…' if len(straggler_syms) > 10 else ''}. "
+                                    f"FLATTEN MANUALLY IN TWS NOW."
+                                )
+                                logger.error(alarm_text)
+                                # Persist
+                                if self._db is not None:
+                                    try:
+                                        from utils.timestamps import now_bson, now_iso
+                                        await asyncio.to_thread(
+                                            self._db.sentcom_thoughts.insert_one,
+                                            {
+                                                "kind": "alarm",
+                                                "category": "eod_post_close_alarm",
+                                                "content": alarm_text,
+                                                "thought": alarm_text,
+                                                "symbol": None,
+                                                "timestamp": now_iso(),
+                                                "created_at": now_bson(),
+                                                "metadata": {
+                                                    "stragglers": straggler_syms,
+                                                    "count": len(stragglers),
+                                                    "trading_date": today_iso,
+                                                },
+                                            },
+                                        )
+                                    except Exception as db_err:
+                                        logger.debug(f"[EOD-SUPERVISOR] alarm persist failed: {db_err}")
+                                # WS
+                                try:
+                                    from services.sentcom_service import emit_stream_event
+                                    await emit_stream_event({
+                                        "kind": "alarm",
+                                        "event": "eod_post_close_stragglers",
+                                        "text": alarm_text,
+                                        "metadata": {
+                                            "stragglers": straggler_syms,
+                                            "count": len(stragglers),
+                                        },
+                                    })
+                                except Exception as ws_err:
+                                    logger.debug(f"[EOD-SUPERVISOR] alarm WS failed: {ws_err}")
+                            # Mark fired regardless — dedupe per day.
+                            post_close_alarm_date = today_iso
+                        except Exception as alarm_err:
+                            logger.debug(f"[EOD-SUPERVISOR] post-close alarm failed: {alarm_err}")
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(f"[EOD-SUPERVISOR] loop error: {type(e).__name__}: {e}")
+
+            await asyncio.sleep(15)
+
     def _compute_live_unrealized_pnl(self) -> tuple:
         """Sum unrealized P&L across all open trades, gated on quote freshness.
 
