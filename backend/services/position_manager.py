@@ -1032,9 +1032,18 @@ class PositionManager:
         try:
             scalp_candidates = []
             for trade in list(bot._open_trades.values()):
-                if getattr(trade, "timeframe", "") != TradeTimeframe.SCALP:
+                # v19.34.171.4 — use string compare to avoid the
+                # import dance (TradeTimeframe / TradeStatus are
+                # str Enums; "scalp" == TradeTimeframe.SCALP holds).
+                _tf = getattr(trade, "timeframe", "")
+                if hasattr(_tf, "value"):
+                    _tf = _tf.value
+                if str(_tf).lower() != "scalp":
                     continue
-                if getattr(trade, "status", "") not in (TradeStatus.OPEN, "open"):
+                _st = getattr(trade, "status", "")
+                if hasattr(_st, "value"):
+                    _st = _st.value
+                if str(_st).lower() != "open":
                     continue
                 ex = (
                     getattr(trade, "executed_at", None)
