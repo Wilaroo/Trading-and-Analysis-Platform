@@ -3897,9 +3897,16 @@ async def get_batch_quotes(symbols: List[str]):
             missing = [s for s in filtered_symbols if s.upper() not in got_symbols]
             
             if missing:
+                # v19.34.170.3 — gate behind connection status. Client 1
+                # is dormant on this DGX rig (live quotes flow through
+                # the pusher), so this fallback would otherwise log
+                # `Not connected to IB for batch quotes` once per
+                # request. Pure log-noise silencer; no behavior change.
                 try:
-                    ib_quotes = await _ib_service.get_quotes_batch(missing)
-                    quotes.extend(ib_quotes)
+                    _ib_status = _ib_service.get_connection_status() if _ib_service else None
+                    if _ib_status and _ib_status.get("connected"):
+                        ib_quotes = await _ib_service.get_quotes_batch(missing)
+                        quotes.extend(ib_quotes)
                 except Exception as e:
                     print(f"IB batch quotes error (fallback): {e}")
         

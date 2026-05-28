@@ -3976,6 +3976,16 @@ class TradingBotService:
                 except asyncio.TimeoutError:
                     print(f"⚠️ [TradingBot] _check_eod_close exceeded {_EOD_WALL_S}s budget — skipping this cycle")
 
+                # v19.34.171 — Scalp time decay (auto-close stale scalps).
+                # Budget under the EOD wall — sweep is read-mostly,
+                # only acts on positions past the decay timer.
+                try:
+                    await asyncio.wait_for(self._check_scalp_decay(), timeout=_EOD_WALL_S)
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [TradingBot] _check_scalp_decay exceeded {_EOD_WALL_S}s budget — skipping this cycle")
+                except Exception as _sd_err:
+                    print(f"⚠️ [TradingBot] _check_scalp_decay error: {_sd_err}")
+
                 # v19.34.113 — EOD setup grading. Fires once per trading
                 # day at 16:10 ET. Read-mostly; the only Mongo writes
                 # are upserts into `setup_grade_records`. Budgeted at
@@ -4691,6 +4701,10 @@ class TradingBotService:
     async def _check_eod_close(self):
         """EOD auto-close — delegated to PositionManager module."""
         await self._position_manager.check_eod_close(self)
+
+    async def _check_scalp_decay(self):
+        """v19.34.171 — Scalp time decay — delegated to PositionManager."""
+        await self._position_manager.check_scalp_decay(self)
 
     async def _check_eod_grading(self):
         """v19.34.113 — Once-per-day setup grading EOD tick.

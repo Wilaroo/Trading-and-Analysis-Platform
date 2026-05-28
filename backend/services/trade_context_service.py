@@ -262,49 +262,26 @@ class TradeContextService:
         """
         fundamentals = FundamentalContext()
 
+        # v19.34.177.1 — route through unified_fundamentals_cache. The
+        # cache handles IB-first → Finnhub fallback → Mongo persistence
+        # → smart TTL (24h, 1h within earnings). Replaces the v170-era
+        # duplicated logic that was inlined here.
         try:
-            ib_connected = False
-            if self._ib_service is not None:
-                try:
-                    status = self._ib_service.get_connection_status()
-                    ib_connected = bool(status and status.get("connected"))
-                except Exception as e:
-                    logger.debug(f"IB status probe failed for {symbol}: {e}")
+            from services.unified_fundamentals_cache import get_cached_fundamentals
+            cached = await get_cached_fundamentals(symbol)
+            if cached:
+                if cached.get("pe_ratio") is not None:
+                    fundamentals.pe_ratio = cached.get("pe_ratio")
+                if cached.get("market_cap") is not None:
+                    fundamentals.market_cap = cached.get("market_cap")
+                # IB ReportSnapshot doesn't expose short_interest, float,
+                # or institutional %. They'd need ReportsOwnership (paid
+                # add-on) or a Finnhub-specific endpoint we don't call.
+                # Leave as None — downstream consumers handle gracefully.
+        except Exception as e:
+            logger.debug(f"unified_fundamentals_cache lookup failed for {symbol}: {e}")
 
-            if ib_connected:
-                try:
-                    ib_data = await self._ib_service.get_fundamentals(symbol)
-                    if ib_data and ib_data.get('success'):
-                        fund = ib_data.get('data', {}) or {}
-                        fundamentals.short_interest_percent = fund.get('short_interest_percent', 0.0)
-                        fundamentals.float_shares = fund.get('float_shares', 0)
-                        fundamentals.institutional_ownership_percent = fund.get('institutional_ownership_percent', 0.0)
-                        fundamentals.pe_ratio = fund.get('pe_ratio')
-                        fundamentals.market_cap = fund.get('market_cap')
-                except ConnectionError as ce:
-                    # Connection dropped between status probe and call.
-                    logger.debug(f"IB went stale mid-fundamentals for {symbol}: {ce}")
-                except Exception as e:
-                    logger.debug(f"IB fundamentals call failed for {symbol}: {e}")
-
-            # Fallback / supplement: Finnhub fundamentals (always
-            # populated for valuation context, since IB's
-            # ReportSnapshot XML isn't parsed by this codebase).
-            if fundamentals.pe_ratio is None or fundamentals.market_cap is None:
-                try:
-                    from services.fundamental_data_service import get_fundamental_data_service
-                    fund_svc = get_fundamental_data_service()
-                    fdata = await fund_svc.get_fundamentals(symbol)
-                    if fdata is not None:
-                        if fundamentals.pe_ratio is None:
-                            fundamentals.pe_ratio = fdata.pe_ratio
-                        if fundamentals.market_cap is None:
-                            # Finnhub returns market cap in millions; keep
-                            # as-is to match the historical IB shape.
-                            fundamentals.market_cap = fdata.market_cap
-                except Exception as e:
-                    logger.debug(f"Finnhub fundamentals fallback failed for {symbol}: {e}")
-
+        try:
             # Check for upcoming earnings (DB lookup — independent of IB)
             if self._db is not None:
                 earnings = self._check_earnings_proximity(symbol)
