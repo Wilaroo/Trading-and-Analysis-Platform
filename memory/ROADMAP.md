@@ -46,6 +46,22 @@ they can be adjusted live without env-var edits + restart cycles.
 
 ## 🚀 Next session — pick up here
 
+**v19.34.170 SHIPPED 2026-05-28** — utils/timestamps.py helpers +
+EOD heartbeat canonical schema + fundamentals fallback to Finnhub.
+12/12 tests passing. See CHANGELOG v170 entry.
+
+**Open verification items**:
+- Confirm EOD heartbeat rows visible in Diagnostics tab next session
+  (`db.sentcom_thoughts.find({category:'eod_heartbeat'})` post 15:45 ET).
+- Confirm `_capture_fundamental_context` log spam silenced after restart.
+
+**v19.34.171 — Scalp Time Decay (PRIORITY NEXT, after market close)**
+- 60-min decay timer on `TradeTimeframe.SCALP` setups in
+  `position_manager.py` tick loop.
+- Write `bot_trades.expires_at` on entry (use `utils.timestamps.now_bson`).
+- Exit sequence on expiry: cancel OCA → wait max 2s for IB event
+  confirmation → MKT flatten. Skip timer if entry is <60 min to close.
+
 **v19.34.164 SHIPPED 2026-05-27** — trade-drop persistence (see CHANGELOG).
 **v19.34.165 SHIPPED 2026-05-27** — 5 momentum playbook setups enabled
 (rs_leader_break, power_trend_stack, pocket_pivot, stage_2_breakout,

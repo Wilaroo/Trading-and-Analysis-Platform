@@ -1,3 +1,62 @@
+## 2026-05-28 — v19.34.170 Timestamp normalization + Fundamentals reconnect
+
+### Trigger
+Two recurring stability issues identified in the v169 handoff:
+
+1. **Timestamp type drift across DB collections** — `bot_trades`,
+   `alert_outcomes`, `shadow_decisions` write ISO strings;
+   `bracket_lifecycle_events` and `_persist_thought` writes use BSON
+   datetimes. The v169 EOD heartbeat wrote `created_at` as an ISO
+   string, which broke the `created_at` TTL index on `sentcom_thoughts`
+   AND made the row invisible to `routers/diagnostics.py` queries that
+   filter on `timestamp` (ISO). Cross-collection queries returned 0
+   rows silently — a known cause of "phantom" debugging sessions.
+
+2. **Fundamentals "Not connected to IB" log spam** —
+   `TradeContextService._capture_fundamental_context` unconditionally
+   called `ib_service.get_fundamentals(symbol)` which raises
+   `ConnectionError` whenever the direct ib_insync worker is stale
+   (most of the time on this DGX install, since live data uses the IB
+   pusher RPC path). Each evaluated alert logged a WARN and left the
+   `FundamentalContext` empty.
+
+### Fix
+- **`backend/utils/timestamps.py`** — new module exposing `now_iso`,
+  `now_bson`, `parse_to_bson`, `parse_to_iso`, `stamps`, `epoch_ms`.
+  Canonical convention going forward: new collections write BOTH a
+  `ts` ISO string AND a `ts_dt` BSON datetime so either query shape
+  succeeds. Existing collections keep their current shape but
+  consumers use `parse_to_bson`/`parse_to_iso` to coerce input.
+- **`services/position_manager.py` EOD heartbeat** — rewritten to the
+  canonical `sentcom_thoughts` schema: `kind="system"`, `content`,
+  ISO `timestamp` (so `routers/diagnostics.py` queries see it), BSON
+  `created_at` (so the TTL index actually expires it after 7d). Keeps
+  top-level `category="eod_heartbeat"` so the operator's existing
+  `db.sentcom_thoughts.find({category:'eod_heartbeat'})` query shape
+  from v169 still works.
+- **`services/trade_context_service.py`** — gate the IB fundamentals
+  call behind `ib_service.get_connection_status()` and fall back to
+  the Finnhub-backed `FundamentalDataService` when the direct IB
+  worker reports disconnected. Earnings proximity lookup is now
+  independent of either upstream.
+
+### Test
+- `tests/test_v19_34_170_timestamps_and_fundamentals.py` — 12 tests:
+  timestamp parse/round-trip, fundamentals fallback hits Finnhub when
+  IB is down, no IB call when disconnected, IB path is preferred when
+  connected, static guard against the EOD heartbeat regressing to ISO
+  `created_at`. All 12 pass. Regression suite (v164/v165/v168.1/v169
+  = 54 tests) all still green.
+
+### Deployment notes
+- No DB migration needed — change is forward-compatible.
+- After the next DGX backend restart, new `sentcom_thoughts` rows for
+  EOD heartbeats will have the new schema. Old v169-shape rows TTL out
+  in 7d.
+
+---
+
+
 ## 2026-05-28 — v19.34.169 Pre-market sizing+EOD observability
 
 ### Trigger
