@@ -430,7 +430,56 @@ class SectorTagService:
             except Exception as e:
                 logger.debug(f"tag_symbol_async mongo lookup failed for {sym}: {e}")
 
-        # 3. Finnhub fallback (network call). Gated behind a try/except —
+        # 3. v19.34.176 — IB-native `reqContractDetails` lookup BEFORE
+        # Finnhub. Uses Client 11 (`ib_direct_service`, which IS
+        # connected on this DGX rig). Returns IB's Reuters-sourced
+        # `industry` / `category` / `subcategory` triple — same shape
+        # as Finnhub, fed through the same `_industry_to_etf` resolver.
+        # Results persisted to `symbol_adv_cache.sector` so future
+        # lookups hit step 2 (Mongo cache) instantly.
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None:
+                triple = await ib_direct.get_contract_industry(sym)
+                if triple:
+                    # Try in order of specificity — `category` is usually
+                    # the most precise label (e.g. "Computer Services"),
+                    # falling back to `industry` (e.g. "Technology") and
+                    # `subcategory` if nothing else matches.
+                    for key in ("category", "industry", "subcategory"):
+                        ib_label = triple.get(key)
+                        if not ib_label:
+                            continue
+                        etf = _industry_to_etf(ib_label)
+                        if etf:
+                            self._map[sym] = etf
+                            if self.db is not None:
+                                try:
+                                    self.db["symbol_adv_cache"].update_one(
+                                        {"symbol": sym},
+                                        {"$set": {
+                                            "sector": etf,
+                                            "sector_name": SECTOR_ETFS.get(etf, etf),
+                                            "sector_source": "ib_contract_details",
+                                            "sector_source_industry": ib_label,
+                                            "sector_source_triple": triple,
+                                        }},
+                                        upsert=True,
+                                    )
+                                except Exception as e:
+                                    logger.debug(
+                                        f"tag_symbol_async IB persist failed for {sym}: {e}"
+                                    )
+                            logger.info(
+                                f"[SECTOR IB] {sym} → {etf} via IB {key} "
+                                f"'{ib_label}' (persisted)"
+                            )
+                            return etf
+        except Exception as e:
+            logger.debug(f"tag_symbol_async IB lookup failed for {sym}: {e}")
+
+        # 4. Finnhub fallback (network call). Gated behind a try/except —
         # any failure (no key, timeout, parse error) silently falls
         # through to None.
         try:
