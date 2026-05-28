@@ -677,18 +677,10 @@ class HistoricalDataQueueService:
             "active_collections": [b for b in by_bar_size if b["is_active"]]
         }
 
-    def _auto_clear_stuck_items(self, older_than_minutes: int = 3):
+    def _auto_clear_stuck_items(self, older_than_minutes: int = 10):
         """
         Automatically clear items stuck in 'claimed' status for too long.
         Called internally when checking progress.
-
-        v19.34.174 — reduced default from 10 → 3 min. Worker's
-        ``get_request_result`` timeout is 180s (3 min). After that the
-        worker abandons the wait, but the row stays "claimed" until
-        this sweep fires. The 7-min gap between abandonment and
-        auto-clear was masking real failures and causing the 98-stuck
-        pile-up the operator saw on 2026-05-28. Aligning the sweep
-        with the worker timeout means failures surface immediately.
         """
         from datetime import datetime, timedelta, timezone
         

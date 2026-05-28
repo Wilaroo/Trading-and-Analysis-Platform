@@ -4634,10 +4634,6 @@ class TradingBotService:
         """EOD auto-close — delegated to PositionManager module."""
         await self._position_manager.check_eod_close(self)
 
-    async def _check_scalp_decay(self):
-        """v19.34.171 — Scalp time decay — delegated to PositionManager."""
-        await self._position_manager.check_scalp_decay(self)
-
     async def _check_eod_grading(self):
         """v19.34.113 — Once-per-day setup grading EOD tick.
 
