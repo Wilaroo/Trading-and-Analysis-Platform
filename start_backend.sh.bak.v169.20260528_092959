@@ -9,24 +9,6 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
-# ── v19.34.169 log archive ─────────────────────────────────────────
-# Auto-archive /tmp/backend.log before any restart so we don't lose
-# yesterday's EOD evidence again. Keeps 30 days of history.
-_archive_backend_log() {
-    local logs_dir="$REPO_DIR/logs"
-    mkdir -p "$logs_dir"
-    if [ -s /tmp/backend.log ]; then
-        local stamp
-        stamp="$(date +%Y%m%d_%H%M%S)"
-        cp /tmp/backend.log "$logs_dir/backend_${stamp}.log"
-        echo "→ archived /tmp/backend.log → logs/backend_${stamp}.log ($(wc -c < /tmp/backend.log) bytes)"
-    fi
-    # Prune archives older than 30 days
-    find "$logs_dir" -name 'backend_*.log' -type f -mtime +30 -delete 2>/dev/null || true
-}
-# ───────────────────────────────────────────────────────────────────
-
-
 # v19.30.11 (2026-05-01): skip-restart-if-healthy guard.
 # Pre-fix this script's first action was always `fuser -k 8001/tcp`,
 # which killed any healthy backend on every invocation. Operator hit
@@ -79,7 +61,6 @@ fi
 # processes whose cmdline doesn't exactly match. v19.30.2 hardening
 # after Spark deploy 2026-05-02 hit "address already in use" because
 # the old session's PID had a different cmdline.).
-_archive_backend_log
 echo "killing any process bound to :8001..."
 # fuser -k SIGTERMs anything bound to that TCP port — works even when
 # cmdline match fails. Fall back to pkill if fuser isn't installed.
