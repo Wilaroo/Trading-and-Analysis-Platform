@@ -3885,7 +3885,7 @@ class TradingBotService:
                 # tick. Total worst-case per scan: ~33s vs unbounded.
                 _SCAN_WALL_S = 20.0
                 _POS_WALL_S = 8.0
-                _EOD_WALL_S = 5.0
+                _EOD_WALL_S = 60.0
                 if not pause_intake:
                     try:
                         await asyncio.wait_for(self._scan_for_opportunities(), timeout=_SCAN_WALL_S)
