@@ -442,28 +442,52 @@ class QualityService:
             return None
     
     async def _fetch_from_ib(self, symbol: str) -> Optional[QualityMetrics]:
-        """Fetch fundamental data from Interactive Brokers"""
+        """Fetch fundamental data from Interactive Brokers.
+
+        v19.34.170.1 — gate behind ``get_connection_status()`` so we
+        don't trip the WARN "Not connected to IB" log on every alert
+        when the legacy direct ib_insync socket is dormant (which is
+        the normal steady-state on the DGX where live data flows
+        through the IB pusher RPC). When IB is down we silently fall
+        back to the next data source upstream.
+        """
         if not self.ib_service:
             return None
-        
+
+        # Skip when the direct IB worker reports disconnected — every
+        # other quality data source (FMP, Finnhub) is preferred anyway,
+        # and the IB ReportSnapshot XML isn't parsed by this method.
+        try:
+            status = self.ib_service.get_connection_status()
+            if not (status and status.get("connected")):
+                return None
+        except Exception:
+            # If even the status probe fails, the socket is definitely down.
+            return None
+
         try:
             fundamentals = await self.ib_service.get_fundamentals(symbol)
-            
+
             if not fundamentals or fundamentals.get("error"):
                 return None
-            
+
             metrics = QualityMetrics(symbol=symbol.upper())
             metrics.data_source = "interactive_brokers"
-            
+
             # IB provides limited fundamental data
             # Extract what's available
             if "market_cap" in fundamentals:
                 # Can use market cap for relative comparisons
                 pass
-            
+
             metrics.data_quality = "low"  # IB fundamentals are limited
             return metrics
-            
+
+        except ConnectionError as ce:
+            # Lost the socket between status probe and call — demote
+            # to debug, no log spam.
+            logger.debug(f"IB went stale mid-quality fetch for {symbol}: {ce}")
+            return None
         except Exception as e:
             logger.warning(f"IB fundamentals fetch failed for {symbol}: {e}")
             return None
