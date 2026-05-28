@@ -5,6 +5,22 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+
+## 🆕 Enhancement saved 2026-05-28 — Daily Ops Digest
+
+One-page morning summary (email or Slack) posted at 9:00 AM ET with
+yesterday's:
+- Total trades, win rate, P&L, regime distribution
+- EOD heartbeat count (proves scheduler fired)
+- Alerts dropped by gate (top reasons)
+- Anomalies: manual closes, broker rejections, stale reapers
+- Open positions carried overnight (POSITION/INVESTMENT only)
+
+Slots cleanly between v169's `sentcom_thoughts` infrastructure and the
+v170 UI tuning panel. Would catch "EOD didn't fire" the next morning,
+not mid-afternoon.
+
+
 ## 🆕 Operator request 2026-05-28 — UI Trade Parameter Tuning Panel
 
 **Scope**: Surface tunable trade-engine parameters in the React UI so
