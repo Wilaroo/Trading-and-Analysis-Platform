@@ -1127,6 +1127,24 @@ class PositionManager:
             logger.error(f"[v19.34.171 SCALP-DECAY] sweep failed: {e}")
 
     async def check_eod_close(self, bot: 'TradingBotService'):
+        # v19.34.180 - UNCONDITIONAL entry heartbeat (proof method ran).
+        # Writes BEFORE any guard so we can tell exactly which guard
+        # short-circuits when EOD fails. Diagnostic only - tiny insert.
+        try:
+            from utils.timestamps import now_iso, now_bson
+            from datetime import datetime as _dt
+            from zoneinfo import ZoneInfo as _ZI
+            _et = _dt.now(_ZI("America/New_York"))
+            if bot._db is not None and _et.hour >= 15 and _et.hour < 17:
+                bot._db["sentcom_thoughts"].insert_one({
+                    "kind": "system",
+                    "content": f"check_eod_close entered et={_et.strftime('%H:%M:%S')} enabled={getattr(bot,'_eod_close_enabled','?')}",
+                    "category": "eod_entry_heartbeat",
+                    "timestamp": now_iso(),
+                    "created_at": now_bson(),
+                })
+        except Exception:
+            pass
         """
         Close ALL open positions near market close (default: 3:55 PM ET).
         This is a critical risk management feature to avoid overnight exposure.
