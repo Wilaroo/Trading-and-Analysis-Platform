@@ -1,3 +1,68 @@
+## 2026-05-28 — v19.34.169 Pre-market sizing+EOD observability
+
+### Trigger
+Operator report: small share sizes on POSITION-tier setups (e.g. ALAB
+1 share, ASTS 3 shares); and EOD scheduler appeared silent yesterday,
+requiring ~13 manual TWS closes. Diagnosed root causes:
+
+1. **Sizing**: `rs_leader_break`, `accumulation_entry`, `power_trend_stack`,
+   `stage_2_breakout` use 2.5-3.0× ATR multipliers. On high-priced
+   volatile names this yields 12-14% raw stop distances, which
+   combined with the fixed risk_per_trade budget collapsed share
+   counts to 1-3. POSITION-tier setups are multi-day holds by design
+   (`close_at_eod=False`); their stops were tuned for swing R:R, not
+   intraday risk envelopes.
+
+2. **EOD silence**: `_check_eod_close` IS wired into the scan loop
+   (`trading_bot_service.py:3907`, with a wall-time budget) and
+   `_eod_close_enabled=True` at init. But EOD state lives only
+   in-memory on the `TradingBotService` instance — no DB
+   audit trail. Yesterday's `/tmp/backend.log` was truncated by the
+   morning restart, so we can't retrospectively prove what fired.
+   The 11 filled positions all closed via `oca_closed_externally_v19_31`
+   — the bot's catch-all when IB shows position vanished without
+   bot-initiated close. That reason fires for BOTH IB OCA brackets
+   AND operator-initiated TWS manual closes (the bot can't distinguish).
+
+### Fix
+- **`opportunity_evaluator.calculate_atr_based_stop`** — cap stop
+  distance at 5% of entry for ATR multipliers ≥ 2.5 (INVESTMENT and
+  POSITION horizons). Operator-tunable via env
+  `MAX_STOP_PCT_INVESTMENT` / `MAX_STOP_PCT_POSITION`. Scalps and
+  intraday setups unchanged. Cap NEVER widens an already-tight stop.
+- **`position_manager.check_eod_close`** — write a `sentcom_thoughts`
+  row (category=`eod_heartbeat`) once per minute inside the EOD
+  window so the operator can SEE the scheduler firing from the UI
+  even when no positions are eligible to close. Dedupes per HH:MM.
+- **`start_backend.sh`** — archive `/tmp/backend.log` to
+  `logs/backend_YYYYMMDD_HHMMSS.log` before each restart, with 30-day
+  retention. Prevents future "where did yesterday's evidence go" gaps.
+
+### Tests (`backend/tests/test_v19_34_169_stop_cap.py`)
+- 8/8 passing: ALAB 5% cap, stage_2_breakout 5% cap (3.0× mult),
+  accumulation_entry 5% cap (2.5× mult), intraday breakout NOT capped,
+  9_ema_scalp NOT capped, env override (`MAX_STOP_PCT_POSITION=0.07`),
+  already-tight stop preserved, short-side symmetry.
+
+### Verified live on DGX
+- POSITION-tier sizing: deployed via `backend/scripts/deploy_v19_34_169.py`.
+  Restart confirmed; first qualifying trade will show stop_pct ≤ 5%.
+- Log archive: `→ archived /tmp/backend.log → logs/backend_20260528_093341.log
+  (702099 bytes)` on first restart.
+- EOD heartbeat: deferred verification to today's 19:45-20:00 UTC
+  window (operator to query `sentcom_thoughts` for category=eod_heartbeat).
+
+### Known follow-ups
+- EOD bug NOT confirmed-fixed yet — heartbeat is the diagnostic.
+  Action item for tonight: query for `category=eod_heartbeat` after
+  the close. If heartbeats fire but no closes go out for
+  `close_at_eod=True` positions, the bug is downstream in the
+  flatten path. If no heartbeats at all, the scan loop isn't reaching
+  EOD code (timeout, wedged loop, etc.).
+- `bot._eod_close_executed_today` flag is in-memory only — needs DB
+  persistence so a mid-day crash doesn't repeat EOD.
+
+
 ## 2026-05-27 — v19.34.168.1 Composite regime history+stats routing fix
 
 ### Trigger
