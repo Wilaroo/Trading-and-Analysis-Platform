@@ -1,3 +1,48 @@
+## 2026-05-29 — v19.34.189 CLOSE-GUARD AUTHORITATIVE OPEN-ORDERS FIX
+
+### Bug (operator-reported: BAP/CF wouldn't close)
+Clicking **Close** aborted with `bracket_cancel_timeout_race_risk` and the
+position never closed. Root-caused live on the DGX:
+- The v19.34.64 OCA-race guard waits for each bracket child to reach a
+  terminal status before sending the MKT close. Its v19.34.70A pre-filter
+  partitioned tracked child orderIds against **`_ib.trades()`** — an
+  in-memory CACHE.
+- That cache (a) freezes an order's status at disconnect and is **never
+  purged on socket-reconnect**, and (b) cannot be marked terminal by this
+  client's error handler when the order was placed under a **different
+  clientId** (the pusher) — `ib_async` keys `self.trades[(clientId, oid)]`,
+  so the `cancelOrder→Error 10147 "not found"→auto-Cancelled` path misses.
+- Net: orders already dead at IB showed as `Submitted`/`PreSubmitted`
+  forever → `wait_for_orders_terminal` timed out → **every** close (manual
+  + manage-loop) aborted. Confirmed: after a full backend restart (fresh IB
+  object) BAP's cancelled orders vanished from the audit, proving stale cache.
+
+### Fix (`services/trade_executor_service.py`, safety-critical path)
+- New `_fetch_live_open_order_ids()` — AUTHORITATIVE set of orderIds open at
+  IB across all clients via a fresh `reqAllOpenOrders` round-trip. Returns
+  `None` on any failure (conservative: caller keeps the block-and-confirm path
+  so flip-protection is never weakened on a transient query error).
+- New pure `_partition_oids_by_live_set(oids, live_ids)` → `(present, gone)`.
+- `_cancel_ib_bracket_orders` now pre-filters against the FRESH set (was the
+  stale cache): children NOT in IB's live open-orders are `gone` → safe
+  (`unknown`), skipped. Added a **post-wait** re-check too: any child that
+  times out but is absent from a fresh `reqAllOpenOrders` is reclassified
+  timeout→safe (catches OCA siblings IB auto-cancels mid-wait).
+- Genuinely-live brackets still appear in the fresh set → still cancelled +
+  confirmed before close → the 2026-05-20 direction-flip protection is intact.
+
+### Verification
+- 7/7 unit tests (`test_v19_34_189_close_guard_authoritative_orders.py`):
+  partition contract (all-live/all-dead/mixed/empty) + fresh-fetch fallback
+  (set / None-on-disconnect / None-on-exception). Backend compiles; lint clean
+  (the one E722 is pre-existing legacy). No automated agent (hardware-bound).
+- ⚠️ OPERATOR LIVE-CHECK: with TWS closed + bot connected, click Close on a
+  stuck position; `grep 'v19.34.189 fresh-openorders' /tmp/backend.log`.
+
+---
+
+
+
 ## 2026-05-30 — v19.34.188 MISSION CONTROL LIFECYCLE EMITS + INLINE SAFETY ACK
 
 ### What

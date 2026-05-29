@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.188 (2026-05-30, "Mission Control lifecycle emits — order_submitted / partial_fill / stop→breakeven / trailing_stop_moved — + inline 'Ack + Unlock' on System/Safety alarms")
+- **Current version**: v19.34.189 (2026-05-29, "Close guard partitions tracked bracket children against a fresh reqAllOpenOrders authoritative snapshot instead of the stale _ib.trades() cache — fixes bracket_cancel_timeout_race_risk false-positives that trapped operator closes on CF/BAP")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
