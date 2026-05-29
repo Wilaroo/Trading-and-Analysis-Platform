@@ -1,3 +1,33 @@
+## 2026-05-29 — v19.34.190 MASTER-CLIENTID STARTUP GUARD + RUNBOOK
+
+### Context
+Follow-up to the CF/BAP close saga: the real fix for orphaned-bracket
+cancellation was the IB Gateway **"Master API client ID = 11"** setting (lets
+clientId-11 cancel cross-session/prior-process orders). That setting lives in
+the Gateway's `jts.ini` on the Windows box — NOT in this repo — so it's lost on
+a Gateway reinstall. Nothing to hardcode in the bot (it already connects as
+`IB_DIRECT_CLIENT_ID`, default 11); we just lock it in with docs + a guard.
+
+### Changes (additive, logging + doc only — zero trading-path impact)
+- `services/ib_direct_service.py` — on every IB connect, compare `client_id`
+  against `IB_EXPECTED_MASTER_CLIENT_ID` (default 11). Loud **WARN** if they
+  differ ("bot may be UNABLE to cancel orphaned/cross-session brackets → IB
+  10147"); calm **INFO** confirming master authority when they match.
+- `memory/runbooks/ib_gateway_master_clientid.md` (NEW) — documents the
+  required Gateway setting, the two in-sync values (`IB_DIRECT_CLIENT_ID` ↔
+  Gateway Master API client ID), the symptom signature (10147 +
+  PendingCancel→Submitted flap), and the re-set steps after any Gateway
+  reinstall.
+
+### Verify
+`grep -iE 'v19.34.190|clientId=' /tmp/backend.log | tail -5` → expect
+"clientId=11 matches documented master — cross-session/orphaned-order cancels
+enabled". Compile-checked; the two E702 lint hits are pre-existing legacy.
+
+---
+
+
+
 ## 2026-05-29 — v19.34.189 CLOSE-GUARD AUTHORITATIVE OPEN-ORDERS FIX
 
 ### Bug (operator-reported: BAP/CF wouldn't close)
