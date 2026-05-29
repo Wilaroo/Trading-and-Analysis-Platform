@@ -5,6 +5,70 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
+
+### Confirmed not-a-bug
+- ✅ **ACMR EOD close** — operator confirmed it was correctly NOT closed because
+  it's labeled INVESTMENT (held overnight by design). No action. (Removed from
+  the EOD-close concern list.)
+
+### 🟡 P1 — Accepted tasks (operator green-lit)
+- **Symbol-flatten fallback + operator force-close override.** Make the V5 Close
+  button work on orphaned IB rows lacking a `trade_id` (flatten by symbol via
+  `ib_direct.cancel_all_open_orders_for_symbol` + MKT close), and bypass the
+  30-min post-stop cooldown for operator-initiated closes. Files:
+  `frontend/.../CloseTradeModal.jsx`, `trade_executor_service.py`, router.
+- **Dual-shape timestamps** (`ts` ISO + `ts_dt` BSON) on `bot_trades` +
+  `shadow_decisions` (finish the v172 normalization; prevents silent
+  cross-collection 0-row query bugs). Use `utils/timestamps.py` helpers.
+
+### 🔴 P1 — Likely real bug surfaced by operator (Friday all-trades-were-A/B/C)
+- **Alphabetical scan/subscription bias.** Universe is `sorted(...)` (alphabetical).
+  `_sync_wave_subscriptions` caps LIVE quote subs at `WAVE_SCANNER_MAX_SUBS=40`,
+  iterating `tier1(alphabetical watchlist)+tier2+tier3` in order → the 40 live
+  quote slots are eaten by early-alphabet tier1 names, starving later-alphabet
+  symbols of fresh quotes → only A/B/C generate live-tradable alerts. tier3 DOES
+  rotate (cursor wraps) but tier1's alpha order + the 40-sub cap dominate.
+  **Fix candidates**: (a) prioritize the live-sub cap by RVOL/conviction not
+  alpha; (b) raise `WAVE_SCANNER_MAX_SUBS`; (c) rotate the tier1 live-sub window.
+  **Diagnostic first**: `/api/scanner/scan-cycle-stats` +
+  `_scanned_symbols_lifetime` to confirm coverage vs alpha bias.
+
+### 🟡 P1/P2 — Quality/liquidity gate (operator: "how does $BIL become a trade?")
+- **Add a volatility/ATR floor hard-gate.** Today the only HARD in-play gate is
+  RVOL ≥ 0.8 + ADV ≥ $2M (in_play_service is SOFT-scoring unless
+  `strict_gate=true`). Ultra-low-vol high-ADV ETFs ($BIL T-bill ETF) clear ADV,
+  blip past RVOL 0.8, a detector fires on their flat range, and the v181
+  auto-ladder "rescues" an otherwise-absurd R:R. Fix: min ATR% / min daily-range
+  floor (env-tunable), and/or an ETF/cash-equivalent blocklist, and/or flip
+  in_play to strict. Pairs with the existing `in_play_service`.
+
+### 🟢 P2 — Features to look into
+- **Forward-looking overnight/premarket/weekend scans.** Premarket
+  (`_run_premarket_scan`), daily (`_run_daily_scan`), carry-forward
+  (`carry_forward_score` top-10) and weekend briefing already exist and feed the
+  gameplan. Enhance into an explicit "setting up for tomorrow / next week"
+  conviction watchlist (ranked, with the trigger that would arm it).
+- **News ↔ gameplan historical cross-reference / learning.** Have the AI review
+  `news_articles`/`news_sentiment`/`catalysts` against historical gameplan names
+  and outcomes (did the catalyst thesis play out?) to grade catalyst-driven
+  setups. New learning-loop surface.
+- **Mission Control per-symbol search/filter.** Add a symbol search box that
+  filters ALL lanes (Scanner/Gates/Execution/Position/Reconciler) to one symbol
+  (extends the existing TrailDrawer click-through into a sticky filter).
+- **Per-stock short/mid/long-term regime triad (Q2 — NOT done).** Today there's
+  per-symbol short-term trend (`realtime_technical_service`, v166 tolerance) +
+  market multi-index regime + sector regime, but NO dedicated per-stock
+  short/mid/long-term regime classifier. Build it as ML features.
+- **Chart loading speed (Q4).** chart-tail WS (v33) + `chart_response_cache` +
+  `/chart/warm` exist. If still slow: confirm `CHART_WS_ENABLED=true`, reduce the
+  initial bar window (full 5k-bar cold payload is the suspect), verify warm
+  pre-fetch fires, and check WS isn't silently falling back to 5s polling.
+  Needs a profiling pass (cold vs warm, payload bytes, WS status pip).
+
+---
+
+
 ## ✅ SHIPPED 2026-05-29 — v19.34.176 Regime engine composite SPY/QQQ/IWM trend
 (see CHANGELOG.md). `market_regime_engine.TrendSignalBlock` was SPY-only (35% of
 the composite that drives `bot._current_regime`); now a tolerance-aware
