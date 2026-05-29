@@ -77,70 +77,142 @@ class TrendSignalBlock(SignalBlock):
     """
     Trend Signal Block (Weight: 35%)
     Determines primary market direction using moving averages and price structure.
+
+    v19.34.176 — COMPOSITE SPY/QQQ/IWM + tolerance band.
+    Pre-fix this block scored SPY *only* (it accepted `qqq_bars` but never
+    used it) with strict boolean MA comparisons. A SPY close 0.01% under
+    the 21-EMA flipped a 20-pt signal off, so a flat tape where QQQ/IWM
+    were green could still print a market-wide "downtrend" — the
+    operator's "SPY downtrend hallucination". Now each index is scored
+    independently with a ±0.25% tolerance band (matching v166) and the
+    three are blended (SPY 0.5 / QQQ 0.3 / IWM 0.2, renormalized over
+    whatever is available). Per-index scores + a divergence flag are
+    surfaced in `signals` for observability.
     """
-    
+
+    # Blend weights — SPY stays dominant; QQQ/IWM temper single-index noise.
+    _INDEX_WEIGHTS = {"spy": 0.5, "qqq": 0.3, "iwm": 0.2}
+    # Tolerance band around each moving average (v166 = 0.25%). Price within
+    # the band scores HALF credit (neutral) instead of a hard 0/full flip.
+    _TREND_TOLERANCE_PCT = 0.0025
+
     def __init__(self):
         super().__init__("trend", 0.35)
-    
-    async def calculate(self, spy_bars: List[Dict], qqq_bars: List[Dict] = None) -> float:
-        """
-        Calculate trend score from SPY price data.
-        
-        Indicators:
-        - SPY vs 21 EMA (20 pts)
-        - SPY vs 50 SMA (20 pts)
-        - SPY vs 200 SMA (15 pts)
-        - 21 EMA vs 50 SMA alignment (15 pts)
-        - Higher highs/lows pattern (30 pts)
-        """
-        if not spy_bars or len(spy_bars) < 200:
-            self.score = 50  # Neutral if insufficient data
-            self.signals = {"error": "Insufficient data for trend analysis"}
-            return self.score
-        
-        closes = [bar.get("close", bar.get("c", 0)) for bar in spy_bars]
-        highs = [bar.get("high", bar.get("h", 0)) for bar in spy_bars]
-        lows = [bar.get("low", bar.get("l", 0)) for bar in spy_bars]
-        
+
+    def _band_points(self, price: float, level: float, full: float) -> float:
+        """Award `full` pts when price is clearly above `level`, 0 when
+        clearly below, and half when inside the ±tolerance band."""
+        if level <= 0:
+            return 0.0
+        diff = (price - level) / level
+        if diff > self._TREND_TOLERANCE_PCT:
+            return full
+        if diff < -self._TREND_TOLERANCE_PCT:
+            return 0.0
+        return full * 0.5
+
+    def _score_index(self, bars: List[Dict]) -> Optional[Dict]:
+        """Score a single index 0-100 from its daily bars (tolerance-aware).
+        Returns None when there is insufficient data so the caller can
+        renormalize the blend over only the available indexes."""
+        if not bars or len(bars) < 200:
+            return None
+
+        closes = [bar.get("close", bar.get("c", 0)) for bar in bars]
+        highs = [bar.get("high", bar.get("h", 0)) for bar in bars]
+        lows = [bar.get("low", bar.get("l", 0)) for bar in bars]
         current_price = closes[-1]
-        
-        # Calculate EMAs and SMAs
+
         ema_21 = self._calculate_ema(closes, 21)
         sma_50 = self._calculate_sma(closes, 50)
         sma_200 = self._calculate_sma(closes, 200)
-        
-        # Signal calculations
-        above_21_ema = current_price > ema_21
-        above_50_sma = current_price > sma_50
-        above_200_sma = current_price > sma_200
-        ema_above_sma = ema_21 > sma_50
-        
-        # Higher highs / higher lows analysis (last 20 bars)
-        hh_hl_score = self._analyze_price_structure(highs[-20:], lows[-20:])
-        
-        # Calculate score
-        score = 0
-        score += 20 if above_21_ema else 0
-        score += 20 if above_50_sma else 0
-        score += 15 if above_200_sma else 0
-        score += 15 if ema_above_sma else 0
-        score += hh_hl_score * 30 / 100  # Normalize to 30 pts max
-        
-        self.score = round(score, 1)
-        self.signals = {
+
+        score = 0.0
+        score += self._band_points(current_price, ema_21, 20)
+        score += self._band_points(current_price, sma_50, 20)
+        score += self._band_points(current_price, sma_200, 15)
+        # 21-EMA vs 50-SMA alignment (tolerance-aware, 15 pts)
+        score += self._band_points(ema_21, sma_50, 15)
+        # Higher-highs / higher-lows structure (30 pts)
+        score += self._analyze_price_structure(highs[-20:], lows[-20:]) * 30 / 100
+
+        return {
+            "score": round(score, 1),
             "current_price": round(current_price, 2),
             "ema_21": round(ema_21, 2),
             "sma_50": round(sma_50, 2),
             "sma_200": round(sma_200, 2),
-            "above_21_ema": above_21_ema,
-            "above_50_sma": above_50_sma,
-            "above_200_sma": above_200_sma,
-            "ema_above_sma": ema_above_sma,
-            "price_structure_score": round(hh_hl_score, 1),
-            "trend_direction": "BULLISH" if score >= 60 else "BEARISH" if score <= 40 else "NEUTRAL"
+            "above_21_ema": current_price > ema_21,
+            "above_50_sma": current_price > sma_50,
+            "above_200_sma": current_price > sma_200,
+        }
+
+    async def calculate(
+        self,
+        spy_bars: List[Dict],
+        qqq_bars: List[Dict] = None,
+        iwm_bars: List[Dict] = None,
+    ) -> float:
+        """
+        Composite trend score (0-100) blended across SPY/QQQ/IWM.
+
+        Per-index indicators (each tolerance-aware, ±0.25%):
+        - price vs 21 EMA (20 pts)
+        - price vs 50 SMA (20 pts)
+        - price vs 200 SMA (15 pts)
+        - 21 EMA vs 50 SMA alignment (15 pts)
+        - higher highs/lows structure (30 pts)
+        """
+        per_index = {
+            "spy": self._score_index(spy_bars),
+            "qqq": self._score_index(qqq_bars),
+            "iwm": self._score_index(iwm_bars),
+        }
+
+        # SPY is the anchor — if it's missing we can't classify the tape.
+        if per_index["spy"] is None:
+            self.score = 50  # Neutral if insufficient data
+            self.signals = {"error": "Insufficient SPY data for trend analysis"}
+            return self.score
+
+        # Weighted blend over whatever indexes have data, renormalized.
+        total_w = 0.0
+        blended = 0.0
+        index_scores = {}
+        for key, data in per_index.items():
+            if data is None:
+                continue
+            w = self._INDEX_WEIGHTS[key]
+            blended += data["score"] * w
+            total_w += w
+            index_scores[key] = data["score"]
+        score = blended / total_w if total_w > 0 else per_index["spy"]["score"]
+
+        # Divergence: the indexes disagree on bull (>=60) vs bear (<=40).
+        any_bull = any(s >= 60 for s in index_scores.values())
+        any_bear = any(s <= 40 for s in index_scores.values())
+        divergence_flag = any_bull and any_bear
+
+        self.score = round(score, 1)
+        self.signals = {
+            "composite_score": round(score, 1),
+            "index_scores": index_scores,
+            "indexes_used": list(index_scores.keys()),
+            "blend_weights": {k: self._INDEX_WEIGHTS[k] for k in index_scores},
+            "divergence_flag": divergence_flag,
+            "tolerance_pct": self._TREND_TOLERANCE_PCT,
+            # Back-compat: keep SPY's raw MA signals for existing consumers.
+            "current_price": per_index["spy"]["current_price"],
+            "ema_21": per_index["spy"]["ema_21"],
+            "sma_50": per_index["spy"]["sma_50"],
+            "sma_200": per_index["spy"]["sma_200"],
+            "above_21_ema": per_index["spy"]["above_21_ema"],
+            "above_50_sma": per_index["spy"]["above_50_sma"],
+            "above_200_sma": per_index["spy"]["above_200_sma"],
+            "trend_direction": "BULLISH" if score >= 60 else "BEARISH" if score <= 40 else "NEUTRAL",
         }
         self.last_updated = datetime.now(timezone.utc)
-        
+
         return self.score
     
     def _calculate_ema(self, prices: List[float], period: int) -> float:
@@ -714,8 +786,10 @@ class MarketRegimeEngine:
         
         # Fetch all required data
         spy_bars = await self._get_historical_bars("SPY", 200)
-        qqq_bars = await self._get_historical_bars("QQQ", 50)
-        # IWM bars fetched via quote for change calculation
+        # v19.34.176 — QQQ/IWM now feed the composite TREND block (not just
+        # breadth), so they need the full 200-bar window for sma_200.
+        qqq_bars = await self._get_historical_bars("QQQ", 200)
+        iwm_bars = await self._get_historical_bars("IWM", 200)
         
         # Get current quotes for change calculations
         spy_quote = await self._get_quote("SPY")
@@ -733,7 +807,8 @@ class MarketRegimeEngine:
         ftd_stored_state = await self._load_ftd_state()
         
         # Calculate each signal block
-        await self.trend_block.calculate(spy_bars, qqq_bars)
+        # v19.34.176 — composite SPY/QQQ/IWM trend (tolerance-aware).
+        await self.trend_block.calculate(spy_bars, qqq_bars, iwm_bars)
         
         await self.breadth_block.calculate(
             sector_data,

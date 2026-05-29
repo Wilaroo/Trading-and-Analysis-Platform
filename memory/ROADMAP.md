@@ -5,6 +5,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## ✅ SHIPPED 2026-05-29 — v19.34.176 Regime engine composite SPY/QQQ/IWM trend
+(see CHANGELOG.md). `market_regime_engine.TrendSignalBlock` was SPY-only (35% of
+the composite that drives `bot._current_regime`); now a tolerance-aware
+(±0.25%) weighted blend of SPY/QQQ/IWM. Fixes "SPY downtrend hallucination".
+8/8 tests passing. **Operator live-check pending** on a soft-SPY/green-QQQ day.
+
+
 ## ✅ SHIPPED 2026-05-29 — v19.34.175 TQS/SMB Unification + 5-pillar UI drill-down
 (see CHANGELOG.md). TQS is now the single source of truth for grade + sizing.
 Fixed latent bug: grade never reached the sizing scaler → every trade sized at

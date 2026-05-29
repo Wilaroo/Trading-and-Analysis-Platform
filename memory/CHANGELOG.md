@@ -1,3 +1,49 @@
+## 2026-05-29 — v19.34.176 REGIME ENGINE: COMPOSITE SPY/QQQ/IWM TREND + TOLERANCE
+
+### Why
+The `market_regime_engine.py` TrendSignalBlock (35% of the composite regime
+score that drives `bot._current_regime` → position sizing + direction bias)
+was **SPY-only**: it accepted `qqq_bars` but never used it, ignored IWM
+entirely, and used strict boolean MA comparisons. A SPY close 0.01% under the
+21-EMA flipped a 20-pt signal off, so a flat tape with green QQQ/IWM could
+still print a market-wide "downtrend" — the operator's "SPY downtrend
+hallucination".
+
+NOTE: v166 (SPY 0.25% tolerance) + v167 (composite SPY/QQQ/IWM) had already
+shipped on 2026-05-27, but ONLY to `realtime_technical_service.py` (per-symbol
+trend classifier) and `enhanced_scanner._update_market_context` (scanner ML
+context). The **regime engine that drives trading decisions was never patched**
+— this is that fix.
+
+### Fix shipped (v19.34.176)
+`backend/services/market_regime_engine.py`:
+- `TrendSignalBlock` is now a **weighted composite of SPY/QQQ/IWM**
+  (0.5 / 0.3 / 0.2, renormalized over whatever has ≥200 bars; SPY stays the
+  anchor — if SPY data is missing the block returns neutral 50).
+- New `_score_index()` scores each index independently; new `_band_points()`
+  applies a **±0.25% tolerance band** (price within band = half credit /
+  neutral instead of a hard 0/full flip) — matches v166.
+- Surfaces `index_scores`, `indexes_used`, `blend_weights`, `divergence_flag`,
+  and `tolerance_pct` in `trend_block.signals` for observability. Back-compat
+  SPY MA fields retained.
+- `_calculate_regime()` now fetches 200 bars for QQQ + IWM (was 50 for QQQ,
+  none for IWM) and passes all three to the trend block.
+
+### Files changed
+- `backend/services/market_regime_engine.py`
+- `backend/tests/test_regime_composite_trend_v19_34_176.py` (new, 8 tests passing)
+
+### Verification
+- 8/8 new unit tests pass (tolerance band, per-index scoring, blend,
+  divergence, SPY-hallucination fix, SPY-only fallback, missing-SPY neutral).
+- Backend boots clean; `/api/market-regime/current` responds (sandbox shows
+  insufficient-data branch — no IB bars locally).
+- ⚠️ OPERATOR LIVE-CHECK: on a day SPY is soft but QQQ/IWM green, confirm
+  `signal_blocks.trend.signals.indexes_used = [spy, qqq, iwm]` and the regime
+  no longer flips to CONFIRMED_DOWN on SPY alone.
+
+---
+
 ## 2026-05-29 — v19.34.175 TQS/SMB UNIFICATION + 5-PILLAR UI DRILL-DOWN
 
 ### Why
