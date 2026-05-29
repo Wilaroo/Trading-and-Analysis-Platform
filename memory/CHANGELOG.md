@@ -1,3 +1,97 @@
+## 2026-05-28 — v19.34.183/185/186 BBAI PHANTOM WHIPLASH FIX BUNDLE
+
+### Investigation
+After v181/v182 EOD fix, surfaced that ARMG and BBAI had `reconciled_external`
+phantom trades on 2026-05-28. Initial hypothesis: stale GTC bracket legs from
+prior sessions filling today. **Disproven** — `bot_orders` cross-session
+check came back empty; IBKR statement showed both May 26 + May 27 BBAI
+positions flattened cleanly.
+
+Diagnostic scripts created (all read-only, surfaced via paste.rs):
+- `/tmp/trace_orphan_origin.py` — classifies today's reconciled_* trades
+  vs originating alerts; flagged 11/22 trades today with `alert_id=None`
+  on `bot_trades` (separate v184 issue, deferred).
+- `/tmp/verify_alert_persistence.py` — confirmed `live_alerts` IS the
+  alert persistence collection (117K rows, 1989 today). Earlier
+  hypothesis "alerts never persisted" was **wrong** — I was querying
+  the wrong collection name. **Retracted.**
+- `/tmp/bbai_origin_trace.py` — pulled full 7-day BBAI lifecycle.
+- `/tmp/bbai_bracket_hunt.py` — auto-scanned every Mongo collection for
+  BBAI rows, found bracket_lifecycle_events with smoking-gun error.
+
+### Real Root Causes Found
+
+**Cause 1 — Trade-ID Race**: Bot fires order → IB confirms fill → position
+appears at IB. Reconciler runs (10-30s cadence) BEFORE the executor finishes
+updating `_open_trades`. Sees IB position without matching internal record,
+stamps `entered_by=reconciled_external`. Bot loses ownership of its own
+trade. Evidence: `trade_audit_log` shows 25+ BBAI mean_reversion_short
+intents today; `bot_trades` shows 0 as `bot_fired` and 3 as
+`reconciled_external` with mangled share counts.
+
+**Cause 2 — IB Error 110 (Variable Tick)**: Reconciler's orphan-stop math
+in `position_reconciler.py:1310-1314` uses float arithmetic:
+`stop_price = avg_cost - stop_distance`. For BBAI at $4.82 with 1.5%
+stop, this produces $4.7477 — IB's tick grid for $1+ stocks requires
+$0.01 increments, so IB returns Error 110, the `bracket_attach_governor`
+permanently blocks the symbol for the day, and the phantom stays naked.
+Evidence: 15+ consecutive `bracket_lifecycle_events` failures on BBAI
+with `error=bracket_attach_blocked:permanent_block:ib_error_110_*`.
+
+### Fixes Shipped
+
+**v19.34.185 — Submit-Race Guard** (`position_reconciler.py:1259-1322`)
+Before spawning a `reconciled_orphan` BotTrade for symbol X, scan
+`bot._open_trades` for any trade matching X with `pre_submit_at`
+within the last 60s. If found, refuse to adopt — log `submit_race_v19_34_185`
+skip and let the next reconcile cycle find the trade properly
+registered. Honors the v19.34.6 pre-submit stamping that was
+previously ignored by the reconciler.
+
+**v19.34.186 — Variable-Tick Rounding** (`position_reconciler.py:1377-1389`)
+Added `_v186_tick_round()` after orphan-stop math. Uses Decimal +
+ROUND_HALF_UP to snap stop_price + target_1 to the correct grid:
+- Stock < $1.00 → $0.0001 (4 decimals)
+- Stock >= $1.00 → $0.01 (2 decimals)
+
+Both patches committed as `002b7345`. Deploy script at paste.rs/jQJ9k
+(idempotent, auto-commits, auto-pushes).
+
+**One-time data repair** (`/tmp/repair_phantom_v19_34_185.py`,
+paste.rs/eNi97). Cross-references `trade_audit_log` planned trades
+against `bot_trades` reconciled_external fills within ±120s and ±0.5%
+price tolerance. For 2026-05-28: surfaced 6 candidates, repaired 1
+(BBAI 277sh short → vwap_fade_short, audit_match=0434fb3e tight_match).
+The other 5 left as-is (genuine external positions, share-count drift,
+or partial-fill remnants — script conservatively requires strong evidence).
+
+### Files Changed
+- `backend/services/position_reconciler.py` (+80 lines)
+
+### Verification Plan (2026-05-29 open)
+1. 15:45 ET — EOD heartbeats fire (v181/v182 confirms)
+2. Throughout session — No `submit_race_v19_34_185` adoptions of
+   bot-fired trades; bot keeps ownership
+3. Sub-$5 stocks — No more `ib_error_110` permanent blocks;
+   brackets attach cleanly
+
+### Still Open (Deferred to Future Sessions)
+- v19.34.184 — `alert_id` stamping fix for `squeeze`, `vwap_bounce`,
+  `gap_fade`, `daily_squeeze`, `pocket_pivot` paths. v19.34.36 wiring
+  works for `mean_reversion_short` but bypasses these 5 setups.
+  Today: 11/22 trades had `alert_id=None`.
+- v19.34.187 — Defensive belt-and-suspenders cooldown
+  (`_recent_executor_activity` dict) on the reconciler. Belt for v185
+  if pre_submit_at isn't stamped on some new code path.
+- v19.34.172 — Dual-shape timestamps (`ts` ISO + `ts_dt` BSON) on
+  `bot_trades`, `alert_outcomes`, `shadow_decisions`,
+  `bracket_lifecycle_events` to prevent silent 0-rows query bugs.
+- v19.34.175 — TQS/SMB unification + 5-pillar UI drill-down panel
+  (read-only with expand-on-click, hide SMB "F" badges).
+
+---
+
+
 ## 2026-05-28 — v19.34.181 + v19.34.182 EOD AUTO-CLOSE RESTORED
 
 ### Trigger
