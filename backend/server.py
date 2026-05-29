@@ -4520,6 +4520,77 @@ async def shutdown_event():
     print("[SHUTDOWN] All background services and child processes stopped")
 
 
+@app.websocket("/api/ws/stream")
+async def websocket_mission_control_stream(websocket: WebSocket):
+    """v19.34.184 — Mission Control live pipeline stream.
+
+    Fans out `emit_stream_event` output, classified into pipeline lanes
+    (scanner / gates / execution / position / reconciler / system). The
+    persistence layer (`sentcom_thoughts`) is always-on; this socket is just
+    the live delivery channel and only does work while a client is connected.
+
+    Client → server messages:
+      {"action":"subscribe","lanes":[...],"severities":[...],"mode":"raw|aggregate"}
+      {"action":"ping"}
+    """
+    from services.stream_bus import get_stream_bus, ALL_LANES, ALL_SEVERITIES
+    bus = get_stream_bus()
+    await websocket.accept()
+    conn = await bus.register(websocket)
+
+    try:
+        await websocket.send_json({
+            "type": "connected",
+            "lanes": list(ALL_LANES),
+            "severities": list(ALL_SEVERITIES),
+            "mode": conn.mode,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        bus.unregister(websocket)
+        return
+
+    async def _keepalive():
+        try:
+            while True:
+                await asyncio.sleep(20)
+                await websocket.send_json({"type": "server_ping", "ts": datetime.now(timezone.utc).isoformat()})
+        except Exception:
+            pass
+
+    keepalive_task = asyncio.create_task(_keepalive())
+
+    try:
+        while True:
+            raw = await websocket.receive_json()
+            if not isinstance(raw, dict):
+                continue
+            act = raw.get("action")
+            if act == "subscribe":
+                bus.update_sub(
+                    conn,
+                    lanes=raw.get("lanes"),
+                    severities=raw.get("severities"),
+                    mode=raw.get("mode"),
+                )
+                await websocket.send_json({
+                    "type": "subscribed",
+                    "lanes": sorted(conn.lanes),
+                    "severities": sorted(conn.severities),
+                    "mode": conn.mode,
+                })
+            elif act == "ping":
+                await websocket.send_json({"type": "pong", "ts": datetime.now(timezone.utc).isoformat()})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        bus.unregister(websocket)
+        keepalive_task.cancel()
+
+
+
 @app.websocket("/api/ws/quotes")
 async def websocket_quotes(websocket: WebSocket):
     """WebSocket endpoint for real-time quote streaming"""

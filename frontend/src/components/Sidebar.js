@@ -10,11 +10,14 @@ import {
   Settings,
   Brain,
   Microscope,
+  Radio,
 } from 'lucide-react';
 
 const navItems = [
   { id: 'command-center', icon: Target, label: 'Command Center', highlight: true },
   { id: 'nia', icon: Brain, label: 'NIA', highlight: true, isNew: true },
+  // v19.34.184 — Mission Control: live multi-lane pipeline cockpit.
+  { id: 'mission-control', icon: Radio, label: 'Mission Control', isNew: true },
   { id: 'trade-journal', icon: ClipboardList, label: 'Trade Journal' },
   { id: 'chart', icon: LineChart, label: 'Charts' },
   { id: 'glossary', icon: BookOpen, label: 'Glossary & Logic' },

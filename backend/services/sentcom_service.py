@@ -3270,6 +3270,23 @@ async def emit_stream_event(payload: Dict[str, Any]) -> bool:
         svc._stream_seen_keys.add(dedup_key)
         svc._stream_buffer.append(msg)
 
+        # v19.34.184 — fan-out to Mission-Control live WS clients. Synchronous,
+        # cheap, no-op when nobody is connected. Never raises into the caller.
+        try:
+            from services.stream_bus import get_stream_bus
+            get_stream_bus().publish({
+                "id": msg.id,
+                "kind": msg.type,
+                "content": msg.content,
+                "symbol": msg.symbol,
+                "action_type": msg.action_type,
+                "confidence": msg.confidence,
+                "metadata": msg.metadata or {},
+                "timestamp": msg.timestamp,
+            })
+        except Exception:
+            pass
+
         # Trim — keep newest first.
         svc._stream_buffer.sort(key=lambda m: m.timestamp, reverse=True)
         if len(svc._stream_buffer) > svc._stream_max_size:

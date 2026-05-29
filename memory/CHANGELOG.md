@@ -1,3 +1,76 @@
+## 2026-05-30 — v19.34.184 MISSION CONTROL (live multi-lane pipeline cockpit)
+
+### What
+A new top-level **Mission Control** tab: a live, always-on "cockpit" that
+streams the bot's decision bus into 5 lanes — **Scanner | Gates | Execution |
+Position | Reconciler** — plus a **System/Safety** strip, a heartbeat pip,
+AGGREGATE/RAW scanner mode, severity filters, and click-through to a symbol's
+recent-decision drawer.
+
+### Why this design (coverage audit drove it)
+A `sentcom_thoughts` audit over 7d showed the event bus already captures the
+whole pipeline (~362k events), so we **reuse the existing bus** instead of
+building a parallel system. Key finding: the **Scanner lane is a firehose**
+(~324k `scanner_skip`/7d, peak ~600 events/min), NOT thin. So the architecture
+centers on throttling that volume, not adding events.
+
+### Performance (the operator's explicit concern: "will B slow the app?")
+No — the trading hot path is untouched:
+  • `StreamBus.publish()` is **synchronous, allocation-cheap, never awaits/sends**
+    — a background ~300ms flush loop does the per-connection send.
+  • **Zero idle overhead**: when no client is connected, `publish()` early-returns
+    (after cheaply bumping the scanner roll-up counter).
+  • **Scanner firehose handling (hybrid)**: in `aggregate` mode skips/rejects are
+    NOT buffered — only counted and summarized via a periodic `scan_pulse`.
+    `scanner_trigger` always streams. `raw` mode streams everything (buffered
+    only when a raw subscriber exists). Hard `_MAX_BUFFER` load-shed on bursts.
+  • **Always-on persistence**: `sentcom_thoughts` is written 24/7 regardless of
+    the tab; the WS is only the live delivery channel (so nothing is lost when
+    the tab is closed — reopen → backfill + resume).
+
+### Backend
+- `services/stream_bus.py` (NEW) — loop-local broadcaster + `classify_lane` /
+  `severity_of` (action_type-primary, source/kind tie-breakers).
+- `services/sentcom_service.py` — `emit_stream_event` now fans out to the bus
+  (sync, fail-open).
+- `server.py` — `@app.websocket("/api/ws/stream")` with subscribe (lanes +
+  severities + mode), 20s keepalive, graceful disconnect.
+- **New lane emits**: v183 guards (`wrong_side_stop_recomputed`,
+  `position_stop_capped`) → Gates lane (live proof they fire); `target_hit`
+  scale-out → Position lane.
+
+### Frontend
+- `pages/MissionControlPage.jsx` (NEW) — orchestrator (backfill + live tail).
+- `hooks/useStreamSocket.js` (NEW) — WS client, backoff reconnect, sub push.
+- `lib/laneClassify.js` (NEW) — client mirror of the server classifier (backfill).
+- `components/missioncontrol/{StreamRow,LaneColumn,TrailDrawer}.jsx` (NEW).
+- `App.js` + `Sidebar.js` — new "Mission Control" nav tab (Radio icon).
+
+### Verification
+- 14 stream-bus unit tests (lane classify, severity, firehose aggregate/raw,
+  per-connection flush filter, scan_pulse). 48/48 across v169/v181/v182/v183/v184.
+- **Live WS handshake verified** on the local backend (connect → lane-filtered
+  subscribe → ping/pong).
+- Frontend: lint clean, compiles with no module errors; smoke screenshot shows
+  5 lanes + System strip + heartbeat + AGGREGATE/RAW + severity filters
+  rendering (IDLE in the mirror — no REACT_APP_BACKEND_URL/live data; connects
+  live on the DGX).
+- Deploy patch: https://paste.rs/21jcv (14 files), `git apply --check` clean on
+  v183 tree (DGX HEAD 7863a27d).
+
+### Follow-ups (deferred, noted)
+- More lifecycle emits (stop→breakeven, trailing-stop move, order_submitted,
+  partial_fill, EOD-flatten-initiated) to further enrich Position/Execution.
+- Inline "acknowledge" action on System/Safety alarms (currently click-through
+  to the recent-decision drawer only).
+- ⚠️ OPERATOR LIVE-CHECK: open Mission Control on the DGX during RTH — heartbeat
+  should go LIVE, Scanner pulse should tick (triggers/skips/rejects), Gates
+  should fill with rejection reasons; flip RAW to see the skip firehose.
+
+---
+
+
+
 ## 2026-05-30 — v19.34.183 STOP-GEOMETRY SANITY (squeeze stale-trigger + evaluator guards)
 
 ### Why (found while validating v182 gameplan accuracy — now visible, not hidden)
