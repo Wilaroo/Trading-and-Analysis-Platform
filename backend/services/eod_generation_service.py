@@ -199,15 +199,63 @@ class EndOfDayGenerationService:
                 replace_existing=True,
             )
 
+            # v19.34.185 (F-F) — Premarket gameplan generation. Every weekday
+            # at 09:00 ET, FORCE-regenerate today's game_plan before the open so
+            # stocks_in_play captures the scanner's premarket gappers (pm_) +
+            # swing/position daily setups as genuine pre-open conviction (and
+            # stays stable all session). This is the data foundation for
+            # gameplan-aware prioritization — without it the plan is whatever
+            # happens to be alerting when the operator first opens the journal
+            # (intraday → circular).
+            self.scheduler.add_job(
+                lambda: _run_async(self.auto_generate_premarket_gameplan),
+                CronTrigger(hour=9, minute=0, day_of_week='mon-fri', timezone=self.et_timezone),
+                id='auto_generate_premarket_gameplan',
+                replace_existing=True,
+            )
+
             self.scheduler.start()
-            logger.info("EOD generation scheduler started (BackgroundScheduler — 4:30/4:45/5:00 PM ET weekdays)")
-    
+            logger.info("EOD generation scheduler started (BackgroundScheduler — 09:00 premarket gameplan + 4:30/4:45/5:00 PM ET weekdays)")
+
     def stop_scheduler(self):
         """Stop the scheduler"""
         if self.scheduler:
             self.scheduler.shutdown()
             self.scheduler = None
-    
+
+    async def auto_generate_premarket_gameplan(self, date: str = None) -> Dict:
+        """v19.34.185 (F-F) — Force-regenerate today's game_plan premarket
+        (09:00 ET) so stocks_in_play reflects genuine pre-open conviction
+        (premarket gappers + swing/position daily setups) and stays stable for
+        the trading day. Feeds gameplan-aware prioritization."""
+        if date is None:
+            date = datetime.now(self.et_timezone).strftime("%Y-%m-%d")
+        print(f"[premarket-gameplan] force-regenerating game_plan for {date}")
+        try:
+            from services.gameplan_service import get_gameplan_service
+            svc = get_gameplan_service(self.db)
+            if svc is None:
+                logger.warning("[premarket-gameplan] gameplan service unavailable")
+                return {"status": "error", "reason": "service_unavailable"}
+            # Force regenerate: drop any existing (early/empty) plan so
+            # create_game_plan rebuilds from the live premarket scanner buffer.
+            self.db["game_plans"].delete_one({"date": date})
+            plan = await svc.create_game_plan(date, auto_populate=True)
+            sip = (plan or {}).get("stocks_in_play", [])
+            premkt = sum(1 for s in sip if s.get("source") in ("premarket_scanner", "daily_scanner"))
+            self._log_generation("premarket_gameplan", date, "success",
+                                 f"{len(sip)} stocks_in_play ({premkt} premarket/daily-sourced)")
+            logger.info(f"[premarket-gameplan] {date}: {len(sip)} stocks_in_play "
+                        f"({premkt} premarket/daily-sourced), bias={(plan or {}).get('bias')}")
+            return {"status": "success", "stocks_in_play": len(sip), "premarket_sourced": premkt}
+        except Exception as e:
+            logger.error(f"[premarket-gameplan] failed: {e}")
+            try:
+                self._log_generation("premarket_gameplan", date, "error", str(e))
+            except Exception:
+                pass
+            return {"status": "error", "reason": str(e)}
+
     async def auto_generate_drc(self, date: str = None) -> Dict:
         """
         Automatically generate DRC at end of day

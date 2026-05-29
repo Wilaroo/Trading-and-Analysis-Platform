@@ -1,3 +1,54 @@
+## 2026-05-30 — v19.34.185 F-F: GAMEPLAN-AWARE PRIORITIZATION (+ premarket gameplan scheduler)
+
+### Why
+The premarket Gameplan and the live bot were disconnected — the bot ranked
+alerts purely on TQS/priority and ignored the operator's pre-open prep. Goal:
+let the Gameplan softly steer slot allocation. **Accuracy pre-flight (audit)
+revealed** the gameplan was only generated ON-DEMAND (when the journal tab is
+opened) → today's plan was intraday-generated, all `live_scanner`, Neutral
+bias. Boosting that would be circular. So F-F needs a stable PREMARKET plan
+first.
+
+### Part A — Premarket gameplan generation (data foundation)
+`eod_generation_service`: new scheduled job **09:00 ET, Mon–Fri** that
+FORCE-regenerates today's `game_plan` before the open (`delete_one` + 
+`create_game_plan(auto_populate=True)`). At 09:00 the scanner buffer holds the
+real conviction names — `pm_` premarket gappers + swing/position daily setups —
+so `stocks_in_play` becomes genuine pre-open prep (`premarket_scanner` /
+`daily_scanner` sources) and stays stable all session.
+- New: `auto_generate_premarket_gameplan(date)`; logged via `_log_generation`.
+
+### Part B — F-F soft conviction boost
+`trading_bot_service._get_trade_alerts._alert_rank` (the v179 quality slot
+ranker): TQS dimension now gets a mild, env-tunable additive boost:
+- **+`GAMEPLAN_WATCHLIST_BOOST`** (default 8) if the symbol is on today's
+  premarket/daily gameplan watchlist.
+- **+`GAMEPLAN_BIAS_BOOST`** (default 4) if direction aligns with `market_bias`
+  (long when Bullish / short when Bearish; nothing when Neutral).
+- **Ranking-only**: never changes the stored TQS grade or any gate decision;
+  the priority bucket still dominates (a low-priority gameplan name can't jump
+  a high-priority non-gameplan one). A clearly-better non-gameplan setup
+  (≥ boost higher TQS) still wins the slot.
+- New helpers: `_compute_gameplan_boost` (static, pure) + `_get_gameplan_conviction`
+  (reads only premarket/daily-sourced names + bias, cached ~5 min so the 09:00
+  regeneration is picked up same session).
+
+### Verification
+- 11 F-F unit tests (watchlist hit, bias align/misalign, neutral, stacking,
+  case-insensitivity, tunable-to-zero, mild-additive ranking effect). 51/51
+  across v179/v182/v183/v184/v185 — no regressions. Both services compile.
+- ⚠️ LIVE CONFIRMATION REQUIRED TOMORROW AM: after deploy + restart, the 09:00
+  ET job runs; re-run the F-F audit (paste.rs/Npujw) → it should show
+  "generated PREMARKET ✅" with `premarket_scanner`/`daily_scanner` names in
+  stocks_in_play. ONLY THEN is the boost operating on real conviction data.
+  (Today's intraday plan = nothing meaningful to boost yet.)
+- Tunable kill-switch: set `GAMEPLAN_WATCHLIST_BOOST=0` and
+  `GAMEPLAN_BIAS_BOOST=0` to disable the boost entirely.
+
+---
+
+
+
 ## 2026-05-30 — v19.34.184 MISSION CONTROL (live multi-lane pipeline cockpit)
 
 ### What
