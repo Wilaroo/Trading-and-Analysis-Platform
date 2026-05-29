@@ -1,3 +1,36 @@
+## 2026-05-29 — v19.34.180 PUT /risk-params now persists MONGO_WINS fields
+
+### Why
+During v179 ops, setting `max_open_positions=25` via `POST /api/trading-bot/risk-params`
+returned 25 in-memory but `effective-limits` kept reading 10. Root cause: the
+endpoint persists via a fire-and-forget `asyncio.create_task(_save_state())`,
+which races the `state_integrity` watchdog. `max_open_positions` (and 5 other
+limits) are `MONGO_WINS`, so the watchdog reverted in-memory 25 back to the
+stale Mongo 10 before the deferred save landed. The operator's API change
+silently didn't stick (had to write Mongo directly + force-resync).
+
+### Fix
+`trading_bot_service.update_risk_params` now writes any updated `MONGO_WINS`
+fields **synchronously** to `bot_state.risk_params.*` before the async save.
+Sync pymongo is safe here — the method runs from a sync FastAPI route
+(threadpool), not the event loop. Affects: `max_open_positions`,
+`max_position_pct`, `max_daily_loss_pct`, `min_risk_reward`,
+`reconciled_default_stop_pct`, `reconciled_default_rr`. MEMORY_WINS fields
+(`starting_capital`, `setup_min_rr`, etc.) are intentionally excluded.
+
+### Files changed
+- `backend/services/trading_bot_service.py` (update_risk_params sync persist)
+- `backend/tests/test_v19_34_180_risk_params_sync_persist.py` (new, 4 tests)
+
+### Verification
+- 4/4 unit tests pass; file compiles.
+- Live (post-deploy): `POST /risk-params {max_open_positions:24}` → effective
+  reads 24 with NO manual Mongo write or resync; restore to 25 confirmed.
+- Ops note: live max_open_positions raised 10 → 25 (kill switch already 25).
+
+---
+
+
 ## 2026-05-29 — v19.34.179 PRIORITIZATION + SLOT ALLOCATION + EXPOSURE + POS-CAP
 
 ### Why
