@@ -1,3 +1,49 @@
+## 2026-05-30 — v19.34.182 GAMEPLAN DATA-ACCURACY FIXES
+
+### Why (operator confirmed live: stocks_in_play=0, empty key levels, $0 stops)
+`gameplan_service._auto_populate_game_plan` had three data-accuracy bugs that
+made the V5 Gameplan/Briefing card show blank/zero data — a hard prerequisite
+for F-F (wiring premarket intelligence into the bot's prioritization).
+
+### Bugs fixed
+1. **$0 stops/targets** — entries read `getattr(alert,'stop_price')` /
+   `'target_price'`, which don't exist on the `LiveAlert` dataclass (canonical
+   fields are `stop_loss` / `target`). Every stop/target rendered as $0.
+2. **Swing/position setups dropped** — `daily_alerts` (scan_tier swing/position)
+   were computed then NEVER appended to `stocks_in_play`. Now appended (deduped)
+   between the premarket and intraday tiers.
+3. **Empty key levels** — `big_picture.key_levels` was never populated. Now
+   filled with SPY/QQQ support+resistance (realtime technical service,
+   `mongo_only=True`) and VIX (regime engine `volume_vix.signals.vix_price`).
+4. **(bonus) Day-2 strict date−1** — looked up `date - 1 day`, landing on
+   weekends/holidays with no plan (zero Day-2 names every Monday). Now queries
+   the most recent PRIOR game plan (`{"date": {"$lt": date}}` sort desc).
+5. **(bonus) reasoning List[str]** — coerced to text via `_reasoning_text`
+   (was stored as a list / sliced as a list in if_then notes).
+
+### Refactor
+Extracted the duplicated entry-building into `_alert_to_stock_entry(alert,
+source)` (single correct field mapping, used by all 3 tiers) + `_reasoning_text`
+helper + `_populate_key_levels` helper. All best-effort / fail-open.
+
+### Files changed
+- `backend/services/gameplan_service.py`
+- `backend/tests/test_v19_34_182_gameplan_accuracy.py` (new, 8 tests)
+
+### Verification
+- 8/8 new unit tests pass (pure logic; no DB/IB needed); 14/14 with the
+  existing gameplan-narrative suite. Lint clean. Patch verified to `git apply
+  --check` cleanly on the v181 tree (DGX HEAD 8f21c0f6).
+- Deploy patch: https://paste.rs/i5pbj (gameplan_service.py + test).
+- ⚠️ RUNTIME NOTE: `GET /journal/gameplan/today` only re-creates the plan when
+  none exists for today. To see the fix on a day where a (buggy) plan already
+  exists, delete today's `game_plans` row OR call `POST /journal/gameplan
+  ?auto_populate=true` to regenerate. Tomorrow's open is clean automatically.
+
+---
+
+
+
 ## 2026-05-29 — v19.34.181 OPENING-VOLATILITY TIME GATE + R:R AUTO-LADDER FALLBACK
 
 ### Why (operator-driven, from live 10:05 ET scanner review)

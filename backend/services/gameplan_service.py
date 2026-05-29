@@ -127,47 +127,32 @@ class GamePlanService:
                 daily_alerts = [a for a in live_alerts if getattr(a, 'scan_tier', '').lower() in ('swing', 'position')]
                 intraday_alerts = [a for a in live_alerts if getattr(a, 'scan_tier', '').lower() in ('intraday', 'scalp')]
                 
-                # Pre-market alerts → Stocks in Play (highest priority)
+                # v19.34.182 — Pre-market alerts → Stocks in Play (highest priority).
+                # Uses the shared builder which reads the CORRECT LiveAlert
+                # dataclass fields (stop_loss/target, not stop_price/target_price).
                 for alert in pm_alerts[:8]:
-                    stock_entry = {
-                        "symbol": getattr(alert, 'symbol', ''),
-                        "setup_type": getattr(alert, 'setup_type', '').replace('_', ' ').title(),
-                        "direction": getattr(alert, 'direction', 'long'),
-                        "key_levels": {
-                            "entry": getattr(alert, 'trigger_price', 0),
-                            "stop": getattr(alert, 'stop_price', 0),
-                            "target": getattr(alert, 'target_price', 0),
-                        },
-                        "catalyst": getattr(alert, 'reasoning', ''),
-                        "timeframe": getattr(alert, 'scan_tier', 'intraday'),
-                        "if_then_statements": [
-                            {
-                                "condition": f"IF {getattr(alert, 'symbol', '')} {'gaps up' if getattr(alert, 'direction', '') == 'long' else 'gaps down'} and holds",
-                                "action": f"THEN enter {getattr(alert, 'direction', 'long')} at ${getattr(alert, 'trigger_price', 0):.2f}",
-                                "notes": getattr(alert, 'reasoning', '')[:80]
-                            }
-                        ],
-                        "source": "premarket_scanner",
-                        "score": getattr(alert, 'score', 0),
-                    }
-                    game_plan["stocks_in_play"].append(stock_entry)
-                
+                    game_plan["stocks_in_play"].append(
+                        self._alert_to_stock_entry(alert, "premarket_scanner")
+                    )
+
+                # v19.34.182 — swing/position (daily) setups were previously
+                # computed into `daily_alerts` then SILENTLY DROPPED (never
+                # appended). Append them now so the gameplan reflects the full
+                # multi-horizon watchlist.
+                for alert in daily_alerts[:6]:
+                    sym = getattr(alert, 'symbol', '')
+                    if not any(s.get("symbol") == sym for s in game_plan["stocks_in_play"]):
+                        game_plan["stocks_in_play"].append(
+                            self._alert_to_stock_entry(alert, "daily_scanner")
+                        )
+
                 # Intraday alerts → additional stocks in play
                 for alert in intraday_alerts[:5]:
-                    if not any(s.get("symbol") == getattr(alert, 'symbol', '') for s in game_plan["stocks_in_play"]):
-                        stock_entry = {
-                            "symbol": getattr(alert, 'symbol', ''),
-                            "setup_type": getattr(alert, 'setup_type', '').replace('_', ' ').title(),
-                            "direction": getattr(alert, 'direction', 'long'),
-                            "key_levels": {
-                                "entry": getattr(alert, 'trigger_price', 0),
-                                "stop": getattr(alert, 'stop_price', 0),
-                                "target": getattr(alert, 'target_price', 0),
-                            },
-                            "catalyst": getattr(alert, 'reasoning', ''),
-                            "source": "live_scanner",
-                        }
-                        game_plan["stocks_in_play"].append(stock_entry)
+                    sym = getattr(alert, 'symbol', '')
+                    if not any(s.get("symbol") == sym for s in game_plan["stocks_in_play"]):
+                        game_plan["stocks_in_play"].append(
+                            self._alert_to_stock_entry(alert, "live_scanner")
+                        )
         except Exception as e:
             print(f"Failed to load live scanner alerts: {e}")
         
@@ -202,9 +187,13 @@ class GamePlanService:
         except Exception as e:
             print(f"Failed to load earnings: {e}")
         
-        # Get previous day's watchlist that might be Day 2 candidates
-        prev_date = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
-        prev_plan = self.gameplan_col.find_one({"date": prev_date})
+        # Get previous day's watchlist that might be Day 2 candidates.
+        # v19.34.182 — use the most recent PRIOR game plan (last *trading*
+        # day) instead of strict `date - 1`, which lands on weekends/holidays
+        # with no plan and silently produced zero Day-2 names every Monday.
+        prev_plan = self.gameplan_col.find_one(
+            {"date": {"$lt": date}}, sort=[("date", -1)]
+        )
         
         if prev_plan:
             # Stocks that moved well yesterday are Day 2 candidates
@@ -230,6 +219,7 @@ class GamePlanService:
         try:
             from services.market_regime_engine import get_market_regime_engine
             engine = get_market_regime_engine()
+            regime_dict = None
             if engine is not None:
                 regime_dict = await engine.get_current_regime()
                 if regime_dict:
@@ -274,9 +264,106 @@ class GamePlanService:
         except Exception as e:
             # Non-fatal — gameplan still saves with stocks_in_play / day_2.
             print(f"gameplan auto-populate: regime fetch skipped: {e}")
+            regime_dict = None
+
+        # v19.34.182 — big_picture.key_levels was NEVER populated (always the
+        # empty-string template), so the V5 big-picture card showed blank
+        # SPY/QQQ S/R + VIX. Fill it from the realtime technical service
+        # (SPY/QQQ support & resistance) + the regime engine (VIX).
+        await self._populate_key_levels(game_plan, regime_dict)
 
         return game_plan
-    
+
+    @staticmethod
+    def _reasoning_text(alert) -> str:
+        """v19.34.182 — LiveAlert.reasoning is a List[str]; coerce to text so
+        we don't store a list (or accidentally slice the list with [:80])."""
+        r = getattr(alert, 'reasoning', '') or ''
+        if isinstance(r, (list, tuple)):
+            return " · ".join(str(x) for x in r if x)
+        return str(r)
+
+    def _alert_to_stock_entry(self, alert, source: str) -> Dict:
+        """v19.34.182 — build a stocks_in_play entry from a LiveAlert dataclass.
+
+        Reads the CORRECT dataclass field names: `stop_loss` and `target`
+        (the old code read `stop_price` / `target_price` which don't exist on
+        LiveAlert, so every stop/target rendered as $0).
+        """
+        symbol = getattr(alert, 'symbol', '') or ''
+        direction = getattr(alert, 'direction', 'long') or 'long'
+        entry = getattr(alert, 'trigger_price', 0) or 0
+        stop = getattr(alert, 'stop_loss', 0) or 0
+        target = getattr(alert, 'target', 0) or 0
+        reasoning = self._reasoning_text(alert)
+        setup = (getattr(alert, 'setup_type', '') or '').replace('_', ' ').title()
+        return {
+            "symbol": symbol,
+            "setup_type": setup,
+            "direction": direction,
+            "key_levels": {
+                "entry": entry,
+                "stop": stop,
+                "target": target,
+            },
+            "catalyst": reasoning,
+            "timeframe": getattr(alert, 'scan_tier', 'intraday'),
+            "if_then_statements": [
+                {
+                    "condition": f"IF {symbol} {'gaps up' if direction == 'long' else 'gaps down'} and holds",
+                    "action": (f"THEN enter {direction} at ${entry:.2f}" if entry
+                               else f"THEN enter {direction}"),
+                    "notes": reasoning[:120],
+                }
+            ],
+            "source": source,
+            "score": getattr(alert, 'score', 0),
+        }
+
+    async def _populate_key_levels(self, game_plan: Dict, regime_dict: Optional[Dict]) -> None:
+        """v19.34.182 — fill big_picture.key_levels with SPY/QQQ support &
+        resistance (realtime technical service) + VIX (regime engine's
+        volume_vix block). Best-effort; never raises."""
+        try:
+            kl = game_plan.get("big_picture", {}).get("key_levels")
+            if kl is None:
+                return
+        except Exception:
+            return
+
+        # SPY / QQQ support & resistance from the technical snapshot.
+        try:
+            from services.realtime_technical_service import get_technical_service
+            tech = get_technical_service()
+            if tech is not None:
+                for sym, sup_key, res_key in (
+                    ("SPY", "spy_support", "spy_resistance"),
+                    ("QQQ", "qqq_support", "qqq_resistance"),
+                ):
+                    try:
+                        snap = await tech.get_technical_snapshot(sym, mongo_only=True)
+                        if snap is not None:
+                            kl[sup_key] = snap.support
+                            kl[res_key] = snap.resistance
+                    except Exception as e:
+                        print(f"gameplan key-levels: {sym} snapshot skipped: {e}")
+        except Exception as e:
+            print(f"gameplan key-levels: tech service skipped: {e}")
+
+        # VIX from the regime engine's volume_vix signal block.
+        try:
+            if regime_dict:
+                vix = (
+                    regime_dict.get("signal_blocks", {})
+                    .get("volume_vix", {})
+                    .get("signals", {})
+                    .get("vix_price")
+                )
+                if vix:
+                    kl["vix_level"] = vix
+        except Exception as e:
+            print(f"gameplan key-levels: vix skipped: {e}")
+
     async def _create_stock_in_play_entry(self, alert: Dict) -> Dict:
         """Create a stock in play entry from a scanner alert"""
         symbol = alert.get("symbol", "")
