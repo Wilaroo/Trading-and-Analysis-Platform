@@ -4471,13 +4471,27 @@ class TradingBotService:
         # the BEST ideas get the slots, not whatever arrived first. (The
         # scanner already orders by priority, but the dict round-trip +
         # the [:20] truncation below need this to be explicit and stable.)
+        #
+        # ── v19.34.185 (F-F) — gameplan-aware soft conviction boost ─────
+        # Names on today's PREMARKET gameplan (pm_/daily-sourced conviction)
+        # and alerts whose direction aligns with the day's market bias get a
+        # mild, env-tunable bump applied to the TQS dimension of the rank key.
+        # Ranking-only: it never changes the stored TQS grade or any gate
+        # decision, and the priority bucket still dominates (so a low-priority
+        # gameplan name can't jump a high-priority non-gameplan one).
+        _gp_watchlist, _gp_bias = self._get_gameplan_conviction()
+        import os as _os_ff
+        _w_watch = float(_os_ff.environ.get("GAMEPLAN_WATCHLIST_BOOST", "8"))
+        _w_bias = float(_os_ff.environ.get("GAMEPLAN_BIAS_BOOST", "4"))
+
         def _alert_rank(a: Dict):
             prio = {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(
                 str(a.get("priority") or "medium").lower(), 4
             )
+            boost = self._compute_gameplan_boost(a, _gp_watchlist, _gp_bias, _w_watch, _w_bias)
             return (
                 prio,
-                -float(a.get("tqs_score") or 0),
+                -(float(a.get("tqs_score") or 0) + boost),
                 -float(a.get("trigger_probability") or 0),
                 -float(a.get("score") or 0),
             )
@@ -4485,6 +4499,70 @@ class TradingBotService:
         alerts.sort(key=_alert_rank)
 
         return alerts[:20]  # Top 20 alerts (best-ranked first)
+
+    @staticmethod
+    def _compute_gameplan_boost(alert: Dict, watchlist: set, bias, w_watch: float, w_bias: float) -> float:
+        """v19.34.185 (F-F) — ranking-only conviction boost for an alert.
+
+        +w_watch if the symbol is on today's premarket/daily gameplan watchlist.
+        +w_bias  if the alert's direction aligns with the day's market bias
+                 (long when Bullish, short when Bearish; nothing when Neutral).
+        Never negative; never touches the stored TQS or any gate.
+        """
+        boost = 0.0
+        sym = str(alert.get("symbol") or "").upper()
+        if sym and watchlist and sym in watchlist:
+            boost += w_watch
+        b = (bias or "").lower()
+        if b in ("bullish", "bearish"):
+            direction = str(alert.get("direction") or "").lower()
+            if (b == "bullish" and direction in ("long", "buy")) or \
+               (b == "bearish" and direction in ("short", "sell")):
+                boost += w_bias
+        return boost
+
+    def _get_gameplan_conviction(self):
+        """v19.34.185 (F-F) — today's gameplan conviction set, cached ~5 min.
+
+        Returns (watchlist:set[str], bias:str|None) where watchlist holds only
+        symbols sourced from the PREMARKET/DAILY scan (genuine pre-open
+        conviction) — NOT intraday live alerts (which would make the boost
+        circular). The 5-min TTL lets the 09:00 ET premarket regeneration be
+        picked up the same session.
+        """
+        import time as _time
+        try:
+            import pytz as _pytz
+            today = datetime.now(_pytz.timezone('America/New_York')).strftime("%Y-%m-%d")
+        except Exception:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        cache = getattr(self, "_gameplan_conviction_cache", None)
+        now = _time.time()
+        if cache and cache.get("date") == today and (now - cache.get("ts", 0)) < 300:
+            return cache["watchlist"], cache["bias"]
+
+        watchlist, bias = set(), None
+        try:
+            db = self._db
+            if db is None:
+                from database import get_database
+                db = get_database()
+            plan = db["game_plans"].find_one(
+                {"date": today}, {"_id": 0, "stocks_in_play": 1, "bias": 1}
+            )
+            if plan:
+                for s in (plan.get("stocks_in_play") or []):
+                    if s.get("source") in ("premarket_scanner", "daily_scanner"):
+                        sym = s.get("symbol")
+                        if sym:
+                            watchlist.add(str(sym).upper())
+                bias = (str(plan.get("bias") or "").lower() or None)
+        except Exception as e:
+            print(f"[F-F] gameplan conviction load skipped: {e}")
+
+        self._gameplan_conviction_cache = {"date": today, "ts": now, "watchlist": watchlist, "bias": bias}
+        return watchlist, bias
     
     async def _evaluate_opportunity(self, alert: Dict) -> Optional[BotTrade]:
         """Evaluate an alert — delegated to OpportunityEvaluator module."""
