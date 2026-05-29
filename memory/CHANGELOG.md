@@ -1,3 +1,43 @@
+## 2026-05-29 — v19.34.177 PORTABLE CLOSED-TRADES FEED (foundation for pipeline tabs + V6)
+
+### Why
+Operator is planning a V5 layout change (pipeline-stage feeds as persistent
+tabs) but V6 is on the horizon with a different layout philosophy. Decision:
+build only the **layout-agnostic, V6-portable** pieces now and DEFER the
+V5-only tab-container/layout restructure. Strict constraint: **zero impact on
+the running app.**
+
+### Shipped (fully additive)
+- **Backend** `GET /api/sentcom/closed-trades?range=today|7d|30d` (new route in
+  `routers/sentcom.py`). Sourced from `bot_trades`, reuses the EXACT v141 dedup
+  key + flags synthetic/reconciler closes, computes a server-side summary
+  (count / WR / net / ΣR / avg / worst / best). Rich rows: unified TQS grade,
+  dir, shares, entry/exit price, **entry/exit time + hold duration**, realized $,
+  R, MAE/MFE (R), close reason, trade type. Does NOT touch any existing route.
+- **Frontend** `components/sentcom/v5/ClosedTradesTable.jsx` — portable,
+  presentational, sortable rich table (data via props, emits onRowClick /
+  onRangeChange). Drops into the future V5 Close tab AND V6 history view with no
+  rework.
+- **Frontend** `components/sentcom/preview/ClosedTradesPreview.jsx` — isolated
+  harness (self-fetch + 15s live refresh) reachable ONLY at
+  `?preview=closedfeed`. NOT mounted in the live tree.
+- **App.js** — added the `?preview=closedfeed` escape-hatch branch (mirrors the
+  existing `?preview=v6mock` pattern). Normal app render path unchanged.
+
+### Verification
+- Endpoint tested via curl across all 3 ranges: dedup confirmed (phantom NVDA
+  dropped), range filtering confirmed, summary accurate. Proxy path confirmed.
+- Real component renders real endpoint data in the V5 aesthetic (screenshot).
+- Frontend compiles clean; lint passes. Zero changes to existing endpoints or
+  the live command-center tree.
+
+### Deferred (V5-only, pending V6 timing decision)
+- Pipeline-feed tab container (HUD tiles → tabs), badge pulse, 3-column layout
+  restructure, right-column → bot-stream move. Hold until operator confirms V6
+  timeline (replace vs coexist).
+
+---
+
 ## 2026-05-29 — v19.34.176 REGIME ENGINE: COMPOSITE SPY/QQQ/IWM TREND + TOLERANCE
 
 ### Why

@@ -822,6 +822,164 @@ async def get_positions():
         }
 
 
+@router.get("/closed-trades")
+async def get_closed_trades(
+    range: str = Query("today", regex="^(today|7d|30d)$"),
+):
+    """
+    v19.34.177 — Ranged, deduped closed-trades feed (portable foundation for
+    the pipeline-feed CLOSE tab + future V6 history view).
+
+    Sourced from `bot_trades` (the source of truth), reusing the EXACT dedup
+    key (v19.34.141) so totals stay in lock-step with /positions and the
+    realized-pnl audit. ADDITIVE — does not touch any existing endpoint or
+    alter the running app's behavior.
+
+    range: today (since ET midnight) | 7d | 30d.
+    Returns rich per-trade rows (unified TQS grade, entry/exit time + price,
+    hold duration, R, MAE/MFE in R, close reason, trade type) plus a
+    server-computed summary block (count / WR / net / ΣR / avg / worst).
+    """
+    from datetime import datetime, timezone, timedelta
+    try:
+        from server import db as _db
+    except Exception as e:
+        logger.warning(f"closed-trades: db import failed: {e}")
+        return {"success": False, "range": range, "trades": [], "summary": {}}
+
+    # ── range → UTC cutoff (ET midnight for 'today', matches /positions) ──
+    now_utc = datetime.now(timezone.utc)
+    if range == "today":
+        et_now = now_utc - timedelta(hours=4)
+        cutoff = et_now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(hours=4)
+    elif range == "7d":
+        cutoff = now_utc - timedelta(days=7)
+    else:  # 30d
+        cutoff = now_utc - timedelta(days=30)
+    cutoff_iso = cutoff.isoformat()
+
+    # ── materialize off the event loop (mirrors /positions L3-hotfix2) ──
+    import asyncio as _aio_ct
+
+    def _materialize_closed():
+        _cur = _db["bot_trades"].find(
+            {
+                "status": "closed",
+                "$or": [
+                    {"closed_at": {"$gte": cutoff_iso}},
+                    {"closed_at": None, "executed_at": {"$gte": cutoff_iso}},
+                ],
+            },
+            {"_id": 0},
+            sort=[("closed_at", -1)],
+            limit=1000,
+        )
+        return list(_cur)
+
+    try:
+        raw = await _aio_ct.to_thread(_materialize_closed)
+    except Exception as e:
+        logger.warning(f"closed-trades lookup failed (non-fatal): {e}")
+        raw = []
+
+    # Synthetic / reconciler-stamped closes (actual IB fill predates closed_at).
+    # Flagged per-row for UI transparency; still included in the list.
+    SYNTHETIC_CLOSE_REASONS = {
+        "oca_closed_externally_v19_31", "external_close_v19_34_15b",
+        "operator_external_flatten", "operator_sync_external_close_v19_34_47",
+        "zombie_cleanup_v19_34_19", "consolidated_v19_34_42",
+        "consolidated_in_flatten_v19_34_44", "stale_pending_v19_34_78",
+        "stale_pending_cleared_v19_34_78",
+    }
+    SYNTHETIC_CLOSE_PREFIXES = ("phantom_close:",)
+
+    def _hold(entry_iso, exit_iso):
+        try:
+            a = datetime.fromisoformat(str(entry_iso).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(exit_iso).replace("Z", "+00:00"))
+            secs = max(0, int((b - a).total_seconds()))
+        except Exception:
+            return None, None
+        h, rem = divmod(secs, 3600)
+        m = rem // 60
+        return secs, (f"{h}h{m:02d}m" if h else f"{m}m")
+
+    _seen: set = set()
+    trades = []
+    for t in raw:
+        realized = float(t.get("realized_pnl") or t.get("net_pnl") or t.get("pnl") or 0)
+        ft = t.get("fill_time") or t.get("entry_time")
+        if ft and hasattr(ft, "isoformat"):
+            ft = ft.isoformat()
+        _key = ("ft", t.get("symbol"), str(ft)) if ft else (
+            "sig", t.get("symbol"), t.get("fill_price"), t.get("shares"), t.get("exit_price"))
+        if _key in _seen:
+            continue
+        _seen.add(_key)
+
+        entry_time = t.get("fill_time") or t.get("entry_time") or t.get("executed_at")
+        exit_time = t.get("closed_at") or t.get("executed_at")
+        if hasattr(entry_time, "isoformat"):
+            entry_time = entry_time.isoformat()
+        if hasattr(exit_time, "isoformat"):
+            exit_time = exit_time.isoformat()
+        hold_secs, hold_label = _hold(entry_time, exit_time)
+
+        _cr = (t.get("close_reason") or t.get("exit_reason") or "").strip()
+        is_synthetic = _cr in SYNTHETIC_CLOSE_REASONS or any(
+            _cr.startswith(p) for p in SYNTHETIC_CLOSE_PREFIXES)
+
+        trades.append({
+            "trade_id": t.get("id"),
+            "symbol": t.get("symbol"),
+            "setup_type": t.get("setup_type"),
+            "unified_grade": t.get("unified_grade") or t.get("tqs_grade") or t.get("quality_grade") or "",
+            "tqs_grade": t.get("tqs_grade") or "",
+            "direction": t.get("direction"),
+            "shares": t.get("shares"),
+            "entry_price": t.get("fill_price") or t.get("entry_price"),
+            "exit_price": t.get("exit_price") or t.get("close_price"),
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "hold_seconds": hold_secs,
+            "hold_label": hold_label,
+            "realized_pnl": round(realized, 2),
+            "r_multiple": t.get("r_multiple"),
+            "mae_r": t.get("mae_r"),
+            "mfe_r": t.get("mfe_r"),
+            "close_reason": _cr or None,
+            "trade_type": t.get("trade_type") or "unknown",
+            "is_synthetic": is_synthetic,
+        })
+
+    # ── server-computed summary (frontend just renders it) ──
+    n = len(trades)
+    wins = sum(1 for x in trades if (x["realized_pnl"] or 0) > 0)
+    losses = sum(1 for x in trades if (x["realized_pnl"] or 0) < 0)
+    net = round(sum(x["realized_pnl"] or 0 for x in trades), 2)
+    r_vals = [float(x["r_multiple"]) for x in trades if x.get("r_multiple") is not None]
+    sum_r = round(sum(r_vals), 2) if r_vals else 0.0
+    summary = {
+        "count": n,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / n * 100) if n else 0,
+        "net_pnl": net,
+        "sum_r": sum_r,
+        "avg_r": round(sum_r / len(r_vals), 2) if r_vals else 0.0,
+        "worst_r": round(min(r_vals), 2) if r_vals else 0.0,
+        "best_r": round(max(r_vals), 2) if r_vals else 0.0,
+    }
+    return {
+        "success": True,
+        "range": range,
+        "cutoff": cutoff_iso,
+        "trades": trades,
+        "summary": summary,
+    }
+
+
+
 @router.get("/setups")
 async def get_setups():
     """
