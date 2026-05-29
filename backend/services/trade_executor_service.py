@@ -2286,6 +2286,57 @@ class TradeExecutorService:
             logger.error(f"IB close position error: {e}")
             return {"success": False, "error": str(e)}
     
+    @staticmethod
+    def _partition_oids_by_live_set(oids, live_ids):
+        """v19.34.189 — split tracked orderIds against an authoritative
+        live open-order set. Returns (present, gone).
+
+        `present` = oid IS currently open at IB (must cancel + confirm
+        before closing — could still fill, flip risk).
+        `gone`    = oid is NOT open at IB (dead/cancelled/filled, or owned
+        by another clientId and already terminal) → safe; cannot fill.
+        Pure function (no IB calls) so it is unit-testable without hardware.
+        """
+        present = [o for o in oids if o in live_ids]
+        gone = [o for o in oids if o not in live_ids]
+        return present, gone
+
+    async def _fetch_live_open_order_ids(self):
+        """v19.34.189 — AUTHORITATIVE set of orderIds currently open at IB
+        across ALL clients, via a fresh `reqAllOpenOrders` round-trip.
+
+        Returns a set[int] on success, or None if the query could not be
+        completed. None is the conservative signal — callers MUST fall
+        back to the legacy block-and-confirm path so we never weaken the
+        OCA-race (direction-flip) protection on a transient query failure.
+
+        Why this exists: the previous pre-filter read `_ib.trades()`, an
+        in-memory cache that (a) freezes an order's status at disconnect
+        and is never purged on socket-reconnect, and (b) cannot be marked
+        terminal by this client's error handler when the order was placed
+        under a different clientId (the pusher). Result: dead orders showed
+        as `Submitted` forever → every close aborted `bracket_cancel_
+        timeout_race_risk`. A fresh `reqAllOpenOrders` returns the TRUE
+        currently-working orders and sidesteps both failure modes.
+        """
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ibd = get_ib_direct_service()
+            if ibd is None or not await ibd.ensure_connected():
+                return None
+            fresh = await asyncio.to_thread(ibd._ib.reqAllOpenOrders)
+            # Brief settle so any in-flight openOrder callbacks land.
+            await asyncio.sleep(0.3)
+            return {int(t.order.orderId) for t in (fresh or [])
+                    if getattr(t, "order", None) is not None}
+        except Exception as e:
+            logger.debug(
+                "[v19.34.189 fresh-openorders] reqAllOpenOrders failed "
+                "(non-fatal, caller falls back to block-safe path): %s", e,
+            )
+            return None
+
+
     async def _cancel_ib_bracket_orders(self, trade) -> Dict[str, Any]:
         """v19.13 — cancel the IB bracket's stop + target children for `trade`.
         v19.34.64 — Now polls IB until each child reaches terminal status
@@ -2373,32 +2424,34 @@ class TradeExecutorService:
         # This eliminates the most common cause of false-positive timeouts
         # (stale tracked IDs) without weakening the OCA-race protection
         # for genuinely live brackets.
-        try:
-            from services.ib_direct_service import get_ib_direct_service
-            _ibd_pre = get_ib_direct_service()
-            if _ibd_pre is not None and await _ibd_pre.ensure_connected():
-                _live = list(_ibd_pre._ib.trades())
-                _live_ids = {int(t.order.orderId) for t in _live
-                             if t.order is not None}
-                _gone = [oid for oid in ordered if oid not in _live_ids]
-                _present = [oid for oid in ordered if oid in _live_ids]
-                if _gone:
-                    logger.info(
-                        "[v19.34.70 PATCH A] %s — %d tracked orderId(s) not "
-                        "in IB cache (already-terminal-safe), skipping "
-                        "cancel/wait: %s",
-                        trade.symbol, len(_gone), _gone,
-                    )
-                    result["unknown"].extend(_gone)
-                ordered = _present
-            # If ib_direct unavailable, fall through to legacy path on
-            # full `ordered` — same behavior as pre-v19.34.70.
-        except Exception as _pa_err:
-            logger.debug(
-                "[v19.34.70 PATCH A] pre-filter failed for %s "
-                "(non-fatal, falling back to legacy path): %s",
-                trade.symbol, _pa_err,
-            )
+        #
+        # v19.34.189 — Authoritative source upgrade. The v19.34.70A
+        # pre-filter read `_ib.trades()` (an in-memory CACHE). That cache
+        # freezes an order's status at disconnect and is NEVER purged on a
+        # socket-reconnect, and it cannot be marked terminal by this
+        # client's error handler when the order was placed under a
+        # different clientId (the pusher). Net effect: orders dead at IB
+        # showed as `Submitted` forever → `wait_for_orders_terminal` timed
+        # out on them → every close aborted `bracket_cancel_timeout_race_
+        # risk` (CF/BAP 2026-05-29). Fix: partition against a FRESH
+        # `reqAllOpenOrders` round-trip (the TRUE currently-working orders
+        # across all clients) instead of the stale cache. If the fresh
+        # query can't complete (returns None) we fall back to the legacy
+        # block-and-confirm path — never weakening the flip protection.
+        _live_ids = await self._fetch_live_open_order_ids()
+        if _live_ids is not None:
+            _present, _gone = self._partition_oids_by_live_set(ordered, _live_ids)
+            if _gone:
+                logger.info(
+                    "[v19.34.189 fresh-openorders] %s — %d tracked orderId(s) "
+                    "NOT in IB's authoritative open-orders (dead/cancelled/"
+                    "filled/other-client), skipping cancel/wait: %s",
+                    trade.symbol, len(_gone), _gone,
+                )
+                result["unknown"].extend(_gone)
+            ordered = _present
+        # If the fresh query failed (None), fall through to legacy path on
+        # full `ordered` — block-safe, same behavior as pre-v19.34.189.
 
         # If pre-filter removed everything, return early — nothing to
         # cancel/wait on. Caller sees `unknown` populated → treats as
@@ -2511,6 +2564,29 @@ class TradeExecutorService:
                 # would erase that signal and re-introduce the bug.
                 result["unknown"].extend(partition.get("unknown", []))
                 result["ib_direct_called"] = True
+                # v19.34.189 — Post-wait authoritative re-check. An order
+                # can go terminal DURING the wait without the cache
+                # reflecting it (e.g. an OCA sibling that IB auto-cancels
+                # when the stop fills, or a different-clientId order). Any
+                # oid that timed out but is NO LONGER in IB's authoritative
+                # open-orders is dead → reclassify timeout→unknown (safe).
+                # Falls back to leaving it in `timeout` (block-safe) if the
+                # fresh query can't complete.
+                if result["timeout"]:
+                    _live_ids_post = await self._fetch_live_open_order_ids()
+                    if _live_ids_post is not None:
+                        _still, _gone_post = self._partition_oids_by_live_set(
+                            result["timeout"], _live_ids_post,
+                        )
+                        if _gone_post:
+                            logger.warning(
+                                "[v19.34.189 fresh-openorders] %s — %d timed-out "
+                                "child(ren) %s absent from IB's authoritative "
+                                "open-orders; reclassifying as safe (cannot fill).",
+                                trade.symbol, len(_gone_post), _gone_post,
+                            )
+                            result["timeout"] = _still
+                            result["unknown"].extend(_gone_post)
                 if result["filled"]:
                     logger.critical(
                         "[v19.34.64 OCA-RACE] %s — bracket child(ren) "
