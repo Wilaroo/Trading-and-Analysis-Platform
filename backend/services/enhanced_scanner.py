@@ -177,6 +177,17 @@ STRATEGY_TIME_WINDOWS = {
     "the_3_30_trade":      [TimeWindow.CLOSE],
 }
 
+# v19.34.181 — opening-volatility gate for longer-horizon setups.
+# Scalp/intraday setups run all day; swing / position / investment /
+# multi-day setups have no opening-30min edge and the operator only
+# wants them live after 10:15 ET. Gated on the FINAL trade_style the
+# detector stamps on the alert (so an intraday-classified `squeeze`
+# correctly stays all-day even though STRATEGY_CONFIG tags it swing).
+# See EnhancedScanner._later_horizon_window_ok().
+LATER_HORIZON_STYLES = {"swing", "position", "investment", "multi_day"}
+LATER_HORIZON_START_ET = (10, 15)  # (hour, minute) ET — inclusive start
+
+
 # Strategy market regime preferences.
 #
 # 2026-04-29 architectural decision (post Setup-landscape v3): this map
@@ -2098,6 +2109,24 @@ class EnhancedBackgroundScanner:
             return False
         
         return True
+
+    def _later_horizon_window_ok(self, alert) -> bool:
+        """v19.34.181 — block swing/position/investment/multi-day alerts
+        before 10:15 ET. Scalp/intraday styles pass at any time. Gated on
+        the alert's final trade_style (what the operator sees), so an
+        intraday-classified setup stays all-day regardless of STRATEGY_CONFIG.
+        Fail-open on any error."""
+        style = str(getattr(alert, "trade_style", "") or "").strip().lower()
+        if style not in LATER_HORIZON_STYLES:
+            return True
+        try:
+            from zoneinfo import ZoneInfo
+            et = datetime.now(ZoneInfo("America/New_York"))
+            if (et.hour, et.minute) < LATER_HORIZON_START_ET:
+                return False
+        except Exception:
+            return True
+        return True
     
     # ==================== SERVICE PROPERTIES ====================
     
@@ -3142,6 +3171,12 @@ class EnhancedBackgroundScanner:
                 # Call appropriate scanner method
                 alert = await self._check_setup(setup_type, symbol, snapshot, tape)
                 if alert:
+                    # v19.34.181 — opening-volatility gate: swing/position/
+                    # investment/multi-day setups only go live after 10:15 ET.
+                    # Scalp/intraday pass any time. Uses the alert's final
+                    # trade_style stamp.
+                    if not self._later_horizon_window_ok(alert):
+                        continue
                     # Add strategy stats to alert
                     base_setup = setup_type.split("_long")[0].split("_short")[0]
                     if base_setup in self._strategy_stats:

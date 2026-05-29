@@ -1,3 +1,54 @@
+## 2026-05-29 — v19.34.181 OPENING-VOLATILITY TIME GATE + R:R AUTO-LADDER FALLBACK
+
+### Why (operator-driven, from live 10:05 ET scanner review)
+1. Swing/position/investment/multi-day setups were firing in the opening 30
+   min — operator wants them gated to **10:15 ET+** (scalp/intraday stay
+   all-day). Root cause: `_is_setup_valid_now` only blocks setups LISTED in
+   `STRATEGY_TIME_WINDOWS`; none of the longer-horizon setups were listed, so
+   the gate returned True (all-day) for them.
+2. Longer-horizon setups were almost all rejected at the `min_risk_reward`
+   gate at absurd R:R (BIL 0.02, BOXX 0.03, stage_2 0.57-0.76). Root cause:
+   their detectors supply their OWN targets (set near daily structure, close
+   to entry) paired with wide 2.5-3× ATR stops → R:R ≪ 1. The auto R-ladder
+   only ran when NO targets were supplied, so it never rescued them.
+
+### Fixes shipped
+- **Time gate (enhanced_scanner):** new `LATER_HORIZON_STYLES`
+  {swing, position, investment, multi_day} + `LATER_HORIZON_START_ET=(10,15)`.
+  `_later_horizon_window_ok(alert)` blocks those styles before 10:15 ET; wired
+  right after `_check_setup` so it gates on the alert's FINAL `trade_style`
+  (an intraday-classified `squeeze` correctly stays all-day even though
+  STRATEGY_CONFIG tags it swing). Scalp/intraday/unknown pass any time.
+  Fail-open.
+- **R:R auto-ladder fallback (opportunity_evaluator):** extracted the v112
+  trade-style ladder into `_target_ladder_rungs(alert, setup_type)` (behavior
+  identical). At the R:R gate, when a detector-supplied target yields
+  sub-threshold R:R, re-derive the target from the ACTUAL per-share risk using
+  the ladder, picking the smallest rung that clears `effective_min_rr`
+  (swing→2.5R, position→2R), leaving the stop untouched. Only applies if the
+  recomputed R:R actually clears the floor; otherwise rejects as before.
+  Logs `🪜 ... auto-ladder fallback`.
+
+### Files changed
+- `backend/services/enhanced_scanner.py`
+- `backend/services/opportunity_evaluator.py`
+- `backend/tests/test_v19_34_112_scalp_sl_tp_fix.py` (anchored to new helper)
+- `backend/tests/test_v19_34_181_timegate_and_rr_fallback.py` (new, 8 tests)
+
+### Verification
+- 8 new tests pass; 121/121 across all ladder/RR/exposure/TQS/prioritization
+  suites green; both services compile.
+- Live (post-deploy): R:R fallback verifiable now (`grep "auto-ladder fallback"
+  /tmp/backend.log`; longer-horizon setups should start clearing the R:R gate).
+  Time gate verifiable at TOMORROW's open (no swing/pos/inv/m-day alerts before
+  10:15 ET; they appear at 10:15).
+- ⚠️ Deploy restarts the backend mid-session → account-guard re-trips
+  (re-acknowledge once account chip is green) and open positions get re-adopted
+  by the reconciler. Prefer deploying when flat / after close.
+
+---
+
+
 ## 2026-05-29 — v19.34.180 PUT /risk-params now persists MONGO_WINS fields
 
 ### Why
