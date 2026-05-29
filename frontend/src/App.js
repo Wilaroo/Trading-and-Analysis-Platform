@@ -15,6 +15,9 @@ import { V6LayoutPreview } from './pages/V6LayoutPreview';
 import { V6BrainstormPreview } from './pages/V6BrainstormPreview';
 import { V6ConceptsExplained } from './pages/V6ConceptsExplained';
 import { V6NextMockup } from './pages/V6NextMockup';
+// v19.34.177 — isolated preview of the portable ClosedTradesTable (?preview=closedfeed).
+// Not in the live tree; renders only behind the flag.
+import ClosedTradesPreview from './components/sentcom/preview/ClosedTradesPreview';
 import { useWebSocket, usePriceAlerts } from './hooks';
 import { TickerModalProvider } from './hooks/useTickerModal';
 import { 
@@ -127,6 +130,8 @@ function App() {
     typeof window !== 'undefined' && window.location.search.includes('preview=v6concepts');
   const isV6MockPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6mock');
+  const isClosedFeedPreview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=closedfeed');
   const isV6Preview =
     typeof window !== 'undefined' &&
     window.location.search.includes('preview=v6') &&
@@ -481,6 +486,8 @@ function App() {
           until consumed) so the preview is isolated and reversible. */}
       {isAuraPreview ? (
         <AuraMockupPreview />
+      ) : isClosedFeedPreview ? (
+        <ClosedTradesPreview />
       ) : isV6MockPreview ? (
         <V6NextMockup />
       ) : isV6ConceptsPreview ? (
