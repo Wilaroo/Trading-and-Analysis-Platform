@@ -282,6 +282,39 @@ class IBDirectService:
                     self.config.client_id, self.config.read_only,
                 )
 
+                # v19.34.190 — Master-clientId config guard. The bot can only
+                # cancel orders it OWNS, UNLESS its clientId matches the IB
+                # Gateway's "Master API client ID" (which grants cross-session
+                # / orphaned-order cancel authority). 2026-05-29: brackets
+                # placed by a prior process became un-cancellable (IB Error
+                # 10147 + PendingCancel→Submitted flap) after restarts, until
+                # the operator set Gateway Master API client ID = 11. That
+                # Gateway setting lives OUTSIDE this repo (jts.ini on the
+                # Windows box) and is lost on a Gateway reinstall/reset. We
+                # can't read it via the API, but we CAN warn loudly if this
+                # client's id drifts from the documented master value, which
+                # is the only thing that must stay in sync on our side.
+                # See runbook: memory/runbooks/ib_gateway_master_clientid.md
+                _expected_master = _env_int("IB_EXPECTED_MASTER_CLIENT_ID", 11)
+                if self.config.client_id != _expected_master:
+                    logger.warning(
+                        "v19.34.190 [IB-DIRECT] ⚠️ clientId=%d != documented "
+                        "Master API client ID=%d. The bot may be UNABLE to "
+                        "cancel orphaned/cross-session bracket orders after a "
+                        "restart (IB Error 10147). Set IB_DIRECT_CLIENT_ID=%d "
+                        "AND the Gateway's Master API client ID=%d to match. "
+                        "See runbook: ib_gateway_master_clientid.md",
+                        self.config.client_id, _expected_master,
+                        _expected_master, _expected_master,
+                    )
+                else:
+                    logger.info(
+                        "v19.34.190 [IB-DIRECT] clientId=%d matches documented "
+                        "master — cross-session/orphaned-order cancels enabled "
+                        "(requires Gateway Master API client ID=%d).",
+                        self.config.client_id, _expected_master,
+                    )
+
                 # ── v19.34.54 — flap-detection event hook ──
                 # `disconnectedEvent` fires when the socket drops for
                 # ANY reason (Gateway restart, network blip, idle
