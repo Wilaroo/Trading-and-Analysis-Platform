@@ -2,152 +2,157 @@
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A hardened, full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (:8001) + React (:3000) + MongoDB.  (trade drops persistence) and  (enabled 5 new momentum setups) were successfully deployed and verified. However, a major market regime classification bug exists in  where microscopic intraday volatility flags SPY as a downtrend (even when up +0.48% and holding gaps), polluting downstream AI features. The previous agent developed a patch () but dropped off while trying to transfer it to the DGX terminal. 
+**what currently exists?**: A hardened, full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (:8001) + React (:3000) + MongoDB. In this session, a massive safety overhaul was completed. The persistent EOD Auto-close failure was traced to a 5-second  timeout and fixed/decoupled (v181/v182). Major order-reconciliation phantom loops and sub-penny IB tick-rounding bugs (Error 110) were also resolved (v184, v185, v186, v187), securing the bot's order lifecycle stability. 
 
 **Last working item**: 
-    - Last item agent was working: Transferring the  patch and test files to the user's DGX. The DGX terminal has strict TTY buffer limits (failing on large python  pastes) and external pastebins (, ) are timing out. The agent was attempting to use small base64 chunks via  but disconnected before providing the commands to the user.
-    - Status: IN PROGRESS / BLOCKED (User is waiting for the chunked commands)
-    - Agent Testing Done: Y (Tests passed locally in the agent's environment before transfer)
-    - Which testing method agent to use? manual testing by bash / python -c / pytest. (Automated testing agents WILL FAIL due to DGX hardware bindings. DO NOT use testing agents).
-    - User Testing Done: N (Blocked on transfer)
+    - Last item agent was working: Preparing to begin **v19.34.175** (TQS/SMB unification + 5-pillar UI drill-down). The previous agent shipped 7 critical backend safety patches and consumed ~75% of the context window. To avoid dropping context midway through a heavy full-stack feature (estimated 3-4 hours of work involving both backend wiring and React UI components), the agent requested a fork to provide a clean slate.
+    - Status: NOT STARTED
+    - Agent Testing Done: N/A
+    - Which testing method agent to use? manual testing by bash / python -c. (Automated testing agents WILL FAIL due to physical DGX hardware bindings. DO NOT use testing agents).
+    - User Testing Done: N/A
 
 **All Pending/In progress Issue list**:
-  Issue 1: 🔴 (P0) Deploy v19.34.166 (Scanner Regime Bug Fix & Transfer Block)
-     - Attempted fixes: Agent created patch to add 0.25% tolerance to  trend logic and fix  DB persistence in . Transfer failed repeatedly due to DGX network timeouts and TTY buffer limits truncating base64 strings.
-     - Next debug checklist: Re-create the  deployment script and test file. Break them into VERY SMALL base64 chunks (e.g., 500 characters using ) so the user can paste them safely without hitting the TTY buffer limit. Provide these explicitly to the user.
-     - Why fix this issue and what will be achieved with the fix? Fixes the hallucinated strong_downtrend tag on 80% of live alerts which is poisoning downstream ML features and keeping  dormant.
-     - Status: BLOCKED
-     - Is recurring issue? Y (Terminal pasting issue is recurring)
-     - Should Test frontend/backend/both after fix? Backend
-
-  Issue 2: 🟡 (P1) Diagnostics Tab Data Inaccuracy & Funnel Rewrite (v19.34.167)
-     - Attempted fixes: Waiting on v166 regime accuracy to be solved first.
-     - Next debug checklist: Rewrite the Funnel endpoint () to include Stage 0 (Scanner Emits) and Stage 1 (Pre-shadow filters/drops) + Drop Reasons stacked-bar sidecar.
-     - Why fix this issue and what will be achieved with the fix? Makes the Diagnostics tab operationally useful instead of highly misleading.
+  Issue 1: 🟡 (P1) Shadow vs Real 18-point gap investigation
+     - Attempted fixes: None yet.
+     - Next debug checklist: Analyze a paired trade (shadow alert fired, real didn't or vice versa). Look at slippage, stop placement, or gate timing differences.
+     - Why fix this issue and what will be achieved with the fix? Closes the model-vs-execution gap to accurately reflect performance.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Both
-     - Blocked on other issue: Blocked on Issue 1 (v19.34.166).
+     - Should Test frontend/backend/both after fix? Backend
+     - Blocked on other issue: None
+
+  Issue 2: 🟢 (P3) Investigate missing  alert
+     - Attempted fixes: Investigated alert persistence and confirmed  is working, but this specific early-morning alert was somehow dropped before hitting the DB.
+     - Next debug checklist: Write a one-time script that scans today's  values against  and surfaces any orphans. 
+     - Why fix this issue and what will be achieved with the fix? Plugs a rare edge case/race condition in scanner persistence.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Backend
 
 **In progress Task List**:
-  Task 1: 🟡 (P1) Transfer v19.34.166 Patch Chunks
-     - Where to resume: Agent stopped responding after saying 6 /tmp/v166_chunks_v2.txt. Provide the user with the actual terminal commands to rebuild the deploy script.
-     - What will be achieved with this? Unblocks the user and deploys the critical regime fix.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix? Backend
-     - Blocked on something: None
+  Task 1: 🔴 (P0) v19.34.175: TQS / SMB Unification & UI Drill-down
+     - Where to resume: Make TQS the single source of truth (backfill ). Rewire position sizing to read TQS, not SMB. Hide standalone F badges on the frontend. Build a UI drill-down panel for the 5 TQS pillars with expand-on-click showing sub-component breakdowns.
+     - What will be achieved with this? Stops double-counting the SMB score (which is already 15% of the TQS Setup pillar) and cleans up a confusing operator UI.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? Both
+     - Blocked on something: None (Forked explicitly to work on this).
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🟡 (P1) v19.34.168: Resurrect or retire  collection (currently empty, breaking the Module Scorecard UI).
-    - 🟡 (P1) Standardize timestamp field types (mix of ISO strings and BSON datetimes) across , , , and .
-    - 🟡 (P1) Diagnostics UX Polish (Standardize ranges to Today/3d/7d/30d, add freshness timestamps).
-    - 🟡 (P1) Implement SentCom V6 UI Refactor (Variant C layout).
+    - 🟡 (P1) Finish v19.34.172: Dual-shape timestamps ( ISO +  BSON) on  and  (Deferred from previous session to keep patches small).
+    - 🟡 (P1) Frontend UI Fix: Add  /  to position cards in the UI.
+    - 🟡 (P1) v19.34.178: Decide on earnings calendar source (Finnhub vs yfinance).
+    - 🟡 (P1) Diagnostics UX Polish (Rewrite Funnel Stage 0/1 visibility, Standardize ranges to Today/3d/7d/30d, add freshness timestamps).
     
     Future Tasks:
+    - 🟢 (P2) v19.34.166: Deploy market regime classifier tolerance patch (fixes SPY downtrend hallucinations; script exists in older fork but was never successfully deployed).
     - 🟢 (P2) Tick-level Stop Run Probability ML Module.
     - 🟢 (P3) Break up  monolith.
 
 **Completed work in this session**
-- :  now persists to  MongoDB collection. Updated KNOWN_GATES and REASON_MAP. (DONE)
--  passed 8/8 tests. (DONE)
-- : Added , , , ,  to  and . (DONE)
--  passed 30/30 tests. (DONE)
-- Discovered root cause of  dormancy (Regime trend classifier is overly strict on EMA micro-boundaries). (DONE)
+- : Fixed EOD Auto-close (bumped  from 5s to 60s, stopping asyncio timeouts from silently killing EOD checks). (DONE)
+- : Created dedicated EOD supervisor task (15s cadence, no  wall) + 16:00 ET straggler alarm. (DONE)
+- : Restored  in  so backend restarts no longer sever the alert→trade decision trail. (DONE)
+- : Added submit-race guard so the reconciler stops adopting the bot's own in-flight trades as phantoms. (DONE)
+- : Fixed Variable-tick rounding bug (IB Error 110 on sub-penny stops for penny stocks). (DONE)
+- : Added defensive recent-executor-activity cooldown to reconciler (5-min safety net). (DONE)
+-  (Part 1): Dual-shape timestamps ( ISO +  BSON) on  and  + DB backfill. (DONE)
+- Repaired phantom trades for BBAI in Mongo to restore correct learning loop attribution. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Timestamp type inconsistency
-     - Debug checklist: , , and  use ISO strings.  and  use BSON Datetime.
-     - Why to solve this issue and what will be achieved with this? Prevents silent 0 rows returned bugs when querying across collections.
+   - Issue 1: Dual-shape timestamps needed on  and .
+     - Debug checklist: Locate insert sites and apply the same  helpers used in v172.
+     - Why to solve this issue and what will be achieved with this? Prevents silent cross-collection Mongo query bugs.
      - Should Test frontend/backend/both after fix: Backend
      - Is recurring issue? N
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Terminal Base64/Bash Heredoc chunk pasting corruption and pastebin network timeouts.
-  - Recurrence count: >5
-  - Status: IN PROGRESS
-  - Note: Do NOT use python  for base64 decoding on the DGX. The TTY buffer maxes out at ~1KB and corrupts. Use small  chunks (under 1,000 characters each) and then decode.
+  - Issue recurrence in previous fork: Terminal Base64/Bash chunk pasting corruption and DGX pasting limits.
+  - Recurrence count: >10
+  - Status: RESOLVED (Mitigated completely by uploading python patch scripts to  and having the user  them directly onto the DGX). **YOU MUST USE THIS PATTERN**.
 
 **Code Architecture**
 - DGX Spark (Linux) running FastAPI (Backend) on , React (Frontend) on .
 - Python scripts interact natively via PyMongo to localhost MongoDB ( DB).
+- Windows PC handles IB Gateway connections () and pushes live market data to DGX via ZMQ/RPC pusher.
 
 **Key Technical Concepts**
-FastAPI, React, MongoDB, Market Regime Classification (Engine vs Scanner SPY-only logic), Trade Drops persistence, EMA Trend logic.
+FastAPI, React, MongoDB, Interactive Brokers (Pusher vs Direct), EOD Auto-close routines, Position Reconciler, TQS (Trade Quality Score), SMB grading.
 
 **key DB schema**
-  - : Tracks alerts that failed validation gates inside the bot.
-  - : Stores the  list.
-  -  / : Regime engine historical persistence.
+  - : Stores execution logic, stops, entries, and close reasons.
+  - : Stores EOD variables ().
+  - : The actual scanner outputs containing uid=0(root) gid=0(root) groups=0(root) (alert_id) and .
+  -  & : Recently updated with dual-shape timestamps (, ).
 
 **changes in tech stack**
-  - None
+  - None.
 
 **All files of reference**
-  -  (Modified in v164, v165)
-  -  (Modified in v164)
-  -  (Modified in v164)
-  -  (Modified in v164)
-  -  (Needs the v166 trend tolerance patch)
-  -  (Needs the v166 DB persistence patch)
-  -  (Created)
-  -  (Created)
-  -  (Created)
-  -  (Created)
-  -  (Created, pending transfer)
+  -  (Heavily modified for EOD tasks)
+  -  (Modified for EOD logic)
+  -  (Patched for race guards)
+  -  (Patched to retain )
+  -  (Patched for tick rounding)
+  -  (Used for v172)
+  -  (CRITICAL RULES FOR AGENTS ON THIS SYSTEM)
 
 **Areas that need refactoring**
-  -  (Monolith)
-  - Scanner's  (Currently SPY-only, should subscribe to ).
+  - TQS vs SMB overlapping logic (Immediate focus: v19.34.175).
+  -  (Monolith breakdown).
 
 **key api endpoints**
   - 
-  - 
 
 **Critical Info for New Agent**
-- **Hardware Limitations**: Do NOT use automated testing agents. Standard integration tests will fail due to physical DGX hardware bindings.
-- **Terminal Pasting Bug**: The DGX user's terminal truncates large pastes.  and other curl endpoints are currently timing out. You MUST generate the  patch logic into a robust Python deploy script, convert it to base64, and give the user small sequential append commands (, , etc.) to rebuild it locally. Keep chunks well under 1,000 chars.
-- **Immediate Task**: Apologize for dropping off, reconstruct the  patch/test file, chunk it safely, and provide it to the user.
+- **Hardware Limitations**: Do NOT use automated testing agents ( WILL FAIL). Standard integration tests will fail due to physical DGX hardware bindings. Run manual , , or bash grep checks.
+- **Git Wipe Hazard**: The user's  restart script runs  on the DGX. **ANY UNCOMMITTED CHANGES WILL BE SILENTLY DESTROYED ON RESTART**. Always write deploy scripts that auto-commit the changes (On branch main
+nothing to commit, working tree clean) before asking the user to restart.
+- **File Transfer Method**: The physical terminal corrupts standard base64 pastes. ALWAYS use the  curl pattern proven in this session ().
+- **Read MD Files**: User explicitly requested you review  and other documentation files before beginning.
 
 **documents and test reports created in this job**
-  - 
-  - 
-  - 
-  - 
+  -  (Multiple deployment and repair scripts transferred to the DGX).
+  -  updated.
 
 **Last 10 User Messages and any pending HUMAN messages** 
- - *User*: ok so what am i copy and pasting?
- - *Agent*: (Empty response)
- - *User*: hello?
- - *Agent*: (Empty response)
- - *User (Pending Human Message)*: what happened? where are you?
- - **Action required**: Respond immediately. Apologize for the disconnect. Acknowledge that the deployment script was too large and the network is blocking pastebins. Immediately provide the  deployment script using small  commands to safely transfer the fix for the regime classification bug.
+ - *User*: ok lets get ready to fork then. make sure next agent reads agents.md and our other .mds
+ - *Agent*: Verified docs existed, auto-committed session changes to , and safely initiated fork.
+ - *User*: do we need to commit our changes first?
+ - *Agent*: Confirmed that the python scripts already executed On branch main
+nothing to commit, working tree clean automatically, so DGX state is safe.
+ - *User*: Next Action Items ... ok lets see what of these we want to prioritize next then
+ - *Agent*: Provided prioritized list.
+ - *User*: lets do A, then D, then E, then F (A=184+187, D=172, E=175, F=166).
+ - *Note*: Agent completed A and D. **You are now on E: v19.34.175**.
 
 **Project Health Check:**
-Broken (Critical bug misclassifying regimes as downtrend in production, poisoning ML features. Deployment blocked by DGX environment limits).
+Healthy. Severe order lifecycle / reconciler whiplash and EOD bugs were resolved in the immediate prior session.
 
 **3rd Party Integrations**
   - Interactive Brokers (Data & Execution - runs on hardware, requires User credentials)
+  - Finnhub
   - *No Emergent LLM Key required for this stack.*
 
 **Testing status**
   - Testing agent used after significant changes: NO (Hardware block).
   - Troubleshoot agent used after agent stuck in loop: NO.
-  - Test files created:  (Passing),  (Passing). 
-  - Known regressions: None, but pre-existing regime bug uncovered.
+  - Test files created: N/A. Manual Python diagnostic scripts heavily used instead.
+  - Known regressions: None currently.
 
 **Credentials to test flow:**
 N/A - System runs natively on user's local DGX.
 
 **What agent forgot to execute**
-The agent generated the  fix but disconnected completely while trying to compress/chunk the files for the user to copy/paste, leaving the user hanging without the fix.
+The agent deferred adding / dual timestamps to  and  to keep the v172 patch small. It needs to be picked up in the future.
 
 **Debugging checklist for current issue**
-    Issue: Transferring v19.34.166 to DGX safely
-    Files to check:  (add 0.25% tolerance logic for EMA bounds),  (fix  to point to valid collections).
+    Task: v19.34.175 (TQS/SMB unification + UI drill-down)
+    Backend files to check: , , ,  (position sizing logic).
+    Frontend files to check:  (Position cards, UI drill-down panel).
     Next steps:
-    1. Recreate the Python script that modifies  to add  tolerance and fixes .
-    2. Convert this script to base64.
-    3. Split the base64 string into chunks of ~500 characters.
-    4. Provide the user with terminal commands: , , etc.
-    5. Provide the final decode command: .</analysis>
+    1. Read  and related documentation as explicitly requested by the user.
+    2. Audit the backend to see exactly where position sizing currently reads the SMB score, and rewrite it to read TQS instead.
+    3. Add a DB backfill script to set  on historical rows.
+    4. On the frontend, hide the standalone F badges that confuse the operator.
+    5. Build the 5-pillar UI drill-down panel with expand-on-click functionality for TQS sub-components.</analysis>

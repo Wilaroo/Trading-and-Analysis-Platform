@@ -987,7 +987,7 @@ if not self._can_route_brackets():
 
 ### Deployment plan
 Same as Patches G/H/I: develop in Emergent sandbox, publish patch via
-`https://trading-bot-v166.preview.emergentagent.com/<patchfile>`,
+`https://unified-scoring.preview.emergentagent.com/<patchfile>`,
 operator `curl + git apply` on DGX, run pytest, commit, push,
 restart, verify with kill switch ON, then unlock.
 

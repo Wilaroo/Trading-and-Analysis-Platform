@@ -20,7 +20,7 @@ echo.
 :: CONFIGURATION
 :: =====================================================
 set SCRIPT_DIR=%~dp0
-set CLOUD_URL=https://trading-bot-v166.preview.emergentagent.com
+set CLOUD_URL=https://unified-scoring.preview.emergentagent.com
 
 :: =====================================================
 :: STEP 1: RUN STARTTRADING.BAT (but don't wait for health loop)
