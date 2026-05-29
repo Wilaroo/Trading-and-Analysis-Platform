@@ -1189,6 +1189,52 @@ class TradingBotService:
         if hasattr(self._stop_manager, "set_db"):
             self._stop_manager.set_db(db)
         logger.info("TradingBotService services configured")
+
+    async def _broadcast_event(self, payload: dict) -> None:
+        """v19.34.191 — legacy shim restoring EOD/orphan HUD events.
+
+        The original `_broadcast_event` was dropped during the
+        unified-stream migration, leaving ~9 EOD/orphan-sweep call
+        sites raising AttributeError (swallowed → HUD banners dead).
+        Maps the legacy ``{"type": ..., "timestamp": ..., **extra}``
+        payloads onto `emit_stream_event` so Mission Control HUD
+        notifications fire again. Never raises into the caller.
+        """
+        try:
+            from services.sentcom_service import emit_stream_event
+            if not isinstance(payload, dict):
+                return
+            etype = str(payload.get("type") or payload.get("event") or "event")
+            sev = str(payload.get("severity") or "").upper()
+            kind = "alert" if (
+                sev in ("CRITICAL", "ALARM", "WARN", "WARNING")
+                or "alarm" in etype or "blocked" in etype
+            ) else "system"
+            text = payload.get("text") or payload.get("content")
+            if not text:
+                label = etype.replace("_", " ").title()
+                bits = []
+                for _k in (
+                    "open_positions", "positions_to_close", "closed",
+                    "failed", "escalated", "queued", "errors",
+                    "ghosts_found", "total_pnl",
+                ):
+                    _v = payload.get(_k)
+                    if _v not in (None, "", [], {}):
+                        bits.append(f"{_k.replace('_', ' ')}={_v}")
+                text = f"⏱ {label}" + (f" · {', '.join(bits)}" if bits else "")
+            meta = {
+                _mk: _mv for _mk, _mv in payload.items()
+                if _mk not in ("type", "event", "text", "content", "kind")
+            }
+            await emit_stream_event({
+                "kind": kind,
+                "event": etype,
+                "text": text,
+                "metadata": meta,
+            })
+        except Exception as _e:
+            logger.debug(f"_broadcast_event shim failed: {_e}")
     
     def set_market_regime_engine(self, regime_engine):
         """Set market regime engine for regime-aware position sizing"""

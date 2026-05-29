@@ -2147,7 +2147,7 @@ class PositionReconciler:
                             # the DB matches the heal report.
                             if not persisted:
                                 try:
-                                    db_handle = getattr(bot, "_db", None) or getattr(self, "db", None)
+                                    db_handle = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(self, "db", None))
                                     if db_handle is not None and getattr(zt, "id", None):
                                         await asyncio.to_thread(
                                             db_handle["bot_trades"].update_one,

@@ -634,7 +634,7 @@ class DynamicRiskEngine:
             'sector_performance': {}
         }
         
-        if not self._db:
+        if self._db is None:
             return learning_data
         
         try:

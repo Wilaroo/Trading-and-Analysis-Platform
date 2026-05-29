@@ -1210,7 +1210,7 @@ class PositionManager:
             last_hb = getattr(bot, "_eod_last_heartbeat_stamp", None)
             if last_hb != hb_stamp:
                 bot._eod_last_heartbeat_stamp = hb_stamp
-                db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+                db = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
                 if db is not None:
                     # Count open close_at_eod=True positions on the fly
                     eod_eligible_count = db["bot_trades"].count_documents({
@@ -1569,7 +1569,7 @@ class PositionManager:
             logger.warning(f"EOD WS notify (complete) failed: {e}")
 
         # Persist the EOD close event
-        if bot._db:
+        if bot._db is not None:
             eod_event = {
                 "event_type": "eod_auto_close",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1626,7 +1626,7 @@ class PositionManager:
         `bot_events.eod_auto_close` row. Used by both the main close
         path AND the early-return paths so postmortem ALWAYS finds an
         event for the day."""
-        if not bot._db:
+        if bot._db is None:
             return
         try:
             await asyncio.to_thread(
@@ -1705,7 +1705,7 @@ class PositionManager:
 
         # Cross-check Mongo for swing rows on those symbols.
         swing_known: set = set()
-        if bot._db:
+        if bot._db is not None:
             try:
                 cursor = await asyncio.to_thread(
                     lambda: list(bot._db.bot_trades.find(
@@ -1987,7 +1987,7 @@ class PositionManager:
                 })
 
         # Persist a bot_event row for postmortem.
-        if bot._db:
+        if bot._db is not None:
             try:
                 await asyncio.to_thread(
                     bot._db.bot_events.insert_one,
@@ -2085,7 +2085,7 @@ class PositionManager:
                              return_exceptions=False)
         bot._eod_t_minus_2_fired_today = today_str
 
-        if bot._db:
+        if bot._db is not None:
             try:
                 await asyncio.to_thread(
                     bot._db.bot_events.insert_one,
@@ -2145,7 +2145,7 @@ class PositionManager:
             ib_open,
         )
         bot._eod_t_minus_1_alerted_today = today_str
-        if bot._db:
+        if bot._db is not None:
             try:
                 await asyncio.to_thread(
                     bot._db.bot_events.insert_one,
@@ -2348,7 +2348,7 @@ class PositionManager:
                 pass
 
             # Persist for the postmortem endpoint.
-            if bot._db:
+            if bot._db is not None:
                 try:
                     await asyncio.to_thread(
                         bot._db.bot_events.insert_one,

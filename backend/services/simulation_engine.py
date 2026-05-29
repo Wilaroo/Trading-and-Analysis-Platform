@@ -596,7 +596,7 @@ class HistoricalSimulationEngine:
                 bars = await self._fetch_alpaca_bars(symbol, start, end)
                 
                 # Cache the data to unified collection
-                if bars and self._db:
+                if bars and self._db is not None:
                     from datetime import timezone as tz
                     for bar in bars:
                         timestamp = bar.get("timestamp", "")

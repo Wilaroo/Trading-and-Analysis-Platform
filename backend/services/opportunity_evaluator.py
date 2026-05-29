@@ -748,7 +748,7 @@ class OpportunityEvaluator:
                 guard_bs = "5 mins"
                 if isinstance(alert, dict):
                     guard_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
-                db_for_guard = getattr(bot, "_db", None) or getattr(bot, "db", None)
+                db_for_guard = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
                 if sym_for_guard and db_for_guard is not None and stop_price:
                     from services.smart_levels_service import compute_stop_guard
                     dir_str = "long" if direction == TradeDirection.LONG else "short"
@@ -856,7 +856,7 @@ class OpportunityEvaluator:
                 tgt_bs = "5 mins"
                 if isinstance(alert, dict):
                     tgt_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
-                db_for_targets = getattr(bot, "_db", None) or getattr(bot, "db", None)
+                db_for_targets = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
                 # ── v19.34.112 — Skip target-snap for scalps ────────────
                 # target-snap is designed to *widen* targets to just
                 # before the nearest S/R cluster on the move side. For
@@ -1562,7 +1562,7 @@ class OpportunityEvaluator:
         # Clean LVN airpocket → fast move on either side → full size.
         vp_path_multiplier = 1.0
         try:
-            db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+            db = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
             if symbol and db is not None:
                 from services.smart_levels_service import compute_path_multiplier
                 dir_str = "long" if direction == TradeDirection.LONG else "short"
@@ -1609,7 +1609,7 @@ class OpportunityEvaluator:
         mr_hurst: Optional[float] = None
         mr_half_life: Optional[float] = None
         try:
-            db = getattr(bot, "_db", None) or getattr(bot, "db", None)
+            db = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
             if symbol and db is not None:
                 from services.mean_reversion_metrics import (
                     compute_mr_metrics, get_mr_multiplier,

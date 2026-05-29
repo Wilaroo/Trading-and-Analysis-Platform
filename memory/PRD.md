@@ -391,3 +391,17 @@ corrected stop via shared `_retune_stop_core` helper. v111 cooldown
 legacy wide-stop scalp in the book. Wires into V6 Position Health
 Console's "Tighten all wide-stop scalps" batch action.
 17/17 new tests, 255/255 cumulative v100→v117 PASS.
+
+
+## v19.34.191 — EOD SUPERVISOR CRASH HARDENING (2026-02)
+
+Fixed two P0 crashes that surfaced during a 16:00 ET EOD auto-close with
+IB Gateway wedged: (1) PyMongo `bool(Database)` truthiness crash
+(`NotImplementedError`) at 17 sites across 6 service files — replaced with
+`is not None`/`is None` and None-safe ternaries; (2) restored the missing
+`TradingBotService._broadcast_event` as a shim mapping legacy
+`{type, timestamp, ...}` payloads onto `emit_stream_event` so EOD/orphan
+Mission Control HUD banners fire again (9 call sites unchanged).
+7/7 new regression tests pass (`test_v19_34_191_eod_crash_hardening.py`).
+Deployed via paste.rs wrapper (commits before restart).
+See CHANGELOG.md for full detail.

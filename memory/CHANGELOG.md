@@ -1,3 +1,41 @@
+## 2026-02-?? — v19.34.191 EOD SUPERVISOR CRASH HARDENING
+
+### Context
+During a 16:00 ET EOD auto-close while IB Gateway was wedged, two P0 Python
+bugs surfaced in the scan/EOD loop:
+1. **PyMongo `bool(Database)` crash** — `NotImplementedError: Database objects
+   do not implement truth value testing`, raised by `<Database> or <Database>`
+   and `if <Database>:` checks.
+2. **`_broadcast_event` AttributeError** — the method was dropped during the
+   unified-stream migration, leaving ~9 EOD/orphan HUD call sites raising
+   (swallowed) AttributeError → HUD banners silently dead.
+
+### Changes
+- **BUG 1 (17 sites, 6 files):** Replaced every `bool(Database)` truthiness
+  trap with explicit `is not None` / `is None` checks and None-safe ternaries.
+  - `position_manager.py` (1× `or`-pattern, 6× `if bot._db:`, 1× `if not bot._db:`)
+  - `opportunity_evaluator.py` (4× `or`-pattern)
+  - `position_consolidator.py` (2× `or self.db`)
+  - `position_reconciler.py` (1× `or`-pattern)
+  - `dynamic_risk_engine.py` (1× `if not self._db:`)
+  - `simulation_engine.py` (1× `if bars and self._db:`)
+- **BUG 2:** Restored `TradingBotService._broadcast_event` as a thin shim that
+  maps the legacy `{"type", "timestamp", **extra}` payloads onto
+  `emit_stream_event` (kind=`alert` for alarm/critical/blocked, else `system`;
+  auto-humanized text line; extra fields → `metadata`). All 9 call sites work
+  unchanged.
+
+### Verify
+- `backend/tests/test_v19_34_191_eod_crash_hardening.py` — 7 tests, all pass
+  (NoBool sentinel proves truthiness fix; shim payload mapping + severity +
+  bad-input safety).
+- `py_compile` clean on all 7 touched files. Grep confirms zero residual
+  `or`-on-Database or bare `if (bot|self)._db:` patterns.
+- Deploy: paste.rs wrapper `https://paste.rs/Ew8Zg` (patch `YZ9CI`, test
+  `vUsBm`) — commits+pushes before restart.
+
+---
+
 ## 2026-05-29 — v19.34.190 MASTER-CLIENTID STARTUP GUARD + RUNBOOK
 
 ### Context

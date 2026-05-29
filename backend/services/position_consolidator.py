@@ -515,7 +515,7 @@ class PositionConsolidator:
 
         # Mongo-direct fallback for siblings (mirrors v19.34.21 zombie-close hardening).
         try:
-            db_handle = getattr(bot, "_db", None) or self.db
+            db_handle = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else self.db)
             if db_handle is not None:
                 for s in siblings:
                     try:
@@ -578,7 +578,7 @@ class PositionConsolidator:
 
         # Audit trail to share_drift_events.
         try:
-            db_handle = getattr(bot, "_db", None) or self.db
+            db_handle = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else self.db)
             if db_handle is not None:
                 await asyncio.to_thread(
                     db_handle["share_drift_events"].insert_one,
