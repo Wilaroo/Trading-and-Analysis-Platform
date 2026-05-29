@@ -101,7 +101,7 @@ const MissionControlPage = () => {
   const ageS = lastEventTs ? Math.round((Date.now() - lastEventTs) / 1000) : null;
 
   return (
-    <div data-testid="mission-control-page" className="h-full flex flex-col bg-zinc-950 text-zinc-200">
+    <div data-testid="mission-control-page" className="flex flex-col bg-zinc-950 text-zinc-200" style={{ height: 'calc(100vh - 6rem)' }}>
       {/* Header / heartbeat */}
       <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
@@ -151,8 +151,11 @@ const MissionControlPage = () => {
         </div>
       </div>
 
-      {/* 5 lane columns */}
-      <div className="flex-1 min-h-0 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 p-2">
+      {/* 5 lane columns — each scrolls INDEPENDENTLY (bounded grid row) */}
+      <div
+        className="flex-1 min-h-0 grid grid-cols-5 gap-2 p-2"
+        style={{ gridTemplateRows: 'minmax(0, 1fr)' }}
+      >
         {COLUMN_LANES.map((lane) => (
           <LaneColumn
             key={lane}
