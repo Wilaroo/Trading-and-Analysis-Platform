@@ -26,7 +26,7 @@ export const LaneColumn = ({ lane, events, pulse, onSymbolClick }) => {
   return (
     <div
       data-testid={`mc-lane-${lane}`}
-      className="flex flex-col min-w-0 border border-zinc-800 rounded bg-zinc-950 overflow-hidden"
+      className="flex flex-col min-w-0 min-h-0 h-full border border-zinc-800 rounded bg-zinc-950 overflow-hidden"
     >
       <div className="px-2 py-1.5 border-b border-zinc-800 bg-zinc-900/40 flex items-baseline justify-between">
         <span className="text-[12px] uppercase tracking-wider text-zinc-200 font-bold">{meta.label}</span>
