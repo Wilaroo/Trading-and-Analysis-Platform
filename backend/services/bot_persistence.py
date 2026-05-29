@@ -190,7 +190,11 @@ class BotPersistence:
                         shares=trade_doc.get("shares", 0),
                         risk_amount=trade_doc.get("risk_amount", 0),
                         potential_reward=trade_doc.get("potential_reward", 0),
-                        risk_reward_ratio=trade_doc.get("risk_reward_ratio", 0)
+                        risk_reward_ratio=trade_doc.get("risk_reward_ratio", 0),
+                        # v19.34.184 — restore alert_id on closed-trade
+                        # restore so decision_trail + learning_loop joins
+                        # survive across restarts.
+                        alert_id=trade_doc.get("alert_id"),
                     )
                     trade.fill_price = trade_doc.get("fill_price", trade_doc.get("entry_price", 0))
                     trade.exit_price = trade_doc.get("exit_price", 0)
@@ -358,7 +362,10 @@ class BotPersistence:
                         shares=shares,
                         risk_amount=risk_amount,
                         potential_reward=potential_reward,
-                        risk_reward_ratio=risk_reward_ratio
+                        risk_reward_ratio=risk_reward_ratio,
+                        # v19.34.184 — restore alert_id so decision_trail +
+                        # learning_loop joins survive across restarts.
+                        alert_id=trade_doc.get("alert_id"),
                     )
 
                     # Restore optional fields via direct assignment.

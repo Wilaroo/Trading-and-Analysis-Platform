@@ -1256,6 +1256,64 @@ class PositionReconciler:
                         })
                         continue
 
+                    # ── v19.34.187 — Recent Executor Activity Cooldown ──
+                    # Belt-and-suspenders for v185. If a NEW code path
+                    # forgets to stamp `pre_submit_at`, this OUTER net
+                    # still saves you: any open BotTrade for `sym` with
+                    # created_at within the last 5 min blocks adoption.
+                    # Catches both pre-submit and post-fill races.
+                    try:
+                        from datetime import datetime as _dt187, timezone as _tz187
+                        _now187 = _dt187.now(_tz187.utc)
+                        _recent_cutoff_s = 300  # 5 minutes
+                        _bot_open_187 = getattr(bot, "_open_trades", {}) or {}
+                        _recent_hit_187 = None
+                        for _t187 in _bot_open_187.values():
+                            if getattr(_t187, "symbol", None) != sym:
+                                continue
+                            _ca187 = getattr(_t187, "created_at", None)
+                            if not _ca187:
+                                continue
+                            try:
+                                _ca_dt187 = _dt187.fromisoformat(
+                                    str(_ca187).replace("Z", "+00:00")
+                                )
+                                if _ca_dt187.tzinfo is None:
+                                    _ca_dt187 = _ca_dt187.replace(tzinfo=_tz187.utc)
+                                _age187 = (_now187 - _ca_dt187).total_seconds()
+                                if 0 <= _age187 <= _recent_cutoff_s:
+                                    _recent_hit_187 = {
+                                        "trade_id": getattr(_t187, "id", "?"),
+                                        "created_at": str(_ca187),
+                                        "age_s": round(_age187, 1),
+                                        "setup_type": getattr(_t187, "setup_type", "?"),
+                                    }
+                                    break
+                            except Exception:
+                                continue
+                        if _recent_hit_187:
+                            logger.warning(
+                                "🛡️  [v19.34.187 RECENT-ACTIVITY] %s — bot "
+                                "created trade_id=%s setup=%s %.1fs ago; "
+                                "refusing to adopt as orphan (5-min cooldown).",
+                                sym, _recent_hit_187["trade_id"],
+                                _recent_hit_187["setup_type"],
+                                _recent_hit_187["age_s"],
+                            )
+                            report["skipped"].append({
+                                "symbol": sym,
+                                "reason": "recent_executor_activity_v19_34_187",
+                                "cooldown_window_s": _recent_cutoff_s,
+                                "recent_trade": _recent_hit_187,
+                            })
+                            continue
+                    except Exception as _r187_err:
+                        logger.debug(
+                            "[v19.34.187] recent-activity cooldown check "
+                            "failed for %s: %s (falling through to v185)",
+                            sym, _r187_err,
+                        )
+
                     # ── v19.34.185 — Submit-Race Guard ──
                     # If the bot itself just submitted an order for this
                     # symbol (within the last 60s), DO NOT spawn an
