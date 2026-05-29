@@ -177,12 +177,16 @@ const ClosedTradesTable = ({
                   </td>
                   <td className="text-right px-2 py-1.5 text-zinc-300">{t.shares ?? '—'}</td>
                   <td className="text-right px-2 py-1.5 text-zinc-300">{fmtPrice(t.entry_price)}</td>
-                  <td className="text-right px-2 py-1.5 text-zinc-300">{fmtPrice(t.exit_price)}</td>
+                  <td className="text-right px-2 py-1.5 text-zinc-300" title={t.exit_price_derived ? 'derived from realized P&L (external close)' : ''}>
+                    {t.exit_price_derived && t.exit_price != null ? '~' : ''}{fmtPrice(t.exit_price)}
+                  </td>
                   <td className="text-right px-2 py-1.5 text-zinc-500">{fmtTime(t.entry_time)}</td>
                   <td className="text-right px-2 py-1.5 text-zinc-500">{fmtTime(t.exit_time)}</td>
                   <td className="text-right px-2 py-1.5 text-zinc-400">{t.hold_label || '—'}</td>
                   <td className={`text-right px-2 py-1.5 font-medium ${pnlClass(t.realized_pnl)}`}>{fmtMoney(t.realized_pnl)}</td>
-                  <td className={`text-right px-2 py-1.5 ${pnlClass(t.r_multiple)}`}>{fmtR(t.r_multiple)}</td>
+                  <td className={`text-right px-2 py-1.5 ${pnlClass(t.r_multiple)}`} title={t.r_multiple_derived ? 'derived from realized P&L ÷ entry risk' : ''}>
+                    {t.r_multiple_derived && t.r_multiple != null ? '~' : ''}{fmtR(t.r_multiple)}
+                  </td>
                   <td className="text-right px-2 py-1.5 text-zinc-500">
                     {t.mae_r != null || t.mfe_r != null
                       ? `${t.mae_r != null ? Number(t.mae_r).toFixed(1) : '—'}/${t.mfe_r != null ? '+' + Number(t.mfe_r).toFixed(1) : '—'}`
