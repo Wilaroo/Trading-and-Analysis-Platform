@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.190 (2026-05-29, "IB-DIRECT master-clientId startup config guard — WARN at connect if clientId != documented master (11) — + runbook for the required Gateway 'Master API client ID = 11' setting that enables cancelling orphaned/cross-session brackets")
+- **Current version**: v19.34.192 (2026-02, "EOD/close bracket-cancel routed through DGX-native ib_direct (Master API clientId 11, permId-aware via live order object) instead of the stale/serialized legacy IBService worker — fixes the recurring EOD MKT-close deadlock (bracket_cancel_timeout_race_risk) + IB 10147 OrderId-not-found on cross-session DAY/GTC children. OCA-race 8s+5s wait contract untouched.")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

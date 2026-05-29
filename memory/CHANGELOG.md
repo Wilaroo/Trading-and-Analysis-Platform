@@ -1,3 +1,48 @@
+## 2026-02-?? — v19.34.192 EOD/CLOSE BRACKET-CANCEL VIA IB_DIRECT (master clientId 11)
+
+### Context (recurring P0 — EOD MKT-close deadlock)
+At 15:45 ET EOD, `close_at_eod=True` positions repeatedly failed to flatten with
+`bracket_cancel_timeout_race_risk`, and cross-session DAY/GTC bracket children
+threw IB `10147 OrderId not found`. Root-caused in the close path:
+`_cancel_ib_bracket_orders` dispatched its cancels through
+`routers.ib._ib_service.cancel_order()` — the legacy `IBService` worker thread,
+which on this DGX deployment is the **stale/disconnected** direct-ib_insync
+worker (PRD v170) serialized on a 1-worker queue. The cancel never reached IB
+before the 8s+5s terminal-wait expired → every close aborted. The throttle is
+NOT a deliberate IB-pacing safeguard (IB's real limit is ~50 msg/s); it is an
+unintended stale+serialized bottleneck.
+
+### Fix (`services/trade_executor_service.py`, safety-critical path — dispatch only)
+- New `_dispatch_bracket_cancel_v192(oid, symbol)` routes the cancel through the
+  DGX-native `ib_direct` socket (IB Gateway **Master API client ID = 11**,
+  v19.34.190). `ib_direct.cancel_order` cancels via the **live order OBJECT**
+  (which carries `permId`) looked up from the `_ib.trades()` cache that
+  `_fetch_live_open_order_ids` freshly populates via `reqAllOpenOrders`
+  immediately before the loop. Master clientId 11 lets clientId-11 cancel
+  cross-session orders → dodges `10147`.
+- Both the primary cancel loop and the v19.34.73 retry loop now use the helper.
+- Legacy `IBService` retained ONLY as a fallback (ib_direct down/None) so a
+  cancel is never silently dropped.
+- **The OCA-race contract is UNTOUCHED**: the 8s primary + 5s retry
+  terminal-wait, the filled/timeout abort, and the v189 fresh-openorders
+  re-check all remain exactly as before. Only the cancel TRANSPORT changed.
+
+### Verify
+- `backend/tests/test_v19_34_192_eod_cancel_dispatch.py` — 6 tests, all pass
+  (prefers ib_direct; falls back on failure / None / disconnected; no-transport
+  returns False; `_cancel_ib_bracket_orders` routes through the helper).
+- `py_compile` clean. (7 adjacent failures in v189/v191/70a/v40 suites are
+  PRE-EXISTING stale-mock / sandbox-env artifacts — confirmed identical with the
+  patch stashed; not introduced here.)
+- Deploy: paste.rs wrapper `https://paste.rs/orhz4` (patch `https://paste.rs/8CZIM`)
+  — applies, runs the test, commits+pushes BEFORE restart.
+- ⚠️ OPERATOR LIVE-CHECK (15:45 ET): grep `/tmp/backend.log` for
+  `v19.34.192 eod-cancel ... via ib_direct (master clientId 11, permId-aware)`;
+  every `close_at_eod=True` position flat by 15:59:30, NO
+  `bracket_cancel_timeout_race_risk` aborts.
+
+---
+
 ## 2026-02-?? — v19.34.191 EOD SUPERVISOR CRASH HARDENING
 
 ### Context

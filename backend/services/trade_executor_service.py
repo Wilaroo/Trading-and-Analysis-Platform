@@ -2337,6 +2337,85 @@ class TradeExecutorService:
             return None
 
 
+    async def _dispatch_bracket_cancel_v192(self, oid: int, symbol: str) -> bool:
+        """v19.34.192 — EOD/close-path bracket-cancel dispatch.
+
+        Routes the cancel through the DGX-native `ib_direct` socket
+        (IB Gateway "Master API client ID = 11", see v19.34.190) instead
+        of the legacy `IBService` worker thread, which on this DGX
+        deployment is the stale/disconnected direct-ib_insync worker
+        (PRD v170) serialized on a 1-worker queue. That stale+serialized
+        transport was the root of the EOD `bracket_cancel_timeout_race_
+        risk` deadlock: the cancel never reached IB before the 8s+5s
+        terminal-wait expired, so every close aborted.
+
+        Why ib_direct works here:
+          * `_fetch_live_open_order_ids()` runs a fresh `reqAllOpenOrders`
+            on this SAME ib_direct singleton immediately before the cancel
+            loop, so `ib_direct.cancel_order(oid)` finds the order in the
+            live `_ib.trades()` cache and cancels via the live order
+            OBJECT — which carries `permId`.
+          * Master clientId 11 lets clientId-11 cancel cross-session
+            DAY/GTC orders placed under the pusher's clientId, so the
+            prior `10147 OrderId not found` rejections no longer fire.
+
+        Falls back to the legacy `IBService` path ONLY when ib_direct is
+        unavailable, so a cancel is never silently dropped. This does NOT
+        change the OCA-race contract — the 8s+5s terminal-wait +
+        flip-protection in `_cancel_ib_bracket_orders` is untouched.
+
+        Returns True if a cancel was dispatched (best-effort).
+        """
+        # Preferred: DGX-native ib_direct (master clientId 11, permId-aware).
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            if ib_direct is not None and await ib_direct.ensure_connected():
+                res = await ib_direct.cancel_order(int(oid))
+                if isinstance(res, dict) and res.get("success"):
+                    logger.info(
+                        "[v19.34.192 eod-cancel] %s — cancelled order_id=%s "
+                        "via ib_direct (master clientId 11, permId-aware).",
+                        symbol, oid,
+                    )
+                    return True
+                logger.warning(
+                    "[v19.34.192 eod-cancel] %s — ib_direct cancel order_id=%s "
+                    "returned %s; falling back to legacy IBService.",
+                    symbol, oid,
+                    (res.get("error") if isinstance(res, dict) else res),
+                )
+        except Exception as e:
+            logger.warning(
+                "[v19.34.192 eod-cancel] %s — ib_direct cancel order_id=%s "
+                "raised %s: %s; falling back to legacy IBService.",
+                symbol, oid, type(e).__name__, e,
+            )
+        # Fallback: legacy IBService worker (may be stale on DGX).
+        try:
+            from routers.ib import _ib_service
+            if _ib_service is not None:
+                ok = await _ib_service.cancel_order(int(oid))
+                if not ok:
+                    logger.warning(
+                        "[v19.34.192 eod-cancel] %s — legacy IBService cancel "
+                        "order_id=%s returned False (may already be terminal).",
+                        symbol, oid,
+                    )
+                return True
+            logger.warning(
+                "[v19.34.192 eod-cancel] %s — no cancel transport available "
+                "for order_id=%s (ib_direct down + IBService None).",
+                symbol, oid,
+            )
+        except Exception as e:
+            logger.warning(
+                "[v19.34.192 eod-cancel] %s — legacy IBService cancel "
+                "order_id=%s raised %s: %s.",
+                symbol, oid, type(e).__name__, e,
+            )
+        return False
+
     async def _cancel_ib_bracket_orders(self, trade) -> Dict[str, Any]:
         """v19.13 — cancel the IB bracket's stop + target children for `trade`.
         v19.34.64 — Now polls IB until each child reaches terminal status
@@ -2460,30 +2539,13 @@ class TradeExecutorService:
             return result
 
         for oid in ordered:
-            try:
-                # Use the singleton IB service already wired into the
-                # app at startup. Avoids HTTP round-trip back through
-                # the router for an in-process cancel.
-                from routers.ib import _ib_service
-                if _ib_service is not None:
-                    ok = await _ib_service.cancel_order(oid)
-                    if not ok:
-                        logger.warning(
-                            f"v19.13: IB cancel returned False for order_id={oid} "
-                            f"({trade.symbol}) — child may have already filled or "
-                            f"been cancelled."
-                        )
-                    result["issued"].append(oid)
-                else:
-                    logger.warning(
-                        f"v19.13: IB service unavailable for cancel order_id={oid} "
-                        f"({trade.symbol})"
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"v19.13: bracket cancel raised for order_id={oid} "
-                    f"({trade.symbol}): {type(e).__name__}: {e}"
-                )
+            # v19.34.192 — dispatch via DGX-native ib_direct (master
+            # clientId 11, permId-aware) instead of the stale/serialized
+            # legacy IBService worker that caused the EOD cancel deadlock.
+            # Falls back to IBService inside the helper if ib_direct is
+            # unavailable, so a cancel is never silently dropped.
+            await self._dispatch_bracket_cancel_v192(oid, trade.symbol)
+            result["issued"].append(oid)
 
         # v19.34.64 — Confirm each cancel reached terminal status at IB
         # before returning. Without this poll, the caller submits its
@@ -2519,10 +2581,11 @@ class TradeExecutorService:
                         trade.symbol, _retry_oids,
                     )
                     for _oid in _retry_oids:
+                        # v19.34.192 — retry cancel via ib_direct too.
                         try:
-                            from routers.ib import _ib_service
-                            if _ib_service is not None:
-                                await _ib_service.cancel_order(_oid)
+                            await self._dispatch_bracket_cancel_v192(
+                                _oid, trade.symbol,
+                            )
                         except Exception as _re_err:
                             logger.debug(
                                 "[v19.34.73 cancel-retry] re-cancel %s "

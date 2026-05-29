@@ -405,3 +405,17 @@ Mission Control HUD banners fire again (9 call sites unchanged).
 7/7 new regression tests pass (`test_v19_34_191_eod_crash_hardening.py`).
 Deployed via paste.rs wrapper (commits before restart).
 See CHANGELOG.md for full detail.
+
+
+## v19.34.192 — EOD/CLOSE CANCEL TRANSPORT → IB_DIRECT (2026-02)
+
+Fixed the recurring EOD MKT-close deadlock. `_cancel_ib_bracket_orders`
+(`trade_executor_service.py`) now dispatches bracket-child cancels through the
+DGX-native `ib_direct` socket (Master API clientId 11, permId-aware via the live
+order object) instead of the stale/serialized legacy `IBService` worker. This
+eliminates the `bracket_cancel_timeout_race_risk` aborts and the IB `10147
+OrderId not found` rejections on cross-session DAY/GTC children. The OCA-race
+safety contract (8s primary + 5s retry terminal-wait, filled/timeout abort,
+v189 fresh-openorders re-check) is unchanged — only the cancel transport moved.
+6/6 new tests pass (`test_v19_34_192_eod_cancel_dispatch.py`). Deployed via
+paste.rs wrapper (commits before restart). See CHANGELOG.md.
