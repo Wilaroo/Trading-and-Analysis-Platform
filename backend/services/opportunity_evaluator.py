@@ -640,6 +640,61 @@ class OpportunityEvaluator:
             if not stop_price:
                 stop_price = self.calculate_atr_based_stop(entry_price, direction, atr, setup_type, bot)
 
+            # ── v19.34.183 — Wrong-side stop guard (entry/sizing path) ───
+            # A long must have stop < entry; a short stop > entry. A detector
+            # that emits an inverted stop (e.g. a squeeze whose price already
+            # ran past the band, leaving a stale trigger) would otherwise size
+            # off |entry-stop| and submit a backwards bracket. Discard the
+            # inverted stop and recompute the canonical per-setup ATR stop,
+            # which is always on the correct side of entry.
+            try:
+                if stop_price and entry_price:
+                    _is_long = (direction == TradeDirection.LONG)
+                    _wrong_side = ((_is_long and stop_price >= entry_price) or
+                                   ((not _is_long) and stop_price <= entry_price))
+                    if _wrong_side:
+                        _orig_ws = float(stop_price)
+                        stop_price = self.calculate_atr_based_stop(
+                            entry_price, direction, atr, setup_type, bot
+                        )
+                        logger.warning(
+                            f"🩹 [v19.34.183 wrong-side-stop] {symbol} "
+                            f"{'LONG' if _is_long else 'SHORT'} alert stop ${_orig_ws:.2f} on "
+                            f"wrong side of entry ${entry_price:.2f} — recomputed → ${stop_price:.2f}"
+                        )
+            except Exception as _ws_err:
+                logger.debug(f"[v19.34.183 wrong-side-stop] skipped for {symbol}: {_ws_err}")
+
+            # ── v19.34.183 — Position/investment stop-cap for DETECTOR stops ─
+            # v169 caps multi-day stops at 5% of entry, but that cap lives
+            # inside calculate_atr_based_stop, which only runs when the alert
+            # supplies NO stop. Detectors like stage_2_breakout / weekly_breakout
+            # DO supply a wide structural stop (e.g. BMO 30w-SMA stop = 16.8%),
+            # bypassing the cap and re-collapsing share counts to 1-3. Apply the
+            # same cap here to detector-supplied stops on position/investment
+            # horizons. Only ever TIGHTENS an over-wide stop; never loosens.
+            try:
+                import os as _os_scap
+                _style = str(alert.get('trade_style', '') or '').lower()
+                if _style in ('position', 'investment') and stop_price and entry_price:
+                    _cap_pct = float(_os_scap.environ.get(
+                        "MAX_STOP_PCT_POSITION" if _style == 'position' else "MAX_STOP_PCT_INVESTMENT",
+                        "0.05",
+                    ))
+                    _dist = abs(float(entry_price) - float(stop_price))
+                    _cap_dist = float(entry_price) * _cap_pct
+                    if _cap_pct and _cap_dist > 0 and _dist > _cap_dist:
+                        _is_long = (direction == TradeDirection.LONG)
+                        _new_stop = (entry_price - _cap_dist) if _is_long else (entry_price + _cap_dist)
+                        logger.info(
+                            f"[v19.34.183 stop-cap] {symbol} {_style} detector stop "
+                            f"${stop_price:.2f} ({_dist/entry_price*100:.1f}%) > {_cap_pct*100:.0f}% cap "
+                            f"— tightened → ${_new_stop:.2f}"
+                        )
+                        stop_price = _new_stop
+            except Exception as _scap_err:
+                logger.debug(f"[v19.34.183 stop-cap] skipped for {symbol}: {_scap_err}")
+
             # ── Stop-placement guard (2026-04-28e) ──
             # Before targets / position size, ask Smart S/R if our stop
             # is sitting inside a Volume-Profile / pivot cluster. If so,
