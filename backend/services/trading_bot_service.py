@@ -519,7 +519,7 @@ class RiskParameters:
     starting_capital: float = 100000.0       # Account capital for position sizing (updated from IB)
     max_position_pct: float = 50.0           # Maximum % of capital per position (user requested 50%)
     max_notional_per_trade: float = 100000.0  # Hard absolute notional ceiling per trade ($) — belt-and-braces vs `max_position_pct` (which floats with equity). 0 = disabled. (added 2026-04-30 v19.4)
-    max_open_positions: int = 10             # Maximum concurrent positions (unlimited = high number)
+    max_open_positions: int = 25             # Maximum concurrent positions (operator default; live value loaded from Mongo bot_state, capped by kill-switch SAFETY_MAX_POSITIONS)
     # ── v19.34.123 (Feb 2026) ───────────────────────────────────
     # When False (default), the opportunity_evaluator refuses any
     # new entry on a (symbol, direction) that already has an open
@@ -4093,8 +4093,23 @@ class TradingBotService:
             # existing behaviour.
             pass
 
-        # Check max open positions
-        if len(self._open_trades) >= self.risk_params.max_open_positions:
+        # Check max open positions.
+        # v19.34.179 — honor the EFFECTIVE cap = min(bot config,
+        # kill-switch SAFETY_MAX_POSITIONS). Previously this gate used the
+        # bot value alone, so a bot cap of 25 with a kill switch of 5
+        # wasted evaluation on trades the kill switch would later block at
+        # execution (and made the intake number disagree with the binding
+        # cap the operator sees on /effective-limits). This can only TIGHTEN
+        # the gate, never loosen it — strictly safe.
+        _eff_max_pos = self.risk_params.max_open_positions
+        try:
+            from services.safety_guardrails import SafetyConfig
+            _safety_max = SafetyConfig.from_env().max_positions
+            if _safety_max and _safety_max > 0:
+                _eff_max_pos = min(_eff_max_pos, _safety_max)
+        except Exception:
+            pass
+        if len(self._open_trades) >= _eff_max_pos:
             # 2026-04-28: was a silent return — now logs into Bot's Brain
             # so operator sees the cap is what's gating new entries.
             self.record_rejection(
@@ -4102,7 +4117,8 @@ class TradingBotService:
                 setup_type="any",
                 direction="",
                 reason_code="max_open_positions",
-                context={"cap": self.risk_params.max_open_positions},
+                context={"cap": _eff_max_pos,
+                         "bot_cap": self.risk_params.max_open_positions},
             )
             return
         
@@ -4350,8 +4366,28 @@ class TradingBotService:
         
         if alerts:
             print(f"✅ [TradingBot] {len(alerts)} alerts ready for evaluation")
-        
-        return alerts[:20]  # Top 20 alerts
+
+        # ── v19.34.179 — quality-ranked slot allocation ───────────────
+        # The scarce position slots (max_open_positions) are filled by
+        # iterating this list in order until the cap is hit. Rank by
+        # priority bucket → TQS score → trigger probability → raw score so
+        # the BEST ideas get the slots, not whatever arrived first. (The
+        # scanner already orders by priority, but the dict round-trip +
+        # the [:20] truncation below need this to be explicit and stable.)
+        def _alert_rank(a: Dict):
+            prio = {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(
+                str(a.get("priority") or "medium").lower(), 4
+            )
+            return (
+                prio,
+                -float(a.get("tqs_score") or 0),
+                -float(a.get("trigger_probability") or 0),
+                -float(a.get("score") or 0),
+            )
+
+        alerts.sort(key=_alert_rank)
+
+        return alerts[:20]  # Top 20 alerts (best-ranked first)
     
     async def _evaluate_opportunity(self, alert: Dict) -> Optional[BotTrade]:
         """Evaluate an alert — delegated to OpportunityEvaluator module."""

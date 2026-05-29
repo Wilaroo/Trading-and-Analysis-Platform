@@ -1,3 +1,78 @@
+## 2026-05-29 — v19.34.179 PRIORITIZATION + SLOT ALLOCATION + EXPOSURE + POS-CAP
+
+### Why
+Read-only audit of premarket prep / trade prioritization / scalp time-decay
+surfaced four concrete defects. Fixed all four + the operator's
+`max_open_positions` alignment question.
+
+### Fixes shipped
+- **F-A — inverted alert priority sort (P0)**. `enhanced_scanner.get_live_alerts`
+  used `sort(key=(priority_order, created_at), reverse=True)` with
+  `priority_order={CRITICAL:0…LOW:3}`, so `reverse=True` flipped the bucket
+  order and **CRITICAL/HIGH alerts sorted LAST**. The bot intake
+  (`_get_trade_alerts` → `[:20]` → slot fill) burned its position slots on
+  LOW-priority alerts first and could truncate CRITICAL off the end. Replaced
+  with a **stable two-pass sort** (recency desc, then priority asc) → CRITICAL
+  first, newest-first within bucket. Proven: pre-fix order
+  `[LOW,MED,HIGH,CRIT]`; post-fix `[CRIT_new,CRIT_old,HIGH,MED,LOW]`. The same
+  file already used the correct convention at L1115 (CRITICAL=4) — confirming
+  `get_live_alerts` was the outlier.
+- **F-B — quality-ranked slot allocation**. `_get_trade_alerts` returned
+  `alerts[:20]` in scanner order with no quality ranking. Added `_alert_rank`
+  (priority bucket → tqs_score → trigger_probability → score, all desc) before
+  the slice so the scarce `max_open_positions` slots go to the BEST ideas.
+- **F-C — portfolio exposure caps now apply to autopilot**. The v96/98
+  position-style (30%) + long-horizon (55%) caps via
+  `portfolio_exposure_guard.compute_exposure` were wired ONLY into the manual
+  `submit_trade` router path. Unattended bot entries could pile simultaneous
+  long-horizon bets past the intended concentration (starving scalp/intraday
+  buying power). Mirrored the clamp into `opportunity_evaluator.evaluate_opportunity`
+  (autonomous path), right after final sizing: clamps shares to the remaining
+  cap room, or rejects (`reason_code="portfolio_exposure_cap"`) when saturated.
+  Fail-open. Per-symbol (v123) cap still applies independently.
+- **F-E — morning-readiness false YELLOW**. `morning_readiness_service` expected
+  EOD at 15:55; canonical is 15:45 (v181). Widened the accepted band to
+  15:40–15:58 so the daily autopilot check stops throwing a spurious YELLOW.
+
+### max_open_positions alignment (operator question — "isn't it 25 now?")
+- **Code default bumped 10 → 25** (`RiskParameters.max_open_positions`). This is
+  only the fallback; the LIVE value is Mongo `bot_state.risk_params.max_open_positions`.
+- **Intake gate now uses the EFFECTIVE cap** = `min(bot value,
+  SAFETY_MAX_POSITIONS)`. Previously the scan-loop intake (`:4097`) used the
+  bot value alone while the kill switch enforced the min — so a bot=25 /
+  kill-switch=5 config wasted evaluation on trades that would be blocked at
+  execution. Gate can now only TIGHTEN (strictly safe).
+- ⚠️ OPERATOR ACTION: the binding cap is `min(bot, SAFETY_MAX_POSITIONS)`. The
+  kill-switch env default is **5**. If you want 25 live, set BOTH:
+    - Mongo: `db.bot_state.updateOne({_id:"bot_state"},{$set:{"risk_params.max_open_positions":25}})`
+    - DGX env: `SAFETY_MAX_POSITIONS=25` (then restart). Confirm via
+      `GET /api/trading-bot/effective-limits` → `effective.max_open_positions`.
+
+### F-D — scalp time-decay tagging audit (read-only script)
+`backend/scripts/audit_scalp_timeframe_tagging_v19_34_179.py`. `check_scalp_decay`
+only fires for `timeframe=="scalp"`, which is set from
+`STRATEGY_CONFIG[setup_type]["timeframe"]` (default INTRADAY). Any scalp detector
+missing/mis-tagged silently never time-decays (closes only at EOD). Run on DGX:
+`DB_NAME=tradecommand python -m backend.scripts.audit_scalp_timeframe_tagging_v19_34_179`
+→ prints mismatches; if any, add/correct the setup's STRATEGY_CONFIG timeframe.
+
+### Files changed
+- `backend/services/enhanced_scanner.py` (F-A)
+- `backend/services/trading_bot_service.py` (F-B + pos-cap default + effective intake gate)
+- `backend/services/opportunity_evaluator.py` (F-C autonomous exposure clamp)
+- `backend/services/morning_readiness_service.py` (F-E)
+- `backend/scripts/audit_scalp_timeframe_tagging_v19_34_179.py` (new, F-D)
+- `backend/tests/test_v19_34_179_prioritization_and_caps.py` (new, 8 tests)
+
+### Verification
+- 8/8 new unit tests pass; 52/52 existing TQS + exposure-cap tests still green.
+- All five changed files compile; F-C guard import + clamp math validated.
+- ⚠️ No automated agent (hardware-bound). OPERATOR LIVE-CHECK: confirm
+  CRITICAL alerts get slots first; run the F-D audit; set the pos-cap env/Mongo.
+
+---
+
+
 ## 2026-05-29 — v19.34.177 PORTABLE CLOSED-TRADES FEED (foundation for pipeline tabs + V6)
 
 ### Why
