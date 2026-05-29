@@ -1,3 +1,60 @@
+## 2026-05-30 — v19.34.183 STOP-GEOMETRY SANITY (squeeze stale-trigger + evaluator guards)
+
+### Why (found while validating v182 gameplan accuracy — now visible, not hidden)
+With v182 surfacing real alert levels, three live alerts exposed bad stop
+geometry: DIA `squeeze` long had `stop 505.82 ABOVE entry 501.63` (inverted),
+and BMO `stage_2_breakout` carried a 16.8% structural stop. Root cause traced:
+the alert dict maps `stop_price = alert.stop_loss`, and the evaluator only
+recomputes a stop when one is MISSING (`if not stop_price`) — so detector
+stops flow straight into sizing/brackets, inverted or over-wide.
+
+### Bugs fixed
+1. **DIA squeeze stale trigger (detector).** `_check_squeeze` set
+   `trigger_price = bb_upper` (long) but anchored stop/target to *current
+   price*. Once price has already broken out and run past the band, bb_upper
+   is stale and an ATR stop (current_price − 1·ATR) lands ABOVE it → inverted
+   long. Fix: anchor entry to `max(bb_upper, current_price)` (long) /
+   `min(bb_lower, current_price)` (short), and compute stop+target+R:R off that
+   single consistent `entry`. Normal pre-breakout case unchanged (entry =
+   band). Option (i): fix the geometry, do NOT suppress the signal.
+2. **Inverted stop reaches sizer (evaluator, defense-in-depth).** New wrong-side
+   guard right after the stop resolve: if a long's stop ≥ entry (or short's
+   stop ≤ entry), discard it and recompute via `calculate_atr_based_stop`
+   (always correct-side). Catches ALL ~38 detectors, not just squeeze.
+3. **v169 5% stop-cap bypassed for detector stops (evaluator).** v169's
+   position/investment 5%-of-entry cap lives inside `calculate_atr_based_stop`,
+   which only runs when no stop is supplied. stage_2_breakout / weekly_breakout
+   supply their own wide structural stops, bypassing it → reopened the "1–3
+   share" tiny-sizing problem. New cap applies the same 5% ceiling (env
+   `MAX_STOP_PCT_POSITION` / `MAX_STOP_PCT_INVESTMENT`) to detector-supplied
+   stops on position/investment horizons. Only TIGHTENS; never loosens.
+
+### Not bugs (confirmed working)
+- BOXX `three_week_tight` R:R 0.60 → v181 auto-ladder re-derives the target to
+  clear the swing R:R floor. Working as designed.
+- `LiveAlert.atr` persisting as 0.0 in diagnostics is a cosmetic display gap
+  (detector used a real ATR ~5.1) — left as a future nit.
+
+### Files changed
+- `backend/services/enhanced_scanner.py` (`_check_squeeze` entry anchor)
+- `backend/services/opportunity_evaluator.py` (wrong-side guard + detector stop-cap)
+- `backend/tests/test_v19_34_183_stop_geometry.py` (new, 10 tests)
+
+### Verification
+- 10/10 new tests pass (3 exercise the REAL `_check_squeeze`; 7 mirror the
+  evaluator guard logic). 62/62 across v169+v181+v179+v112+v182+v183 — no
+  regressions. Both services compile; lint clean on the edited regions.
+- Deploy patch: paste.rs URL provided in chat (3 files).
+- Path touched is the ENTRY/sizing path, not the safety-critical close path.
+- ⚠️ OPERATOR LIVE-CHECK: next session, grep `/tmp/backend.log` for
+  `v19.34.183 wrong-side-stop` / `v19.34.183 stop-cap` to confirm the guards
+  fire; confirm position-tier setups (stage_2_breakout) now size with sane
+  share counts instead of 1–3.
+
+---
+
+
+
 ## 2026-05-30 — v19.34.182 GAMEPLAN DATA-ACCURACY FIXES
 
 ### Why (operator confirmed live: stocks_in_play=0, empty key levels, $0 stops)

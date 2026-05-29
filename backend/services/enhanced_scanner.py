@@ -4529,17 +4529,29 @@ class EnhancedBackgroundScanner:
         # to within 1.0 ATR of the current price caps downside while still
         # honouring the BB band structure — whichever is TIGHTER (closer to
         # price) wins, so the BB still governs when it's tight enough.
+        #
+        # v19.34.183 — Anchor the ENTRY to where the trade actually enters.
+        # The breakout trigger is bb_upper (long) / bb_lower (short), but once
+        # price has ALREADY broken out and run past the band, that level is
+        # stale and sits on the WRONG side of an ATR stop anchored to current
+        # price (e.g. DIA: trigger 501.63 < stop 505.82 for a "long"). Clamp
+        # the entry to current price in that case so entry/stop/target geometry
+        # is always internally consistent, then anchor stop + target to `entry`.
+        cp = snapshot.current_price
         if direction == "long":
+            entry = max(snapshot.bb_upper, cp)
             raw_stop = snapshot.bb_lower
-            atr_floor = snapshot.current_price - (snapshot.atr * 1.0)
-            stop = max(raw_stop, atr_floor)  # LONG: higher stop = tighter
+            atr_floor = entry - (snapshot.atr * 1.0)
+            stop = max(raw_stop, atr_floor)  # LONG: higher stop = tighter (always < entry)
+            target = entry + (snapshot.atr * 2.5)
         else:
+            entry = min(snapshot.bb_lower, cp)
             raw_stop = snapshot.bb_upper
-            atr_ceil = snapshot.current_price + (snapshot.atr * 1.0)
-            stop = min(raw_stop, atr_ceil)  # SHORT: lower stop = tighter
-        target = snapshot.current_price + (snapshot.atr * 2.5) if direction == "long" else snapshot.current_price - (snapshot.atr * 2.5)
-        risk = abs(snapshot.current_price - stop)
-        rr = abs(target - snapshot.current_price) / risk if risk > 0 else 1
+            atr_ceil = entry + (snapshot.atr * 1.0)
+            stop = min(raw_stop, atr_ceil)  # SHORT: lower stop = tighter (always > entry)
+            target = entry - (snapshot.atr * 2.5)
+        risk = abs(entry - stop)
+        rr = abs(target - entry) / risk if risk > 0 else 1
         
         return LiveAlert(
             id=f"squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
@@ -4549,7 +4561,7 @@ class EnhancedBackgroundScanner:
             direction=direction,
             priority=priority,
             current_price=snapshot.current_price,
-            trigger_price=snapshot.bb_upper if direction == "long" else snapshot.bb_lower,
+            trigger_price=round(entry, 2),  # v19.34.183 — consistent entry anchor
             stop_loss=round(stop, 2),
             target=round(target, 2),
             risk_reward=round(rr, 2),
