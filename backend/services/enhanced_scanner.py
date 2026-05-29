@@ -1818,6 +1818,9 @@ class EnhancedBackgroundScanner:
         # Save to outcomes collection with R-multiple data
         if self.alert_outcomes_collection is not None:
             try:
+                # v19.34.172 — dual-shape timestamps on closed_at.
+                from utils.timestamps import stamps as _v172_stamps
+                _v172 = _v172_stamps()
                 self.alert_outcomes_collection.insert_one({
                     "alert_id": alert_id,
                     "symbol": alert.symbol,
@@ -1833,7 +1836,10 @@ class EnhancedBackgroundScanner:
                     "target": alert.target,
                     "projected_rr": alert.risk_reward,
                     "created_at": alert.created_at,
-                    "closed_at": datetime.now(timezone.utc).isoformat()
+                    "closed_at": _v172["ts"],
+                    "closed_at_dt": _v172["ts_dt"],
+                    "ts": _v172["ts"],
+                    "ts_dt": _v172["ts_dt"],
                 })
             except Exception as e:
                 logger.warning(f"Could not save alert outcome: {e}")

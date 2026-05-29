@@ -2926,6 +2926,9 @@ class PositionManager:
                 logger.warning(f"[v162 EOD] {trade.symbol} save failed: {e}")
             try:
                 if bot._db is not None:
+                    # v19.34.172 — dual-shape timestamps.
+                    from utils.timestamps import stamps as _v172_stamps
+                    _v172 = _v172_stamps()
                     bot._db.bracket_lifecycle_events.insert_one({
                         "phase": "eod_flatten_v162",
                         "success": True,
@@ -2934,7 +2937,9 @@ class PositionManager:
                         "shares_closed": shares_to_close,
                         "exit_price": trade.exit_price,
                         "realized_pnl": trade.realized_pnl,
-                        "created_at": datetime.now(timezone.utc),
+                        "created_at": _v172["ts_dt"],
+                        "ts": _v172["ts"],
+                        "ts_dt": _v172["ts_dt"],
                     })
             except Exception:
                 pass

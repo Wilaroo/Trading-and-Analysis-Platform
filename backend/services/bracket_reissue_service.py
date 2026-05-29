@@ -103,7 +103,14 @@ async def _persist_lifecycle_event(
         # Shallow copy to avoid mutating the live event dict the caller
         # may still be using.
         doc = dict(event)
-        doc["created_at"] = datetime.now(timezone.utc)
+        # v19.34.172 — dual-shape timestamps (ts ISO + ts_dt BSON).
+        # `created_at` retained as BSON for legacy queries; `ts/ts_dt`
+        # added so range filters with either type return the row.
+        from utils.timestamps import stamps as _v172_stamps
+        _v172 = _v172_stamps()
+        doc["created_at"] = _v172["ts_dt"]
+        doc["ts"] = _v172["ts"]
+        doc["ts_dt"] = _v172["ts_dt"]
         # Keep the document compact — `plan` already contains the rich
         # computed parameters; don't double-store the trade object.
         await asyncio.to_thread(db["bracket_lifecycle_events"].insert_one, doc)
