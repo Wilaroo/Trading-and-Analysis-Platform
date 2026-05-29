@@ -164,11 +164,11 @@ class TestTradeStyleTargetLadder:
         # in evaluate_alert — too much setup to run end-to-end here).
         src = (BACKEND_DIR / "services" / "opportunity_evaluator.py").read_text()
         # Anchor: the new v112 ladder block.
-        idx = src.find("Trade-style-aware target ladder")
-        assert idx >= 0, "v112 ladder docstring marker missing"
+        idx = src.find("def _target_ladder_rungs")
+        assert idx >= 0, "v112 ladder helper _target_ladder_rungs missing"
         window = src[idx:idx + 2500]
         # Scalp branch
-        assert "rungs = [1.0, 1.5]" in window, (
+        assert "return [1.0, 1.5]" in window, (
             "Scalp trade_style MUST produce a [1.0R, 1.5R] ladder. "
             "Pre-v112 it inherited the [1.5R, 2.5R, 4R] swing ladder "
             "which is unreachable inside a <5min scalp window."
@@ -176,27 +176,27 @@ class TestTradeStyleTargetLadder:
 
     def test_position_uses_runner_friendly_ladder(self):
         src = (BACKEND_DIR / "services" / "opportunity_evaluator.py").read_text()
-        idx = src.find("Trade-style-aware target ladder")
+        idx = src.find("def _target_ladder_rungs")
         window = src[idx:idx + 2500]
-        assert "rungs = [2.0, 4.0, 8.0]" in window, (
+        assert "return [2.0, 4.0, 8.0]" in window, (
             "Position trade_style MUST use [2R, 4R, 8R] for runner-friendly "
             "scale-outs over multi-day holds."
         )
 
     def test_intraday_uses_two_rung_session_ladder(self):
         src = (BACKEND_DIR / "services" / "opportunity_evaluator.py").read_text()
-        idx = src.find("Trade-style-aware target ladder")
+        idx = src.find("def _target_ladder_rungs")
         window = src[idx:idx + 2500]
-        assert "rungs = [1.5, 2.5]" in window
+        assert "return [1.5, 2.5]" in window
 
     def test_swing_preserves_legacy_three_rung_ladder(self):
         """Backward compatibility: swing/multi_day MUST keep the legacy
         [1.5R, 2.5R, 4R] ladder — that's what pre-v112 trades were
         sized against, so the regression suite + journal stays valid."""
         src = (BACKEND_DIR / "services" / "opportunity_evaluator.py").read_text()
-        idx = src.find("Trade-style-aware target ladder")
+        idx = src.find("def _target_ladder_rungs")
         window = src[idx:idx + 2500]
-        assert "rungs = [1.5, 2.5, 4.0]" in window, (
+        assert "return [1.5, 2.5, 4.0]" in window, (
             "Swing/unknown trade_style MUST preserve the legacy "
             "[1.5R, 2.5R, 4R] ladder for backward compatibility."
         )
@@ -205,7 +205,7 @@ class TestTradeStyleTargetLadder:
         """Backward-compatibility: alerts that pre-date the `trade_style`
         stamp can still be classified as scalps via `setup_type`."""
         src = (BACKEND_DIR / "services" / "opportunity_evaluator.py").read_text()
-        idx = src.find("Trade-style-aware target ladder")
+        idx = src.find("def _target_ladder_rungs")
         window = src[idx:idx + 2500]
         # The scalp gate MUST OR both signals.
         assert "trade_style_lower == 'scalp'" in window

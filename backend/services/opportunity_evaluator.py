@@ -740,47 +740,11 @@ class OpportunityEvaluator:
                     _floor_err,
                 )
 
-            # Calculate targets if not provided
+            # Calculate targets if not provided — trade-style-aware ladder
+            # (v19.34.112). See OpportunityEvaluator._target_ladder_rungs.
             if not target_prices:
                 risk = abs(entry_price - stop_price)
-                # ── v19.34.112 (Feb 2026) — Trade-style-aware target ladder ──
-                # Pre-v112 every trade — scalp, swing, position — got
-                # the same `[1.5R, 2.5R, 4R]` ladder regardless of
-                # holding period. A scalp targeting 1R in <5 minutes
-                # rarely sees 1.5R inside the window; 2.5R and 4R are
-                # noise rungs that never trigger. Worse, the OCA
-                # bracket attached to the trade uses `target_prices[0]`
-                # (the 1.5R rung) as the SINGLE LMT — so scalps exit
-                # at 1.5R or they don't exit at all.
-                #
-                # New ladder is keyed off `trade_style` (preferred) with
-                # `setup_type` fallback for setups that pre-date the
-                # trade_style stamp. Each rung is tuned to the typical
-                # holding-period MFE distribution:
-                #   • Scalp     → [1.0R, 1.5R]      — fast, two-rung scale
-                #   • Intraday  → [1.5R, 2.5R]      — single-session bracket
-                #   • Swing     → [1.5R, 2.5R, 4R]  — legacy default (kept)
-                #   • Position  → [2R,   4R,   8R]  — runner-friendly
-                trade_style_lower = (
-                    (alert.get('trade_style') if isinstance(alert, dict) else None)
-                    or ''
-                ).strip().lower()
-                setup_lower = (setup_type or '').strip().lower()
-                _is_scalp = (
-                    trade_style_lower == 'scalp'
-                    or setup_lower in {'scalp', 'nine_ema_scalp', 'spencer_scalp', 'abc_scalp'}
-                )
-                _is_position = trade_style_lower in {'position', 'investment'}
-                _is_intraday = trade_style_lower == 'intraday'
-                if _is_scalp:
-                    rungs = [1.0, 1.5]
-                elif _is_position:
-                    rungs = [2.0, 4.0, 8.0]
-                elif _is_intraday:
-                    rungs = [1.5, 2.5]
-                else:
-                    # swing / multi_day / unknown → legacy ladder.
-                    rungs = [1.5, 2.5, 4.0]
+                rungs = self._target_ladder_rungs(alert, setup_type)
                 if direction == TradeDirection.LONG:
                     target_prices = [entry_price + risk * r for r in rungs]
                 else:
@@ -1074,6 +1038,42 @@ class OpportunityEvaluator:
                 # targets and keep the strict 2.0 gate. The narrative now
                 # surfaces the SETUP-SPECIFIC threshold, not the global one,
                 # so the operator's Bot's Brain stream shows the right number.
+                _eff_min = bot.risk_params.effective_min_rr(setup_type)
+
+                # ── v19.34.181 — auto-ladder fallback ──────────────────
+                # Detector-supplied targets for longer-horizon setups are
+                # often set near daily structure while the stop is a wide
+                # (2.5-3× ATR) swing/position stop, collapsing R:R below the
+                # gate (observed: stage_2/three_week_tight at R:R 0.02-0.76).
+                # Before rejecting, re-derive the target from the ACTUAL risk
+                # using the trade-style R ladder, picking the smallest rung
+                # that clears the effective min R:R — so these ideas get a
+                # timeframe-appropriate target instead of dying on a too-close
+                # detector target. Stop is left untouched.
+                _risk_ps = abs(entry_price - stop_price)
+                if _risk_ps > 0 and shares > 0 and risk_amount > 0:
+                    _rungs = self._target_ladder_rungs(alert, setup_type)
+                    _chosen = next((r for r in _rungs if r >= _eff_min), _rungs[-1])
+                    _ladder = [r for r in _rungs if r >= _chosen] or [_chosen]
+                    if direction == TradeDirection.LONG:
+                        _new_targets = [entry_price + _risk_ps * r for r in _ladder]
+                    else:
+                        _new_targets = [entry_price - _risk_ps * r for r in _ladder]
+                    _new_primary = _new_targets[0]
+                    _new_reward = abs(_new_primary - entry_price) * shares
+                    _new_rr = _new_reward / risk_amount if risk_amount > 0 else 0
+                    if _new_rr >= _eff_min:
+                        print(
+                            f"   🪜 {symbol} R:R {risk_reward_ratio:.2f} < {_eff_min} "
+                            f"— auto-ladder fallback → target ${_new_primary:.2f} "
+                            f"(R:R {_new_rr:.2f}, {_chosen}R)"
+                        )
+                        target_prices = _new_targets
+                        primary_target = _new_primary
+                        potential_reward = _new_reward
+                        risk_reward_ratio = _new_rr
+
+            if risk_reward_ratio < bot.risk_params.effective_min_rr(setup_type):
                 _eff_min = bot.risk_params.effective_min_rr(setup_type)
                 print(f"   ❌ R:R {risk_reward_ratio:.2f} < {_eff_min} min required (setup={setup_type})")
                 bot.record_rejection(
@@ -2229,6 +2229,31 @@ class OpportunityEvaluator:
             if m:
                 ai_ctx[ec_key] = m
         return ai_ctx
+
+    @staticmethod
+    def _target_ladder_rungs(alert, setup_type):
+        """v19.34.112 / v19.34.181 — R-multiple target ladder keyed off
+        trade_style (with setup_type fallback). Returned rungs are applied
+        to the per-share risk to build timeframe-appropriate targets:
+          • Scalp     → [1.0R, 1.5R]
+          • Intraday  → [1.5R, 2.5R]
+          • Position/Investment → [2R, 4R, 8R]   (runner-friendly)
+          • Swing/Multi-day/unknown → [1.5R, 2.5R, 4R]  (legacy default)
+        """
+        trade_style_lower = (
+            (alert.get('trade_style') if isinstance(alert, dict) else None) or ''
+        ).strip().lower()
+        setup_lower = (setup_type or '').strip().lower()
+        if (trade_style_lower == 'scalp'
+                or setup_lower in {'scalp', 'nine_ema_scalp',
+                                   'spencer_scalp', 'abc_scalp'}):
+            return [1.0, 1.5]
+        if trade_style_lower in {'position', 'investment'}:
+            return [2.0, 4.0, 8.0]
+        if trade_style_lower == 'intraday':
+            return [1.5, 2.5]
+        return [1.5, 2.5, 4.0]
+
 
     @staticmethod
     def classify_time_window(now_et) -> str:
