@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SentCom — Pipeline Feed Tabs (mockup)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#09090b; --panel:#0c0c0f; --panel2:#111114; --card:#161619;
+    --bd:#27272a; --bd2:#1f1f23;
+    --t1:#f4f4f5; --t2:#a1a1aa; --t3:#71717a; --t4:#52525b;
+    --violet:#a78bfa; --blue:#60a5fa; --amber:#fbbf24; --emerald:#34d399; --slate:#94a3b8;
+    --pos:#34d399; --neg:#fb7185;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--t1);font-family:'Manrope',sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'JetBrains Mono',monospace}
+  .wrap{max-width:1920px;margin:0 auto;padding:10px 14px 40px}
+  .frame-label{font-family:'JetBrains Mono',monospace;color:var(--t3);font-size:11px;letter-spacing:.18em;text-transform:uppercase;margin:26px 0 8px;border-left:2px solid var(--violet);padding-left:8px}
+
+  /* top safety bar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--bd);border-radius:4px;background:var(--panel);padding:7px 12px;margin-bottom:10px}
+  .topbar .left{display:flex;align-items:center;gap:14px}
+  .brand{font-weight:800;letter-spacing:.16em;font-size:13px}
+  .pill{font-family:'JetBrains Mono',monospace;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border:1px solid var(--bd);border-radius:999px;padding:2px 8px;color:var(--t2)}
+  .pill.live{color:var(--emerald);border-color:#065f46}
+  .pill.warn{color:var(--amber);border-color:#78350f}
+  .metric{text-align:right}
+  .metric .l{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--t4)}
+  .metric .v{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px}
+
+  /* 3-col grid */
+  .grid{display:grid;grid-template-columns:30% 1fr 24%;gap:10px;height:760px}
+  .col{display:flex;flex-direction:column;min-height:0}
+  .panel{border:1px solid var(--bd);border-radius:5px;background:var(--panel);display:flex;flex-direction:column;min-height:0}
+
+  /* === LEFT: pipeline feed tabs === */
+  .tabbar{display:flex;gap:5px;padding:7px 7px 0;border-bottom:1px solid var(--bd2)}
+  .tab{position:relative;flex:1;min-width:0;border:1px solid var(--bd);border-bottom:none;border-radius:5px 5px 0 0;background:var(--panel2);padding:7px 8px 9px;cursor:pointer;transition:background .15s}
+  .tab:hover{background:#17171b}
+  .tab .row1{display:flex;align-items:center;justify-content:space-between;gap:4px}
+  .tab .lbl{font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tab .cnt{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:17px;line-height:1;color:var(--t1)}
+  .tab .sub{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--t4);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tab.active{background:var(--card);border-color:#3f3f46}
+  .tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px}
+  .tab.scan .lbl{color:var(--violet)} .tab.scan.active::after{background:var(--violet)}
+  .tab.eval .lbl{color:var(--blue)} .tab.eval.active::after{background:var(--blue)}
+  .tab.order .lbl{color:var(--amber)} .tab.order.active::after{background:var(--amber)}
+  .tab.manage .lbl{color:var(--emerald)} .tab.manage.active::after{background:var(--emerald)}
+  .tab.close .lbl{color:var(--slate)} .tab.close.active::after{background:var(--slate)}
+  .dot{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:999px;background:var(--amber);box-shadow:0 0 0 0 rgba(251,191,36,.6);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(251,191,36,.5)}70%{box-shadow:0 0 0 6px rgba(251,191,36,0)}100%{box-shadow:0 0 0 0 rgba(251,191,36,0)}}
+  .feed{flex:1;overflow:auto;padding:8px}
+
+  /* open position cards (Manage tab) */
+  .poscard{border:1px solid var(--bd);border-radius:5px;background:var(--card);padding:9px 10px;margin-bottom:7px}
+  .poscard .top{display:flex;align-items:center;justify-content:space-between}
+  .sym{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px}
+  .badge{font-family:'JetBrains Mono',monospace;font-size:9.5px;text-transform:uppercase;border:1px solid var(--bd);border-radius:3px;padding:1px 5px;color:var(--t2)}
+  .badge.long{color:var(--emerald);border-color:#065f46}
+  .badge.short{color:var(--neg);border-color:#7f1d1d}
+  .badge.gA{color:var(--emerald);border-color:#065f46;background:rgba(6,95,70,.18)}
+  .badge.gB{color:var(--blue);border-color:#1e3a8a;background:rgba(30,58,138,.18)}
+  .pos-pnl{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px}
+  .pos-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;color:var(--t3);font-family:'JetBrains Mono',monospace;font-size:11px}
+  .pos-meta b{color:var(--t2);font-weight:500}
+  .green{color:var(--pos)} .red{color:var(--neg)}
+
+  /* scan/eval/order rows */
+  .feedrow{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bd2);padding:7px 4px}
+  .feedrow .l{display:flex;align-items:center;gap:8px;min-width:0}
+  .feedrow .meta{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3)}
+
+  /* === CENTER: chart === */
+  .chart-hd{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--bd2)}
+  .chart-body{flex:1;position:relative;overflow:hidden;background:
+     linear-gradient(180deg,rgba(52,211,153,.04),transparent 40%);}
+  .axis{position:absolute;left:0;right:0;border-top:1px dashed var(--bd2)}
+  .candles{position:absolute;inset:0;display:flex;align-items:flex-end;gap:3px;padding:30px 16px 26px}
+  .cnd{width:7px;border-radius:1px;align-self:flex-end}
+  .watermark{position:absolute;top:42%;left:0;right:0;text-align:center;color:var(--t4);font-family:'JetBrains Mono',monospace;letter-spacing:.2em;font-size:13px;text-transform:uppercase}
+
+  /* === RIGHT: briefings + bot stream === */
+  .brief{border:1px solid var(--bd);border-radius:5px;background:var(--panel);padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer}
+  .brief .t{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--blue);font-weight:700}
+  .stream-hd{display:flex;align-items:center;justify-content:space-between;padding:8px 11px;border-bottom:1px solid var(--bd2)}
+  .stream-hd .t{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--t2);font-weight:700}
+  .stream{flex:1;overflow:auto;padding:8px 11px}
+  .thought{border-left:2px solid var(--bd);padding:5px 0 9px 10px;margin-bottom:4px;position:relative}
+  .thought::before{content:'';position:absolute;left:-4px;top:7px;width:6px;height:6px;border-radius:999px;background:var(--t4)}
+  .thought.buy::before{background:var(--emerald)} .thought.buy{border-color:#065f46}
+  .thought.warn::before{background:var(--amber)} .thought.warn{border-color:#78350f}
+  .thought.scan::before{background:var(--violet)}
+  .thought .ts{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t4)}
+  .thought .tx{color:var(--t2);font-size:12px;line-height:1.45;margin-top:2px}
+  .thought .tx b{color:var(--t1)}
+
+  /* === closed table === */
+  .closehd{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--bd2)}
+  .range{display:flex;gap:4px}
+  .range button{font-family:'JetBrains Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--bd);background:var(--panel2);color:var(--t3);border-radius:4px;padding:3px 9px;cursor:pointer}
+  .range button.on{color:var(--slate);border-color:#475569;background:rgba(71,85,105,.18)}
+  table{width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:11px}
+  thead th{position:sticky;top:0;background:var(--panel);text-align:right;color:var(--t4);font-weight:500;text-transform:uppercase;letter-spacing:.06em;font-size:9.5px;padding:7px 6px;border-bottom:1px solid var(--bd)}
+  thead th:first-child,thead th.l{text-align:left}
+  tbody td{text-align:right;padding:6px 6px;border-bottom:1px solid var(--bd2);color:var(--t2);white-space:nowrap}
+  tbody td.l{text-align:left}
+  tbody tr:hover{background:#15151a;cursor:pointer}
+  .tnum{color:var(--t1);font-weight:500}
+  .summary{display:flex;gap:14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--t3)}
+  .summary b{font-weight:700}
+  .note{color:var(--t4);font-size:11px;margin:6px 2px 0;font-style:italic}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="frame-label">Frame 1 — Full Command-Center layout · left = pipeline feed tabs (HUD tiles ARE the tabs) · MANAGE tab active</div>
+
+  <!-- top bar -->
+  <div class="topbar">
+    <div class="left">
+      <span class="brand">SENTCOM</span>
+      <span class="pill live">● IB LIVE</span>
+      <span class="pill">SCANNER ON</span>
+      <span class="pill warn">REGIME · NEUTRAL</span>
+      <span class="pill">acct $248,310</span>
+    </div>
+    <div style="display:flex;gap:22px">
+      <div class="metric"><div class="l">Day P&L</div><div class="v green">+$1,284.50</div></div>
+      <div class="metric"><div class="l">Open Risk</div><div class="v">$612</div></div>
+      <div class="metric"><div class="l">Win Rate</div><div class="v">67%</div></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: pipeline feed tabs -->
+    <div class="col">
+      <div class="panel" style="flex:1">
+        <div class="tabbar">
+          <div class="tab scan">
+            <span class="dot"></span>
+            <div class="row1"><span class="lbl">Scan</span><span class="cnt">23</span></div>
+            <div class="sub">scanning 480</div>
+          </div>
+          <div class="tab eval">
+            <div class="row1"><span class="lbl">Eval</span><span class="cnt">6</span></div>
+            <div class="sub">2 gated</div>
+          </div>
+          <div class="tab order">
+            <span class="dot"></span>
+            <div class="row1"><span class="lbl">Order</span><span class="cnt">3</span></div>
+            <div class="sub">1q+2@ib</div>
+          </div>
+          <div class="tab manage active">
+            <div class="row1"><span class="lbl">Manage</span><span class="cnt">5</span></div>
+            <div class="sub">+$842 unreal</div>
+          </div>
+          <div class="tab close">
+            <div class="row1"><span class="lbl">Close</span><span class="cnt">12</span></div>
+            <div class="sub">WR 67%</div>
+          </div>
+        </div>
+        <div class="feed">
+          <!-- open position cards -->
+          <div class="poscard">
+            <div class="top">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span class="sym">NVDA</span>
+                <span class="badge long">LONG</span>
+                <span class="badge gA">TQS A</span>
+              </div>
+              <span class="pos-pnl green">+$418.20</span>
+            </div>
+            <div class="pos-meta">
+              <span><b>200</b> sh @ 121.40</span><span>stop 119.80</span>
+              <span>+2.1R</span><span>entry 09:41:12</span><span>gap_and_go</span>
+            </div>
+          </div>
+          <div class="poscard">
+            <div class="top">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span class="sym">TSLA</span>
+                <span class="badge short">SHORT</span>
+                <span class="badge gB">TQS B+</span>
+              </div>
+              <span class="pos-pnl green">+$236.00</span>
+            </div>
+            <div class="pos-meta">
+              <span><b>120</b> sh @ 248.10</span><span>stop 251.30</span>
+              <span>+1.4R</span><span>entry 10:03:50</span><span>vwap_fade</span>
+            </div>
+          </div>
+          <div class="poscard">
+            <div class="top">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span class="sym">AMD</span>
+                <span class="badge long">LONG</span>
+                <span class="badge gB">TQS B</span>
+              </div>
+              <span class="pos-pnl red">−$94.50</span>
+            </div>
+            <div class="pos-meta">
+              <span><b>150</b> sh @ 168.20</span><span>stop 166.90</span>
+              <span>−0.5R</span><span>entry 10:22:04</span><span>orb</span>
+            </div>
+          </div>
+          <div class="poscard">
+            <div class="top">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span class="sym">META</span>
+                <span class="badge long">LONG</span>
+                <span class="badge gA">TQS A</span>
+              </div>
+              <span class="pos-pnl green">+$512.80</span>
+            </div>
+            <div class="pos-meta">
+              <span><b>80</b> sh @ 604.10</span><span>stop 596.00</span>
+              <span>+1.9R</span><span>entry 09:58:31</span><span>pullback</span>
+            </div>
+          </div>
+          <div class="poscard">
+            <div class="top">
+              <div style="display:flex;align-items:center;gap:7px">
+                <span class="sym">UBER</span>
+                <span class="badge short">SHORT</span>
+                <span class="badge gB">TQS B+</span>
+              </div>
+              <span class="pos-pnl red">−$230.50</span>
+            </div>
+            <div class="pos-meta">
+              <span><b>300</b> sh @ 72.40</span><span>stop 73.60</span>
+              <span>−0.9R</span><span>entry 11:14:22</span><span>breakdown</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER: chart (wider) -->
+    <div class="col">
+      <div class="panel" style="flex:1">
+        <div class="chart-hd">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="mono" style="font-weight:700;font-size:16px">NVDA</span>
+            <span class="mono green" style="font-size:14px">121.40 ▲ +2.84%</span>
+            <span class="pill">5m</span>
+          </div>
+          <div class="summary"><span>VWAP <b class="tnum">120.92</b></span><span>EMA21 <b class="tnum">120.10</b></span><span>vol <b class="tnum">1.8×</b></span></div>
+        </div>
+        <div class="chart-body">
+          <div class="axis" style="top:25%"></div><div class="axis" style="top:50%"></div><div class="axis" style="top:75%"></div>
+          <div class="candles" id="candles"></div>
+          <div class="watermark">chart — now wider (55% → ~46%+ of screen)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: briefings + bot stream -->
+    <div class="col">
+      <div class="brief">
+        <span class="t">◆ Morning Briefing</span>
+        <span class="mono" style="color:var(--t3);font-size:11px">3 watch · tap to expand</span>
+      </div>
+      <div class="panel" style="flex:1">
+        <div class="stream-hd">
+          <span class="t">◇ Bot Narrative Stream</span>
+          <span class="mono" style="color:var(--t4);font-size:10px">live</span>
+        </div>
+        <div class="stream">
+          <div class="thought buy"><div class="ts">11:14:22 · NVDA</div><div class="tx"><b>Entered LONG 200sh @121.40.</b> TQS A (88) · setup pillar 92, technical 84. Regime composite SPY/QQQ/IWM = neutral, no divergence.</div></div>
+          <div class="thought scan"><div class="ts">11:13:58 · AAPL</div><div class="tx">Evaluating gap_and_go — confidence gate 0.61, below 0.66 threshold. <b>Holding.</b></div></div>
+          <div class="thought warn"><div class="ts">11:12:40 · AMD</div><div class="tx">AMD pulling toward stop (166.90). MAE −0.6R. Watching tape for capitulation.</div></div>
+          <div class="thought"><div class="ts">11:11:05 · MARKET</div><div class="tx">Breadth softening: SPY −0.2% but QQQ +0.3% — <b>index divergence</b>, sizing held at 0.8×.</div></div>
+          <div class="thought buy"><div class="ts">10:58:31 · META</div><div class="tx"><b>Scaled target 1 hit (+1.0R).</b> Trailing stop to breakeven on runner.</div></div>
+          <div class="thought scan"><div class="ts">10:55:12 · SCANNER</div><div class="tx">6 new setups surfaced · 2 priority-downgraded by regime gate.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ FRAME 2 ============ -->
+  <div class="frame-label">Frame 2 — same left panel, CLOSE tab active · richer closed-trades table + Today/7d/30d range selector</div>
+
+  <div class="grid" style="height:560px">
+    <div class="col" style="grid-column:1 / span 2">
+      <div class="panel" style="flex:1">
+        <div class="tabbar">
+          <div class="tab scan"><div class="row1"><span class="lbl">Scan</span><span class="cnt">23</span></div><div class="sub">scanning 480</div></div>
+          <div class="tab eval"><div class="row1"><span class="lbl">Eval</span><span class="cnt">6</span></div><div class="sub">2 gated</div></div>
+          <div class="tab order"><div class="row1"><span class="lbl">Order</span><span class="cnt">3</span></div><div class="sub">1q+2@ib</div></div>
+          <div class="tab manage"><div class="row1"><span class="lbl">Manage</span><span class="cnt">5</span></div><div class="sub">+$842 unreal</div></div>
+          <div class="tab close active"><div class="row1"><span class="lbl">Close</span><span class="cnt">48</span></div><div class="sub">WR 64%</div></div>
+        </div>
+        <div class="closehd">
+          <div class="summary">
+            <span>Trades <b class="tnum">48</b></span>
+            <span>WR <b class="green">64%</b></span>
+            <span>Net <b class="green">+$3,914</b></span>
+            <span>Σ <b class="tnum">+18.4R</b></span>
+            <span>worst <b class="red">−1.2R</b></span>
+          </div>
+          <div class="range">
+            <button>Today</button><button class="on">7d</button><button>30d</button>
+          </div>
+        </div>
+        <div class="feed" style="padding:0">
+          <table>
+            <thead><tr>
+              <th class="l">Sym</th><th class="l">Setup</th><th>TQS</th><th>Dir</th><th>Sh</th>
+              <th>Entry</th><th>Exit</th><th>In</th><th>Out</th><th>Hold</th>
+              <th>P&L</th><th>R</th><th>MAE/MFE</th><th class="l">Reason</th><th>Type</th>
+            </tr></thead>
+            <tbody>
+              <tr><td class="l tnum">NVDA</td><td class="l">gap_and_go</td><td class="green">A</td><td class="green">L</td><td>200</td><td>121.40</td><td>124.85</td><td>09:41</td><td>10:58</td><td>1h17m</td><td class="green tnum">+$690</td><td class="green">+3.4R</td><td>−0.3/+3.6</td><td class="l">target</td><td>T2H</td></tr>
+              <tr><td class="l tnum">META</td><td class="l">pullback</td><td class="green">A</td><td class="green">L</td><td>80</td><td>604.10</td><td>612.40</td><td>09:58</td><td>11:40</td><td>1h42m</td><td class="green tnum">+$664</td><td class="green">+2.0R</td><td>−0.4/+2.3</td><td class="l">trail</td><td>T2H</td></tr>
+              <tr><td class="l tnum">TSLA</td><td class="l">vwap_fade</td><td style="color:var(--blue)">B+</td><td class="red">S</td><td>120</td><td>248.10</td><td>243.90</td><td>10:03</td><td>10:46</td><td>43m</td><td class="green tnum">+$504</td><td class="green">+1.6R</td><td>−0.5/+1.8</td><td class="l">target</td><td>M2M</td></tr>
+              <tr><td class="l tnum">AMD</td><td class="l">orb</td><td style="color:var(--blue)">B</td><td class="green">L</td><td>150</td><td>168.20</td><td>166.85</td><td>10:22</td><td>10:51</td><td>29m</td><td class="red tnum">−$202</td><td class="red">−1.0R</td><td>−1.1/+0.4</td><td class="l">stop</td><td>M2M</td></tr>
+              <tr><td class="l tnum">AAPL</td><td class="l">breakout</td><td class="green">A</td><td class="green">L</td><td>140</td><td>229.50</td><td>233.10</td><td>09:47</td><td>11:02</td><td>1h15m</td><td class="green tnum">+$504</td><td class="green">+1.9R</td><td>−0.2/+2.1</td><td class="l">target</td><td>T2H</td></tr>
+              <tr><td class="l tnum">UBER</td><td class="l">breakdown</td><td style="color:var(--blue)">B+</td><td class="red">S</td><td>300</td><td>72.40</td><td>73.55</td><td>11:14</td><td>11:39</td><td>25m</td><td class="red tnum">−$345</td><td class="red">−1.2R</td><td>−1.3/+0.2</td><td class="l">stop</td><td>M2M</td></tr>
+              <tr><td class="l tnum">GOOGL</td><td class="l">pullback</td><td style="color:var(--blue)">B</td><td class="green">L</td><td>90</td><td>178.30</td><td>181.20</td><td>10:11</td><td>13:05</td><td>2h54m</td><td class="green tnum">+$261</td><td class="green">+1.3R</td><td>−0.6/+1.5</td><td class="l">EOD</td><td>T2H</td></tr>
+              <tr><td class="l tnum">AMZN</td><td class="l">gap_and_go</td><td class="green">A</td><td class="green">L</td><td>110</td><td>201.40</td><td>205.90</td><td>09:39</td><td>11:20</td><td>1h41m</td><td class="green tnum">+$495</td><td class="green">+2.2R</td><td>−0.3/+2.4</td><td class="l">target</td><td>T2H</td></tr>
+            </tbody>
+          </table>
+          <div class="note" style="padding:0 10px 12px">Sourced from bot_trades (deduped, source of truth). Row-click → bracket lifecycle history drill-down.</div>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="panel" style="flex:1;align-items:center;justify-content:center">
+        <div style="text-align:center;color:var(--t4);font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.12em;padding:20px;line-height:1.8">
+          CHART<br>(unchanged — stays wide)<br><br>RIGHT COL → briefings + bot stream<br>(unchanged from Frame 1)
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  // fake candles
+  const c=document.getElementById('candles');
+  let p=60;
+  for(let i=0;i<46;i++){
+    const up=Math.random()>0.42; p+=(up?1:-1)*(2+Math.random()*6);
+    p=Math.max(20,Math.min(150,p));
+    const h=30+ (p/150)*180;
+    const el=document.createElement('div');
+    el.className='cnd';
+    el.style.height=h+'px';
+    el.style.background=up?'rgba(52,211,153,.7)':'rgba(251,113,133,.7)';
+    c.appendChild(el);
+  }
+</script>
+</body>
+</html>
