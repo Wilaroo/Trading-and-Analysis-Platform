@@ -718,7 +718,7 @@ class TradeExecution:
                     f"{trade.symbol}: {_snap_err}"
                 )
 
-            # v19.34.186 — surface order submission to Mission Control's
+            # v19.34.188 — surface order submission to Mission Control's
             # Execution lane (before the fill confirms).
             try:
                 from services.sentcom_service import emit_stream_event

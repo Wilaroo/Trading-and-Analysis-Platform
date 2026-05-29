@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.176 (2026-05-29, "Regime engine: composite SPY/QQQ/IWM trend block + 0.25% tolerance band — fixes the SPY-only downtrend hallucination in the engine that drives bot._current_regime")
+- **Current version**: v19.34.188 (2026-05-30, "Mission Control lifecycle emits — order_submitted / partial_fill / stop→breakeven / trailing_stop_moved — + inline 'Ack + Unlock' on System/Safety alarms")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

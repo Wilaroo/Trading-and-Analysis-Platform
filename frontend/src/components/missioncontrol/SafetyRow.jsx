@@ -1,5 +1,5 @@
 /**
- * SafetyRow — v19.34.186. A System/Safety strip line with inline actions:
+ * SafetyRow — v19.34.188. A System/Safety strip line with inline actions:
  *   • alarm rows get an "Ack + Unlock" button → POST /api/safety/reset-kill-switch
  *     (the real operator acknowledgement that re-arms trading)
  *   • any row can be dismissed (muted) locally

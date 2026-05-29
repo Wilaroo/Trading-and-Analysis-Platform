@@ -436,7 +436,7 @@ class StopManager:
         if len(history) > 100:
             del history[:-100]
 
-        # v19.34.186 — surface stop moves to Mission Control's Position lane.
+        # v19.34.188 — surface stop moves to Mission Control's Position lane.
         # This is the single chokepoint for trailing + breakeven + activation
         # moves, so one emit here covers them all. Fire-and-forget (no-op if no
         # running loop); never breaks the stop-management path.

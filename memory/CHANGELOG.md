@@ -1,3 +1,47 @@
+## 2026-05-30 — v19.34.188 MISSION CONTROL LIFECYCLE EMITS + INLINE SAFETY ACK
+
+### What
+Completes the Mission Control observability follow-ups noted in v19.34.184:
+the live cockpit now shows the *whole* position-management + execution
+lifecycle, and the operator can acknowledge a safety alarm inline (no tab
+switch). (Re-tagged from a v19.34.186 collision with the BBAI tick-rounding
+patch — see operator request.)
+
+### Backend — new lifecycle emits (all fire-and-forget, never block the path)
+- `services/stop_manager._record_stop_adjustment` — single chokepoint for
+  trailing + breakeven + activation moves → emits **`stop_to_breakeven`**
+  (Position lane, success) or **`trailing_stop_moved`** (Position lane, info).
+- `services/trade_execution` — emits **`order_submitted`** (Execution lane)
+  right before `place_bracket_order` so the operator sees intent before fill.
+- `services/trade_executor_service` (partial branch) — emits **`partial_fill`**
+  (Execution lane) with filled/remaining qty.
+- All four classify into the correct lane in `stream_bus.classify_lane`
+  (verified — no router change needed).
+
+### Frontend — inline safety acknowledge
+- `components/missioncontrol/SafetyRow.jsx` (NEW) — System/Safety strip row:
+  alarm rows get an **"Ack + Unlock"** button → `POST /api/safety/reset-kill-switch`
+  (the real operator re-arm), plus a local **dismiss (×)**. Non-alarm rows just
+  render + dismiss.
+- `pages/MissionControlPage.jsx` — System/Safety strip now renders `SafetyRow`
+  (was the plain `StreamRow`), with a locally-dismissed-id set so muted rows
+  stay hidden. Header count reflects visible (non-dismissed) rows.
+
+### Verification
+- 4 new lane-contract tests (`test_v19_34_188_lifecycle_emit_lanes.py`) +
+  14 existing stream-bus tests = 18/18 pass. Both backend + frontend lint clean;
+  all 3 backend services compile.
+- Frontend mounts cleanly: `mission-control-page` + `mc-system-strip` testids
+  present (no live data in the sandbox — connects live on the DGX). No automated
+  testing agent per AGENTS.md (hardware-bound).
+- ⚠️ OPERATOR LIVE-CHECK (RTH): open Mission Control — Execution lane should show
+  `order_submitted` / `partial_fill`; Position lane should show stop→breakeven /
+  trailing moves; trip + reset a kill-switch alarm via the inline "Ack + Unlock".
+
+---
+
+
+
 ## 2026-05-30 — v19.34.185 F-F: GAMEPLAN-AWARE PRIORITIZATION (+ premarket gameplan scheduler)
 
 ### Why

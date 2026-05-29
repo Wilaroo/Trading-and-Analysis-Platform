@@ -15,7 +15,7 @@ import { Radio, Activity } from 'lucide-react';
 import useStreamSocket from '../hooks/useStreamSocket';
 import { classifyLane, severityOf, SEVERITIES } from '../lib/laneClassify';
 import LaneColumn from '../components/missioncontrol/LaneColumn';
-import StreamRow from '../components/missioncontrol/StreamRow';
+import SafetyRow from '../components/missioncontrol/SafetyRow';
 import TrailDrawer from '../components/missioncontrol/TrailDrawer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -39,6 +39,17 @@ const MissionControlPage = () => {
   const [activeSeverities, setActiveSeverities] = useState(() => new Set(SEVERITIES));
   const [drawerSymbol, setDrawerSymbol] = useState(null);
   const [lastEventTs, setLastEventTs] = useState(null);
+  // v19.34.188 — locally-dismissed System/Safety rows (keyed by id|timestamp).
+  const [dismissedSafety, setDismissedSafety] = useState(() => new Set());
+
+  const dismissSafety = useCallback((ev) => {
+    const key = ev.id || ev.timestamp;
+    setDismissedSafety((prev) => {
+      const n = new Set(prev);
+      n.add(key);
+      return n;
+    });
+  }, []);
 
   const pushEvents = useCallback((events) => {
     if (!events?.length) return;
@@ -99,6 +110,10 @@ const MissionControlPage = () => {
 
   const sm = STATUS_META[status] || STATUS_META.idle;
   const ageS = lastEventTs ? Math.round((Date.now() - lastEventTs) / 1000) : null;
+  const visibleSystem = useMemo(
+    () => lanes.system.filter((ev) => !dismissedSafety.has(ev.id || ev.timestamp)),
+    [lanes.system, dismissedSafety],
+  );
 
   return (
     <div data-testid="mission-control-page" className="flex flex-col bg-zinc-950 text-zinc-200" style={{ height: 'calc(100vh - 6rem)' }}>
@@ -171,13 +186,15 @@ const MissionControlPage = () => {
       <div data-testid="mc-system-strip" className="h-28 border-t border-zinc-800 bg-zinc-950 flex flex-col">
         <div className="px-3 py-1 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between">
           <span className="text-[11px] uppercase tracking-wider text-zinc-300 font-bold">System / Safety</span>
-          <span className="text-[10px] text-zinc-600">{lanes.system.length}</span>
+          <span className="text-[10px] text-zinc-600">{visibleSystem.length}</span>
         </div>
         <div className="flex-1 overflow-y-auto v5-scroll">
-          {lanes.system.length === 0 ? (
+          {visibleSystem.length === 0 ? (
             <div className="px-3 py-3 text-[11px] text-zinc-600">No system/safety events.</div>
           ) : (
-            lanes.system.map((ev) => <StreamRow key={ev.id || `${ev.timestamp}-sys`} ev={ev} onSymbolClick={setDrawerSymbol} />)
+            visibleSystem.map((ev) => (
+              <SafetyRow key={ev.id || `${ev.timestamp}-sys`} ev={ev} onDismiss={dismissSafety} />
+            ))
           )}
         </div>
       </div>
