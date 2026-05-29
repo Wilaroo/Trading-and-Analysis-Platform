@@ -7524,7 +7524,15 @@ class EnhancedBackgroundScanner:
             AlertPriority.MEDIUM: 2,
             AlertPriority.LOW: 3
         }
-        alerts.sort(key=lambda x: (priority_order.get(x.priority, 4), x.created_at), reverse=True)
+        # v19.34.179 — FIX inverted priority sort. The prior single
+        # `reverse=True` sort inverted priority_order (CRITICAL=0 ended up
+        # LAST), so the bot's intake (`_get_trade_alerts` → `[:20]` → slot
+        # fill) burned its position slots on LOW-priority alerts first and
+        # could truncate CRITICAL/HIGH off the end. `created_at` is an ISO
+        # string (sorts chronologically), so a stable two-pass sort gives
+        # CRITICAL-first with newest-first within each priority bucket.
+        alerts.sort(key=lambda x: x.created_at, reverse=True)          # recency desc
+        alerts.sort(key=lambda x: priority_order.get(x.priority, 4))   # stable: priority asc
         
         return alerts
     

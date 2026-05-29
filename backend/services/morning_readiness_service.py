@@ -235,10 +235,13 @@ def _check_trading_bot_configured(db, bot=None) -> Dict[str, Any]:
         issues.append("EOD auto-close DISABLED")
     eod_min = getattr(bot, "_eod_close_minute", None)
     eod_hr = getattr(bot, "_eod_close_hour", None)
-    if eod_hr != 15 or not (50 <= (eod_min or 0) <= 58):
+    # v19.34.179 — canonical EOD is 15:45 ET (v19.34.181), not 15:55.
+    # Accept the 15:40–15:58 band so both the current 15:45 and the legacy
+    # 15:55 read GREEN instead of throwing a spurious daily YELLOW.
+    if eod_hr != 15 or not (40 <= (eod_min or 0) <= 58):
         issues.append(
             f"EOD close window unusual: {eod_hr}:{eod_min:02d} "
-            f"(expected 15:55)"
+            f"(expected ~15:45)"
             if eod_min is not None else "EOD close window not set"
         )
 

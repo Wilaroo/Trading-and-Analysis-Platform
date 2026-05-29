@@ -1001,6 +1001,67 @@ class OpportunityEvaluator:
 
             print(f"   📊 {symbol}: {shares} shares, entry=${entry_price:.2f}, stop=${stop_price:.2f}, risk=${risk_amount:.2f}")
 
+            # ── v19.34.179 — Portfolio-level exposure cap (AUTONOMOUS path) ──
+            # The v19.34.96/98 position-style (30%) + long-horizon (55%)
+            # exposure caps were ONLY wired into the manual submit_trade
+            # router path, so unattended bot entries could pile simultaneous
+            # long-horizon bets past the intended portfolio concentration
+            # (starving scalp/intraday buying power — the exact case the
+            # guard was built for). Mirror the submit_trade clamp here so
+            # autopilot honors the same caps. Fail-open: any error logs and
+            # proceeds (per-symbol + per-trade caps still apply).
+            try:
+                _style = (alert.get("trade_style") if isinstance(alert, dict) else None) or ""
+                _style = str(_style).strip().lower()
+                if _style and entry_price > 0:
+                    from services.portfolio_exposure_guard import (
+                        LONG_HORIZON_STYLES, POSITION_STYLES, compute_exposure,
+                    )
+                    _acct_val = 0.0
+                    try:
+                        _acct_val = float(await bot._get_account_value() or 0)
+                    except Exception:
+                        _acct_val = 0.0
+                    if _acct_val > 0:
+                        try:
+                            from services.position_sizer import get_position_sizer_service
+                            _scfg = get_position_sizer_service().get_config()
+                            _pos_cap = float(_scfg.get("max_position_style_exposure_pct", 30.0))
+                            _lh_cap = float(_scfg.get("max_long_horizon_exposure_pct", 55.0))
+                        except Exception:
+                            _pos_cap, _lh_cap = 30.0, 55.0
+                        _open = list((getattr(bot, "_open_trades", {}) or {}).values())
+                        for _styles, _cap_pct, _label in (
+                            (POSITION_STYLES, _pos_cap, "position-style"),
+                            (LONG_HORIZON_STYLES, _lh_cap, "long-horizon"),
+                        ):
+                            if _style not in _styles:
+                                continue
+                            _snap = compute_exposure(_open, _acct_val, cap_pct=_cap_pct, styles=_styles)
+                            _cap_shares = int(_snap.remaining_value // entry_price) if entry_price > 0 else 0
+                            if shares > _cap_shares:
+                                print(
+                                    f"   🧱 {symbol} portfolio {_cap_pct:.0f}% {_label} cap: "
+                                    f"${_snap.remaining_value:,.0f} remaining → {_cap_shares} shares "
+                                    f"(was {shares})"
+                                )
+                                shares = max(0, _cap_shares)
+                        if shares <= 0:
+                            print(f"   ❌ {symbol} blocked by portfolio exposure cap (style={_style})")
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type, direction=direction_str,
+                                reason_code="portfolio_exposure_cap",
+                                context={
+                                    "trade_style": _style,
+                                    "why": ("Portfolio-level exposure cap (position-style 30% / "
+                                            "long-horizon 55%) is saturated — no room for additional "
+                                            "long-horizon exposure. Protects scalp/intraday buying power."),
+                                },
+                            )
+                            return None
+            except Exception as _exp_err:
+                logger.debug(f"v19.34.179 portfolio exposure clamp skipped for {symbol}: {_exp_err}")
+
             # Calculate risk/reward
             primary_target = target_prices[0] if target_prices else entry_price
             potential_reward = abs(primary_target - entry_price) * shares
