@@ -1979,7 +1979,38 @@ class TradingBotService:
             else:
                 setattr(self.risk_params, key, value)
                 logger.info(f"Risk param updated: {key} = {value}")
-        
+
+        # v19.34.180 — persist MONGO_WINS fields SYNCHRONOUSLY.
+        # The async create_task(_save_state()) below races the
+        # state_integrity watchdog, which treats these fields as
+        # MONGO_WINS and reverts the in-memory value back to the stale
+        # Mongo snapshot BEFORE the deferred save lands — so the
+        # operator's PUT /risk-params silently doesn't stick (observed
+        # 2026-05-29: max_open_positions=25 reverted to 10). Writing the
+        # changed MONGO_WINS fields straight to bot_state here makes the
+        # endpoint authoritative for them. Sync pymongo is fine: this
+        # method is called from a sync FastAPI route (threadpool), not
+        # the event loop.
+        try:
+            from services.state_integrity_service import MONGO_WINS_FIELDS
+            mongo_now = {
+                f"risk_params.{k}": getattr(self.risk_params, k)
+                for k in kwargs
+                if k in MONGO_WINS_FIELDS and hasattr(self.risk_params, k)
+            }
+            if mongo_now and getattr(self, "_db", None) is not None:
+                self._db.bot_state.update_one(
+                    {"_id": "bot_state"}, {"$set": mongo_now}, upsert=True
+                )
+                logger.info(
+                    f"v19.34.180 synced MONGO_WINS risk fields to Mongo: "
+                    f"{list(mongo_now.keys())}"
+                )
+        except Exception as _mw_err:
+            logger.warning(
+                f"v19.34.180 sync persist of MONGO_WINS risk fields failed: {_mw_err}"
+            )
+
         # Persist state after updating risk params
         try:
             loop = asyncio.get_event_loop()
