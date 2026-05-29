@@ -929,6 +929,41 @@ async def get_closed_trades(
         is_synthetic = _cr in SYNTHETIC_CLOSE_REASONS or any(
             _cr.startswith(p) for p in SYNTHETIC_CLOSE_PREFIXES)
 
+        # v19.34.178 — accuracy enrichment. Externally/synthetically closed
+        # trades never had exit_price / r_multiple stamped by the bot (the
+        # existing closed_today builder shows them blank). Derive both from
+        # data that IS present so the feed is complete:
+        #   • effective exit  = entry ± realized_pnl/shares (direction-aware)
+        #   • R-multiple      = realized_pnl / risk_amount (entry dollar-risk),
+        #                       falling back to realized / (|entry-stop|*shares)
+        entry_p = t.get("fill_price") or t.get("entry_price")
+        shares_n = t.get("shares") or 0
+        is_short = str(t.get("direction") or "").lower().startswith("s")
+        exit_p = t.get("exit_price") or t.get("close_price")
+        exit_derived = False
+        if exit_p is None and entry_p and shares_n:
+            try:
+                per_share = realized / shares_n
+                exit_p = round(entry_p - per_share if is_short else entry_p + per_share, 2)
+                exit_derived = True
+            except Exception:
+                exit_p = None
+
+        r_mult = t.get("r_multiple")
+        r_derived = False
+        if r_mult is None:
+            risk_amt = t.get("risk_amount")
+            stop_p = t.get("stop_price")
+            try:
+                if risk_amt and float(risk_amt) > 0:
+                    r_mult = round(realized / float(risk_amt), 2)
+                    r_derived = True
+                elif entry_p and stop_p and shares_n and abs(entry_p - stop_p) > 1e-9:
+                    r_mult = round(realized / (abs(entry_p - stop_p) * shares_n), 2)
+                    r_derived = True
+            except Exception:
+                r_mult = None
+
         trades.append({
             "trade_id": t.get("id"),
             "symbol": t.get("symbol"),
@@ -937,14 +972,16 @@ async def get_closed_trades(
             "tqs_grade": t.get("tqs_grade") or "",
             "direction": t.get("direction"),
             "shares": t.get("shares"),
-            "entry_price": t.get("fill_price") or t.get("entry_price"),
-            "exit_price": t.get("exit_price") or t.get("close_price"),
+            "entry_price": entry_p,
+            "exit_price": exit_p,
+            "exit_price_derived": exit_derived,
             "entry_time": entry_time,
             "exit_time": exit_time,
             "hold_seconds": hold_secs,
             "hold_label": hold_label,
             "realized_pnl": round(realized, 2),
-            "r_multiple": t.get("r_multiple"),
+            "r_multiple": r_mult,
+            "r_multiple_derived": r_derived,
             "mae_r": t.get("mae_r"),
             "mfe_r": t.get("mfe_r"),
             "close_reason": _cr or None,
