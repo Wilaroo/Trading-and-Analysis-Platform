@@ -596,6 +596,17 @@ class OpportunityEvaluator:
                         alert["_post_gate_tqs_score"] = recalc_tqs.score
                         alert["_post_gate_tqs_grade"] = recalc_tqs.grade
                         alert["_post_gate_tqs_action"] = recalc_tqs.action
+                        # v19.34.175 — persist the AI-enriched 5-pillar
+                        # breakdown so the UI drill-down reflects the richest
+                        # (post-confidence-gate) TQS computation.
+                        try:
+                            _rd = recalc_tqs.to_dict()
+                            alert["_post_gate_tqs_pillars"] = _rd.get("pillar_scores", {}) or {}
+                            alert["_post_gate_tqs_pillar_grades"] = recalc_tqs.pillar_grades or {}
+                            alert["_post_gate_tqs_breakdown"] = _rd.get("breakdown", {}) or {}
+                            alert["_post_gate_tqs_weights"] = recalc_tqs.weights_used or {}
+                        except Exception:
+                            pass
                         logger.debug(
                             f"Post-gate TQS for {symbol}: {recalc_tqs.score:.1f} "
                             f"(pre-gate: {alert.get('tqs_score', 'N/A')})"
@@ -832,11 +843,22 @@ class OpportunityEvaluator:
             symbol_for_vp = alert.get("symbol") if isinstance(alert, dict) else None
             if isinstance(alert, dict):
                 scanner_bs = alert.get("bar_size") or alert.get("scanner_bar_size") or "5 mins"
-                # v19.34.156 — `smb_grade` is the canonical field; fall back
-                # to `trade_grade` for legacy alert paths. Q2b: missing /
-                # unknown grades fall to D inside `_resolve_grade_multiplier`,
-                # NOT silently to B — operator wants strict grade routing.
-                alert_grade = alert.get("smb_grade") or alert.get("trade_grade")
+                # ── v19.34.175 — TQS is the SINGLE SOURCE OF TRUTH for sizing.
+                # Operator choice A (2026-05-29): plumb the real TQS grade into
+                # the grade scaler with the existing multiplier table
+                # (A=1.0 / B=0.7 / C=0.3 / D=0.1). Pre-fix this read `smb_grade`,
+                # which (a) was never threaded into this dict — so the scaler
+                # defaulted to D (0.1x) on EVERY trade — and (b) double-counted
+                # SMB, which is already 15% of the TQS Setup pillar. SMB grade is
+                # now retained for AUDIT ONLY (stamped on the trade record).
+                # Prefer the AI-enriched post-gate TQS grade, then the pre-gate
+                # TQS grade, then legacy trade_grade. Missing/unknown → D (strict,
+                # per Q2b) inside `_resolve_grade_multiplier`.
+                alert_grade = (
+                    alert.get("_post_gate_tqs_grade")
+                    or alert.get("tqs_grade")
+                    or alert.get("trade_grade")
+                )
                 # v19.34.157 — setup_type drives the MR family lookup
                 # (MR vs momentum vs breakout). Unknown setups produce a
                 # neutral 1.0× multiplier (never blocks).
@@ -1043,6 +1065,22 @@ class OpportunityEvaluator:
                 except Exception:
                     pass
 
+            # ── v19.34.175 — canonical TQS grade/score for this trade.
+            # TQS is the single source of truth; `unified_grade` = TQS grade
+            # (falls back to the legacy quality_grade only when TQS is entirely
+            # absent, e.g. a legacy/synthetic alert with no scanner enrichment).
+            tqs_grade_final = (
+                alert.get("_post_gate_tqs_grade")
+                or alert.get("tqs_grade")
+                or ""
+            )
+            tqs_score_final = (
+                alert.get("_post_gate_tqs_score")
+                or alert.get("tqs_score")
+                or 0
+            )
+            unified_grade_final = tqs_grade_final or quality_grade
+
             # Create trade
             trade = BotTrade(
                 id=str(uuid.uuid4())[:8],
@@ -1055,6 +1093,9 @@ class OpportunityEvaluator:
                 quality_grade=quality_grade,
                 trade_style=alert.get("trade_style", "trade_2_hold"),
                 smb_grade=alert.get("smb_grade", quality_grade),
+                tqs_score=float(tqs_score_final or 0),
+                tqs_grade=tqs_grade_final,
+                unified_grade=unified_grade_final,
                 tape_score=alert.get("tape_score", 5),
                 target_r_multiple=alert.get("target_r_multiple", risk_reward_ratio),
                 direction_bias=alert.get("direction_bias", "both"),
@@ -2002,10 +2043,25 @@ class OpportunityEvaluator:
                 "post_gate_grade": alert.get("_post_gate_tqs_grade", ""),
                 "post_gate_action": alert.get("_post_gate_tqs_action", ""),
                 "delta": round(post_gate_tqs - pre_gate_tqs, 1) if pre_gate_tqs else None,
+                # v19.34.175 — unified grade + full 5-pillar breakdown for the
+                # operator UI drill-down (prefer the richer post-gate data).
+                "unified_grade": alert.get("_post_gate_tqs_grade") or alert.get("tqs_grade") or "",
+                "score": round(post_gate_tqs, 1),
+                "pillar_scores": alert.get("_post_gate_tqs_pillars") or alert.get("tqs_pillar_scores") or {},
+                "pillar_grades": alert.get("_post_gate_tqs_pillar_grades") or alert.get("tqs_pillar_grades") or {},
+                "breakdown": alert.get("_post_gate_tqs_breakdown") or alert.get("tqs_breakdown") or {},
+                "weights": alert.get("_post_gate_tqs_weights") or alert.get("tqs_weights") or {},
             }
         elif pre_gate_tqs:
             ctx["tqs"] = {
                 "pre_gate_score": round(pre_gate_tqs, 1),
+                # v19.34.175 — pre-gate path (no confidence-gate live prediction).
+                "unified_grade": alert.get("tqs_grade") or "",
+                "score": round(pre_gate_tqs, 1),
+                "pillar_scores": alert.get("tqs_pillar_scores") or {},
+                "pillar_grades": alert.get("tqs_pillar_grades") or {},
+                "breakdown": alert.get("tqs_breakdown") or {},
+                "weights": alert.get("tqs_weights") or {},
             }
 
         # 10. Liquidity-aware multipliers (2026-04-28e)
