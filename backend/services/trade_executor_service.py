@@ -681,6 +681,23 @@ class TradeExecutorService:
                         "routing": "SMART"
                     }
                 elif status == "partial":
+                    # v19.34.188 — surface partial fills to Mission Control's
+                    # Execution lane (fire-and-forget; no-op if no loop).
+                    try:
+                        import asyncio as _aio
+                        from services.sentcom_service import emit_stream_event
+                        _fq = order_result.get("filled_qty", 0)
+                        _rq = order_result.get("remaining_qty", 0)
+                        _aio.get_running_loop().create_task(emit_stream_event({
+                            "kind": "info",
+                            "event": "partial_fill",
+                            "symbol": trade.symbol,
+                            "text": f"◐ {trade.symbol} partial fill: {_fq} of {_fq + _rq} @ ${order_result.get('fill_price', trade.entry_price):.2f} ({_rq} left)",
+                            "metadata": {"source": "trade_executor_service", "filled_qty": _fq,
+                                         "remaining_qty": _rq, "order_id": order_id},
+                        }))
+                    except Exception:
+                        pass
                     return {
                         "success": True,
                         "order_id": order_id,

@@ -734,6 +734,23 @@ class TradeExecution:
                     f"{trade.symbol}: {_snap_err}"
                 )
 
+            # v19.34.188 — surface order submission to Mission Control's
+            # Execution lane (before the fill confirms).
+            try:
+                from services.sentcom_service import emit_stream_event
+                _dir = (str(trade.direction.value).upper() if hasattr(trade.direction, "value")
+                        else str(trade.direction).upper())
+                await emit_stream_event({
+                    "kind": "info",
+                    "event": "order_submitted",
+                    "symbol": trade.symbol,
+                    "text": f"📤 Submitting {_dir} {trade.shares} {trade.symbol} @ ${getattr(trade, 'entry_price', 0) or 0:.2f}",
+                    "metadata": {"source": "trade_executor_service", "trade_id": trade.id,
+                                 "shares": trade.shares, "intent": "bracket"},
+                })
+            except Exception:
+                pass
+
             bracket_result = await bot._trade_executor.place_bracket_order(trade)
             use_legacy = (
                 not bracket_result.get('success') and

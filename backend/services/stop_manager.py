@@ -436,6 +436,32 @@ class StopManager:
         if len(history) > 100:
             del history[:-100]
 
+        # v19.34.188 — surface stop moves to Mission Control's Position lane.
+        # This is the single chokepoint for trailing + breakeven + activation
+        # moves, so one emit here covers them all. Fire-and-forget (no-op if no
+        # running loop); never breaks the stop-management path.
+        try:
+            import asyncio as _aio
+            from services.sentcom_service import emit_stream_event
+            _is_be = "breakeven" in str(reason).lower() or "break_even" in str(reason).lower()
+            _evt = "stop_to_breakeven" if _is_be else "trailing_stop_moved"
+            _icon = "🛡️" if _is_be else "↗"
+            _payload = {
+                "kind": "info",
+                "event": _evt,
+                "symbol": trade.symbol,
+                "text": f"{_icon} {trade.symbol} stop ${old_stop:.2f} → ${new_stop:.2f} ({reason})",
+                "metadata": {"source": "position_manager", "old_stop": old_stop,
+                             "new_stop": new_stop, "reason": reason},
+            }
+            try:
+                _aio.get_running_loop().create_task(emit_stream_event(_payload))
+            except RuntimeError:
+                pass  # sync context, no loop — skip live emit (still logged)
+        except Exception:
+            pass
+
+
     def forget_trade(self, trade_id: str) -> None:
         """v19.13 — release internal per-trade state when a trade closes.
 
