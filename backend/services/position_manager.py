@@ -2474,6 +2474,29 @@ class PositionManager:
 
                     logger.info(f"Scale-out complete: {trade.symbol} T{i+1} - Sold {shares_to_sell} @ ${fill_price:.2f}, P&L: ${partial_pnl:.2f}, Remaining: {trade.remaining_shares}")
 
+                    # v19.34.184 — surface scale-out / target hits to Mission
+                    # Control's Position lane (kind=info so the classifier keeps
+                    # it in Position, not Execution; success severity derives
+                    # from the `target_hit` action_type).
+                    try:
+                        from services.sentcom_service import emit_stream_event
+                        await emit_stream_event({
+                            "kind": "info",
+                            "event": "target_hit",
+                            "symbol": trade.symbol,
+                            "text": (
+                                f"🎯 {trade.symbol} T{i+1} hit @ ${fill_price:.2f} — "
+                                f"sold {shares_to_sell}sh, P&L ${partial_pnl:+.2f}, "
+                                f"{trade.remaining_shares}sh left"
+                            ),
+                            "metadata": {"source": "position_manager",
+                                         "target_idx": i + 1,
+                                         "fill_price": fill_price,
+                                         "partial_pnl": partial_pnl},
+                        })
+                    except Exception:
+                        pass
+
                     await bot._notify_trade_update(trade, f"scale_out_t{i+1}")
 
                     # 2026-05-05 v19.34.7 — Bracket re-issue after scale-out.

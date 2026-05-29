@@ -662,6 +662,24 @@ class OpportunityEvaluator:
                             f"{'LONG' if _is_long else 'SHORT'} alert stop ${_orig_ws:.2f} on "
                             f"wrong side of entry ${entry_price:.2f} — recomputed → ${stop_price:.2f}"
                         )
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "warning",
+                                "event": "wrong_side_stop_recomputed",
+                                "symbol": symbol,
+                                "text": (
+                                    f"🩹 {symbol} {'long' if _is_long else 'short'} "
+                                    f"stop ${_orig_ws:.2f} was wrong side of entry "
+                                    f"${entry_price:.2f} — recomputed ${stop_price:.2f}"
+                                ),
+                                "metadata": {"source": "opportunity_evaluator",
+                                             "guard": "v19.34.183_wrong_side_stop",
+                                             "original_stop": _orig_ws,
+                                             "new_stop": stop_price},
+                            })
+                        except Exception:
+                            pass
             except Exception as _ws_err:
                 logger.debug(f"[v19.34.183 wrong-side-stop] skipped for {symbol}: {_ws_err}")
 
@@ -691,6 +709,24 @@ class OpportunityEvaluator:
                             f"${stop_price:.2f} ({_dist/entry_price*100:.1f}%) > {_cap_pct*100:.0f}% cap "
                             f"— tightened → ${_new_stop:.2f}"
                         )
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "info",
+                                "event": "position_stop_capped",
+                                "symbol": symbol,
+                                "text": (
+                                    f"✂️ {symbol} {_style} stop {_dist/entry_price*100:.1f}% "
+                                    f"capped to {_cap_pct*100:.0f}% (${stop_price:.2f}→${_new_stop:.2f}) "
+                                    f"— keeps share sizing sane"
+                                ),
+                                "metadata": {"source": "opportunity_evaluator",
+                                             "guard": "v19.34.183_stop_cap",
+                                             "style": _style,
+                                             "capped_stop": _new_stop},
+                            })
+                        except Exception:
+                            pass
                         stop_price = _new_stop
             except Exception as _scap_err:
                 logger.debug(f"[v19.34.183 stop-cap] skipped for {symbol}: {_scap_err}")
