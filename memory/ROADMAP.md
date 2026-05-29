@@ -5,6 +5,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## ✅ SHIPPED 2026-05-29 — v19.34.175 TQS/SMB Unification + 5-pillar UI drill-down
+(see CHANGELOG.md). TQS is now the single source of truth for grade + sizing.
+Fixed latent bug: grade never reached the sizing scaler → every trade sized at
+0.1× (D). Operator chose full TQS sizing (A=1.0×). **Operator live-check pending**:
+confirm A-grade fills now size at 1.0× and the ~10× size jump is acceptable.
+
+
 
 ## 🆕 Enhancement saved 2026-05-28 — Daily Ops Digest
 

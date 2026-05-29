@@ -673,6 +673,17 @@ class BotTrade:
     tape_score: int = 5               # 1-10
     target_r_multiple: float = 2.0    # Target R based on trade style
     direction_bias: str = "both"      # Setup's primary direction
+
+    # ── v19.34.175 — TQS/SMB unification ─────────────────────────────
+    # `unified_grade` is the single source of truth for this trade's
+    # grade — it equals the Trade Quality Score grade (`tqs_grade`). The
+    # `smb_grade` field above is retained for AUDIT ONLY and no longer
+    # drives position sizing (it is already 15% of the TQS Setup pillar;
+    # reusing it for sizing double-counted it). `tqs_score`/`tqs_grade`
+    # mirror the TQS pipeline output captured at fill time.
+    tqs_score: float = 0.0            # 0-100 overall Trade Quality Score
+    tqs_grade: str = ""               # A / B+ / B / C+ / C / D / F
+    unified_grade: str = ""           # canonical grade (= tqs_grade)
     
     # Scale-out tracking (with defaults)
     original_shares: int = 0  # Original position size before scale-outs
@@ -4249,7 +4260,29 @@ class TradingBotService:
                     'priority': alert.priority.value if alert.priority else 'medium',
                     'tape_confirmation': alert.tape_confirmation,
                     'strategy_win_rate': alert.strategy_win_rate,
-                    'auto_execute_eligible': alert.auto_execute_eligible
+                    'auto_execute_eligible': alert.auto_execute_eligible,
+                    # ── v19.34.175 — TQS/SMB unification ───────────────
+                    # Pre-fix, this manually-rebuilt dict DROPPED every
+                    # grade + quality field, so (a) the grade scaler in
+                    # `calculate_position_size` resolved to D (0.1x) on
+                    # EVERY trade and (b) the post-gate TQS recalc ran on
+                    # hardcoded defaults (smb_grade="B", tape=0, rr=2.0).
+                    # Thread the real scanner values so TQS is the single
+                    # source of truth for grade + sizing. SMB grade is
+                    # carried for AUDIT ONLY (no longer drives sizing).
+                    'tqs_score': getattr(alert, 'tqs_score', 0.0),
+                    'tqs_grade': getattr(alert, 'tqs_grade', '') or '',
+                    'tqs_action': getattr(alert, 'tqs_action', '') or '',
+                    'tqs_pillar_scores': getattr(alert, 'tqs_pillar_scores', {}) or {},
+                    'tqs_pillar_grades': getattr(alert, 'tqs_pillar_grades', {}) or {},
+                    'tqs_breakdown': getattr(alert, 'tqs_breakdown', {}) or {},
+                    'tqs_weights': getattr(alert, 'tqs_weights', {}) or {},
+                    'trade_style': getattr(alert, 'trade_style', '') or '',
+                    'tape_score': getattr(alert, 'tape_score', 0) or 0,
+                    'smb_score_total': getattr(alert, 'smb_score_total', 0) or 0,
+                    'risk_reward': getattr(alert, 'risk_reward', 0) or 0,
+                    'smb_grade': getattr(alert, 'trade_grade', '') or '',
+                    'trade_grade': getattr(alert, 'trade_grade', '') or '',
                 }
                 
                 # 2026-05-01 v19.20 — skip watchlist-only setups silently.

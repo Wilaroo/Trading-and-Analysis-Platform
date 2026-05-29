@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.80 (2026-05-22, "Bracket-stacking auto-cancel + quote-resub watchdog — first real backend features after the docs-only run")
+- **Current version**: v19.34.175 (2026-05-29, "TQS/SMB unification: TQS is the single source of truth for grade + sizing; fixed latent 0.1× under-sizing bug; 5-pillar UI drill-down")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

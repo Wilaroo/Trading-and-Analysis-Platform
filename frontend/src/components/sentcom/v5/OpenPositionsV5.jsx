@@ -49,6 +49,28 @@ import CloseTradeModal from './CloseTradeModal';
 // v156 grade-scaling × v157 MR-regime sizing chain stamped on every
 // fill in `entry_context.multipliers`.
 import WhyThisSizePill from './WhyThisSizePill';
+// v19.34.175 — TQS 5-pillar drill-down (entry_context.tqs). TQS is now
+// the single source of truth for the trade's grade.
+import TqsPillarPanel from './TqsPillarPanel';
+
+// v19.34.175 — Resolve the canonical (unified) grade for a position.
+// TQS is the single source of truth; fall back through the legacy
+// quality grade so older fills still render a grade.
+const unifiedGrade = (pos) => {
+  if (!pos) return '';
+  return (
+    pos.unified_grade
+    || pos.tqs_grade
+    || (pos.entry_context && pos.entry_context.tqs && pos.entry_context.tqs.unified_grade)
+    || pos.quality_grade
+    || ''
+  );
+};
+// Standalone grade chips are SUPPRESSED for F / missing grades — an
+// isolated "F" badge confused operators (it read as a hard reject when
+// it's just a low composite). The full reasoning still lives in the
+// expandable TQS drill-down.
+const showGradeChip = (g) => !!g && String(g).toUpperCase() !== 'F';
 
 const formatR = (r) => {
   if (r == null || Number.isNaN(Number(r))) return '';
@@ -220,9 +242,11 @@ const modelTrailLine = (pos) => {
   if (reasoning.length > 0) {
     const first = String(reasoning[0]).slice(0, 60);
     parts.push(first);
-  } else if (pos.smb_grade && !isScalpPosition(pos)) {
-    // v19.34.85 — scalps suppress the SMB chip (rubric mismatch).
-    parts.push(`SMB ${pos.smb_grade}`);
+  } else if (!isScalpPosition(pos)) {
+    // v19.34.175 — show the unified TQS grade (single source of truth),
+    // not the standalone SMB grade. Suppressed for F/missing (scalps too).
+    const g = unifiedGrade(pos);
+    if (showGradeChip(g)) parts.push(`TQS ${g}`);
   }
   return parts.join(' · ');
 };
@@ -606,8 +630,9 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             {(position.setup_variant || position.setup_type) && (
               <span>setup {humanizeStyle(position.setup_variant || position.setup_type)}</span>
             )}
-            {position.smb_grade && (
-              <span>· grade {position.smb_grade}</span>
+            {/* v19.34.175 — unified TQS grade (suppressed for F/missing). */}
+            {showGradeChip(unifiedGrade(position)) && (
+              <span>· grade {unifiedGrade(position)}</span>
             )}
             {position.market_regime && (
               <span>· regime {position.market_regime}</span>
@@ -616,6 +641,12 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
                 entry_context.multipliers has at least one v156/v157 key). */}
             <WhyThisSizePill multipliers={position?.entry_context?.multipliers} />
           </div>
+
+          {/* v19.34.175 — TQS 5-pillar drill-down (expand-on-click). */}
+          <TqsPillarPanel
+            tqs={position?.entry_context?.tqs}
+            testIdSuffix={`open-pos-${position.symbol}`}
+          />
 
           {/* v19.34.11 — Bracket lifecycle history (lazy-loaded on click) */}
           <BracketHistoryPanel
@@ -762,9 +793,9 @@ const GroupMemberRow = ({ member, idx }) => {
           <span>{Math.round(Math.abs(Number(member.shares ?? 0)))}sh</span>
           <span className="text-zinc-500">@</span>
           <span>${formatPx(member.entry_price)}</span>
-          {member.smb_grade && !isScalpPosition(member) && (
+          {showGradeChip(unifiedGrade(member)) && !isScalpPosition(member) && (
             <span className="px-1 py-0 bg-zinc-800 text-zinc-400 text-[12px] uppercase rounded">
-              SMB {member.smb_grade}
+              TQS {unifiedGrade(member)}
             </span>
           )}
           {(member.setup_variant || member.setup_type) && (

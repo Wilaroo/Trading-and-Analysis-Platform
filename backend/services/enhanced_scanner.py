@@ -493,6 +493,12 @@ class LiveAlert:
     tqs_key_factors: List[str] = field(default_factory=list)
     tqs_concerns: List[str] = field(default_factory=list)
     tqs_is_high_quality: bool = False     # TQS >= 70 (highlighted in UI)
+    # v19.34.175 — full 5-pillar breakdown captured at alert time so the
+    # operator UI can drill into exactly how the score was composed.
+    tqs_pillar_scores: Dict[str, float] = field(default_factory=dict)
+    tqs_pillar_grades: Dict[str, str] = field(default_factory=dict)
+    tqs_breakdown: Dict[str, Any] = field(default_factory=dict)
+    tqs_weights: Dict[str, float] = field(default_factory=dict)
     
     # NEW: AI Integration fields
     ai_confidence: float = 0.0            # 0-100 AI confidence in trade direction
@@ -7612,6 +7618,19 @@ class EnhancedBackgroundScanner:
                 alert.tqs_timeframe = tqs_result.trade_timeframe
                 alert.tqs_key_factors = tqs_result.key_factors[:3] if tqs_result.key_factors else []
                 alert.tqs_concerns = tqs_result.concerns[:3] if tqs_result.concerns else []
+                
+                # v19.34.175 — capture the full 5-pillar breakdown (per-pillar
+                # score/grade/components/factors) + weights so the operator UI
+                # can drill into exactly how this score was composed at alert
+                # time, without an expensive recompute.
+                try:
+                    _td = tqs_result.to_dict()
+                    alert.tqs_pillar_scores = _td.get("pillar_scores", {}) or {}
+                    alert.tqs_pillar_grades = tqs_result.pillar_grades or {}
+                    alert.tqs_breakdown = _td.get("breakdown", {}) or {}
+                    alert.tqs_weights = tqs_result.weights_used or {}
+                except Exception:
+                    pass
                 
                 # Flag high-quality alerts (TQS >= 70)
                 alert.tqs_is_high_quality = tqs_result.score >= 70

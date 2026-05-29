@@ -1,3 +1,69 @@
+## 2026-05-29 — v19.34.175 TQS/SMB UNIFICATION + 5-PILLAR UI DRILL-DOWN
+
+### Why
+TQS (Trade Quality Score) is now the single source of truth for a trade's
+grade. SMB grade was being read by the position-size scaler even though SMB
+is already 15% of the TQS Setup pillar (double-counting), AND the operator
+UI showed confusing standalone SMB/"F" grade badges.
+
+### CRITICAL latent bug found + fixed
+Audit revealed `trading_bot_service._get_trade_alerts()` manually rebuilt the
+alert dict that feeds `opportunity_evaluator.evaluate_opportunity()` and
+**dropped every grade/quality field** (`tqs_grade`, `tqs_score`, `smb_grade`,
+`tape_score`, `risk_reward`, `smb_score_total`, `trade_style`). Consequences in
+production since v19.34.156:
+  • Position sizing grade resolved to **D = 0.1×** on EVERY trade (grade was
+    `None` → `_resolve_grade_multiplier(None)` → D). Operator confirmed NO
+    `POSITION_SIZE_GRADE_*` env overrides on the DGX — so the bot has been
+    sizing every trade at **10% of intended size**.
+  • The post-gate TQS recalc ran on hardcoded defaults (smb_grade="B", tape=0,
+    rr=2.0) instead of real alert values.
+
+### Fixes shipped (operator chose option A — full TQS sizing)
+- **Plumb real TQS data into the alert dict** (`trading_bot_service.py`
+  `_get_trade_alerts`): tqs_score/grade/action/pillar_scores/pillar_grades/
+  breakdown/weights + tape_score, smb_score_total, risk_reward, trade_style,
+  and smb_grade (audit-only).
+- **Rewire position sizing to TQS** (`opportunity_evaluator.py` ~L840):
+  `alert_grade = _post_gate_tqs_grade → tqs_grade → trade_grade`. SMB no longer
+  drives sizing. Multiplier table unchanged (A=1.0/B=0.7/C=0.3/D=0.1) → A-grade
+  trades now size at full 1.0× (~10× larger than the broken 0.1×).
+- **`unified_grade` field** added to `BotTrade` (= TQS grade), plus `tqs_grade`/
+  `tqs_score`. `smb_grade` retained for audit only. Serialized via `to_dict()`,
+  hydrated on restore via the dataclass allow-list.
+- **5-pillar breakdown captured** at alert time (`enhanced_scanner.
+  _enrich_alert_with_tqs`) + post-gate (`opportunity_evaluator`), stored in
+  `entry_context.tqs.{pillar_scores,pillar_grades,breakdown,weights,
+  unified_grade}`.
+- **Frontend** (`OpenPositionsV5.jsx` + new `TqsPillarPanel.jsx`): SMB grade
+  badges replaced with the unified TQS grade; standalone **F**/missing grade
+  chips suppressed (confused operators). New expand-on-click 5-pillar drill-down
+  (Setup/Technical/Fundamental/Context/Execution) showing per-pillar score,
+  grade, weight, sub-component scores + ± factor bullets.
+- **DB backfill** (`backend/scripts/backfill_v19_34_175_unified_grade.py`):
+  idempotent, sets `unified_grade` on historical `bot_trades` from
+  entry_context.tqs → score-derived grade → quality_grade → smb_grade. Supports
+  `DRY_RUN=1`.
+
+### Files changed
+- `backend/services/trading_bot_service.py` (BotTrade fields + alert-dict plumbing)
+- `backend/services/opportunity_evaluator.py` (sizing rewire + unified_grade + entry_context.tqs)
+- `backend/services/enhanced_scanner.py` (LiveAlert pillar fields + capture)
+- `frontend/src/components/sentcom/v5/OpenPositionsV5.jsx`
+- `frontend/src/components/sentcom/v5/TqsPillarPanel.jsx` (new)
+- `backend/scripts/backfill_v19_34_175_unified_grade.py` (new)
+- `backend/tests/test_tqs_unification_v19_34_175.py` (new, 10 tests passing)
+
+### Verification
+- 10/10 unit tests pass. Backend compiles + `/api/tqs/*` endpoints return the
+  expected 5-pillar breakdown. Frontend compiles clean. (No automated
+  testing-agent — hardware-bound per AGENTS.md.)
+- ⚠️ OPERATOR LIVE-CHECK NEEDED next session: confirm A-grade fills now size at
+  full 1.0× (entry_context.multipliers.grade_scale = 1.0) and that the size
+  jump is expected/acceptable.
+
+---
+
 ## 2026-05-28 — v19.34.183/185/186 BBAI PHANTOM WHIPLASH FIX BUNDLE
 
 ### Investigation
