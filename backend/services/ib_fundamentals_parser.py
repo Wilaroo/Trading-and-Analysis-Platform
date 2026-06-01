@@ -152,25 +152,28 @@ def parse_report_snapshot(xml_str: Optional[str]) -> Dict[str, Any]:
 
 
 def parse_reports_ownership(
-    xml: str, shares_outstanding: Optional[float] = None
+    xml: str, shares_outstanding: Optional[float] = None,
+    institutional_type: str = "2",
 ) -> Dict[str, Any]:
-    """v19.34.204 — parse IB ``ReportsOwnership`` XML → institutional ownership.
+    """v19.34.205 — parse IB ``ReportsOwnership`` XML → institutional ownership.
 
-    The doc is multi-MB (thousands of ``<Owner>`` holdings from 13F filings):
+    The doc is multi-MB (thousands of ``<Owner>`` holdings) and groups holders
+    by a ``<type>`` code. Summing ALL types double-counts (a mutual fund's
+    shares are also counted inside its parent investment-advisor's 13F) → ~2x
+    shares-outstanding. We therefore sum ONLY the institutional bucket:
+    ``type==2`` (Investment Advisor / 13F institution — the standard
+    "institutional ownership" figure; AMD = 75.5% vs ~70% publicly reported).
 
         <OwnershipDetails>
           <floatShares asofDate="...">1623418512</floatShares>
-          <Owner ownerId="...">
-            <type>5</type><name>BlackRock Inc</name>
-            <quantity asofDate="...">505377</quantity>
-          </Owner>
+          <Owner ownerId="..."><type>2</type><name>...</name>
+            <quantity asofDate="...">505377</quantity></Owner>
           ...
         </OwnershipDetails>
 
-    Institutional ownership % = Σ holder quantities ÷ shares-outstanding
-    (falls back to ÷ floatShares if shares-out unknown), capped at 100%.
-    Uses ``iterparse`` + ``elem.clear()`` to stream the large doc without
-    holding the whole tree in memory. Returns {} on parse failure.
+    institutional ownership % = Σ(type-2 quantities) ÷ shares-outstanding
+    (falls back to ÷ floatShares), capped at 100%. Streams via ``iterparse`` +
+    ``elem.clear()``. Returns {} on parse failure.
     """
     import io
 
@@ -180,20 +183,23 @@ def parse_reports_ownership(
     try:
         for _event, elem in ET.iterparse(io.StringIO(xml), events=("end",)):
             tag = elem.tag
-            if tag == "quantity":
-                try:
-                    total_shares += float((elem.text or "0").strip())
-                except (TypeError, ValueError):
-                    pass
-                elem.clear()
-            elif tag == "floatShares":
+            if tag == "floatShares":
                 try:
                     float_shares = float((elem.text or "").strip())
                 except (TypeError, ValueError):
                     pass
                 elem.clear()
             elif tag == "Owner":
-                holders += 1
+                t_el = elem.find("type")
+                otype = (t_el.text or "").strip() if t_el is not None else ""
+                if otype == institutional_type:
+                    q_el = elem.find("quantity")
+                    if q_el is not None:
+                        try:
+                            total_shares += float((q_el.text or "0").strip())
+                            holders += 1
+                        except (TypeError, ValueError):
+                            pass
                 elem.clear()
     except ET.ParseError as exc:
         logger.debug("parse_reports_ownership failed: %s", exc)

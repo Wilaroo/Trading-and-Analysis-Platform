@@ -270,6 +270,13 @@ async def refresh_institutional_ownership(symbol: str, db=None) -> Optional[floa
                                          {"shares_outstanding": 1})
         if cached:
             shares_out = cached.get("shares_outstanding")
+        if not shares_out:
+            # v19.34.205 — fetch ReportSnapshot (~10KB) for an accurate
+            # institutional-% denominator when shares-out isn't cached yet.
+            snap = await ibd.get_fundamental_report(symbol, "ReportSnapshot")
+            if snap:
+                from services.ib_fundamentals_parser import parse_report_snapshot
+                shares_out = parse_report_snapshot(snap).get("shares_outstanding")
 
         xml = await ibd.get_fundamental_report(symbol, "ReportsOwnership",
                                                timeout=60.0)
