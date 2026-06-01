@@ -33,6 +33,25 @@ def recalculate_adv_cache(db, lookback_days: int = 20, min_bars: int = 10, verbo
     """
     if verbose:
         print(f"Starting ADV cache recalculation (lookback={lookback_days}, min_bars={min_bars})...")
+
+    # v19.34.193 — DISABLED. This routine delete_many()'d symbol_adv_cache and
+    # rewrote docs with only `avg_volume` (share count) and NO
+    # `avg_dollar_volume`, which silently collapsed the wave-scanner's
+    # tier2/tier3 pools and made the bot trade only the alphabetical fallback
+    # watchlist (every trade an A/B name). It is permanently disabled. Use the
+    # canonical rebuild instead:
+    #     POST /api/ib-collector/rebuild-adv-from-ib
+    #     (IBHistoricalCollector.rebuild_adv_from_ib_data — writes
+    #      avg_dollar_volume + atr_pct + tier)
+    _msg = (
+        "recalculate_adv_cache() is DISABLED (v19.34.193): it wiped the "
+        "avg_dollar_volume field and crippled scanner coverage. Use "
+        "POST /api/ib-collector/rebuild-adv-from-ib "
+        "(IBHistoricalCollector.rebuild_adv_from_ib_data)."
+    )
+    if verbose:
+        print("ALARM: " + _msg)
+    raise RuntimeError(_msg)
     
     # Step 1: Aggregate real daily bars per symbol
     # Real daily bars have date strings of length 10 ("YYYY-MM-DD")

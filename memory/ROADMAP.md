@@ -22,17 +22,19 @@ Open priorities, deferred ideas, and backlog. Move items to
   `shadow_decisions` (finish the v172 normalization; prevents silent
   cross-collection 0-row query bugs). Use `utils/timestamps.py` helpers.
 
-### 🔴 P1 — Likely real bug surfaced by operator (Friday all-trades-were-A/B/C)
-- **Alphabetical scan/subscription bias.** Universe is `sorted(...)` (alphabetical).
-  `_sync_wave_subscriptions` caps LIVE quote subs at `WAVE_SCANNER_MAX_SUBS=40`,
-  iterating `tier1(alphabetical watchlist)+tier2+tier3` in order → the 40 live
-  quote slots are eaten by early-alphabet tier1 names, starving later-alphabet
-  symbols of fresh quotes → only A/B/C generate live-tradable alerts. tier3 DOES
-  rotate (cursor wraps) but tier1's alpha order + the 40-sub cap dominate.
-  **Fix candidates**: (a) prioritize the live-sub cap by RVOL/conviction not
-  alpha; (b) raise `WAVE_SCANNER_MAX_SUBS`; (c) rotate the tier1 live-sub window.
-  **Diagnostic first**: `/api/scanner/scan-cycle-stats` +
-  `_scanned_symbols_lifetime` to confirm coverage vs alpha bias.
+### 🔴 P1 — Alphabetical scan bias (Friday all-trades-were-A/B) — ✅ RESOLVED v19.34.193
+- **Root cause (confirmed via diagnostic):** the weekly ADV scheduler (Sundays
+  10 PM ET) called the legacy `recalculate_adv_cache.py`, which `delete_many()`'d
+  `symbol_adv_cache` and dropped `avg_dollar_volume` → wave-scanner tier2/3
+  collapsed to 0 → scanner degraded to a 50-symbol ALPHABETICAL fallback. NOT a
+  sort/subscription-cap issue (the wave scanner is ADV-ranked + rotating).
+- **Fixed:** data repaired via `POST /api/ib-collector/rebuild-adv-from-ib`
+  (9,412 syms); weekly recalc rerouted to `rebuild_adv_from_ib_data`; footgun
+  script disabled; WaveScanner self-heal + empty-pool TTL bypass + broken-cache
+  alarm/avg_volume fallback. 5/5 tests pass. (paste.rs Ksyzp / O6DNk)
+- **Follow-up (optional, P2):** the `WAVE_SCANNER_MAX_SUBS=40` live-quote cap is
+  still small vs the pusher's auto-top-N; consider raising / RVOL-prioritizing it
+  once coverage is confirmed healthy post-restart.
 
 ### 🟡 P1/P2 — Quality/liquidity gate (operator: "how does $BIL become a trade?")
 - **Add a volatility/ATR floor hard-gate.** Today the only HARD in-play gate is

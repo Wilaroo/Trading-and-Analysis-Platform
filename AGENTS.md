@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.192 (2026-02, "EOD/close bracket-cancel routed through DGX-native ib_direct (Master API clientId 11, permId-aware via live order object) instead of the stale/serialized legacy IBService worker — fixes the recurring EOD MKT-close deadlock (bracket_cancel_timeout_race_risk) + IB 10147 OrderId-not-found on cross-session DAY/GTC children. OCA-race 8s+5s wait contract untouched.")
+- **Current version**: v19.34.193 (2026-02, "Scanner universe-coverage hardening — fixed the weekly ADV scheduler that wiped avg_dollar_volume every Sunday (legacy recalculate_adv_cache.py delete_many) and silently degraded the scanner to a 50-symbol alphabetical fallback (A/B-only trading). Weekly recalc now routes to the canonical rebuild_adv_from_ib_data; footgun script disabled; WaveScanner self-heals + empty-pool TTL bypass + broken-cache alarm/avg_volume fallback.")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

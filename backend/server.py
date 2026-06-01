@@ -3811,11 +3811,23 @@ async def _weekly_adv_recalc_loop():
 
 
 def _run_adv_recalc():
-    """Sync wrapper for ADV recalculation (runs in thread)."""
+    """Sync wrapper for ADV recalculation (runs in thread).
+
+    v19.34.193 — PREVIOUSLY called scripts/recalculate_adv_cache.py, which
+    delete_many()'d symbol_adv_cache and rewrote docs WITHOUT the
+    `avg_dollar_volume` field. That silently collapsed the wave-scanner's
+    tier2/tier3 pools every Sunday 10 PM ET, leaving the bot trading only
+    the 50-symbol alphabetical fallback watchlist (every trade an A/B
+    name). Now routes to the canonical
+    IBHistoricalCollector.rebuild_adv_from_ib_data() — the same path as
+    POST /api/ib-collector/rebuild-adv-from-ib — which writes
+    avg_dollar_volume + atr_pct + tier.
+    """
     try:
-        from scripts.recalculate_adv_cache import recalculate_adv_cache
-        stats = recalculate_adv_cache(db, lookback_days=10, min_bars=5, verbose=True)
-        return stats
+        import asyncio as _asyncio
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+        return _asyncio.run(collector.rebuild_adv_from_ib_data())
     except Exception as e:
         return {"error": str(e)}
 

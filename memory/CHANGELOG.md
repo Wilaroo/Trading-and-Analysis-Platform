@@ -1,3 +1,50 @@
+## 2026-?? — v19.34.193 SCANNER UNIVERSE-COVERAGE HARDENING (alphabetical A/B-only bug)
+
+### Context (operator: "all Friday trades were A/B/C symbols")
+A read-only coverage diagnostic proved the bot was blind to ~9,150 of ~9,400
+symbols. Root cause chain:
+  * The weekly ADV scheduler (`server.py`, Sundays 10 PM ET) called the legacy
+    `scripts/recalculate_adv_cache.py`, which `delete_many()`'d
+    `symbol_adv_cache` and rewrote 9,200 docs with ONLY `avg_volume` (share
+    count) and NO `avg_dollar_volume`.
+  * The wave-scanner ranks tier2/tier3 by `avg_dollar_volume >= $50M / $10M`,
+    so both pools collapsed to 0 (`tier2_pool_size=0`, `tier3_roster_size=0`).
+  * With tiers 2/3 empty, the scanner silently degraded to the 50-symbol
+    ALPHABETICAL fallback watchlist → every trade an A/B name, every Sunday.
+
+### Immediate data repair (operator-run, no code)
+`POST /api/ib-collector/rebuild-adv-from-ib` → rebuilt 9,412 symbols with
+`avg_dollar_volume` + ATR% + tier (intraday 1,145 / swing 844 / investment 507).
+
+### Code fix (this patch — prevents recurrence)
+- `server.py::_run_adv_recalc` now calls the CANONICAL
+  `IBHistoricalCollector.rebuild_adv_from_ib_data()` (writes
+  `avg_dollar_volume`+`atr_pct`+`tier`) instead of the footgun script.
+- `scripts/recalculate_adv_cache.py::recalculate_adv_cache()` is DISABLED
+  (raises `RuntimeError`, no `delete_many`) so a manual run can't wipe it.
+- `services/wave_scanner.py`:
+    * self-heals its db handle (`get_database()`) if a db-less singleton
+      slipped through the init race;
+    * BYPASSES the 10-min TTL while pools are empty (fast self-heal right after
+      a rebuild — no 10-min blind window);
+    * on the wipe signature (docs exist, 0 match `avg_dollar_volume>=$10M`)
+      raises a LOUD alarm and falls back to an `avg_volume`-ranked liquid set —
+      NEVER collapses to alphabetical again.
+
+### Verify
+- `backend/tests/test_v19_34_193_scanner_coverage_hardening.py` — 5/5 pass
+  (healthy ADV-rank, broken-cache→avg_volume fallback non-alphabetical,
+  empty-pool TTL bypass, populated-pool TTL honored, footgun disabled).
+- py_compile + ruff clean.
+- Deploy: paste.rs wrapper `https://paste.rs/Ksyzp` (patch `https://paste.rs/O6DNk`).
+- ⚠️ OPERATOR LIVE-CHECK after restart (~90s): `tier2_pool_size ~200`,
+  `tier3_roster_size ~1989`, live subs ADV-ranked (not all A/B).
+
+### Diagnostics created
+`/tmp/diag_scan_coverage_v19_34_193.py`, `/tmp/diag_adv_cache_fields_v19_34_193.py`.
+
+---
+
 ## 2026-02-?? — v19.34.192 EOD/CLOSE BRACKET-CANCEL VIA IB_DIRECT (master clientId 11)
 
 ### Context (recurring P0 — EOD MKT-close deadlock)

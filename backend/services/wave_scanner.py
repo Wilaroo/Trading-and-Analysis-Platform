@@ -84,11 +84,43 @@ class WaveScanner:
 
     # ---- Universe sourcing ---------------------------------------------
     def _refresh_universe_pools_if_needed(self) -> None:
-        """Pull the latest canonical universe slices from MongoDB."""
+        """Pull the latest canonical universe slices from MongoDB.
+
+        v19.34.193 hardening (after the `symbol_adv_cache` wipe that left
+        the bot trading only the alphabetical fallback watchlist — every
+        Friday trade was an A/B name):
+          * Self-heal the db handle if a db-less singleton slipped through
+            the init race (`get_wave_scanner` created it before
+            `init_wave_scanner` wired the db).
+          * BYPASS the 10-min TTL whenever the current pools are EMPTY, so a
+            broken→repaired cache (e.g. after POST /rebuild-adv-from-ib) is
+            picked up on the very next scan cycle instead of up to 10 min
+            later.
+          * If the `avg_dollar_volume` query returns 0 rows while the
+            collection is non-empty (the exact wipe signature — docs exist
+            but lack the dollar-volume field), raise a LOUD alarm and fall
+            back to an `avg_volume`-ranked liquid set. NEVER silently
+            collapse to the alphabetical watchlist again.
+        """
         now = datetime.now(timezone.utc)
 
+        # Self-heal: never operate db-less.
+        if self._db is None:
+            try:
+                from database import get_database
+                _db = get_database()
+                if _db is not None:
+                    self._db = _db
+            except Exception:
+                pass
+
+        pools_empty = not self._tier2_pool and not self._tier3_roster
+
+        # Honor the TTL ONLY when we already have populated pools. When the
+        # pools are empty we always re-query (fast self-heal after a repair).
         if (
-            self._last_tier2_refresh
+            not pools_empty
+            and self._last_tier2_refresh
             and (now - self._last_tier2_refresh).total_seconds()
             < self._tier2_refresh_interval
         ):
@@ -103,35 +135,56 @@ class WaveScanner:
             return
 
         try:
-            # Tier 2 — top-N intraday symbols ranked by avg_dollar_volume desc
-            cursor = (
-                self._db["symbol_adv_cache"]
-                .find(
-                    {
-                        "avg_dollar_volume": {"$gte": 50_000_000},
-                        "unqualifiable": {"$ne": True},
-                    },
-                    {"symbol": 1, "avg_dollar_volume": 1, "_id": 0},
-                )
-                .sort("avg_dollar_volume", -1)
-                .limit(self._tier2_pool_size)
-            )
-            self._tier2_pool = [d["symbol"] for d in cursor if d.get("symbol")]
+            adv = self._db["symbol_adv_cache"]
 
-            # Tier 3 — full canonical swing universe (super-set of intraday)
-            # ordered by ADV desc so wave 0 covers the most-liquid names first.
-            cursor = (
-                self._db["symbol_adv_cache"]
-                .find(
-                    {
-                        "avg_dollar_volume": {"$gte": 10_000_000},
-                        "unqualifiable": {"$ne": True},
-                    },
+            # Tier 2 — top-N intraday symbols ranked by avg_dollar_volume desc
+            self._tier2_pool = [
+                d["symbol"]
+                for d in adv.find(
+                    {"avg_dollar_volume": {"$gte": 50_000_000},
+                     "unqualifiable": {"$ne": True}},
+                    {"symbol": 1, "avg_dollar_volume": 1, "_id": 0},
+                ).sort("avg_dollar_volume", -1).limit(self._tier2_pool_size)
+                if d.get("symbol")
+            ]
+
+            # Tier 3 — full canonical swing universe, ADV desc (most-liquid
+            # first so wave 0 covers the biggest names).
+            self._tier3_roster = [
+                d["symbol"]
+                for d in adv.find(
+                    {"avg_dollar_volume": {"$gte": 10_000_000},
+                     "unqualifiable": {"$ne": True}},
                     {"symbol": 1, "_id": 0},
-                )
-                .sort("avg_dollar_volume", -1)
-            )
-            self._tier3_roster = [d["symbol"] for d in cursor if d.get("symbol")]
+                ).sort("avg_dollar_volume", -1)
+                if d.get("symbol")
+            ]
+
+            # Broken-cache detector + non-alphabetical fallback.
+            if not self._tier3_roster:
+                total_docs = adv.estimated_document_count()
+                if total_docs > 0:
+                    logger.error(
+                        "🚨 WaveScanner ALARM: symbol_adv_cache has %d docs but "
+                        "ZERO match avg_dollar_volume>=$10M — the dollar-volume "
+                        "field is missing/zeroed (cache-wipe signature). The "
+                        "scanner would otherwise collapse to the alphabetical "
+                        "watchlist. REBUILD via POST /api/ib-collector/"
+                        "rebuild-adv-from-ib. Falling back to avg_volume rank.",
+                        total_docs,
+                    )
+                    # Fallback: rank by raw share volume (liquidity-biased, NOT
+                    # alphabetical) so coverage degrades gracefully.
+                    self._tier3_roster = [
+                        d["symbol"]
+                        for d in adv.find(
+                            {"avg_volume": {"$gte": 500_000},
+                             "unqualifiable": {"$ne": True}},
+                            {"symbol": 1, "avg_volume": 1, "_id": 0},
+                        ).sort("avg_volume", -1).limit(2000)
+                        if d.get("symbol")
+                    ]
+                    self._tier2_pool = self._tier3_roster[: self._tier2_pool_size]
 
             self._last_tier2_refresh = now
             self._last_tier3_refresh = now
@@ -304,6 +357,18 @@ def get_wave_scanner() -> WaveScanner:
     global _wave_scanner
     if _wave_scanner is None:
         _wave_scanner = WaveScanner()
+    # v19.34.193 — self-heal: never operate db-less. If the singleton was
+    # created by an early get_wave_scanner() before init_wave_scanner()
+    # wired the db (import-order race), lazily acquire the canonical handle
+    # so tier2/tier3 can populate instead of silently staying empty.
+    if getattr(_wave_scanner, "_db", None) is None:
+        try:
+            from database import get_database
+            _db = get_database()
+            if _db is not None:
+                _wave_scanner.set_db(_db)
+        except Exception:
+            pass
     return _wave_scanner
 
 

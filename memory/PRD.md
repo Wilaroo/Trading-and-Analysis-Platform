@@ -419,3 +419,21 @@ safety contract (8s primary + 5s retry terminal-wait, filled/timeout abort,
 v189 fresh-openorders re-check) is unchanged — only the cancel transport moved.
 6/6 new tests pass (`test_v19_34_192_eod_cancel_dispatch.py`). Deployed via
 paste.rs wrapper (commits before restart). See CHANGELOG.md.
+
+
+## v19.34.193 — SCANNER UNIVERSE-COVERAGE HARDENING (2026-06, deployed bea9535f)
+
+Fixed a universe-crippling bug: the weekly ADV scheduler (`server.py`, Sundays
+10 PM ET) called the legacy `scripts/recalculate_adv_cache.py`, which
+`delete_many()`'d `symbol_adv_cache` and rewrote docs WITHOUT `avg_dollar_volume`
+(only `avg_volume`). The wave-scanner ranks tier2/tier3 by `avg_dollar_volume`,
+so both pools collapsed to 0 and the scanner silently degraded to a 50-symbol
+ALPHABETICAL fallback watchlist — every trade an A/B name, ~9,150 symbols
+ignored, every week. Fixes: (1) weekly recalc now calls the canonical
+`IBHistoricalCollector.rebuild_adv_from_ib_data()`; (2) the footgun script is
+disabled (raises); (3) `WaveScanner` self-heals its db handle, bypasses the
+10-min TTL while pools are empty, and on the wipe signature raises a loud alarm +
+falls back to an `avg_volume` rank (never alphabetical). Data repaired live via
+`POST /api/ib-collector/rebuild-adv-from-ib` (9,412 syms). Verified live: 195
+ADV-ranked live subs spanning A→Z, tier3_roster=2,498. 5/5 tests pass
+(`test_v19_34_193_scanner_coverage_hardening.py`). See CHANGELOG.md.
