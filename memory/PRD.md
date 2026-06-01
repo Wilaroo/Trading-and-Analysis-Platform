@@ -26,18 +26,20 @@
 
 ---
 
-## 📌 Status snapshot — 2026-06-01 (v19.34.211)
+## 📌 Status snapshot — 2026-06-01 (v19.34.211 / 211a — DEPLOYED)
 
-**Dynamic Universe Builder: BUILT (v211, pending DGX deploy via paste.rs).**
-- New `dynamic_universe_builder.py` composes a priority-ranked daily scan
-  universe (liquid core + IB movers + catalysts + held, regime-tilted), gated
-  to the qualified universe, persisted to `daily_scan_universe`, rebuilt
-  premarket + every ~45 min intraday. Graceful degradation never yields empty.
+**Dynamic Universe Builder + Gameplan Movers UI: LIVE on DGX (commit 6a625e77).**
+- `dynamic_universe_builder.py` composes a priority-ranked daily scan universe
+  (liquid core + IB movers + catalysts + held, regime-tilted), gated to the
+  qualified universe, persisted to `daily_scan_universe`, rebuilt premarket +
+  every ~45 min intraday. Graceful degradation never yields empty.
 - Wired: front-loaded into daily/premarket scans, injected into RTH wave_scanner
-  Tier-1 (every ~15s), and top findings pushed to the game plan (`dynamic_movers`)
-  for briefings. API: `/api/dynamic-universe` (GET/priority/POST rebuild).
-- Tests 6/6 + live smoke (all endpoints + rebuild). Deploy script validated vs
-  synthetic pre-v211 sandbox.
+  Tier-1 (every ~15s), top findings pushed to the game plan (`dynamic_movers`,
+  UTC-date keyed). API: `/api/dynamic-universe` (GET/priority/POST rebuild).
+- Frontend: Game Plan tab "Dynamic Movers" panel (regime chip + Refresh +
+  colour-coded source tags). yarn build done, backend restarted, health green.
+- Live DGX rebuild confirmed real data (NVDA/AAPL 105, AIQ held 100, VSCO
+  earnings 60, PANW 49...). Tests 6/6.
 
 **Alphabetical execution bias: FIXED (v210, deployed e102876d).**
 - Root cause: `_scan_daily_setups`/`_scan_premarket_setups` used
