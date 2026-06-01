@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 COLLECTION = "symbol_fundamentals_cache"
+INSTITUTIONAL_COLLECTION = "institutional_ownership_cache"
 DEFAULT_TTL_HOURS = 24
 EARNINGS_PROXIMITY_TTL_HOURS = 1  # within 1d of earnings → fresh data more often
 
@@ -205,6 +206,21 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
         except Exception as exc:
             logger.debug("Short-interest lookup failed for %s: %s", symbol, exc)
 
+    # 3.6 Institutional ownership % — merged from the separately-maintained
+    # `institutional_ownership_cache` (populated weekly by
+    # refresh_institutional_ownership; the IB ReportsOwnership doc is multi-MB
+    # so it can't live in this 24h hot path). (v19.34.204)
+    if db is not None:
+        try:
+            inst = db[INSTITUTIONAL_COLLECTION].find_one({"symbol": symbol})
+            if inst and inst.get("institutional_ownership_percent") is not None:
+                merged["institutional_ownership_percent"] = \
+                    inst["institutional_ownership_percent"]
+                source_chain.append("ib_ownership")
+        except Exception as exc:
+            logger.debug("Institutional ownership lookup failed for %s: %s",
+                         symbol, exc)
+
     if not source_chain:
         return None
 
@@ -225,3 +241,57 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
             logger.debug("Cache write failed for %s: %s", symbol, exc)
 
     return merged
+
+
+
+async def refresh_institutional_ownership(symbol: str, db=None) -> Optional[float]:
+    """v19.34.204 — fetch IB ReportsOwnership (multi-MB) for ``symbol`` via the
+    live ib_direct socket, compute institutional ownership %, and upsert it into
+    ``institutional_ownership_cache``. Returns the % or None.
+
+    MUST run inside the backend process (where the clientId-11 socket lives).
+    Heavy (3–6 MB/symbol) → intended for a weekly off-hours job, NOT the hot
+    path. shares-outstanding is read from the existing fundamentals cache
+    (populated by ReportSnapshot) so we express ownership as % of shares-out.
+    """
+    if db is None:
+        db = _get_db()
+    if db is None:
+        return None
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        from services.ib_fundamentals_parser import parse_reports_ownership
+        ibd = get_ib_direct_service()
+        if ibd is None or not ibd.is_connected():
+            return None
+
+        shares_out = None
+        cached = db[COLLECTION].find_one({"symbol": symbol},
+                                         {"shares_outstanding": 1})
+        if cached:
+            shares_out = cached.get("shares_outstanding")
+
+        xml = await ibd.get_fundamental_report(symbol, "ReportsOwnership",
+                                               timeout=60.0)
+        if not xml:
+            return None
+        parsed = parse_reports_ownership(xml, shares_outstanding=shares_out)
+        pct = parsed.get("institutional_ownership_percent")
+        if pct is None:
+            return None
+        db[INSTITUTIONAL_COLLECTION].update_one(
+            {"symbol": symbol},
+            {"$set": {
+                "symbol": symbol,
+                "institutional_ownership_percent": pct,
+                "num_institutional_holders": parsed.get("num_institutional_holders"),
+                "float_shares_ownership": parsed.get("float_shares"),
+                "fetched_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        return pct
+    except Exception as exc:
+        logger.debug("refresh_institutional_ownership failed for %s: %s",
+                     symbol, exc)
+        return None

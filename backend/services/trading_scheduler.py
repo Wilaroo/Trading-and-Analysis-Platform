@@ -186,6 +186,23 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 1d. Institutional-ownership refresh — Sunday 3:00 AM ET weekly
+            #     (v19.34.204). IB ReportsOwnership is multi-MB/symbol, so this
+            #     runs off-hours into institutional_ownership_cache; the hot
+            #     fundamentals path just reads the pre-computed % (15% pillar).
+            self._scheduler.add_job(
+                _wrap_async(self._run_institutional_ownership_refresh),
+                CronTrigger(
+                    day_of_week='sun',
+                    hour=3,
+                    minute=0,
+                    timezone='US/Eastern'
+                ),
+                id='institutional_ownership_refresh',
+                name='Institutional Ownership Refresh',
+                replace_existing=True
+            )
+
             # 2. Weekly Report - Friday 4:30 PM ET
             self._scheduler.add_job(
                 _wrap_async(self._run_weekly_report),
@@ -355,6 +372,36 @@ class TradingScheduler:
             logger.info("[scheduler] learning_stats rebuild complete: %d contexts", n)
         except Exception as e:
             logger.error("[scheduler] learning_stats rebuild failed: %s", e)
+
+    async def _run_institutional_ownership_refresh(self):
+        """v19.34.204 — weekly: pull IB ReportsOwnership for the active universe
+        and persist institutional ownership % into institutional_ownership_cache
+        (the 15% fundamental pillar component). Heavy/off-hours; sequential +
+        throttled so the multi-MB fetches don't starve the order socket."""
+        try:
+            import asyncio as _asyncio
+            from services.unified_fundamentals_cache import (
+                refresh_institutional_ownership, _get_db, COLLECTION,
+            )
+            db = _get_db()
+            if db is None:
+                logger.warning("[scheduler] institutional refresh: no DB")
+                return
+            syms = sorted({
+                d["symbol"] for d in
+                db[COLLECTION].find({}, {"symbol": 1, "_id": 0})
+                if d.get("symbol")
+            })
+            done = 0
+            for sym in syms:
+                pct = await refresh_institutional_ownership(sym, db)
+                if pct is not None:
+                    done += 1
+                await _asyncio.sleep(2.0)  # ease the multi-MB transfers
+            logger.info("[scheduler] institutional ownership refresh: %d/%d "
+                        "symbols updated", done, len(syms))
+        except Exception as e:
+            logger.error("[scheduler] institutional ownership refresh failed: %s", e)
 
     async def _run_earnings_calendar_refresh(self):
         """v19.34.203 — persist upcoming earnings into earnings_calendar so the
@@ -949,6 +996,11 @@ class TradingScheduler:
         elif task_type == "earnings_calendar_refresh":
             # v19.34.203 — on-demand earnings calendar refresh.
             await self._run_earnings_calendar_refresh()
+        elif task_type == "institutional_ownership_refresh":
+            # v19.34.204 — on-demand: background it (full universe is multi-MB ×
+            # ~174 symbols → minutes; don't block the HTTP request).
+            import asyncio as _a
+            _a.create_task(self._run_institutional_ownership_refresh())
         else:
             return {"success": False, "error": f"Unknown task type: {task_type}"}
             
