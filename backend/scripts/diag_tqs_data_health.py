@@ -84,10 +84,10 @@ def main():
     lt = ls.count_documents({})
     print(f"  contexts: {lt}")
     if lt:
+        ge5 = ls.count_documents({"total_trades": {"$gte": 5}})
         ge10 = ls.count_documents({"total_trades": {"$gte": 10}})
-        ge30 = ls.count_documents({"total_trades": {"$gte": 30}})
-        print(f"  >=10 trades (escapes 'low' conf): {ge10}/{lt} ({pct(ge10, lt)})")
-        print(f"  >=30 trades (high conf):          {ge30}/{lt} ({pct(ge30, lt)})")
+        print(f"  >=5 trades (setup scorer USES the win-rate): {ge5}/{lt} ({pct(ge5, lt)})")
+        print(f"  >=10 trades (more robust):                   {ge10}/{lt} ({pct(ge10, lt)})")
         # per-setup best sample size
         by_setup = {}
         for d in ls.find({}, {"setup_type": 1, "total_trades": 1, "win_rate": 1}):
@@ -95,10 +95,10 @@ def main():
             tt = d.get("total_trades", 0) or 0
             if tt > by_setup.get(st, (-1, 0))[0]:
                 by_setup[st] = (tt, d.get("win_rate"))
-        print("  best sample per setup (setups in your open book matter most):")
+        print("  per-setup (scorer uses win-rate when n>=5, else neutral 0.5):")
         for st in sorted(by_setup):
             tt, wr = by_setup[st]
-            flag = "  ← <10: win-rate DEFAULTS to 0.5→score 50" if tt < 10 else ""
+            flag = "  ← n<5: NEUTRAL 0.5" if tt < 5 else "  ✓ active"
             wr_s = f"{wr:.2f}" if isinstance(wr, (int, float)) else "—"
             print(f"    {st:<22} n={tt:<4} win_rate={wr_s}{flag}")
     else:
