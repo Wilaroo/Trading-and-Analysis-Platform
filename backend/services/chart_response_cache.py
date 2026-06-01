@@ -265,16 +265,60 @@ def get_chart_response_cache(db=None) -> ChartResponseCache:
     return _singleton
 
 
-def chart_cache_ttl_for(timeframe: str) -> int:
-    """Bar-size-aware TTL (env-tunable).
+def _seconds_until_session_rollover(
+    now: Optional[datetime] = None,
+    rollover_hour_et: int = 17,
+) -> int:
+    """Seconds from `now` until the next `rollover_hour_et` (ET) boundary.
+
+    v19.34.198 — session-aware chart cache. A long intraday TTL (e.g. the
+    operator's 8-hour `CHART_CACHE_TTL_INTRADAY_S=28800`) is great for
+    instant intraday revisits, but a fixed TTL set at 3:55 PM would bleed
+    the closing-print skeleton deep into the evening and into the next
+    premarket. Clamping every intraday entry so it never outlives the next
+    5 PM ET rollover makes the cache *auto-roll* with the trading session:
+    each session naturally starts cold (the first load rebuilds the full
+    window), and intra-session revisits stay instant.
+
+    Default rollover hour is 17 (5 PM ET) — after the 4 PM RTH close + the
+    post-close settle, before any next-day premarket bars exist.
+    """
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now_et = now.astimezone(et)
+    rollover = now_et.replace(
+        hour=rollover_hour_et, minute=0, second=0, microsecond=0
+    )
+    if now_et >= rollover:
+        rollover += timedelta(days=1)
+    return max(1, int((rollover - now_et).total_seconds()))
+
+
+def chart_cache_ttl_for(timeframe: str, now: Optional[datetime] = None) -> int:
+    """Bar-size-aware, session-aware TTL (env-tunable).
 
     - Daily/weekly bars change once per session — 180s is plenty.
     - Intraday: the chart-tail WS/poll backfills the freshest bars within
       ~5s after the cold hydrate, so the full-window response only needs to
       be a "good enough" skeleton. v19.34.197 bumps the intraday default
-      30s -> 60s to halve cold-miss frequency (each miss can pay the live
-      pusher merge) without any visible staleness.
-    - Env overrides: CHART_CACHE_TTL_INTRADAY_S, CHART_CACHE_TTL_DAILY_S.
+      30s -> 60s; the operator can push it much higher (8h) for instant
+      revisits.
+    - v19.34.198 — SESSION-AWARE clamp: the intraday TTL is capped so an
+      entry never outlives the next 5 PM ET session rollover. This lets the
+      operator keep a huge `CHART_CACHE_TTL_INTRADAY_S` for instant same-
+      session revisits while guaranteeing the cache rebuilds fresh each new
+      session instead of serving yesterday's closing skeleton at the next
+      premarket open.
+    - Env overrides:
+        CHART_CACHE_TTL_INTRADAY_S  — base intraday TTL (default 60).
+        CHART_CACHE_TTL_DAILY_S     — daily/weekly TTL (default 180).
+        CHART_CACHE_SESSION_AWARE   — "false"/"0"/"off" disables the
+                                      rollover clamp (default ON).
+        CHART_CACHE_ROLLOVER_HOUR_ET — rollover hour, ET (default 17 = 5 PM).
     """
     import os as _os_ttl
 
@@ -288,12 +332,25 @@ def chart_cache_ttl_for(timeframe: str) -> int:
     intraday = _envint("CHART_CACHE_TTL_INTRADAY_S", 60)
     daily = _envint("CHART_CACHE_TTL_DAILY_S", 180)
 
-    if not timeframe:
-        return intraday
-    tf = timeframe.lower().replace(" ", "")
-    if tf in {"1day", "daily", "1d", "1week", "weekly", "1w"}:
+    tf = (timeframe or "").lower().replace(" ", "")
+    is_daily = tf in {"1day", "daily", "1d", "1week", "weekly", "1w"}
+    if is_daily:
         return daily
-    return intraday
+
+    # Intraday — apply the session-aware rollover clamp unless disabled.
+    session_aware = (
+        _os_ttl.environ.get("CHART_CACHE_SESSION_AWARE", "true")
+        .strip().lower() not in ("0", "false", "no", "off")
+    )
+    if not session_aware:
+        return intraday
+
+    rollover_hour = _envint("CHART_CACHE_ROLLOVER_HOUR_ET", 17)
+    rollover_hour = min(23, max(0, rollover_hour))
+    until_rollover = _seconds_until_session_rollover(now, rollover_hour)
+    # Clamp to the rollover, but keep a small floor so a load that lands
+    # one second before 5 PM still caches briefly rather than TTL=0.
+    return max(30, min(intraday, until_rollover))
 
 
 def make_cache_key(
