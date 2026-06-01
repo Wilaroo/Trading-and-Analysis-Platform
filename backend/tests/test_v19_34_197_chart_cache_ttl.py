@@ -27,6 +27,10 @@ def _reload():
 def test_default_intraday_60_daily_180(monkeypatch):
     monkeypatch.delenv("CHART_CACHE_TTL_INTRADAY_S", raising=False)
     monkeypatch.delenv("CHART_CACHE_TTL_DAILY_S", raising=False)
+    # v19.34.198 — disable the session-aware rollover clamp so this test
+    # pins the *base* TTL contract deterministically (clamp is covered in
+    # test_v19_34_198_session_aware_ttl.py).
+    monkeypatch.setenv("CHART_CACHE_SESSION_AWARE", "false")
     ttl = crc.chart_cache_ttl_for
     assert ttl("5min") == 60
     assert ttl("1min") == 60
@@ -38,6 +42,7 @@ def test_default_intraday_60_daily_180(monkeypatch):
 
 def test_env_override_intraday(monkeypatch):
     monkeypatch.setenv("CHART_CACHE_TTL_INTRADAY_S", "120")
+    monkeypatch.setenv("CHART_CACHE_SESSION_AWARE", "false")
     ttl = crc.chart_cache_ttl_for
     assert ttl("5min") == 120
     assert ttl("1day") == 180  # daily untouched
@@ -45,6 +50,7 @@ def test_env_override_intraday(monkeypatch):
 
 def test_env_override_daily(monkeypatch):
     monkeypatch.setenv("CHART_CACHE_TTL_DAILY_S", "600")
+    monkeypatch.setenv("CHART_CACHE_SESSION_AWARE", "false")
     ttl = crc.chart_cache_ttl_for
     assert ttl("1day") == 600
     assert ttl("5min") == 60
@@ -53,6 +59,7 @@ def test_env_override_daily(monkeypatch):
 def test_bad_env_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("CHART_CACHE_TTL_INTRADAY_S", "not-a-number")
     monkeypatch.setenv("CHART_CACHE_TTL_DAILY_S", "-5")  # non-positive → default
+    monkeypatch.setenv("CHART_CACHE_SESSION_AWARE", "false")
     ttl = crc.chart_cache_ttl_for
     assert ttl("5min") == 60
     assert ttl("1day") == 180

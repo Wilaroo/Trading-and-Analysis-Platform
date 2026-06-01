@@ -1327,8 +1327,8 @@ class ChartWarmRequest(BaseModel):
     """Request shape for `POST /chart/warm`. All fields except `symbols`
     are optional and have sensible defaults that match the V5 frontend's
     typical chart load."""
-    symbols: List[str] = Field(..., min_length=1, max_length=32)
-    timeframes: List[str] = Field(default=["5min"], max_length=4)
+    symbols: List[str] = Field(..., min_length=1, max_length=48)
+    timeframes: List[str] = Field(default=["1min", "5min", "15min"], max_length=5)
     days: int = Field(default=5, ge=1, le=365)
     session: str = Field(default="rth_plus_premarket")
     max_concurrent: int = Field(default=4, ge=1, le=8)

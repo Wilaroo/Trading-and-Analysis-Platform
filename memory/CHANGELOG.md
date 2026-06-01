@@ -1,3 +1,38 @@
+## 2026-06-01 — v19.34.198 SESSION-AWARE CHART CACHE TTL (5 PM ET rollover)
+
+### Context
+Operator set `CHART_CACHE_TTL_INTRADAY_S=28800` (8h) so same-session chart
+revisits are instant (2ms cache hit + chart-tail WS backfill). Risk of a flat
+8h TTL: an entry cached late in the session would bleed the closing-print
+skeleton into the evening and the next premarket open.
+
+### Fix — `services/chart_response_cache.py`
+- New `_seconds_until_session_rollover(now, rollover_hour_et=17)` helper.
+- `chart_cache_ttl_for(timeframe, now=None)` now CLAMPS the intraday TTL so an
+  entry never outlives the next **5 PM ET** rollover. Same-session revisits stay
+  instant; each new session rebuilds fresh. Examples (base 8h):
+  10:00 ET → 7h · 3:55 PM → 1h · 4:30 PM → 30m · post-5 PM → full 8h.
+- Floor of 30s prevents TTL=0 right at the boundary. Daily TTL untouched.
+- Env: `CHART_CACHE_ROLLOVER_HOUR_ET` (default 17), `CHART_CACHE_SESSION_AWARE`
+  ("false" disables the clamp → flat base TTL).
+
+### Widen pre-warm — `routers/sentcom_chart.py`
+- `POST /chart/warm` defaults: timeframes `["5min"]` → `["1min","5min","15min"]`;
+  symbol cap 32 → 48. A single warm call now primes the operator's intraday set.
+
+### Tests
+- `tests/test_v19_34_198_session_aware_ttl.py` — 7 tests (rollover math, clamp,
+  base-when-far, daily-never-clamped, disable flag, custom hour, zero floor).
+- `tests/test_v19_34_197_chart_cache_ttl.py` — pinned `CHART_CACHE_SESSION_AWARE=false`
+  so the base-TTL contract stays deterministic. **11/11 passing** locally.
+
+### Deploy
+`paste.rs` idempotent script `deploy_v19_34_198.py` (patch → pytest → git
+commit+push → restart prompt). Dry-run verified: patches apply, 11 green,
+2nd run fully idempotent (all skip).
+
+---
+
 ## 2026-?? — v19.34.197 CHART COLD-LOAD LATENCY FIX (18-21s → ~3s)
 
 ### Diagnosis (read-only diag_chart_latency.py on the live DGX)
