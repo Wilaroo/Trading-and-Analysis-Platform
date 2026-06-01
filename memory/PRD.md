@@ -49,6 +49,12 @@ catalysts + regime tilt, replacing static ETF lists); P1 `accumulation_entry`
 win-rate (11%/30) investigation; P2 TQS A/B/C threshold recalibration now that
 pillars spread; P2 large-cap institutional-ownership saturation.
 
+**Stability (v209, 2026-06-01):** Fixed a close-all UI hang + pusher "disconnect"
+traced to synchronous `requests.get` (Finnhub/FMP enrichment) blocking the
+asyncio event loop. All 11 call sites now run via `asyncio.to_thread`. Possible
+follow-up: a parallel/batched close-all endpoint (cancel+flatten concurrently
+with a bounded semaphore) so closing many positions doesn't serialize.
+
 
 > Lean, static spec. Dated work history lives in `CHANGELOG.md`.
 > Open priorities and backlog live in `ROADMAP.md`.
