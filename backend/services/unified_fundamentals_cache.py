@@ -292,6 +292,7 @@ async def refresh_institutional_ownership(symbol: str, db=None) -> Optional[floa
                 "symbol": symbol,
                 "institutional_ownership_percent": pct,
                 "num_institutional_holders": parsed.get("num_institutional_holders"),
+                "excluded_control_holders": parsed.get("excluded_control_holders"),
                 "float_shares_ownership": parsed.get("float_shares"),
                 "fetched_at": datetime.now(timezone.utc),
             }},
