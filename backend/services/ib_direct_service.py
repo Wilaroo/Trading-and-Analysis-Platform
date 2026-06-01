@@ -721,6 +721,44 @@ class IBDirectService:
             return None
 
 
+    async def get_fundamental_report(
+        self,
+        symbol: str,
+        report_type: str = "ReportSnapshot",
+        timeout: float = 20.0,
+    ):
+        """v19.34.202 — fetch an IB Reuters fundamental XML report for ``symbol``
+        via the live clientId-11 socket (``reqFundamentalDataAsync``). Returns
+        the raw XML string, or ``None`` on miss / not-subscribed / error.
+
+        ``ReportSnapshot`` (~10KB) carries valuation + ``<SharesOut
+        TotalFloat=...>`` (shares-outstanding text + float attribute). The
+        legacy ``ib_service`` ReportSnapshot path is dead on this deploy, so
+        this routes through ``ib_direct`` instead.
+        """
+        if not self._connected or not self._ib:
+            return None
+        try:
+            from ib_async import Stock
+        except ImportError:
+            return None
+        try:
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            qualified = await self._ib.qualifyContractsAsync(contract)
+            if not qualified:
+                return None
+            xml = await asyncio.wait_for(
+                self._ib.reqFundamentalDataAsync(qualified[0], report_type),
+                timeout=timeout,
+            )
+            return xml or None
+        except Exception as exc:
+            logger.debug(
+                "[v19.34.202 get_fundamental_report] %s/%s failed: %s",
+                symbol, report_type, exc,
+            )
+            return None
+
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
     # v19.34.42 -- IB minTick resolution + fp-safe price rounding
     async def _resolve_min_tick(self, contract) -> float:

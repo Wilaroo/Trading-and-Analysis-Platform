@@ -101,6 +101,23 @@ def parse_report_snapshot(xml_str: Optional[str]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
+    # CoGeneralInfo/SharesOut → shares outstanding (text) + float (TotalFloat
+    # attr). v19.34.202 — e.g. <SharesOut TotalFloat="1623871179.0">1630600639.0</SharesOut>
+    shares_out = root.find(".//CoGeneralInfo/SharesOut")
+    if shares_out is not None:
+        txt = (shares_out.text or "").strip()
+        if txt:
+            try:
+                out["shares_outstanding"] = float(txt)
+            except (TypeError, ValueError):
+                pass
+        total_float = shares_out.get("TotalFloat")
+        if total_float:
+            try:
+                out["float_shares"] = float(total_float)
+            except (TypeError, ValueError):
+                pass
+
     # Reuters industry / sector
     for indinfo in root.iter("Industry"):
         # IB tags Industry nodes with a `type` attribute ("TRBC", "NAICS", etc.)
