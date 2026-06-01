@@ -171,43 +171,6 @@ def get_universe(
     return {d["symbol"] for d in cursor if d.get("symbol")}
 
 
-
-def get_universe_ranked(
-    db,
-    tier: str = "intraday",
-    *,
-    limit: Optional[int] = None,
-    include_unqualifiable: bool = False,
-) -> List[str]:
-    """Return qualified symbols ordered by ``avg_dollar_volume`` DESC (most
-    liquid first), optionally truncated to ``limit``.
-
-    Use this anywhere a *deterministic, non-alphabetical* ordering of the
-    universe is needed — e.g. scan-wave rotation or "top-N liquid names".
-    ``sorted(get_universe(...))[:N]`` is an ANTI-PATTERN: ``get_universe``
-    returns an unordered set, so sorting it is alphabetical and truncating it
-    restricts scans to A–early-B names only (the cause of the v19.34.210
-    alphabetical trade-selection bias).
-    """
-    if db is None:
-        return []
-    tier_key = "investment" if tier == "all" else tier
-    if tier_key not in DOLLAR_VOL_THRESHOLDS:
-        raise ValueError(f"Unknown tier: {tier!r}; must be one of "
-                         f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}")
-    threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
-
-    query: Dict[str, Any] = {"avg_dollar_volume": {"$gte": threshold}}
-    if not include_unqualifiable:
-        query["unqualifiable"] = {"$ne": True}
-
-    cursor = (db["symbol_adv_cache"]
-              .find(query, {"symbol": 1, "_id": 0})
-              .sort("avg_dollar_volume", -1))
-    if limit:
-        cursor = cursor.limit(int(limit))
-    return [d["symbol"] for d in cursor if d.get("symbol")]
-
 def get_universe_for_bar_size(
     db,
     bar_size: str,
