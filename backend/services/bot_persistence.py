@@ -21,6 +21,55 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def resolve_restore_grades(trade_doc: Dict, entry_context: Optional[Dict]):
+    """v19.34.199 — Resolve the grade fields for a restored BotTrade.
+
+    `restore_open_trades` historically constructed BotTrade with a hardcoded
+    field subset that OMITTED unified_grade/tqs_grade/tqs_score/smb_grade, so
+    multi-day swing trades came back with empty grades on every boot — and the
+    periodic persist then overwrote the DB (incl. the v175 backfill) with those
+    empties. The UI's `unifiedGrade()` then fell back to the legacy
+    `quality_grade` and mislabeled it "TQS".
+
+    Resolution (first non-empty wins), mirroring the v175 backfill so restore
+    and backfill agree:
+      unified  : doc.unified_grade → ctx.tqs.unified_grade →
+                 ctx.tqs.post_gate_grade → doc.quality_grade
+      tqs_grade: doc.tqs_grade → ctx.tqs.unified_grade →
+                 ctx.tqs.post_gate_grade   (TQS-specific — no legacy fallback)
+      tqs_score: doc.tqs_score → ctx.tqs.score → ctx.tqs.post_gate_score
+
+    Returns (unified_grade, tqs_grade, tqs_score, smb_grade).
+    """
+    ec_tqs = (entry_context or {}).get("tqs") or {}
+
+    unified = (
+        trade_doc.get("unified_grade")
+        or ec_tqs.get("unified_grade")
+        or ec_tqs.get("post_gate_grade")
+        or trade_doc.get("quality_grade")
+        or ""
+    )
+    tqs_grade = (
+        trade_doc.get("tqs_grade")
+        or ec_tqs.get("unified_grade")
+        or ec_tqs.get("post_gate_grade")
+        or ""
+    )
+    tqs_score = (
+        trade_doc.get("tqs_score")
+        or ec_tqs.get("score")
+        or ec_tqs.get("post_gate_score")
+        or 0
+    )
+    smb = trade_doc.get("smb_grade", "") or ""
+    try:
+        tqs_score = float(tqs_score or 0)
+    except (TypeError, ValueError):
+        tqs_score = 0.0
+    return str(unified or ""), str(tqs_grade or ""), tqs_score, str(smb or "")
+
+
 class BotPersistence:
     """Manages bot state persistence and restoration from MongoDB."""
 
@@ -450,7 +499,24 @@ class BotPersistence:
                     # Restore richer trade logging fields
                     trade.setup_variant = trade_doc.get("setup_variant", "")
                     trade.entry_context = trade_doc.get("entry_context", {})
+                    # ── v19.34.199 — hydrate grade fields the subset
+                    # constructor above omits. Without this, restored
+                    # multi-day swing trades return with EMPTY
+                    # unified_grade/tqs_grade and the next persist
+                    # overwrites the DB (incl. the v175 backfill). Derive
+                    # the honest TQS grade from entry_context.tqs when the
+                    # top-level field is absent so it survives restarts and
+                    # the UI label tells the truth.
+                    _ug, _tg, _ts, _smb = resolve_restore_grades(
+                        trade_doc, trade.entry_context
+                    )
+                    trade.unified_grade = _ug
+                    trade.tqs_grade = _tg
+                    trade.tqs_score = _ts
+                    if _smb:
+                        trade.smb_grade = _smb
                     trade.mfe_price = trade_doc.get("mfe_price", trade.fill_price)
+
                     trade.mfe_pct = trade_doc.get("mfe_pct", 0.0)
                     trade.mfe_r = trade_doc.get("mfe_r", 0.0)
                     trade.mae_price = trade_doc.get("mae_price", trade.fill_price)
