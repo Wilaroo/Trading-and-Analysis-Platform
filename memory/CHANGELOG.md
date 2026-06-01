@@ -1,3 +1,30 @@
+## 2026-06-01 — v19.34.208 APPLY SMB SCORE REGARDLESS OF SETUP CONFIG (v207 follow-up)
+
+### Why (live verification of v207)
+Post-restart `live_alerts` showed a real spread (squeeze/gap_fade/fashionably_late
+= 30–43) BUT every `vwap_fade_long` / `vwap_fade_short` / `vwap_continuation`
+alert was still exactly 25. Same-instant proof: VIAV `gap_fade`=42 while VIAV
+`vwap_fade_long`=25 — so it was NOT missing data. Root cause: in
+`populate_smb_fields`, the injected `smb_score` was applied INSIDE `if config:`,
+and those directional/variant setup names resolve to NO registry config
+(`get_setup_config("vwap_fade_long") is None`), so the entire block (style,
+targets, SMB, earnings) was skipped → flat 25.
+
+### Fix
+- `services/enhanced_scanner.py` `LiveAlert.populate_smb_fields` — moved the
+  `smb_score` + `earnings_score` application OUT of the `if config:` gate. The
+  config block still sets trade_style/targets when a config exists; the SMB
+  score now applies whenever the context carries a valid `SMBVariableScore`,
+  for any setup_type.
+### Verify
+- `tests/test_v19_34_208_smb_no_config.py` (5/5) — asserts vwap_fade_long
+  (no config) now applies a 38/50 score; gap_fade (has config) unchanged.
+- DGX live: re-run `/tmp/verify_v19_34_207b.py` next session — vwap_fade /
+  vwap_continuation alerts should now score >=28 instead of 25.
+
+---
+
+
 ## 2026-06-01 — v19.34.207 SMB 5-VARIABLE SCORING WIRED INTO LIVE SCANNER (Setup-pillar de-starvation)
 
 ### Why
