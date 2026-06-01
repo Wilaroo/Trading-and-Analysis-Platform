@@ -1,3 +1,49 @@
+## 2026-06-02 — v19.34.202 IB-SOURCED FUNDAMENTALS: FLOAT + SHORT-INTEREST% (R2+R3)
+
+### Why (IB probe proof)
+`probe_ib_fundamentals.py` (clientId 77, read-only) confirmed the operator's IB
+account DOES serve Reuters fundamentals, and that **ReportSnapshot (~10KB)
+already carries float + shares-outstanding**:
+    <SharesOut Date="2026-04-29" TotalFloat="1623871179.0">1630600639.0</SharesOut>
+→ shares-out = element text, float = `TotalFloat` attr. (ReportsOwnership also
+works but is 3.6 MB/symbol — too heavy for per-symbol cache fills; institutional
+ownership R4 deferred to a low-cadence job.)
+
+Also confirmed the legacy `ib_service` fundamentals path is dead on this deploy
+(every cached doc historically `source=finnhub`) → fundamentals must route
+through the LIVE `ib_direct` clientId-11 socket.
+
+### Fix
+- `services/ib_direct_service.py` — new `get_fundamental_report(symbol,
+  report_type="ReportSnapshot")` via `reqFundamentalDataAsync` on the live
+  socket (mirrors the `get_contract_industry` guard pattern; 20s timeout).
+- `services/ib_fundamentals_parser.py` — `parse_report_snapshot` now extracts
+  `shares_outstanding` (`<SharesOut>` text) + `float_shares` (`TotalFloat` attr).
+- `services/unified_fundamentals_cache.py`:
+  * IB step now prefers `ib_direct` ReportSnapshot (legacy ib_service kept as a
+    fallback only if ib_direct is down) → fills `float_shares` (**R3**).
+  * New short-interest step: `short_interest_percent = FINRA short shares ÷ IB
+    shares-outstanding` via `ShortInterestService.get_short_data_for_symbol`
+    (**R2**). FINRA is bi-monthly — the accurate cadence for short interest.
+  * New pure helper `compute_short_interest_pct()` (unit-tested).
+
+### Verify
+- `backend/tests/test_v19_34_202_ib_fundamentals.py` — 5/5 pass (SharesOut/Float
+  parse from real AMD XML, missing-SharesOut safe, SI% math + guards). Lint clean
+  on changed regions; all 3 services import OK.
+- ⚠️ OPERATOR LIVE-CHECK after restart: re-run `diag_tqs_data_health.py` — the
+  `symbol_fundamentals_cache` should now show non-zero `float_shares` and
+  `short_interest_percent` coverage (was 0%), and `source` should include
+  `ib_direct_report_snapshot+...+finra_short`. Cache is 24h TTL so coverage
+  fills as symbols are re-fetched.
+
+### Still ahead (this pillar)
+R0 earnings_calendar persistence (Finnhub free, 15%), R4 institutional ownership
+(IB ReportsOwnership — low-cadence job, 15%).
+
+---
+
+
 ## 2026-06-02 — v19.34.201 FUNDAMENTAL PILLAR: CATALYST/NEWS WIRING (the 30% lever)
 
 ### Why (live diag proof)

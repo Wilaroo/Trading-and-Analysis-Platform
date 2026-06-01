@@ -1,10 +1,12 @@
-"""Unified fundamentals cache (v19.34.177).
+"""Unified fundamentals cache (v19.34.202).
 
 Cache hierarchy:
   1. ``symbol_fundamentals_cache`` Mongo collection (TTL-indexed)
-  2. IB ReportSnapshot via ib_service (parsed via ib_fundamentals_parser)
-  3. Finnhub via fundamental_data_service (last resort for fields IB
-     doesn't expose: short_interest, float, institutional ownership)
+  2. IB ReportSnapshot via ib_direct (live clientId-11 socket) — carries
+     valuation + float + shares-outstanding (``<SharesOut TotalFloat=...>``).
+     Falls back to the legacy ib_service worker only if ib_direct is down.
+  3. Finnhub via fundamental_data_service (valuation cross-check / fallback)
+  4. FINRA short-interest shares ÷ IB shares-outstanding → ``short_interest_percent``
 
 Smart TTL:
   * 24h normally
@@ -52,6 +54,17 @@ def _get_db():
     except Exception as exc:
         logger.debug("unified_fundamentals_cache: DB init failed: %s", exc)
     return _db
+
+
+def compute_short_interest_pct(si_shares, shares_out) -> Optional[float]:
+    """Short interest as a % of shares outstanding (rounded), or None if the
+    inputs are missing/invalid. Pure — unit-testable without IB/Mongo."""
+    try:
+        if si_shares and shares_out and float(shares_out) > 0:
+            return round(100.0 * float(si_shares) / float(shares_out), 2)
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 def _ttl_hours_for(symbol: str, db) -> int:
@@ -105,23 +118,43 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
     merged: Dict[str, Any] = {"symbol": symbol}
     source_chain = []
 
-    # 2. IB ReportSnapshot
+    # 2. IB ReportSnapshot — prefer the LIVE ib_direct socket (clientId 11).
+    # The legacy ib_service worker is usually disconnected on this deploy
+    # (which is why every cached doc historically came from Finnhub), so
+    # ib_direct is the real IB path. ReportSnapshot is ~10KB and carries
+    # float + shares-outstanding via <SharesOut TotalFloat=...>. (v19.34.202)
     try:
-        from services.ib_service import get_ib_service
+        from services.ib_direct_service import get_ib_direct_service
         from services.ib_fundamentals_parser import parse_report_snapshot
-        ib = get_ib_service()
-        if ib is not None:
-            status = ib.get_connection_status()
-            if status and status.get("connected"):
-                ib_resp = await ib.get_fundamentals(symbol)
-                if ib_resp and ib_resp.get("success"):
-                    raw = (ib_resp.get("data") or {}).get("raw_data") or ""
-                    parsed = parse_report_snapshot(raw)
-                    if parsed:
-                        merged.update(parsed)
-                        source_chain.append("ib_report_snapshot")
+        ibd = get_ib_direct_service()
+        if ibd is not None and ibd.is_connected():
+            xml = await ibd.get_fundamental_report(symbol, "ReportSnapshot")
+            if xml:
+                parsed = parse_report_snapshot(xml)
+                if parsed:
+                    merged.update(parsed)
+                    source_chain.append("ib_direct_report_snapshot")
     except Exception as exc:
-        logger.debug("IB fundamentals lookup failed for %s: %s", symbol, exc)
+        logger.debug("ib_direct fundamentals lookup failed for %s: %s", symbol, exc)
+
+    # 2b. Legacy ib_service ReportSnapshot — only if ib_direct didn't deliver.
+    if "ib_direct_report_snapshot" not in source_chain:
+        try:
+            from services.ib_service import get_ib_service
+            from services.ib_fundamentals_parser import parse_report_snapshot
+            ib = get_ib_service()
+            if ib is not None:
+                status = ib.get_connection_status()
+                if status and status.get("connected"):
+                    ib_resp = await ib.get_fundamentals(symbol)
+                    if ib_resp and ib_resp.get("success"):
+                        raw = (ib_resp.get("data") or {}).get("raw_data") or ""
+                        parsed = parse_report_snapshot(raw)
+                        if parsed:
+                            merged.update(parsed)
+                            source_chain.append("ib_report_snapshot")
+        except Exception as exc:
+            logger.debug("IB fundamentals lookup failed for %s: %s", symbol, exc)
 
     # 3. Finnhub supplement (fills fields IB doesn't expose + valuation
     # cross-check)
@@ -151,6 +184,26 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
                 source_chain.append("finnhub")
         except Exception as exc:
             logger.debug("Finnhub fundamentals lookup failed for %s: %s", symbol, exc)
+
+    # 3.5 Short-interest % — FINRA short-interest shares ÷ shares-outstanding.
+    # Float/shares come from IB ReportSnapshot above; FINRA gives raw short
+    # shares (no %). This is the only place we can compute a real SI%. The
+    # FINRA feed is bi-monthly (that IS the accurate cadence — there is no
+    # realtime short interest). (v19.34.202)
+    shares_out = merged.get("shares_outstanding") or merged.get("float_shares")
+    if shares_out and float(shares_out) > 0 and db is not None:
+        try:
+            from services.short_interest_service import ShortInterestService
+            si = await ShortInterestService(db).get_short_data_for_symbol(symbol)
+            si_shares = (si or {}).get("short_interest")
+            pct = compute_short_interest_pct(si_shares, shares_out)
+            if pct is not None:
+                merged["short_interest_percent"] = pct
+                if (si or {}).get("days_to_cover") is not None:
+                    merged["days_to_cover"] = si["days_to_cover"]
+                source_chain.append("finra_short")
+        except Exception as exc:
+            logger.debug("Short-interest lookup failed for %s: %s", symbol, exc)
 
     if not source_chain:
         return None
