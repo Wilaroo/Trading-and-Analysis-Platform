@@ -131,12 +131,46 @@ class FundamentalQualityService:
         except Exception as e:
             logger.debug(f"unified_fundamentals_cache lookup failed for {symbol}: {e}")
                 
-        # Check earnings calendar
-        if self._db and days_to_earnings is None:
+        # v19.34.201 — live news → catalyst/sentiment when the caller didn't
+        # supply it. The TQS engine now wires `news_service` into this pillar
+        # (was always None → catalyst stuck at the "no catalyst" floor of 40,
+        # which is 30% of the pillar and the single biggest cause of the flat
+        # ~57 fundamental score). `_analyze_sentiment` returns a STRING
+        # (bullish/bearish/neutral) → map to a float the scorer understands.
+        if (self._news_service is not None and has_catalyst is None
+                and has_recent_news is None):
             try:
                 from datetime import datetime, timezone, timedelta
-                earnings_col = self._db.get("earnings_calendar")
-                if earnings_col:
+                items = await self._news_service.get_ticker_news(symbol, max_items=10)
+                real = [it for it in (items or []) if not it.get("is_placeholder")]
+                if real:
+                    cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
+                    recent = []
+                    for it in real:
+                        try:
+                            ts = datetime.fromisoformat(
+                                str(it.get("timestamp", "")).replace("Z", "+00:00"))
+                            if ts >= cutoff:
+                                recent.append(it)
+                        except (ValueError, TypeError):
+                            recent.append(it)  # keep undated items
+                    pool = recent or real
+                    _smap = {"bullish": 1.0, "positive": 1.0,
+                             "bearish": -1.0, "negative": -1.0}
+                    vals = [_smap.get(str(it.get("sentiment", "")).lower(), 0.0)
+                            for it in pool]
+                    if pool:
+                        has_recent_news = True
+                        news_sentiment = sum(vals) / len(vals)
+            except Exception as e:
+                logger.debug(f"news enrichment failed for {symbol}: {e}")
+
+        # Check earnings calendar
+        if self._db is not None and days_to_earnings is None:
+            try:
+                from datetime import datetime, timezone, timedelta
+                earnings_col = self._db["earnings_calendar"]
+                if earnings_col is not None:
                     now = datetime.now(timezone.utc)
                     upcoming = earnings_col.find_one({
                         "symbol": symbol,

@@ -237,6 +237,8 @@ class TQSEngine:
         self._technical_analysis_service = None
         self._sector_service = None
         self._scanner = None
+        self._news_service = None
+        self._db = None
         
     def set_services(
         self,
@@ -245,7 +247,9 @@ class TQSEngine:
         ib_service=None,
         technical_service=None,
         sector_service=None,
-        scanner=None
+        scanner=None,
+        news_service=None,
+        db=None,
     ):
         """Wire up all dependencies"""
         self._learning_loop = learning_loop
@@ -254,6 +258,8 @@ class TQSEngine:
         self._technical_analysis_service = technical_service
         self._sector_service = sector_service
         self._scanner = scanner
+        self._news_service = news_service
+        self._db = db
         
         # Wire up sub-services
         self._setup_service.set_services(
@@ -265,7 +271,9 @@ class TQSEngine:
             alpaca_service=alpaca_service
         )
         self._fundamental_service.set_services(
-            ib_service=ib_service
+            ib_service=ib_service,
+            news_service=news_service,
+            db=db,
         )
         self._context_service.set_services(
             alpaca_service=alpaca_service,
@@ -698,7 +706,9 @@ def init_tqs_engine(
     ib_service=None,
     technical_service=None,
     sector_service=None,
-    scanner=None
+    scanner=None,
+    news_service=None,
+    db=None,
 ) -> TQSEngine:
     """Initialize the TQS engine with dependencies"""
     engine = get_tqs_engine()
@@ -708,6 +718,8 @@ def init_tqs_engine(
         ib_service=ib_service,
         technical_service=technical_service,
         sector_service=sector_service,
-        scanner=scanner
+        scanner=scanner,
+        news_service=news_service,
+        db=db,
     )
     return engine
