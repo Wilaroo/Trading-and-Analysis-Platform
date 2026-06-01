@@ -124,6 +124,44 @@ def main():
         future = ec.count_documents({"date": {"$gte": now.isoformat()}})
         print(f"  future-dated: {future}")
 
+    # ── 5. Detector signal layer (live_alerts) ────────────────────────
+    # These are the PRE-TQS selection signals: priority bucket (heuristic),
+    # trigger_probability (static per-detector prior — NOT learned), and the
+    # tape/smb signals that DO feed the setup/context pillars. Confirms the
+    # crude-prior design and that tape/smb actually vary.
+    print("\n══ DETECTOR signal layer: live_alerts (pre-TQS selection) ══")
+    la = db["live_alerts"]
+    docs = list(la.find().sort("_id", -1).limit(3000))
+    print(f"  sample: last {len(docs)} alerts")
+    if docs:
+        def vals(field):
+            out = []
+            for d in docs:
+                v = d.get(field)
+                if isinstance(v, (int, float)):
+                    out.append(float(v))
+            return out
+
+        def spread(field, label):
+            v = vals(field)
+            nonzero = sum(1 for x in v if abs(x) > 1e-9)
+            if v:
+                uniq = len(set(round(x, 3) for x in v))
+                print(f"  {label:<20} n={len(v):<5} mean={sum(v)/len(v):>6.2f} "
+                      f"min={min(v):>6.2f} max={max(v):>6.2f} "
+                      f"nonzero={pct(nonzero, len(v))} distinct_vals={uniq}")
+            else:
+                print(f"  {label:<20} (no numeric data)")
+
+        prio = Counter(str(d.get("priority", "?")) for d in docs)
+        print(f"  priority buckets: {dict(prio)}")
+        spread("trigger_probability", "trigger_prob")
+        spread("tape_score", "tape_score")
+        spread("smb_score_total", "smb_score_total")
+        spread("score", "raw_score")
+        print("  NOTE: trigger_prob should show only a few distinct_vals "
+              "(static priors); tape/smb should vary (they feed setup/context).")
+
     print("\n══ READ ══")
     print("  Any 🔴 / low coverage above = that pillar is running on defaults,")
     print("  which is why TQS compresses to the C band. Fix = revive the feed,")
