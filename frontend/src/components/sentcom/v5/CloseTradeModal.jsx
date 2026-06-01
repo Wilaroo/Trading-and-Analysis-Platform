@@ -24,6 +24,9 @@ const formatPx = (v) => {
 
 const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
   const tradeId = position?.trade_id || position?.id;
+  // Orphan = an IB position the bot has no trade record for (no trade_id).
+  // These can't go through /trades/{id}/close — we force-flatten by symbol.
+  const isOrphan = !position?.trade_id;
   const symbol = position?.symbol || '?';
   const direction = (position?.direction || position?.side || 'long').toLowerCase();
   const isShort = direction === 'short';
@@ -49,11 +52,7 @@ const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
   }, [remaining, percentage]);
 
   const handleSubmit = async () => {
-    if (!tradeId) {
-      setError('Missing trade_id — cannot close.');
-      return;
-    }
-    if (orderType === 'limit') {
+    if (!isOrphan && orderType === 'limit') {
       const lmt = Number(limitPrice);
       if (!lmt || lmt <= 0) {
         setError('Enter a valid limit price > 0.');
@@ -65,19 +64,28 @@ const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
     setResult(null);
     try {
       const base = process.env.REACT_APP_BACKEND_URL || '';
-      const res = await fetch(
-        `${base}/api/trading-bot/trades/${encodeURIComponent(tradeId)}/close`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            percentage: Number(percentage),
-            order_type: orderType,
-            limit_price: orderType === 'limit' ? Number(limitPrice) : null,
-            reason: 'v5_operator_close_panel',
-          }),
-        }
-      );
+      const res = isOrphan
+        ? await fetch(
+            `${base}/api/trading-bot/positions/${encodeURIComponent(symbol)}/flatten`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'v5_operator_force_flatten' }),
+            }
+          )
+        : await fetch(
+            `${base}/api/trading-bot/trades/${encodeURIComponent(tradeId)}/close`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                percentage: Number(percentage),
+                order_type: orderType,
+                limit_price: orderType === 'limit' ? Number(limitPrice) : null,
+                reason: 'v5_operator_close_panel',
+              }),
+            }
+          );
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.success === false) {
         const detail = data?.detail;
@@ -133,6 +141,21 @@ const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
 
         {/* Body */}
         <div className="px-4 py-3 space-y-4">
+          {isOrphan && (
+            <div
+              data-testid="close-trade-orphan-banner"
+              className="rounded border border-amber-700 bg-amber-950/40 px-3 py-2 text-xs text-amber-300"
+            >
+              <div className="font-semibold">Orphaned IB position</div>
+              <div className="text-[11px] text-amber-400/90 mt-0.5">
+                No bot trade record found. This force-flattens the full
+                position at market via IB (cancels any working orders first)
+                and bypasses the post-stop cooldown.
+              </div>
+            </div>
+          )}
+          {!isOrphan && (
+          <>
           {/* Order type */}
           <div>
             <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1.5">
@@ -211,15 +234,20 @@ const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
               className="w-full accent-cyan-500"
             />
           </div>
+          </>
+          )}
 
           {/* Confirmation line */}
           <div className="rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs">
             <span className="text-zinc-500">About to: </span>
             <span className="text-zinc-200 font-mono">
-              {closeAction} {sharesToClose} {symbol}
-              {orderType === 'limit'
-                ? ` @ LMT $${Number(limitPrice || 0).toFixed(2)}`
-                : ' @ MKT'}
+              {isOrphan
+                ? `FLATTEN ALL ${symbol} @ MKT`
+                : `${closeAction} ${sharesToClose} ${symbol}${
+                    orderType === 'limit'
+                      ? ` @ LMT $${Number(limitPrice || 0).toFixed(2)}`
+                      : ' @ MKT'
+                  }`}
             </span>
             <div className="text-[11px] text-zinc-500 mt-1">
               Any live bracket SL/PT will be cancelled at IB first.
@@ -272,10 +300,14 @@ const CloseTradeModal = ({ position, onClose, onSubmitted }) => {
             <button
               data-testid="close-trade-confirm-btn"
               onClick={handleSubmit}
-              disabled={submitting || remaining <= 0}
+              disabled={submitting || (!isOrphan && remaining <= 0)}
               className="px-3 py-1.5 text-xs uppercase tracking-wider rounded bg-rose-700 text-white hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
             >
-              {submitting ? 'Closing…' : `Close ${sharesToClose} sh`}
+              {submitting
+                ? 'Closing…'
+                : isOrphan
+                ? `Force-flatten ${symbol}`
+                : `Close ${sharesToClose} sh`}
             </button>
           )}
         </div>

@@ -4877,6 +4877,75 @@ async def close_by_symbol(request: dict):
         }
 
 
+@router.post("/positions/{symbol}/flatten")
+async def flatten_position_by_symbol(symbol: str, body: Optional[dict] = Body(default=None)):
+    """v19.34.196 — Operator force-flatten an ORPHANED IB position by symbol.
+
+    For positions that exist at IB but have NO bot `trade_id` (the normal
+    `/trades/{id}/close` path can't touch them). Reads the live IB position
+    via ib_direct, cancels every working order for the symbol (clears the
+    OCA bracket children that would otherwise trip IB's 15-order cap and
+    reject the MKT), then sends a MKT to flatten the net position. This is
+    an operator-initiated direct IB flatten — it deliberately BYPASSES the
+    post-stop / per-symbol cooldowns that gate the automated close path.
+    """
+    from services.ib_direct_service import get_ib_direct_service
+
+    sym = (symbol or "").upper().strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="No symbol provided")
+
+    ibd = get_ib_direct_service()
+    if ibd is None or not await ibd.ensure_connected():
+        raise HTTPException(status_code=503, detail="ib_direct not connected; cannot flatten")
+
+    # 1) Net live position for this symbol (signed: + long, - short).
+    positions = await ibd.get_positions_fresh()
+    net = 0.0
+    for p in positions or []:
+        if (p.get("symbol") or "").upper() == sym and p.get("sec_type") in (None, "STK"):
+            net += float(p.get("position") or 0.0)
+
+    if abs(net) < 1:
+        return {
+            "success": True,
+            "message": f"No open {sym} position to flatten",
+            "symbol": sym, "net": net,
+        }
+
+    # 2) Cancel all working orders for the symbol (clear OCA brackets so the
+    #    flatten MKT isn't rejected by IB's 15-order-per-contract cap).
+    cancel_report = await ibd.cancel_all_open_orders_for_symbol(sym)
+
+    # 3) Flatten via MKT on the opposite side.
+    action = "SELL" if net > 0 else "BUY"
+    qty = int(abs(net))
+    order = await ibd.place_market_order(sym, action, qty)
+    if not order.get("success"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "flatten_order_failed", "symbol": sym,
+                "order": order, "cancel": cancel_report,
+            },
+        )
+
+    logger.info(
+        "🛑 [v19.34.196 operator-flatten] %s %s %d @ MKT (order #%s) — "
+        "cancelled %d working orders first.",
+        action, sym, qty, order.get("order_id"),
+        len(cancel_report.get("cancelled", []) or []),
+    )
+    return {
+        "success": True,
+        "message": f"Flatten {action} {qty} {sym} @ MKT submitted",
+        "symbol": sym, "action": action, "quantity": qty,
+        "order_id": order.get("order_id"), "perm_id": order.get("perm_id"),
+        "status": order.get("status"),
+        "cancelled_orders": cancel_report.get("cancelled", []),
+    }
+
+
 @router.post("/quick-order")
 async def quick_order(request: dict):
     """Place a quick market order (used by chat server)."""

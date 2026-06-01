@@ -197,7 +197,14 @@ class ShadowTracker:
         )
         
         if self._decisions_col is not None:
-            self._decisions_col.insert_one(decision.to_dict())
+            # v19.34.195 — dual-shape timestamp (ts ISO + ts_dt BSON) anchored
+            # to created_at so cross-collection queries can filter
+            # shadow_decisions by either type (parity with v172
+            # bracket_lifecycle_events / alert_outcomes + bot_trades).
+            from utils.timestamps import stamps as _stamps
+            _doc = decision.to_dict()
+            _doc.update(_stamps(_doc.get("created_at")))
+            self._decisions_col.insert_one(_doc)
             logger.info(f"Shadow: Logged decision for {symbol} - {combined_recommendation} (executed={was_executed})")
             
         return decision

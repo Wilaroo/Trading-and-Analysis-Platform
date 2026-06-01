@@ -609,6 +609,14 @@ class BotPersistence:
             # Add metadata
             trade_dict["last_updated"] = datetime.now(timezone.utc).isoformat()
 
+            # v19.34.195 — dual-shape timestamp (ts ISO + ts_dt BSON) anchored
+            # to the trade's creation time, so cross-collection queries can
+            # filter bot_trades by either type (parity with v172
+            # bracket_lifecycle_events / alert_outcomes). Stable across
+            # updates because it's anchored to created_at, not "now".
+            from utils.timestamps import stamps as _stamps
+            trade_dict.update(_stamps(trade_dict.get("created_at")))
+
             # Upsert to MongoDB
             bot._db.bot_trades.update_one(
                 {"id": trade.id},
@@ -643,6 +651,10 @@ class BotPersistence:
             trades_col = bot._db["bot_trades"]
             trade_dict = trade.to_dict()
             trade_dict['_id'] = trade.id
+
+            # v19.34.195 — dual-shape timestamp (parity with persist_trade).
+            from utils.timestamps import stamps as _stamps
+            trade_dict.update(_stamps(trade_dict.get("created_at")))
 
             await asyncio.to_thread(
                 lambda: trades_col.replace_one(
