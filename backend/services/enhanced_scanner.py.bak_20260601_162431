@@ -2411,7 +2411,6 @@ class EnhancedBackgroundScanner:
                     if self._scan_count % 2 == 0 or self._scan_count == 0:
                         logger.info("Pre-market — building morning watchlist + landscape pre-warm")
                         try:
-                            await self._maybe_rebuild_dynamic_universe()
                             await self._scan_premarket_setups()
                             await self._prewarm_setup_landscape(force_morning=True)
                             self._cleanup_expired_alerts()
@@ -2463,7 +2462,6 @@ class EnhancedBackgroundScanner:
                 
                 # Run daily/swing/position scans every 10th cycle
                 if self._scan_count % 10 == 0:
-                    await self._maybe_rebuild_dynamic_universe()
                     await self._scan_daily_setups()
                 
                 # Wait for next scan
@@ -5850,37 +5848,6 @@ class EnhancedBackgroundScanner:
         setattr(self, offset_attr, (off + wave_size) % n)
         return wave
 
-    async def _maybe_rebuild_dynamic_universe(self):
-        """v19.34.211 — trigger a cadence-gated (45-min TTL) rebuild of the
-        Dynamic Universe. Cheap no-op when a fresh doc already exists."""
-        try:
-            from services.dynamic_universe_builder import get_dynamic_universe_builder
-            await get_dynamic_universe_builder(self.db).maybe_rebuild()
-        except Exception as e:
-            logger.debug(f"dynamic-universe rebuild skipped: {e}")
-
-    def _merge_dynamic_priority(self, symbols: List[str]) -> List[str]:
-        """v19.34.211 — front-load today's Dynamic Universe priority names
-        (movers + catalysts + held) ahead of the rotation wave so they're
-        scanned every pass, while the full-universe rotation continues
-        underneath. Degrades to the unchanged wave if the builder has no
-        fresh doc."""
-        try:
-            from services.dynamic_universe_builder import get_dynamic_universe_builder
-            prio = get_dynamic_universe_builder(self.db).get_priority_symbols()
-        except Exception as e:
-            logger.debug(f"dynamic-priority merge skipped: {e}")
-            return symbols
-        if not prio:
-            return symbols
-        seen = set()
-        merged = []
-        for s in list(prio) + list(symbols):
-            if s and s not in seen:
-                seen.add(s)
-                merged.append(s)
-        return merged
-
     async def _scan_daily_setups(self):
         """Scan for swing and position setups.
         
@@ -5918,7 +5885,6 @@ class EnhancedBackgroundScanner:
                 _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("DAILY_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_daily_wave_offset", _tier, _wave)
-                symbols = self._merge_dynamic_priority(symbols)
             except Exception as e:
                 logger.warning(f"Daily scan: canonical universe lookup failed: {e}")
             if not symbols:
@@ -6503,7 +6469,6 @@ class EnhancedBackgroundScanner:
                 _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("PREMARKET_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_premarket_wave_offset", _tier, _wave)
-                symbols = self._merge_dynamic_priority(symbols)
             except Exception as e:
                 logger.warning(f"Pre-market scan: canonical universe lookup failed: {e}")
             if not symbols:
