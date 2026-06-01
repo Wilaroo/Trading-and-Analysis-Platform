@@ -24,6 +24,28 @@
 > `/app/AGENTS.md`. Treat this PRD as the *what we're building*; treat
 > AGENTS.md as the *how to safely touch it*.
 
+---
+
+## 📌 Status snapshot — 2026-06-01 (v19.34.207)
+
+**TQS data-starvation remediation: COMPLETE.**
+- **Fundamental pillar (5/5 components live):** Catalyst/News (R1), Float (R3),
+  Short-interest% (R2), Earnings (R0), and **Institutional ownership (R4)** now
+  all pull live IB/FINRA/Finnhub data. R4 shipped as v205 (type-2-only sum) +
+  v206 (exclude single control-stake holders >50% of shares-out). Known P2:
+  ~20 high-institutional large-caps still cap at 100% (intra-type-2 parent/child
+  overlap).
+- **Setup pillar:** SMB component de-starved (v207) — `smb_score_total` was a
+  flat 25 for every alert because the live scanner never passed an `smb_score`
+  into `populate_smb_fields`. Now `enhanced_scanner._compute_smb_5var` runs the
+  canonical 11-point SMB checklist per alert → real 5-var spread (A+ 46 → B 25).
+
+**Next:** P0 Dynamic Universe Builder (premarket scan-universe from IB movers +
+catalysts + regime tilt, replacing static ETF lists); P1 `accumulation_entry`
+win-rate (11%/30) investigation; P2 TQS A/B/C threshold recalibration now that
+pillars spread; P2 large-cap institutional-ownership saturation.
+
+
 > Lean, static spec. Dated work history lives in `CHANGELOG.md`.
 > Open priorities and backlog live in `ROADMAP.md`.
 >
