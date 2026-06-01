@@ -125,6 +125,25 @@ def dump_trade(doc):
     print(f"{'─' * 72}")
     print(f"  grades   unified={ug}  tqs={tg}"
           f"{f'({tscore:.0f})' if tscore else ''}  quality={qg}  smb={smb}")
+
+    # ── Raw grade provenance — what the SIZER actually saw ────────────
+    ec = doc.get("entry_context") or {}
+    mult_raw = ec.get("multipliers") or {}
+    tqs_ctx = ec.get("tqs") or {}
+    sizer_grade = mult_raw.get("grade")  # normalized grade string the sizer used
+    qscore = _f(doc.get("quality_score"))
+    trade_grade = doc.get("trade_grade")
+    print(f"  WHO-SET  sizer_used_grade={sizer_grade or '—'}  "
+          f"(→ mult {_fmt(mult_raw.get('grade_multiplier'))})   "
+          f"trade_grade(alert)={trade_grade or '—'}  "
+          f"quality_score={_fmt(qscore, nd=0)}")
+    if tqs_ctx:
+        print(f"  ctx.tqs  score={_fmt(tqs_ctx.get('score'), nd=0)}  "
+              f"unified={tqs_ctx.get('unified_grade') or '—'}  "
+              f"post_gate_grade={tqs_ctx.get('post_gate_grade') or '—'}  "
+              f"pre_gate_score={_fmt(tqs_ctx.get('pre_gate_score'), nd=0)}")
+    else:
+        print(f"  ctx.tqs  (none captured — no TQS for this setup)")
     print(f"  prices   entry={_fmt(entry, dollar=True)}  "
           f"fill={_fmt(fill, dollar=True)}  "
           f"stop(displayed)={_fmt(disp_stop, dollar=True)}  "
