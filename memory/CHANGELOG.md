@@ -1,3 +1,51 @@
+## 2026-06-02 — v19.34.201 FUNDAMENTAL PILLAR: CATALYST/NEWS WIRING (the 30% lever)
+
+### Why (live diag proof)
+`diag_fundamental_sources.py` on the DGX confirmed the fundamental pillar's
+biggest component — **catalyst (30%)** — was permanently stuck at the
+"no catalyst" floor of **40**. Root cause: `tqs_engine.set_services()` only
+passed `ib_service` to the fundamental pillar, **never `news_service` or `db`**,
+so `FundamentalQualityService._news_service`/`._db` were always None. The
+pillar's news + earnings-calendar lookups were dead code → catalyst always 40,
+contributing to the flat ~57 fundamental score on every trade.
+
+The probe also proved `news_service.get_ticker_news()` IS alive (Finnhub
+company-news + IB news, carries a `sentiment` STRING bullish/bearish/neutral).
+
+### Fix
+- `services/tqs/tqs_engine.py` — `set_services()` + `init_tqs_engine()` now
+  accept and propagate `news_service` + `db` into the fundamental pillar.
+- `server.py` — passes the live `news_service` + `db` into `init_tqs_engine`.
+- `services/tqs/fundamental_quality.py`:
+  * **News→catalyst enrichment** in `calculate_score`: when the caller didn't
+    supply catalyst data and `_news_service` is wired, fetch recent ticker
+    news (last 72h, placeholder items excluded), map the sentiment STRING to a
+    float (bullish→+1 / bearish→−1 / neutral→0), average it, and route through
+    the existing `has_recent_news` branch → catalyst score 50–85 instead of 40.
+  * **Latent crash fixed**: `if self._db:` (pymongo `bool(Database)` raises
+    `NotImplementedError` per AGENTS.md §6) → `is not None`; and
+    `self._db.get("earnings_calendar")` (invalid on Database) → `self._db[...]`.
+    These were dormant only because `_db` was always None; wiring it would have
+    crashed the pillar without this fix.
+
+### Verify
+- `backend/tests/test_v19_34_201_fundamental_news_wire.py` — 5/5 pass (bullish
+  lifts catalyst >floor, no-news-service keeps floor, placeholder ignored,
+  bearish supports short, explicit caller args override news). Lint clean;
+  `server.py` compiles. (Live-server `test_tqs_*_integration` failures in the
+  sandbox are pre-existing — empty `REACT_APP_BACKEND_URL`, not this change.)
+- ⚠️ OPERATOR LIVE-CHECK after restart: fundamental pillar's catalyst component
+  should move off a flat 40 for symbols with recent news; re-run
+  `diag_tqs_pillars.py` to confirm fundamental scores start spreading.
+
+### Still ahead (this pillar)
+R2 short-interest% (FINRA shares ÷ derived shares-out), R3 float, R0 earnings
+persistence, R4 institutional (IB ReportsOwnership). News is the biggest single
+lever and ships first.
+
+---
+
+
 ## 2026-06-02 — v19.34.200 NIGHTLY learning_stats REBUILD (TQS setup-pillar data feed)
 
 ### Why

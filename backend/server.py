@@ -669,7 +669,9 @@ def _init_all_services():
         ib_service=ib_service,
         technical_service=realtime_tech_service,
         sector_service=sector_service,
-        scanner=background_scanner
+        scanner=background_scanner,
+        news_service=news_service,
+        db=db,
     )
 
     print("TQS Engine (Phase 2) initialized")
