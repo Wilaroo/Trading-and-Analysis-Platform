@@ -1,3 +1,46 @@
+## 2026-06-02 — v19.34.200 NIGHTLY learning_stats REBUILD (TQS setup-pillar data feed)
+
+### Why
+The TQS **setup pillar** reads `get_contextual_win_rate(setup_type=base)` from
+`learning_stats`. That collection was sitting EMPTY despite a backlog of
+`trade_outcomes` (the incremental `run_daily_analysis` path only aggregates
+*today's* `reviewed:False` rows and wasn't persisting history). With no row,
+the pillar defaults to `win_rate=0.5` → score 50 → TQS compresses into the "C"
+band → every trade sized at ~0.30×. This is **data starvation, not weighting**
+(STYLE_WEIGHTS are horizon-aware and correct — do NOT rebalance them).
+
+### Fix
+- `services/learning_loop_service.py`
+  * New pure aggregator `_compute_learning_stats(context_key, outcomes)` —
+    reads outcome dicts directly (stored docs are flatter than
+    `TradeOutcome.from_dict` expects, which silently zeroed stats). Writes the
+    exact fields the pillar reads (`win_rate`, `expected_value_r`,
+    `total_trades`) + extras. Shared 1:1 with the manual backfill script.
+  * New `async rebuild_learning_stats_from_all_outcomes()` — full, idempotent
+    rebuild from ALL `trade_outcomes`, grouped by the NORMALIZED setup key the
+    pillar queries (`lower().replace("_long","").replace("_short","")`).
+    Upserts by `context_key`. Returns # contexts written.
+- `services/trading_scheduler.py`
+  * New nightly job `learning_stats_rebuild` @ **5:30 PM ET** →
+    `_run_learning_stats_rebuild()`. Keeps the setup-pillar feed fresh so TQS
+    spreads honestly over time.
+  * `run_task_now("learning_stats_rebuild")` on-demand trigger wired (exposed
+    via `POST /api/scheduler/run/learning_stats_rebuild`) so the operator can
+    refresh without waiting for 5:30 PM.
+
+### Verify
+- `backend/tests/test_v19_34_200_learning_stats_rebuild.py` — 5/5 pass
+  (win-rate/EV/PF math, all-losses, breakeven excluded from WR denominator,
+  empty, bad/missing fields). Lint + syntax clean.
+- ⚠️ OPERATOR LIVE-CHECK after deploy+restart: hit
+  `POST /api/scheduler/run/learning_stats_rebuild` (or wait for 5:30 PM ET),
+  then confirm `learning_stats` is populated and the setup pillar starts
+  spreading off a flat 50. **Effect is forward-looking** (only new trades
+  scored after the rebuild see the richer win-rate feed).
+
+---
+
+
 ## 2026-06-01 — v19.34.199 RESTORE-PATH GRADE HYDRATION (honest TQS grade)
 
 ### Root cause (found via diag_sizing_provenance.py on live DGX)

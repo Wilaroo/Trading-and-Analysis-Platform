@@ -916,6 +916,10 @@ class TradingScheduler:
             await self._run_weekly_revalidation()
         elif task_type == ScheduledTaskType.IB_COLLECTION_RESUME.value:
             await self._run_ib_collection_resume()
+        elif task_type == "learning_stats_rebuild":
+            # v19.34.200 — on-demand rebuild so the operator can refresh
+            # the setup-pillar win-rate feed without waiting for 5:30 PM ET.
+            await self._run_learning_stats_rebuild()
         else:
             return {"success": False, "error": f"Unknown task type: {task_type}"}
             
