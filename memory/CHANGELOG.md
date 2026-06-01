@@ -1,3 +1,45 @@
+## 2026-06-01 — v19.34.199 RESTORE-PATH GRADE HYDRATION (honest TQS grade)
+
+### Root cause (found via diag_sizing_provenance.py on live DGX)
+Open swing trades (power_trend_stack / stage_2_breakout / pocket_pivot) showed
+`unified_grade`/`tqs_grade` = EMPTY despite `entry_context.tqs.unified_grade`
+being populated (C/C+). The card's `unifiedGrade()` then fell back to the legacy
+`quality_grade` (B) and **labeled it "TQS B" — when real TQS was C/C+.**
+
+`restore_open_trades` (the active boot restorer in bot_persistence.py)
+constructs BotTrade from a HARDCODED field subset that omits
+unified_grade/tqs_grade/tqs_score. So every restart returned multi-day trades
+with empty grades, and the periodic persist then overwrote the DB (incl. the
+v175 backfill) with those empties. New trades (created in-session) were fine;
+only RESTORED trades lost the grade.
+
+### Fix — `services/bot_persistence.py`
+- New pure resolver `resolve_restore_grades(trade_doc, entry_context)` mirroring
+  the v175 backfill priority: top-level field → `entry_context.tqs.unified_grade`
+  → `post_gate_grade` → (unified only) legacy `quality_grade`.
+- `restore_open_trades` now calls it after restoring `entry_context`, so the
+  REAL TQS grade survives restarts and the UI label is honest (sizing already
+  used the right TQS grade — this fixes the record + label only).
+- Tests: `tests/test_v19_34_199_restore_grades.py` (6 cases incl. the exact
+  swing-trade C+ derivation + reconciled "R" fallback). All green.
+
+### Diagnostics added (read-only)
+- `scripts/diag_sizing_provenance.py` — per-open-trade multiplier chain, sizing
+  vs displayed stop, budget-vs-realized risk. Proved sizing is CORRECT (TQS-C
+  trades sized at 0.30× as designed) and that "B sized as C" was a label bug,
+  not a sizing bug.
+- `scripts/diag_tqs_distribution.py` — TQS score/grade histogram + legacy-vs-TQS
+  label divergence + per-setup mean TQS, to test whether TQS compresses into the
+  C band.
+
+### NOTE: NOT a sizing change
+The earlier "Fix 1" (fall back to quality_grade in the sizer) was REJECTED after
+the diagnostic proved these are genuinely TQS-C/C+ trades. Inflating them to B
+size would resurrect the exact lenient-grade double-count v175 removed. Sizing
+left untouched.
+
+---
+
 ## 2026-06-01 — v19.34.198 SESSION-AWARE CHART CACHE TTL (5 PM ET rollover)
 
 ### Context
