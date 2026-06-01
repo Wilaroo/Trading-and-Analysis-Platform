@@ -40,7 +40,7 @@ class EarningsService:
                 "token": self._finnhub_key
             }
             
-            resp = requests.get(url, params=params, timeout=10)
+            resp = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
             
             if resp.status_code == 200:
                 data = resp.json()
@@ -156,7 +156,8 @@ class EarningsService:
             return []
         today = datetime.now(timezone.utc).date()
         try:
-            resp = requests.get(
+            resp = await asyncio.to_thread(
+                requests.get,
                 "https://finnhub.io/api/v1/calendar/earnings",
                 params={
                     "from": today.isoformat(),
@@ -250,7 +251,7 @@ class EarningsService:
                 "token": self._finnhub_key
             }
             
-            resp = requests.get(url, params=params, timeout=10)
+            resp = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
             
             if resp.status_code == 200:
                 data = resp.json()

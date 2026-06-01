@@ -378,7 +378,7 @@ class QualityService:
         try:
             # Get financial ratios
             ratios_url = f"https://financialmodelingprep.com/api/v3/ratios/{symbol}?limit=1&apikey={self.fmp_api_key}"
-            ratios_resp = requests.get(ratios_url, timeout=10)
+            ratios_resp = await asyncio.to_thread(requests.get, ratios_url, timeout=10)
             
             if ratios_resp.status_code != 200:
                 return None
@@ -399,7 +399,7 @@ class QualityService:
             
             # Get cash flow statement for accruals
             cf_url = f"https://financialmodelingprep.com/api/v3/cash-flow-statement/{symbol}?limit=1&apikey={self.fmp_api_key}"
-            cf_resp = requests.get(cf_url, timeout=10)
+            cf_resp = await asyncio.to_thread(requests.get, cf_url, timeout=10)
             
             if cf_resp.status_code == 200:
                 cf_data = cf_resp.json()
@@ -409,7 +409,7 @@ class QualityService:
             
             # Get balance sheet for total assets
             bs_url = f"https://financialmodelingprep.com/api/v3/balance-sheet-statement/{symbol}?limit=1&apikey={self.fmp_api_key}"
-            bs_resp = requests.get(bs_url, timeout=10)
+            bs_resp = await asyncio.to_thread(requests.get, bs_url, timeout=10)
             
             if bs_resp.status_code == 200:
                 bs_data = bs_resp.json()

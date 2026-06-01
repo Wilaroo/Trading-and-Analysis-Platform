@@ -3,6 +3,7 @@ Real-Time Fundamental & Technical Data Service
 Fetches live fundamental metrics from Finnhub and combines with Alpaca market data
 Provides comprehensive stock analysis with actual real-time data
 """
+import asyncio
 import logging
 import os
 import requests
@@ -131,7 +132,7 @@ class FundamentalDataService:
                 "token": self._finnhub_key
             }
             
-            resp = requests.get(url, params=params, timeout=15)
+            resp = await asyncio.to_thread(requests.get, url, params=params, timeout=15)
             
             if resp.status_code == 200:
                 data = resp.json()
@@ -240,7 +241,7 @@ class FundamentalDataService:
                 "token": self._finnhub_key
             }
             
-            resp = requests.get(url, params=params, timeout=10)
+            resp = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
             
             if resp.status_code == 200:
                 data = resp.json()
@@ -279,7 +280,7 @@ class FundamentalDataService:
                 "token": self._finnhub_key
             }
             
-            resp = requests.get(url, params=params, timeout=15)
+            resp = await asyncio.to_thread(requests.get, url, params=params, timeout=15)
             
             if resp.status_code == 200:
                 data = resp.json()
