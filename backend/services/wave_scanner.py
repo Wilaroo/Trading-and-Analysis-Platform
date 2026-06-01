@@ -241,6 +241,15 @@ class WaveScanner:
             tier1.extend(get_mega_cap_watchlist())
         except Exception as e:
             logger.debug(f"Could not load mega-cap watchlist: {e}")
+        # v19.34.211 — Dynamic Universe priority pin. Today's IB movers +
+        # catalysts (gated to the qualified universe) ride in Tier-1 so live
+        # scalps catch them every ~15s. Operator/mega-cap pins keep priority
+        # (appended before this); dedupe below drops repeats.
+        try:
+            from services.dynamic_universe_builder import get_dynamic_universe_builder
+            tier1.extend(get_dynamic_universe_builder(getattr(self, "_db", None)).get_priority_symbols())
+        except Exception as e:
+            logger.debug(f"Could not load dynamic-universe priority: {e}")
         # Dedupe preserving insertion order (operator pins win).
         seen = set()
         tier1 = [s for s in tier1 if not (s in seen or seen.add(s))]

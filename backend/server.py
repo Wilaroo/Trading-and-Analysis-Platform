@@ -68,6 +68,7 @@ from routers.system_router import router as system_router, init_system_router
 # v19.30.11 (2026-05-01) — operator-facing alert banner endpoint
 from routers.system_banner import router as system_banner_router
 from routers.dashboard_router import router as dashboard_router, init_dashboard_router
+from routers.dynamic_universe import router as dynamic_universe_router, init_dynamic_universe_router
 from routers.ai_training import router as ai_training_router
 from routers.sentiment_refresh import (
     router as sentiment_refresh_router,
@@ -488,6 +489,10 @@ def _init_all_services():
     # Wire Scanner ↔ Trading bot for auto-execution
     background_scanner.set_trading_bot(trading_bot)
     background_scanner.set_db(db)
+
+    # v19.34.211 — Dynamic Universe Builder (premarket + intraday daily scan
+    # universe: liquid core + IB movers + catalysts + held, regime-tilted).
+    init_dynamic_universe_router(db)
 
     # Wire Trading bot ↔ Scanner for Smart Strategy Filtering (access to strategy stats)
     trading_bot.set_enhanced_scanner(background_scanner)
@@ -1559,6 +1564,7 @@ app.include_router(watchlist_router)
 app.include_router(system_router)
 app.include_router(system_banner_router)
 app.include_router(dashboard_router)
+app.include_router(dynamic_universe_router)
 app.include_router(sentiment_refresh_router)
 # Tier 2-4 routers registered during startup via _deferred_routers
 

@@ -1,3 +1,55 @@
+## 2026-06-01 — v19.34.211 DYNAMIC UNIVERSE BUILDER (movers + catalysts + regime tilt)
+
+### Why
+v210 made the daily/premarket scans sweep the full ADV-ranked universe, but
+that universe is static — it ignores *today's* actionable names. Operator
+asked the scanner to (a) run the whole universe every day, (b) hit qualified
+scalp/intraday names many times/day, and (c) surface today's movers/catalysts
+into the live loop AND the game plan / briefings.
+
+### What
+New `services/dynamic_universe_builder.py` composes a **priority-ranked daily
+scan universe** each premarket + every ~45 min intraday, persisted to the
+`daily_scan_universe` Mongo collection (one doc per ET date):
+- **Liquid core** — top-600 by ADV (`get_universe_ranked`, intraday tier).
+- **IB movers** — `ib_service.run_scanner()` over TOP_PERC_GAIN/LOSE, GAP_UP/
+  DOWN, MOST_ACTIVE, HOT_BY_VOLUME (fallback: `ib_data_provider`
+  most-active). Gated to the qualified universe (ADV ≥ $2M).
+- **Catalysts** — today's earnings + fresh-news tickers, gated to qualified.
+- **Held + watchlist** — open `bot_trades` + operator manual pins, always in,
+  top priority, exempt from the gate.
+- **Regime tilt** — `market_regime_engine` state biases mover scoring
+  (CONFIRMED_UP → gainers/gap-ups aligned, CONFIRMED_DOWN → losers/gap-downs).
+- Per-source weights → `priority_score`; dedup + sort DESC; top-40
+  `priority_symbols`. Graceful degradation — a failed source NEVER yields an
+  empty universe.
+
+### Consumption (wiring)
+- `enhanced_scanner`: `_maybe_rebuild_dynamic_universe()` (TTL-gated) runs in
+  the premarket + RTH loops; `_merge_dynamic_priority()` front-loads priority
+  names ahead of the v210 rotation wave in both daily + premarket scans.
+- `wave_scanner.get_scan_batch`: top priority names injected into **RTH
+  Tier-1** (scanned every ~15s) so live scalps catch today's movers.
+- Top findings pushed into today's game plan (`dynamic_movers` field) for the
+  gameplan / briefings.
+- New API: `GET /api/dynamic-universe`, `GET /api/dynamic-universe/priority`,
+  `POST /api/dynamic-universe/rebuild`.
+
+### Tests — `backend/tests/test_v19_34_211_dynamic_universe_builder.py`
+6/6 passing: scoring + qualification gate, regime tilt (up/down), priority
+selection (pure-core excluded, held top), graceful degradation (empty movers),
+freshness/maybe_rebuild. Plus live smoke test on this env: all 3 endpoints +
+`POST /rebuild` built a valid doc with live regime detection.
+
+### Deploy
+`deploy_v19_34_211.py` (paste.rs → curl): creates 2 new files + 9 anchored
+edits across enhanced_scanner/wave_scanner/server.py, transactional with .bak
++ compile/import rollback, idempotent. Validated against a synthetic pre-v211
+DGX sandbox (reproduces exact target state byte-for-byte). **Commit before
+restart.**
+
+---
+
 ## 2026-06-01 — v19.34.210 KILL ALPHABETICAL EXECUTION BIAS (liquidity-ranked universe rotation)
 
 ### Incident
