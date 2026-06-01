@@ -266,18 +266,34 @@ def get_chart_response_cache(db=None) -> ChartResponseCache:
 
 
 def chart_cache_ttl_for(timeframe: str) -> int:
-    """Bar-size-aware TTL.
+    """Bar-size-aware TTL (env-tunable).
 
     - Daily/weekly bars change once per session — 180s is plenty.
-    - Intraday bars get a fresh tick every 30s-1min — 30s TTL keeps
-      the chart feeling live while still saving 95%+ of the recompute.
+    - Intraday: the chart-tail WS/poll backfills the freshest bars within
+      ~5s after the cold hydrate, so the full-window response only needs to
+      be a "good enough" skeleton. v19.34.197 bumps the intraday default
+      30s -> 60s to halve cold-miss frequency (each miss can pay the live
+      pusher merge) without any visible staleness.
+    - Env overrides: CHART_CACHE_TTL_INTRADAY_S, CHART_CACHE_TTL_DAILY_S.
     """
+    import os as _os_ttl
+
+    def _envint(name: str, default: int) -> int:
+        try:
+            v = int(float(_os_ttl.environ.get(name, default)))
+            return v if v > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    intraday = _envint("CHART_CACHE_TTL_INTRADAY_S", 60)
+    daily = _envint("CHART_CACHE_TTL_DAILY_S", 180)
+
     if not timeframe:
-        return 30
+        return intraday
     tf = timeframe.lower().replace(" ", "")
     if tf in {"1day", "daily", "1d", "1week", "weekly", "1w"}:
-        return 180
-    return 30
+        return daily
+    return intraday
 
 
 def make_cache_key(

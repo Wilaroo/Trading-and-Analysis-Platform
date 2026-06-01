@@ -617,12 +617,39 @@ async def get_chart_bars(
         tf_cfg = _hybrid_data_service.TIMEFRAMES.get(tf)
         live_bar_size = tf_cfg.get("ib_bar_size") if tf_cfg else None
         if live_bar_size and tf in {"1min", "5min", "15min", "1hour"}:
-            live_res = await _hybrid_data_service.fetch_latest_session_bars(
-                symbol.upper(),
-                live_bar_size,
-                active_view=True,  # /chart calls ARE active-view
-                use_rth=False,
-            )
+            # v19.34.197 — TIME-BOUND the live pusher-RPC merge. On a cache
+            # MISS this on-demand IB historical request (rpc.latest_bars) can
+            # take 15-21s for quote-subscribed symbols, blocking the ENTIRE
+            # cold chart load (measured: 18-21s for 5min/1min, vs <300ms for
+            # daily which skips the merge). The chart-tail WS/poll already
+            # backfills the freshest bars within ~5s, so cap the merge tightly
+            # and serve the historical window immediately on timeout. The slow
+            # RPC keeps running in its threadpool and populates live_bar_cache,
+            # so the NEXT load gets the merged bars fast. Env-tunable via
+            # CHART_LIVE_MERGE_TIMEOUT_S (default 3.0s).
+            import asyncio as _asyncio_merge
+            import os as _os_merge
+            try:
+                _merge_to = float(_os_merge.environ.get("CHART_LIVE_MERGE_TIMEOUT_S", "3.0"))
+            except (TypeError, ValueError):
+                _merge_to = 3.0
+            try:
+                live_res = await _asyncio_merge.wait_for(
+                    _hybrid_data_service.fetch_latest_session_bars(
+                        symbol.upper(),
+                        live_bar_size,
+                        active_view=True,  # /chart calls ARE active-view
+                        use_rth=False,
+                    ),
+                    timeout=_merge_to,
+                )
+            except _asyncio_merge.TimeoutError:
+                logger.info(
+                    "[v19.34.197 chart-merge] %s %s live merge exceeded %.1fs — "
+                    "serving historical window now; chart-tail will backfill "
+                    "the live bars.", symbol.upper(), tf, _merge_to,
+                )
+                live_res = {"success": False, "error": "live_merge_timeout"}
             if live_res.get("success"):
                 live_bars = live_res.get("bars") or []
                 result.bars.extend(live_bars)

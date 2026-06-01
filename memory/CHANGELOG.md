@@ -1,3 +1,31 @@
+## 2026-?? — v19.34.197 CHART COLD-LOAD LATENCY FIX (18-21s → ~3s)
+
+### Diagnosis (read-only diag_chart_latency.py on the live DGX)
+Cold INTRADAY `/chart` loads measured **18,000-21,000 ms**; daily was <300ms.
+NOT payload (~85KB / 245 bars) and NOT Mongo (`get_bars` fast — daily proves
+it). Root cause: the per-miss live pusher-RPC merge (`fetch_latest_session_bars`
+→ `rpc.latest_bars`, an on-demand IB historical request for quote-subscribed
+symbols) blocked the whole chart load with NO timeout. Daily skips the merge →
+fast. Cache works (warm = 1-4ms) but the 30s intraday TTL + warm-only-top-12
+meant most clicks were cold misses paying the full 18s.
+
+### Fix
+- `routers/sentcom_chart.py` — TIME-BOUND the merge with
+  `asyncio.wait_for(CHART_LIVE_MERGE_TIMEOUT_S, default 3.0s)`. On timeout serve
+  the historical window immediately; the chart-tail WS/poll backfills the live
+  bars within ~5s, and the slow RPC still warms `live_bar_cache` for the next
+  load. Cold worst case 18-21s → ~3s.
+- `services/chart_response_cache.chart_cache_ttl_for` — env-tunable; intraday
+  default 30s → 60s (`CHART_CACHE_TTL_INTRADAY_S` / `CHART_CACHE_TTL_DAILY_S`)
+  to halve cold-miss frequency. Safe because the WS tail keeps the chart live.
+
+### Verify
+4/4 tests (`test_v19_34_197_chart_cache_ttl.py`); py_compile + ruff clean.
+Deploy paste.rs `00uTK` (patch `SDNl1`). ⚠️ Operator: after restart re-run
+`diag_chart_latency.py` — cold intraday should drop ~18s → ~3s.
+
+---
+
 ## 2026-?? — v19.34.194–196 QUALITY GATE + DUAL TIMESTAMPS + OPERATOR FORCE-FLATTEN
 
 Three operator-requested features (each with passing pytest; deploy wrapper
