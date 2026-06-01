@@ -3544,3 +3544,4 @@ v19_*_chunk*.py
 __pycache__/
 scripts/watch_*.sh
 *.bak.v*
+*.bak_*
