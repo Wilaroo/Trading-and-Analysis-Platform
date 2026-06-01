@@ -26,7 +26,24 @@
 
 ---
 
-## 📌 Status snapshot — 2026-06-01 (v19.34.207)
+## 📌 Status snapshot — 2026-06-01 (v19.34.210)
+
+**Alphabetical execution bias: FIXED (v210, deployed e102876d).**
+- Root cause: `_scan_daily_setups`/`_scan_premarket_setups` used
+  `sorted(get_universe(...))[:200]`/`[:300]` — `get_universe` returns an
+  unordered set, so `sorted()` was alphabetical and `[:N]` truncated to
+  A–early-B, structurally hiding the late-alphabet universe (→ 93.9% of OPENED
+  positions were A–E).
+- Fix: new `symbol_universe.get_universe_ranked()` (avg_dollar_volume DESC) +
+  `enhanced_scanner._next_universe_wave()` rotating per-scan cursor. Daily +
+  premarket now sweep the **full investment-tier universe ($2M+, ~3,339 names)**
+  at wave=500 (env-overridable `SCAN_UNIVERSE_TIER`/`DAILY_SCAN_WAVE_SIZE`/
+  `PREMARKET_SCAN_WAVE_SIZE`) → whole qualified universe swept ~17 min RTH /
+  ~28 min premarket / ~20 min after-hours. RTH wave_scanner (scalp/intraday/
+  swing) left untouched (already ADV-ranked). Tests: 8/8
+  `test_v19_34_210_liquidity_universe_rotation.py`. Watch: re-run
+  `diag_alpha_bias.py` over 1–2 sessions — A–E skew should collapse toward
+  the universe's natural spread.
 
 **TQS data-starvation remediation: COMPLETE.**
 - **Fundamental pillar (5/5 components live):** Catalyst/News (R1), Float (R3),
