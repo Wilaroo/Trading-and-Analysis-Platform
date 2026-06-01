@@ -35,10 +35,14 @@
   v206 (exclude single control-stake holders >50% of shares-out). Known P2:
   ~20 high-institutional large-caps still cap at 100% (intra-type-2 parent/child
   overlap).
-- **Setup pillar:** SMB component de-starved (v207) — `smb_score_total` was a
-  flat 25 for every alert because the live scanner never passed an `smb_score`
-  into `populate_smb_fields`. Now `enhanced_scanner._compute_smb_5var` runs the
-  canonical 11-point SMB checklist per alert → real 5-var spread (A+ 46 → B 25).
+- **Setup pillar:** SMB component de-starved (v207 + v208) — `smb_score_total`
+  was a flat 25 for every alert because the live scanner never passed an
+  `smb_score` into `populate_smb_fields` (v207), and even after wiring it, the
+  score was applied inside an `if config:` gate that skipped directional/variant
+  setups with no registry config (vwap_fade_long/short, vwap_continuation) (v208).
+  **Live-verified 2026-06-01:** post-v208 alerts spread [34–43], mean 38.4,
+  0/28 stuck at 25, across every setup family (canonical 11-point SMB checklist
+  per alert via `enhanced_scanner._compute_smb_5var`).
 
 **Next:** P0 Dynamic Universe Builder (premarket scan-universe from IB movers +
 catalysts + regime tilt, replacing static ETF lists); P1 `accumulation_entry`
