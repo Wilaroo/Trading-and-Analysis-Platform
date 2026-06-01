@@ -31,11 +31,15 @@ through the LIVE `ib_direct` clientId-11 socket.
 - `backend/tests/test_v19_34_202_ib_fundamentals.py` — 5/5 pass (SharesOut/Float
   parse from real AMD XML, missing-SharesOut safe, SI% math + guards). Lint clean
   on changed regions; all 3 services import OK.
-- ⚠️ OPERATOR LIVE-CHECK after restart: re-run `diag_tqs_data_health.py` — the
-  `symbol_fundamentals_cache` should now show non-zero `float_shares` and
-  `short_interest_percent` coverage (was 0%), and `source` should include
-  `ib_direct_report_snapshot+...+finra_short`. Cache is 24h TTL so coverage
-  fills as symbols are re-fetched.
+- ✅ VERIFIED LIVE ON DGX (2026-06-01, commit 8f2a9d3b): cleared cache + forced
+  in-backend fetch via `/api/tqs/breakdown/{sym}` for AMD/AVGO/ALAB →
+  `source=ib_direct_report_snapshot+finnhub+finra_short`, with real
+  `float_shares` (AMD 1.62B, AVGO 4.64B, ALAB 153M) and `short_interest_percent`
+  (AMD 1.98, AVGO 1.11, ALAB 7.89). The IB ReportSnapshot fetch ONLY fires inside
+  the backend process (where the live clientId-11 socket lives) — a standalone
+  script has no IB connection and correctly falls back to Finnhub.
+- NOTE: the 174 pre-existing cache docs backfill on their own 24h TTL (or force a
+  symbol with `verify_v19_34_202.py`).
 
 ### Still ahead (this pillar)
 R0 earnings_calendar persistence (Finnhub free, 15%), R4 institutional ownership
