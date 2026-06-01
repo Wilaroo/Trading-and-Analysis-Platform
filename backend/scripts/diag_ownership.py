@@ -47,49 +47,41 @@ def _snapshot_shares(xml):
 
 
 def _ownership_breakdown(xml):
-    """Stream the doc: sum quantities, count owners, note quantity parents,
-    and ALSO sum quantities that are direct children of <Owner> only."""
+    """Stream the doc and aggregate quantity by the Owner <type> code, so we can
+    see which type(s) double-count. Each <Owner> has one <type> and one
+    <quantity>."""
+    by_type_sum = Counter()
+    by_type_count = Counter()
     total_all = 0.0
-    n_qty = 0
     n_owner = 0
     float_shares = None
-    parent_tags = Counter()
-    # build a parent map cheaply via iterparse start/end stack
-    stack = []
-    owner_only_total = 0.0
-    for event, elem in ET.iterparse(io.StringIO(xml), events=("start", "end")):
-        if event == "start":
-            stack.append(elem.tag)
-        else:  # end
-            tag = elem.tag
-            if tag == "quantity":
-                parent = stack[-2] if len(stack) >= 2 else "?"
-                parent_tags[parent] += 1
-                try:
-                    q = float((elem.text or "0").strip())
-                    total_all += q
-                    n_qty += 1
-                    if parent == "Owner":
-                        owner_only_total += q
-                except (TypeError, ValueError):
-                    pass
-            elif tag == "floatShares":
-                try:
-                    float_shares = float((elem.text or "").strip())
-                except (TypeError, ValueError):
-                    pass
-            elif tag == "Owner":
-                n_owner += 1
-            if stack:
-                stack.pop()
+    for event, elem in ET.iterparse(io.StringIO(xml), events=("end",)):
+        tag = elem.tag
+        if tag == "floatShares":
+            try:
+                float_shares = float((elem.text or "").strip())
+            except (TypeError, ValueError):
+                pass
+            elem.clear()
+        elif tag == "Owner":
+            n_owner += 1
+            t_el = elem.find("type")
+            q_el = elem.find("quantity")
+            t = (t_el.text or "?").strip() if t_el is not None else "?"
+            try:
+                q = float((q_el.text or "0").strip()) if q_el is not None else 0.0
+            except (TypeError, ValueError):
+                q = 0.0
+            by_type_sum[t] += q
+            by_type_count[t] += 1
+            total_all += q
             elem.clear()
     return {
         "total_all_quantities": total_all,
-        "owner_only_total": owner_only_total,
-        "num_quantity_tags": n_qty,
         "num_owner_tags": n_owner,
         "float_shares": float_shares,
-        "quantity_parents": dict(parent_tags),
+        "by_type_sum": dict(by_type_sum),
+        "by_type_count": dict(by_type_count),
     }
 
 
@@ -111,28 +103,26 @@ async def main():
         print(f"\n{sym} ReportsOwnership ({len(own):,} chars):")
         b = _ownership_breakdown(own)
         print(f"  num <Owner> tags          = {b['num_owner_tags']:,}")
-        print(f"  num <quantity> tags       = {b['num_quantity_tags']:,}")
-        print(f"  quantity parents          = {b['quantity_parents']}")
         print(f"  floatShares (ownership)   = {b['float_shares']:,.0f}" if b['float_shares'] else "  floatShares = None")
         print(f"  SUM of ALL quantities     = {b['total_all_quantities']:,.0f}")
-        print(f"  SUM (Owner-direct only)   = {b['owner_only_total']:,.0f}")
 
-        denom_so = shares_out
-        denom_fl = b["float_shares"] or total_float_snap
-        print("\n  ── resulting ratios ──")
-        for label, total in (("ALL-qty", b["total_all_quantities"]),
-                             ("Owner-only", b["owner_only_total"])):
-            if denom_so:
-                print(f"  {label} / shares_out = {100*total/denom_so:6.1f}%")
-            if denom_fl:
-                print(f"  {label} / float      = {100*total/denom_fl:6.1f}%")
+        denom = shares_out or b["float_shares"] or total_float_snap
+        print(f"\n  ── per owner <type> (denom = shares_out {shares_out:,.0f}) ──"
+              if shares_out else "\n  ── per owner <type> ──")
+        rows = sorted(b["by_type_sum"].items(), key=lambda kv: -kv[1])
+        for t, s in rows:
+            pct = (100 * s / denom) if denom else 0
+            print(f"    type {t:>3}: {b['by_type_count'][t]:>6,} owners, "
+                  f"{s:>16,.0f} shares  = {pct:6.1f}% of shares_out")
+        print(f"\n  TOTAL (all types) = {100*b['total_all_quantities']/denom:.1f}% "
+              f"of shares_out" if denom else "")
     finally:
         ib.disconnect()
         print("\n✓ disconnected")
     print("\n══ READ ══")
-    print("  If 'Owner-only / shares_out' ≈ 60-90% but 'ALL-qty' >> 100%, the bug")
-    print("  is over-summing quantity tags outside <Owner>. If both are >100%,")
-    print("  the denominator (float vs shares_out) or double-counting is the issue.")
+    print("  Pick the type(s) whose % lands near the real institutional figure")
+    print("  (~60-80% for a large-cap like AMD). Summing ALL types double-counts")
+    print("  (funds counted both at fund level and in their parent institution).")
     return 0
 
 
