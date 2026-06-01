@@ -1,3 +1,58 @@
+## 2026-06-01 — v19.34.207 SMB 5-VARIABLE SCORING WIRED INTO LIVE SCANNER (Setup-pillar de-starvation)
+
+### Why
+`smb_score_total` was a flat **25** for every alert. Root cause: the live
+scanner's only call to `populate_smb_fields` (`enhanced_scanner._process_new_alert`)
+built the context with just `{market_regime, tape_score}` — it **never passed an
+`smb_score`**, so the `SMBVariableScore` branch was skipped and the dataclass
+default 25 stuck. That flat 25 then fed the TQS Setup pillar's SMB component
+(15% weight), collapsing the spread.
+
+### Fix (Approach A — canonical 11-point checklist)
+- `services/enhanced_scanner.py` — new `async _compute_smb_5var(alert)` maps the
+  alert's `TechnicalSnapshot` + fire-time fields into the canonical 11-point SMB
+  checklist (`scoring_engine.evaluate_smb_checklist`) and folds it into the
+  5-variable score (`smb_unified_scoring.convert_checklist_to_smb_score`). The
+  `_process_new_alert` SMB block now injects `smb_score` (+ `earnings_score`)
+  into the context. Snapshot→checklist mapping: gap/rvol→catalyst+volume,
+  ema9/ema20/ema50+price→trend+MAs, support/resistance→S/R+R:R+exit,
+  vwap/prev_close→MTF, rs/change%→relative-strength, setup_type→proven-success,
+  regime→sentiment. Fails safe to the old default on any error.
+### Verify
+- `tests/test_v19_34_207_smb_5var.py` (4/4). Canonical-path spread:
+  STRONG=46/50 (A+), PARTIAL=38/50 (B+), WEAK=25/50 (baseline). No more flat 25.
+- DGX live: `/tmp/verify_v19_34_207.py` checks `live_alerts/bot_trades`
+  `smb_score_total` distribution at next scan session.
+
+---
+
+## 2026-06-01 — v19.34.205 + v19.34.206 INSTITUTIONAL OWNERSHIP (R4 — final TQS Fundamental pillar component)
+
+### v205 — type-2-only sum (correct bucket)
+IB `ReportsOwnership` groups holders by `<type>`; summing ALL types double-counts
+(~2x shares-out → 100% everywhere). Sum ONLY `type==2` (13F investment advisors).
+Also fetch `shares_outstanding` from ReportSnapshot for the denominator when not
+cached. AMD validated at 75.5%.
+
+### v206 — control-stake / stale-artifact exclusion
+type-2 alone still over-counted for some names because IB's Refinitiv feed carries
+stale **controlling-stake** rows (AB: `AXA Financial`=182% of shares-out; AAMI:
+`HNA Capital`=64%) — divested parents far above any free-float 13F position.
+`parse_reports_ownership` now EXCLUDES any single type-2 holder whose quantity
+exceeds `max_single_holder_frac` (default **50%**) of shares-outstanding, then
+caps at 100%. Records `excluded_control_holders` for observability.
+### Verify (live IB)
+- AMD 75.5% (unchanged), AB 100%→31%, AAMI 100%→67%. Cache spread after refresh:
+  93 syms, mean 65.6%, range 1.1–100%, 61/93 in the 20–99% band (was 62/84 at 100%).
+- `tests/test_v19_34_206_institutional_ownership.py` (8/8).
+- **Known limitation (P2):** ~20 high-institutional large-caps (GS, MS, SBUX…)
+  still hit the 100% cap due to intra-type-2 parent/child overlap (e.g. "BlackRock
+  Inc" + "BlackRock Fund Advisors" both filing, each <50%). Directionally correct;
+  de-saturating needs fragile entity-name dedup → deferred.
+
+---
+
+
 ## 2026-06-02 — v19.34.202 IB-SOURCED FUNDAMENTALS: FLOAT + SHORT-INTEREST% (R2+R3)
 
 ### Why (IB probe proof)

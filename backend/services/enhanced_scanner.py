@@ -7191,7 +7191,68 @@ class EnhancedBackgroundScanner:
         )
 
     # ==================== ALERT MANAGEMENT ====================
-    
+
+    async def _compute_smb_5var(self, alert: "LiveAlert"):
+        """v19.34.207 — compute the canonical SMB 5-variable score for an alert.
+
+        Maps the alert's per-symbol technical snapshot + fire-time fields into
+        the 11-point SMB checklist (``scoring_engine.evaluate_smb_checklist``)
+        and folds it into the 5-variable ``SMBVariableScore``. This replaces the
+        old hardcoded ``smb_score_total=25`` default -- the scanner previously
+        never passed an ``smb_score`` into ``populate_smb_fields``, so every
+        alert pegged the TQS Setup pillar's SMB component (15% weight) at a flat
+        value. Returns an ``SMBVariableScore`` or ``None`` on any failure (the
+        caller then falls back to the dataclass default -- no worse than before).
+        """
+        if not SMB_INTEGRATION_AVAILABLE:
+            return None
+        try:
+            from services.scoring_engine import get_scoring_engine
+            from services.smb_unified_scoring import convert_checklist_to_smb_score
+
+            data = {
+                "current_price": getattr(alert, "current_price", 0) or 0,
+                "gap_percent": getattr(alert, "gap_pct", 0) or 0,
+                "rvol": getattr(alert, "rvol", 0) or 0,
+                # the alert fired because it matched its setup pattern
+                "matched_strategies": [{"name": alert.setup_type}],
+            }
+            snap = await self.technical_service.get_technical_snapshot(alert.symbol)
+            if snap is not None:
+                prev_close = getattr(snap, "prev_close", 0) or 0
+                cur = getattr(snap, "current_price", 0) or data["current_price"]
+                data.update({
+                    "current_price": cur or data["current_price"],
+                    "prev_close": prev_close,
+                    "ema_9": getattr(snap, "ema_9", 0) or 0,
+                    "sma_20": getattr(snap, "ema_20", 0) or 0,   # ema_20 proxy
+                    "sma_50": getattr(snap, "ema_50", 0) or 0,   # ema_50 proxy
+                    "vwap": getattr(snap, "vwap", 0) or 0,
+                    "support_1": getattr(snap, "support", 0) or 0,
+                    "resistance_1": getattr(snap, "resistance", 0) or 0,
+                    "avg_volume": getattr(snap, "avg_volume", 0) or 0,
+                    "rvol": getattr(snap, "rvol", 0) or data["rvol"],
+                    "gap_percent": getattr(snap, "gap_pct", 0) or data["gap_percent"],
+                    "trend": {"uptrend": "BULLISH", "downtrend": "BEARISH"}.get(
+                        getattr(snap, "trend", "") or "", "NEUTRAL"),
+                })
+                if prev_close and cur:
+                    data["change_percent"] = round(
+                        (cur - prev_close) / prev_close * 100, 2)
+
+            # The checklist's sentiment check expects bullish/neutral/bearish.
+            regime = self._market_regime.value
+            sentiment = {"strong_uptrend": "bullish",
+                         "strong_downtrend": "bearish"}.get(regime, "neutral")
+
+            checklist = get_scoring_engine(self.db).evaluate_smb_checklist(
+                data, {"regime": sentiment})
+            return convert_checklist_to_smb_score(checklist)
+        except Exception as e:
+            logger.debug(
+                f"SMB 5-var compute failed for {getattr(alert, 'symbol', '?')}: {e}")
+            return None
+
     async def _process_new_alert(self, alert: LiveAlert):
         """Process a new alert — enforces per-symbol dedup (max 1 active per symbol)"""
         # Check for duplicate: same symbol + same setup_type
@@ -7263,12 +7324,17 @@ class EnhancedBackgroundScanner:
         
         # === SMB INTEGRATION: Populate SMB fields ===
         try:
+            # v19.34.207 — compute the real 5-variable score (was never passed
+            # before, so smb_score_total defaulted to a flat 25 for every alert).
+            smb_5var = await self._compute_smb_5var(alert)
             context = {
                 "market_regime": self._market_regime.value,
-                "tape_score": alert.tape_score if hasattr(alert, 'tape_score') else 5
+                "tape_score": alert.tape_score if hasattr(alert, 'tape_score') else 5,
+                "smb_score": smb_5var,
+                "earnings_score": getattr(alert, "earnings_score", 0) or 0,
             }
             alert.populate_smb_fields(context)
-            logger.debug(f"SMB fields populated for {alert.symbol}: style={alert.trade_style}, grade={alert.trade_grade}")
+            logger.debug(f"SMB fields populated for {alert.symbol}: total={alert.smb_score_total}, grade={alert.trade_grade}")
         except Exception as e:
             logger.debug(f"Could not populate SMB fields: {e}")
         

@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.197 (2026-02, "Chart cold-load latency fix — time-bound the live pusher-RPC merge (CHART_LIVE_MERGE_TIMEOUT_S, default 3s) that was blocking intraday /chart loads for 18-21s on cache miss; serve historical window immediately + let chart-tail WS backfill; env-tunable cache TTL (intraday 30s->60s). Cold ~18s -> ~3s.")
+- **Current version**: v19.34.207 (2026-06-01, "SMB 5-variable scoring wired into the live scanner — `enhanced_scanner._compute_smb_5var` maps each alert's TechnicalSnapshot into the canonical 11-point SMB checklist → 5-var score, replacing the flat `smb_score_total=25` that starved the TQS Setup pillar. Preceded by v205/v206 institutional-ownership R4: type-2-only sum + control-stake (>50% single holder) exclusion — AMD 75.5%, AB 31%, AAMI 67%.")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
