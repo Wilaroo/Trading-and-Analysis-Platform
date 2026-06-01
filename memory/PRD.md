@@ -437,3 +437,20 @@ falls back to an `avg_volume` rank (never alphabetical). Data repaired live via
 `POST /api/ib-collector/rebuild-adv-from-ib` (9,412 syms). Verified live: 195
 ADV-ranked live subs spanning A→Z, tier3_roster=2,498. 5/5 tests pass
 (`test_v19_34_193_scanner_coverage_hardening.py`). See CHANGELOG.md.
+
+## v19.34.194–196 — QUALITY GATE + DUAL TIMESTAMPS + FORCE-FLATTEN (2026-02)
+
+Three operator-requested features (16 tests, all pass; deploy paste.rs a3R1H):
+- **v194 $BIL quality gate** (`opportunity_evaluator.py`): env-tunable
+  `MIN_TRADE_ATR_PCT` daily-ATR% floor (default 0.3%) + `CASH_EQUIVALENT_BLOCKLIST`
+  (T-bill/ultra-short ETFs). Fail-open hard gates that stop ultra-low-vol tickers
+  ($BIL) becoming trades, while index ETFs (SPY/QQQ ~0.7-1.4%) pass.
+- **v195 dual-shape timestamps**: `bot_persistence` (persist_trade/save_trade) +
+  `shadow_tracker.log_decision` now stamp `ts` (ISO) + `ts_dt` (BSON) anchored to
+  created_at — completes the v172 normalization on `bot_trades`+`shadow_decisions`.
+- **v196 operator force-flatten**: `POST /api/trading-bot/positions/{symbol}/flatten`
+  flattens orphaned IB positions (no bot trade_id) via ib_direct (cancel working
+  orders → MKT), bypassing the cooldown. V5 `CloseTradeModal` detects orphan rows
+  and routes there with a "Force-flatten" button instead of erroring.
+See CHANGELOG.md.
+

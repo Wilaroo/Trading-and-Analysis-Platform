@@ -1,3 +1,41 @@
+## 2026-?? — v19.34.194–196 QUALITY GATE + DUAL TIMESTAMPS + OPERATOR FORCE-FLATTEN
+
+Three operator-requested features (each with passing pytest; deploy wrapper
+`https://paste.rs/a3R1H`, patch `https://paste.rs/FKfax`):
+
+### v19.34.194 — $BIL quality gate (volatility floor + cash-equivalent blocklist)
+`services/opportunity_evaluator.py` — two env-tunable hard gates early in
+`evaluate_opportunity` (both fail-OPEN, drops logged via `record_rejection`):
+  * `CASH_EQUIVALENT_BLOCKLIST` (default: BIL,BILS,SGOV,SHV,SHY,ICSH,… T-bill /
+    ultra-short ETFs) → reason `cash_equivalent_blocklist`.
+  * `MIN_TRADE_ATR_PCT` daily ATR% floor (FRACTION; default 0.003 = 0.3% — below
+    SPY/QQQ ~0.7-1.4% so index ETFs pass, but catches $BIL ~0.1%). ATR% sourced
+    from alert atr/price, else `symbol_adv_cache.atr_pct`. 0 disables; blocks
+    ONLY when a measurement exists. Stops ultra-low-vol tickers becoming trades
+    (the BIL R:R 0.02 incident). 6/6 tests.
+
+### v19.34.195 — dual-shape timestamps on bot_trades + shadow_decisions
+`bot_persistence.persist_trade` + `save_trade` and `shadow_tracker.log_decision`
+now stamp `ts` (ISO) + `ts_dt` (BSON), anchored to `created_at` (stable across
+updates), via `utils/timestamps.stamps()`. Completes the v172 normalization;
+prevents silent cross-collection query misses. 4/4 tests.
+
+### v19.34.196 — operator force-flatten orphaned IB positions by symbol
+New `POST /api/trading-bot/positions/{symbol}/flatten` (`routers/trading_bot.py`)
+— reads the live IB position via ib_direct, cancels every working order for the
+symbol (clears OCA brackets that trip IB's 15-order cap), then sends a MKT to
+flatten the net position. Operator-initiated → bypasses the post-stop cooldown.
+The V5 `CloseTradeModal.jsx` now detects orphan rows (no `trade_id`), shows an
+amber "Orphaned IB position" banner + "Force-flatten <SYM>" button, and routes
+to this endpoint instead of erroring "Missing trade_id". 6/6 tests.
+
+### Verify (hardware-bound — manual, NOT testing agent)
+16/16 new tests pass; py_compile + ruff + eslint clean. Frontend hot-reloads.
+⚠️ Operator: after deploy+restart, watch `/tmp/backend.log` for the v194 gate
+logs, confirm new docs carry `ts`/`ts_dt`, and test Force-flatten on an orphan.
+
+---
+
 ## 2026-?? — v19.34.193 SCANNER UNIVERSE-COVERAGE HARDENING (alphabetical A/B-only bug)
 
 ### Context (operator: "all Friday trades were A/B/C symbols")

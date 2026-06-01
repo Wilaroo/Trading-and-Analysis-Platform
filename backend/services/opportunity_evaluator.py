@@ -143,6 +143,102 @@ class OpportunityEvaluator:
             except Exception as _fg_err:
                 logger.debug(f"v19.34.173 F-gate check error: {_fg_err}")
 
+            # ── v19.34.194 — Volatility floor + cash-equivalent blocklist ──
+            # Stops ultra-low-volatility tickers (e.g. $BIL and other T-bill /
+            # ultra-short ETFs) from ever becoming trades. They clear the ADV
+            # liquidity floor but have ~0 daily range, so detectors fire on
+            # noise and the R:R ladder produces absurd targets (the BIL R:R
+            # 0.02 incident). Two hard gates, both fail-OPEN on any error:
+            #   1. CASH_EQUIVALENT_BLOCKLIST — explicit symbol blocklist
+            #      (primary tool; named T-bill / ultra-short ETFs).
+            #   2. MIN_TRADE_ATR_PCT — daily ATR% floor as a FRACTION
+            #      (default 0.003 = 0.3%; catches unlisted junk but is
+            #      deliberately below SPY/QQQ ~0.7-1.4% so index ETFs pass).
+            #      ATR% sourced from alert atr/price, else the collector's
+            #      `symbol_adv_cache.atr_pct`. 0 disables. Blocks ONLY when a
+            #      measurement is available.
+            # Drops land in `trade_drops` via record_rejection.
+            try:
+                import os as _os_q9
+                _sym_u = (symbol or "").upper()
+
+                # 1) Cash-equivalent / ultra-short ETF blocklist.
+                _bl_raw = _os_q9.environ.get(
+                    "CASH_EQUIVALENT_BLOCKLIST",
+                    "BIL,BILS,SGOV,SHV,SHY,ICSH,GBIL,CLTL,USFR,TFLO,FLOT,"
+                    "JPST,MINT,NEAR,GSY,VGSH,SCHO,SPTS,BSV,FLRN,TBIL,XHLF",
+                )
+                _blocklist = {s.strip().upper() for s in _bl_raw.split(",") if s.strip()}
+                if _sym_u and _sym_u in _blocklist:
+                    logger.info(
+                        "🚫 [v19.34.194 cash-equiv] Blocking %s — cash-equivalent "
+                        "/ ultra-short ETF (CASH_EQUIVALENT_BLOCKLIST).", _sym_u,
+                    )
+                    try:
+                        bot.record_rejection(
+                            symbol=symbol, setup_type=setup_type,
+                            direction=direction_str,
+                            reason_code="cash_equivalent_blocklist",
+                            context={"blocklist": "v19.34.194"},
+                        )
+                    except Exception:
+                        pass
+                    return None
+
+                # 2) Daily ATR% floor (fraction).
+                try:
+                    _min_atr_pct = float(_os_q9.environ.get("MIN_TRADE_ATR_PCT", "0.003"))
+                except (TypeError, ValueError):
+                    _min_atr_pct = 0.003
+                if _min_atr_pct > 0:
+                    _atr_pct = None
+                    _atr = (alert.get("atr") or alert.get("atr_14")
+                            or alert.get("atr_value"))
+                    _px = (alert.get("price") or alert.get("current_price")
+                           or alert.get("entry_price") or alert.get("trigger_price"))
+                    try:
+                        if _atr and _px and float(_px) > 0:
+                            _atr_pct = abs(float(_atr)) / float(_px)
+                    except (TypeError, ValueError):
+                        _atr_pct = None
+                    if _atr_pct is None:
+                        # Fall back to the collector's daily ATR% (fraction).
+                        _db_q9 = getattr(bot, "_db", None)
+                        if _db_q9 is None:
+                            _db_q9 = getattr(bot, "db", None)
+                        if _db_q9 is not None and _sym_u:
+                            try:
+                                _doc = _db_q9["symbol_adv_cache"].find_one(
+                                    {"symbol": _sym_u}, {"atr_pct": 1, "_id": 0})
+                                if _doc and _doc.get("atr_pct") is not None:
+                                    _atr_pct = float(_doc["atr_pct"])
+                            except Exception:
+                                _atr_pct = None
+                    # Block ONLY when we have a measurement (fail-open otherwise).
+                    if _atr_pct is not None and _atr_pct < _min_atr_pct:
+                        logger.info(
+                            "🚫 [v19.34.194 atr-floor] Blocking %s %s — daily "
+                            "ATR%% %.3f%% < floor %.3f%% (too quiet to trade).",
+                            _sym_u, setup_type, _atr_pct * 100, _min_atr_pct * 100,
+                        )
+                        try:
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type,
+                                direction=direction_str,
+                                reason_code="atr_floor_too_low",
+                                context={
+                                    "atr_pct": round(_atr_pct, 6),
+                                    "min_atr_pct": _min_atr_pct,
+                                },
+                            )
+                        except Exception:
+                            pass
+                        return None
+            except Exception as _q9_err:
+                logger.debug(
+                    "[v19.34.194 vol-floor] gate crashed (fail-open): %s", _q9_err,
+                )
+
             # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
             # Alerts that sit in the pipeline too long are no longer trading
             # the setup they detected. Kill them at the gate to save the IB

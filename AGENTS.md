@@ -569,7 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.193 (2026-02, "Scanner universe-coverage hardening — fixed the weekly ADV scheduler that wiped avg_dollar_volume every Sunday (legacy recalculate_adv_cache.py delete_many) and silently degraded the scanner to a 50-symbol alphabetical fallback (A/B-only trading). Weekly recalc now routes to the canonical rebuild_adv_from_ib_data; footgun script disabled; WaveScanner self-heals + empty-pool TTL bypass + broken-cache alarm/avg_volume fallback.")
+- **Current version**: v19.34.196 (2026-02, "Operator force-flatten orphaned IB positions by symbol (POST /positions/{symbol}/flatten via ib_direct, bypasses cooldown) + V5 Close modal orphan handling; v195 dual-shape timestamps on bot_trades+shadow_decisions; v194 $BIL quality gate (MIN_TRADE_ATR_PCT floor + CASH_EQUIVALENT_BLOCKLIST)")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

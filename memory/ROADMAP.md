@@ -12,15 +12,15 @@ Open priorities, deferred ideas, and backlog. Move items to
   it's labeled INVESTMENT (held overnight by design). No action. (Removed from
   the EOD-close concern list.)
 
-### 🟡 P1 — Accepted tasks (operator green-lit)
-- **Symbol-flatten fallback + operator force-close override.** Make the V5 Close
-  button work on orphaned IB rows lacking a `trade_id` (flatten by symbol via
-  `ib_direct.cancel_all_open_orders_for_symbol` + MKT close), and bypass the
-  30-min post-stop cooldown for operator-initiated closes. Files:
-  `frontend/.../CloseTradeModal.jsx`, `trade_executor_service.py`, router.
-- **Dual-shape timestamps** (`ts` ISO + `ts_dt` BSON) on `bot_trades` +
-  `shadow_decisions` (finish the v172 normalization; prevents silent
-  cross-collection 0-row query bugs). Use `utils/timestamps.py` helpers.
+### ✅ P1 — Accepted tasks — DONE v19.34.194-196
+- **Symbol-flatten fallback + operator force-close override.** ✅ DONE (v196):
+  `POST /api/trading-bot/positions/{symbol}/flatten` flattens orphaned IB
+  positions (no trade_id) via ib_direct (cancel working orders + MKT), bypasses
+  the cooldown; V5 Close modal routes orphan rows there with a "Force-flatten"
+  button. 6/6 tests.
+- **Dual-shape timestamps** on `bot_trades` + `shadow_decisions`. ✅ DONE (v195):
+  `ts`+`ts_dt` stamped at persist/insert via `utils/timestamps.stamps()`,
+  anchored to created_at. 4/4 tests.
 
 ### 🔴 P1 — Alphabetical scan bias (Friday all-trades-were-A/B) — ✅ RESOLVED v19.34.193
 - **Root cause (confirmed via diagnostic):** the weekly ADV scheduler (Sundays
@@ -31,19 +31,16 @@ Open priorities, deferred ideas, and backlog. Move items to
 - **Fixed:** data repaired via `POST /api/ib-collector/rebuild-adv-from-ib`
   (9,412 syms); weekly recalc rerouted to `rebuild_adv_from_ib_data`; footgun
   script disabled; WaveScanner self-heal + empty-pool TTL bypass + broken-cache
-  alarm/avg_volume fallback. 5/5 tests pass. (paste.rs Ksyzp / O6DNk)
+  alarm/avg_volume fallback. 5/5 tests pass. Verified live (195 ADV-ranked subs
+  A→Z). Deployed bea9535f.
 - **Follow-up (optional, P2):** the `WAVE_SCANNER_MAX_SUBS=40` live-quote cap is
-  still small vs the pusher's auto-top-N; consider raising / RVOL-prioritizing it
-  once coverage is confirmed healthy post-restart.
+  still small vs the pusher's auto-top-N; consider raising / RVOL-prioritizing it.
 
-### 🟡 P1/P2 — Quality/liquidity gate (operator: "how does $BIL become a trade?")
-- **Add a volatility/ATR floor hard-gate.** Today the only HARD in-play gate is
-  RVOL ≥ 0.8 + ADV ≥ $2M (in_play_service is SOFT-scoring unless
-  `strict_gate=true`). Ultra-low-vol high-ADV ETFs ($BIL T-bill ETF) clear ADV,
-  blip past RVOL 0.8, a detector fires on their flat range, and the v181
-  auto-ladder "rescues" an otherwise-absurd R:R. Fix: min ATR% / min daily-range
-  floor (env-tunable), and/or an ETF/cash-equivalent blocklist, and/or flip
-  in_play to strict. Pairs with the existing `in_play_service`.
+### ✅ P1/P2 — Quality/liquidity gate ($BIL) — DONE v19.34.194
+- **ATR%/volatility floor hard-gate + cash-equivalent ETF blocklist.** ✅ DONE:
+  `MIN_TRADE_ATR_PCT` (default 0.3%, fraction) + `CASH_EQUIVALENT_BLOCKLIST`
+  env-tunable hard gates early in OpportunityEvaluator (fail-open; index ETFs
+  like SPY/QQQ pass; catches $BIL ~0.1%). 6/6 tests.
 
 ### 🟢 P2 — Features to look into
 - **Forward-looking overnight/premarket/weekend scans.** Premarket
