@@ -1,3 +1,39 @@
+## 2026-06-01 — v19.34.209 OFFLOAD SYNC HTTP OFF THE EVENT LOOP (close-all hang + pusher stall)
+
+### Incident
+Operator hit "close all" in Open Positions; the UI hung and the IB pusher
+appeared to disconnect. Log forensics (`/tmp/diag_close_incident.py`) showed
+`⚠️ EVENT LOOP BLOCKED for 2.8s!` and `=== WEDGE WATCHDOG TRIGGERED (main thread
+stuck for 5.0s) ===` with the stack at `requests.get(url, params=params,
+timeout=10)`, plus `Failed to get Finnhub news for VIAV: Read timed out`.
+
+### Root cause
+Several `async def` enrichment methods called **synchronous** `requests.get(...,
+timeout=10..20)` directly on the asyncio event loop (Finnhub news/earnings,
+Finnhub fundamentals, FMP quality). When upstream was slow, each call froze the
+ENTIRE loop for up to the full timeout. That single freeze caused BOTH symptoms:
+the manual-close API couldn't be scheduled (UI hang), and the pusher + ib_direct
+heartbeats (also on the loop) went stale (`pusher snapshot 85s old`,
+`ib_direct disconnected` fallthroughs). The close-all just coincided with the
+scanner's Finnhub enrichment burst on the same symbols.
+
+### Fix
+Wrapped all 11 blocking `requests.get` call sites in `await
+asyncio.to_thread(requests.get, ...)` so the socket I/O runs in a worker thread,
+off the loop. Behaviour-preserving; threading-only. Files: `news_service.py`
+(2), `earnings_service.py` (3), `fundamental_data_service.py` (3),
+`quality_service.py` (3). `weekend_briefing_service.py`'s `requests.get` are in
+plain sync `def` helpers (already off-loop) — left as-is.
+### Verify
+- `tests/test_v19_34_209_no_loop_block.py` (2/2) — a 0.4s blocking get no longer
+  stalls a concurrent 50ms heartbeat (loop stays responsive); guard test asserts
+  no bare `= requests.get(` remains in the 4 modules.
+- DGX live: during the next scan/close burst the wedge watchdog "EVENT LOOP
+  BLOCKED" lines should stop appearing.
+
+---
+
+
 ## 2026-06-01 — v19.34.208 APPLY SMB SCORE REGARDLESS OF SETUP CONFIG (v207 follow-up)
 
 ### Why (live verification of v207)

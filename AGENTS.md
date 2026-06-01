@@ -569,8 +569,8 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.208 (2026-06-01, "Apply the SMB 5-var score in `populate_smb_fields` regardless of registry config — directional/variant setups (vwap_fade_long/short, vwap_continuation) resolve to no config and were skipping the SMB block, leaving smb_score_total flat at 25 even after v207. Now the score applies whenever the context carries a valid SMBVariableScore.")
-- **Prior**: v19.34.207 (SMB 5-var wired into live scanner) + v205/v206 (institutional ownership R4).
+- **Current version**: v19.34.209 (2026-06-01, "Offload synchronous `requests.get` (Finnhub news/earnings/fundamentals, FMP quality) off the asyncio event loop via `asyncio.to_thread` — sync HTTP on the loop was freezing it (wedge watchdog 'EVENT LOOP BLOCKED'), which hung the manual close-all and stalled the pusher/ib_direct heartbeats. 11 call sites across 4 services.")
+- **Prior**: v19.34.208 (apply SMB score without registry config) + v207 (SMB 5-var wired) + v205/v206 (institutional ownership R4).
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

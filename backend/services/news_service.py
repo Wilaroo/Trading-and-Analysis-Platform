@@ -11,6 +11,7 @@ Priority order for market news:
 1. Finnhub General News - Best for broad market news
 2. IB News Bulletins - Exchange bulletins
 """
+import asyncio
 import logging
 import os
 import requests
@@ -182,7 +183,7 @@ class NewsService:
                     "token": self._finnhub_key
                 }
                 
-                resp = requests.get(url, params=params, timeout=10)
+                resp = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
                 
                 if resp.status_code == 200:
                     news_items = resp.json()
@@ -241,7 +242,7 @@ class NewsService:
                     "token": self._finnhub_key
                 }
                 
-                resp = requests.get(url, params=params, timeout=10)
+                resp = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
                 
                 if resp.status_code == 200:
                     news_items = resp.json()
