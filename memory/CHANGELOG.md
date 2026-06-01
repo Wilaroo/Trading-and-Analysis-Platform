@@ -1,3 +1,16 @@
+## 2026-06-01 — v19.34.211b Scoring dedupe (catalyst double-count fix)
+
+`DynamicUniverseBuilder.build().add()` added points every time a source was
+seen but de-duped only the source *tag*. Catalyst feeds (earnings/news) list
+the same ticker multiple times → inflated scores (VSCO read 68 vs the correct
+30). Fix: `add()` now counts each distinct source ONCE (skip points if the
+source label is already present). Movers (dict-deduped per scan) and core
+(unique list) unaffected. Tests: +2 (`test_duplicate_catalyst_counts_once`,
+`test_earnings_plus_news_each_count_once`); 8/8 green. Deploy: backend-only
+`deploy_v19_34_211b.py` (paste.rs), idempotent, validated vs sandbox.
+
+---
+
 ## 2026-06-01 — v19.34.211a Gameplan Dynamic-Movers UI + UTC-date alignment
 
 - **Frontend** (`GamePlanTab.jsx`): new collapsible **Dynamic Movers** panel —

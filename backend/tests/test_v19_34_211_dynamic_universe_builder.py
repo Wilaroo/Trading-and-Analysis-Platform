@@ -171,5 +171,37 @@ async def test_maybe_rebuild_skips_when_fresh(monkeypatch):
     assert second is None
 
 
+@pytest.mark.asyncio
+async def test_duplicate_catalyst_counts_once(monkeypatch):
+    # v19.34.211b — earnings feed lists VSCO 3x; must score 30 once, not 90.
+    _patch_sources(
+        monkeypatch,
+        regime="HOLD",
+        core=[],
+        qualified={"VSCO"},
+        earnings=["VSCO", "VSCO", "VSCO"],
+    )
+    b = DynamicUniverseBuilder(db=_FakeDB())
+    doc = await b.build()
+    smap = {d["symbol"]: d for d in doc["symbols"]}
+    assert smap["VSCO"]["score"] == dub.W_CATALYST_EARNINGS  # 30, not 90
+    assert smap["VSCO"]["sources"] == ["catalyst:earnings"]
+
+
+@pytest.mark.asyncio
+async def test_earnings_plus_news_each_count_once(monkeypatch):
+    _patch_sources(
+        monkeypatch,
+        regime="HOLD", core=[], qualified={"ABC"},
+        earnings=["ABC", "ABC"], news=["ABC", "ABC", "ABC"],
+    )
+    b = DynamicUniverseBuilder(db=_FakeDB())
+    doc = await b.build()
+    smap = {d["symbol"]: d for d in doc["symbols"]}
+    # earnings(30) once + news(18) once = 48
+    assert smap["ABC"]["score"] == dub.W_CATALYST_EARNINGS + dub.W_CATALYST_NEWS
+    assert set(smap["ABC"]["sources"]) == {"catalyst:earnings", "catalyst:news"}
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
