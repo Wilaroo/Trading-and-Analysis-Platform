@@ -2,11 +2,12 @@
 Earnings Service - Fetches earnings data from Finnhub
 Provides earnings calendar, historical earnings, beat/miss trends, and analysis
 """
+import asyncio
 import logging
 import os
 import requests
-from typing import Dict, Optional
-from datetime import datetime, timezone
+from typing import Dict, List, Optional
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -146,6 +147,98 @@ class EarningsService:
         except Exception as e:
             logger.warning(f"Failed to get earnings calendar for {symbol}: {e}")
             return {"available": False, "error": str(e)}
+
+    async def get_upcoming_earnings(self, days_ahead: int = 21) -> List[Dict]:
+        """v19.34.203 — market-wide upcoming earnings via ONE Finnhub
+        date-range call (`/calendar/earnings?from=&to=`). Returns the raw
+        ``earningsCalendar`` list, or [] on miss / plan restriction."""
+        if not self._finnhub_key:
+            return []
+        today = datetime.now(timezone.utc).date()
+        try:
+            resp = requests.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={
+                    "from": today.isoformat(),
+                    "to": (today + timedelta(days=days_ahead)).isoformat(),
+                    "token": self._finnhub_key,
+                },
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                return (resp.json() or {}).get("earningsCalendar", []) or []
+            logger.warning("Earnings date-range fetch HTTP %s", resp.status_code)
+        except Exception as e:
+            logger.warning("Earnings date-range fetch failed: %s", e)
+        return []
+
+    async def refresh_earnings_calendar(
+        self, db=None, days_ahead: int = 21,
+        fallback_symbols: Optional[List[str]] = None,
+    ) -> int:
+        """v19.34.203 — persist upcoming earnings into the ``earnings_calendar``
+        collection the TQS fundamental pillar reads.
+
+        Approach (a): one market-wide date-range call. If that returns nothing
+        (e.g. plan restriction), falls back to (b) per-symbol over the active
+        universe (symbols already in ``symbol_fundamentals_cache``), throttled
+        for the Finnhub free tier. Upserts by (symbol, date) and prunes rows
+        older than 2 days. Returns the number of rows written.
+        """
+        if db is None:
+            db = _earnings_db()
+        if db is None:
+            return 0
+
+        docs: List[Dict] = []
+        rows = await self.get_upcoming_earnings(days_ahead)
+        if rows:
+            for e in rows:
+                doc = _normalize_earnings_row(e)
+                if doc:
+                    docs.append(doc)
+        else:
+            # fallback (b): per-symbol over the active universe
+            syms = fallback_symbols or [
+                d["symbol"] for d in
+                db["symbol_fundamentals_cache"].find({}, {"symbol": 1, "_id": 0})
+                if d.get("symbol")
+            ]
+            for sym in syms[:300]:
+                try:
+                    cal = await self.get_earnings_calendar(sym)
+                    ne = cal.get("next_earnings") if cal.get("available") else None
+                    if ne and ne.get("date"):
+                        doc = _normalize_earnings_row({**ne, "symbol": sym})
+                        if doc:
+                            docs.append(doc)
+                except Exception:
+                    pass
+                await asyncio.sleep(1.1)  # free-tier rate limit
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        written = 0
+        for doc in docs:
+            doc["fetched_at"] = now_iso
+            try:
+                db["earnings_calendar"].update_one(
+                    {"symbol": doc["symbol"], "date": doc["date"]},
+                    {"$set": doc}, upsert=True,
+                )
+                written += 1
+            except Exception as e:
+                logger.debug("earnings_calendar upsert failed for %s: %s",
+                             doc.get("symbol"), e)
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        try:
+            db["earnings_calendar"].delete_many({"date": {"$lt": cutoff}})
+            db["earnings_calendar"].create_index("symbol", background=True)
+        except Exception:
+            pass
+        logger.info("[earnings] earnings_calendar refresh wrote %d rows "
+                    "(%s)", written, "date-range" if rows else "per-symbol")
+        return written
     
     async def get_earnings_metrics(self, symbol: str) -> Dict:
         """
@@ -325,6 +418,48 @@ class EarningsService:
 
 # Global service instance
 _earnings_service: Optional[EarningsService] = None
+
+_earnings_db_handle = None
+
+
+def _earnings_db():
+    """Lazy pymongo DB handle (mirrors unified_fundamentals_cache._get_db)."""
+    global _earnings_db_handle
+    if _earnings_db_handle is not None:
+        return _earnings_db_handle
+    try:
+        from pymongo import MongoClient
+        client = MongoClient(os.environ.get("MONGO_URL"),
+                             serverSelectionTimeoutMS=2000)
+        _earnings_db_handle = client[os.environ.get("DB_NAME", "tradecommand")]
+    except Exception as exc:
+        logger.debug("earnings_service DB init failed: %s", exc)
+    return _earnings_db_handle
+
+
+def _normalize_earnings_row(e: Dict) -> Optional[Dict]:
+    """Finnhub earnings row → ``earnings_calendar`` doc, or None if unusable.
+
+    Stores ``date`` as an ISO *datetime* string (Finnhub gives a 'YYYY-MM-DD'
+    date) so the pillar's string-range query (``$gte`` now.isoformat()) and
+    ``datetime.fromisoformat`` both work. Noon UTC avoids the same-day edge
+    where a date-only string sorts BEFORE a full now-datetime string.
+    """
+    sym = (e.get("symbol") or "").upper().strip()
+    d = (e.get("date") or "").strip()
+    if not sym or len(d) < 10:
+        return None
+    return {
+        "symbol": sym,
+        "date": f"{d[:10]}T12:00:00+00:00",
+        "date_only": d[:10],
+        "hour": e.get("hour"),  # bmo / amc / dmh
+        "eps_estimate": e.get("epsEstimate"),
+        "revenue_estimate": e.get("revenueEstimate"),
+        "quarter": e.get("quarter"),
+        "year": e.get("year"),
+        "source": "finnhub",
+    }
 
 
 def get_earnings_service() -> EarningsService:
