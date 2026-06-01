@@ -170,6 +170,19 @@ class TradingScheduler:
                 replace_existing=True
             )
             
+            # 1c. Earnings-calendar refresh — 6:00 AM ET daily (v19.34.203)
+            self._scheduler.add_job(
+                _wrap_async(self._run_earnings_calendar_refresh),
+                CronTrigger(
+                    hour=6,
+                    minute=0,
+                    timezone='US/Eastern'
+                ),
+                id='earnings_calendar_refresh',
+                name='Earnings Calendar Refresh',
+                replace_existing=True
+            )
+
             # 2. Weekly Report - Friday 4:30 PM ET
             self._scheduler.add_job(
                 _wrap_async(self._run_weekly_report),
@@ -339,6 +352,16 @@ class TradingScheduler:
             logger.info("[scheduler] learning_stats rebuild complete: %d contexts", n)
         except Exception as e:
             logger.error("[scheduler] learning_stats rebuild failed: %s", e)
+
+    async def _run_earnings_calendar_refresh(self):
+        """v19.34.203 — persist upcoming earnings into earnings_calendar so the
+        TQS fundamental pillar's earnings-proximity component (15%) works."""
+        try:
+            from services.earnings_service import get_earnings_service
+            n = await get_earnings_service().refresh_earnings_calendar()
+            logger.info("[scheduler] earnings_calendar refresh wrote %d rows", n)
+        except Exception as e:
+            logger.error("[scheduler] earnings_calendar refresh failed: %s", e)
 
     async def _run_daily_analysis(self):
         """Run daily analysis (Medium Learning services)"""
@@ -920,6 +943,9 @@ class TradingScheduler:
             # v19.34.200 — on-demand rebuild so the operator can refresh
             # the setup-pillar win-rate feed without waiting for 5:30 PM ET.
             await self._run_learning_stats_rebuild()
+        elif task_type == "earnings_calendar_refresh":
+            # v19.34.203 — on-demand earnings calendar refresh.
+            await self._run_earnings_calendar_refresh()
         else:
             return {"success": False, "error": f"Unknown task type: {task_type}"}
             
