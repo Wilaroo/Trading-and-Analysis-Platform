@@ -154,6 +154,21 @@ class TradingScheduler:
                 name='Daily Analysis',
                 replace_existing=True
             )
+
+            # 1b. Learning-stats full rebuild — 5:30 PM ET daily (v19.34.200)
+            #     Robust replacement for the fragile incremental path that
+            #     left learning_stats empty and starved the setup pillar.
+            self._scheduler.add_job(
+                _wrap_async(self._run_learning_stats_rebuild),
+                CronTrigger(
+                    hour=17,
+                    minute=30,
+                    timezone='US/Eastern'
+                ),
+                id='learning_stats_rebuild',
+                name='Learning Stats Rebuild',
+                replace_existing=True
+            )
             
             # 2. Weekly Report - Friday 4:30 PM ET
             self._scheduler.add_job(
@@ -314,6 +329,17 @@ class TradingScheduler:
         except Exception:
             return False
             
+    async def _run_learning_stats_rebuild(self):
+        """v19.34.200 — Nightly full rebuild of learning_stats from all
+        trade_outcomes (robust replacement for the fragile incremental path
+        that left learning_stats empty and starved the TQS setup pillar)."""
+        try:
+            from services.learning_loop_service import get_learning_loop_service
+            n = await get_learning_loop_service().rebuild_learning_stats_from_all_outcomes()
+            logger.info("[scheduler] learning_stats rebuild complete: %d contexts", n)
+        except Exception as e:
+            logger.error("[scheduler] learning_stats rebuild failed: %s", e)
+
     async def _run_daily_analysis(self):
         """Run daily analysis (Medium Learning services)"""
         # Skip during training

@@ -38,6 +38,56 @@ from services.graceful_degradation import get_degradation_service
 logger = logging.getLogger(__name__)
 
 
+def _compute_learning_stats(context_key: str, outcomes: list) -> dict:
+    """v19.34.200 — Pure-dict aggregation of trade_outcomes into a learning_stats
+    doc. Reads outcome dicts directly (the stored docs are flatter than
+    TradeOutcome.from_dict expects, which silently zeroes the stats), so the
+    nightly scheduled rebuild and the manual backfill script stay identical.
+
+    Writes exactly the fields get_contextual_win_rate / the setup pillar read
+    (win_rate, expected_value_r, total_trades) plus useful extras.
+    """
+    def _f(v, default=0.0):
+        try:
+            return float(v if v is not None else default)
+        except (TypeError, ValueError):
+            return default
+
+    n = len(outcomes)
+    wins = sum(1 for o in outcomes if o.get("outcome") == "won")
+    losses = sum(1 for o in outcomes if o.get("outcome") == "lost")
+    breakeven = sum(1 for o in outcomes if o.get("outcome") == "breakeven")
+    decided = wins + losses
+    win_rate = wins / decided if decided > 0 else 0.0
+
+    win_rs = [_f(o.get("actual_r")) for o in outcomes
+              if o.get("outcome") == "won" and _f(o.get("actual_r")) > 0]
+    loss_rs = [abs(_f(o.get("actual_r"))) for o in outcomes
+               if o.get("outcome") == "lost"]
+    avg_win_r = sum(win_rs) / len(win_rs) if win_rs else 0.0
+    avg_loss_r = sum(loss_rs) / len(loss_rs) if loss_rs else 1.0
+    total_r = sum(_f(o.get("actual_r")) for o in outcomes)
+    ev_r = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
+    gross_profit = sum(_f(o.get("pnl")) for o in outcomes if _f(o.get("pnl")) > 0)
+    gross_loss = abs(sum(_f(o.get("pnl")) for o in outcomes if _f(o.get("pnl")) < 0))
+    pf = gross_profit / gross_loss if gross_loss > 0 else 0.0
+    total_pnl = sum(_f(o.get("pnl")) for o in outcomes)
+
+    return {
+        "context_key": context_key, "setup_type": context_key,
+        "market_regime": None, "time_of_day": None,
+        "total_trades": n, "wins": wins, "losses": losses, "breakeven": breakeven,
+        "win_rate": round(win_rate, 4), "profit_factor": round(pf, 3),
+        "total_r": round(total_r, 3),
+        "avg_r_per_trade": round(total_r / n, 3) if n else 0.0,
+        "avg_win_r": round(avg_win_r, 3), "avg_loss_r": round(avg_loss_r, 3),
+        "expected_value_r": round(ev_r, 3),
+        "total_pnl": round(total_pnl, 2),
+        "avg_pnl": round(total_pnl / n, 2) if n else 0.0,
+    }
+
+
+
 class LearningLoopService:
     """
     Orchestrates the Three-Speed Learning Architecture.
@@ -568,6 +618,60 @@ class LearningLoopService:
                 logger.error(f"Error updating stats for {context_key}: {e}")
                 
         return updated_count
+
+    async def rebuild_learning_stats_from_all_outcomes(self) -> int:
+        """v19.34.200 — Full, idempotent rebuild of learning_stats from ALL
+        trade_outcomes.
+
+        The incremental run_daily_analysis path only processes *today's
+        reviewed:False* outcomes and was leaving learning_stats EMPTY despite
+        a backlog of outcomes — which starved the setup pillar's win-rate/EV
+        components (they default to 0.5 → score 50, compressing TQS to the C
+        band). This recomputes every context from scratch.
+
+        Grouping uses the NORMALIZED setup key the setup pillar queries
+        (`setup_type.lower().replace("_long","").replace("_short","")`) so the
+        win-rate we write is the one `get_contextual_win_rate(setup_type=base)`
+        actually reads (direction-agnostic, as the pillar intends).
+
+        Idempotent (upsert by context_key). Safe to schedule nightly.
+        Returns the number of contexts written.
+        """
+        if self._trade_outcomes_col is None or self._learning_stats_col is None:
+            logger.warning("[learning_stats rebuild] collections not initialized")
+            return 0
+        try:
+            docs = list(self._trade_outcomes_col.find({}))
+            if not docs:
+                return 0
+            groups: Dict[str, list] = {}
+            for d in docs:
+                base = (d.get("setup_type") or "").lower().replace(
+                    "_long", "").replace("_short", "")
+                if not base:
+                    continue
+                groups.setdefault(base, []).append(d)
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            written = 0
+            for base, outcomes in groups.items():
+                stats = _compute_learning_stats(base, outcomes)
+                stats["last_updated"] = now_iso
+                self._learning_stats_col.update_one(
+                    {"context_key": base},
+                    {"$set": stats},
+                    upsert=True,
+                )
+                written += 1
+            logger.info(
+                "[learning_stats rebuild] upserted %d contexts from %d outcomes",
+                written, len(docs),
+            )
+            return written
+        except Exception as e:
+            logger.error("[learning_stats rebuild] failed: %s", e)
+            return 0
+
         
     async def _update_trader_profile(self, recent_outcomes: List[TradeOutcome]):
         """Update trader profile based on recent trades"""
