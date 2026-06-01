@@ -1,3 +1,18 @@
+## 2026-06-01 — v19.34.211a Gameplan Dynamic-Movers UI + UTC-date alignment
+
+- **Frontend** (`GamePlanTab.jsx`): new collapsible **Dynamic Movers** panel —
+  renders `gamePlan.dynamic_movers` (symbol + score + colour-coded source tags
+  held/watchlist/catalyst/mover) with a regime chip and a **Refresh** button
+  that calls `POST /api/dynamic-universe/rebuild` then reloads the plan.
+- **Backend** (`dynamic_universe_builder._push_to_gameplan`): writes
+  `dynamic_movers` to the **UTC-date** gameplan doc (matching
+  `journal_router /gameplan/today`) so the panel always reads the right plan.
+- Deploy: `deploy_v19_34_211a.py` (paste.rs) — 5 anchored edits, validated vs
+  reverse-applied sandbox + idempotent. Frontend webpack-compiles clean;
+  full app load verified.
+
+---
+
 ## 2026-06-01 — v19.34.211 DYNAMIC UNIVERSE BUILDER (movers + catalysts + regime tilt)
 
 ### Why

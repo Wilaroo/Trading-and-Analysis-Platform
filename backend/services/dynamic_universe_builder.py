@@ -387,9 +387,12 @@ class DynamicUniverseBuilder:
             return
         from services.gameplan_service import get_gameplan_service
         gp = get_gameplan_service(self.db)
-        plan = await gp.get_game_plan(date)
+        # The journal gameplan router keys "today" by UTC date — match it so
+        # the dynamic_movers land on the doc the frontend reads.
+        gp_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        plan = await gp.get_game_plan(gp_date)
         if not plan:
-            plan = await gp.create_game_plan(date, auto_populate=False)
+            plan = await gp.create_game_plan(gp_date, auto_populate=False)
         movers = [
             {
                 "symbol": d["symbol"],
@@ -399,7 +402,7 @@ class DynamicUniverseBuilder:
             }
             for d in top
         ]
-        await gp.update_game_plan(date, {
+        await gp.update_game_plan(gp_date, {
             "dynamic_movers": movers,
             "dynamic_movers_regime": regime_state,
             "dynamic_movers_built_at": datetime.now(timezone.utc).isoformat(),
