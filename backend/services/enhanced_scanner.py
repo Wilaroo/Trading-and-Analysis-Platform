@@ -675,26 +675,33 @@ class LiveAlert:
                         style_targets = get_style_targets(recommended_style)
                         self.target_r_multiple = style_targets.get("target_r", 2.0)
                         self.exit_rule = style_targets.get("exit_rule", "")
-                    
-                    # SMB 5-Variable scoring
-                    smb_score = context.get("smb_score")
-                    if smb_score and isinstance(smb_score, SMBVariableScore):
-                        self.smb_score_total = smb_score.total_score
-                        self.smb_big_picture = smb_score.big_picture
-                        self.smb_fundamental = smb_score.intraday_fundamental
-                        self.smb_technical = smb_score.technical_level
-                        self.smb_tape = smb_score.tape_reading
-                        self.smb_intuition = smb_score.intuition
-                        self.smb_is_a_plus = smb_score.is_a_plus
-                        
-                        if smb_score.is_a_plus:
-                            self.trade_style = "multi_day"
-                            self.target_r_multiple = 5.0
-                    
-                    # Earnings score if available
-                    if "earnings_score" in context:
-                        self.earnings_score = context["earnings_score"]
-                        self.trading_approach = context.get("trading_approach", "")
+
+            # v19.34.208 — apply the SMB 5-var score + earnings INDEPENDENT of
+            # `config`. Directional/variant setup names (vwap_fade_long,
+            # vwap_fade_short, vwap_continuation, ...) resolve to no registry
+            # config, which previously skipped this whole block and left
+            # smb_score_total flat at 25 for those alerts even when the scanner
+            # computed a real score and passed it in via context.
+            if context:
+                # SMB 5-Variable scoring
+                smb_score = context.get("smb_score")
+                if smb_score and isinstance(smb_score, SMBVariableScore):
+                    self.smb_score_total = smb_score.total_score
+                    self.smb_big_picture = smb_score.big_picture
+                    self.smb_fundamental = smb_score.intraday_fundamental
+                    self.smb_technical = smb_score.technical_level
+                    self.smb_tape = smb_score.tape_reading
+                    self.smb_intuition = smb_score.intuition
+                    self.smb_is_a_plus = smb_score.is_a_plus
+
+                    if smb_score.is_a_plus:
+                        self.trade_style = "multi_day"
+                        self.target_r_multiple = 5.0
+
+                # Earnings score if available
+                if "earnings_score" in context:
+                    self.earnings_score = context["earnings_score"]
+                    self.trading_approach = context.get("trading_approach", "")
                         
         except Exception as e:
             logger.warning(f"Error populating SMB fields for {self.setup_type}: {e}")
