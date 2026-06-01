@@ -5824,6 +5824,31 @@ class EnhancedBackgroundScanner:
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB
     
+    def _next_universe_wave(self, offset_attr: str, tier: str, wave_size: int) -> List[str]:
+        """v19.34.210 — return the next rotating wave of the qualified universe,
+        ranked by avg_dollar_volume DESC (most liquid first), advancing a
+        per-scan cursor so successive cycles cover the ENTIRE qualified universe
+        instead of a fixed alphabetical slice.
+
+        Replaces `sorted(get_universe(...))[:N]`, which sorted the universe set
+        alphabetically and truncated to the first N names — so daily/premarket
+        detectors only ever scanned A–early-B symbols (cause of the ~94%-A–E
+        trade-selection bias). Cursor wraps around for full coverage over
+        ceil(len(universe) / wave_size) cycles.
+        """
+        from services.symbol_universe import get_universe_ranked
+        full = get_universe_ranked(self.db, tier=tier)
+        if not full:
+            return []
+        n = len(full)
+        wave_size = max(1, min(wave_size, n))
+        off = getattr(self, offset_attr, 0) % n
+        wave = full[off:off + wave_size]
+        if len(wave) < wave_size:  # wrap around to cover the whole universe
+            wave += full[:wave_size - len(wave)]
+        setattr(self, offset_attr, (off + wave_size) % n)
+        return wave
+
     async def _scan_daily_setups(self):
         """Scan for swing and position setups.
         
@@ -5857,8 +5882,12 @@ class EnhancedBackgroundScanner:
             # killed every non-RS detector. Restore the canonical pull.
             symbols = []
             try:
-                from services.symbol_universe import get_universe
-                symbols = sorted(get_universe(self.db, tier="intraday"))[:200]
+                # v19.34.210 — rotating wave over the FULL qualified universe
+                # (avg_dollar_volume DESC), NOT sorted(...)[:200] which was an
+                # alphabetical truncation that pinned daily setups to A–early-B.
+                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "swing")
+                _wave = int(os.environ.get("DAILY_SCAN_WAVE_SIZE", "500"))
+                symbols = self._next_universe_wave("_daily_wave_offset", _tier, _wave)
             except Exception as e:
                 logger.warning(f"Daily scan: canonical universe lookup failed: {e}")
             if not symbols:
@@ -6439,8 +6468,11 @@ class EnhancedBackgroundScanner:
             # for the same fix.
             symbols = []
             try:
-                from services.symbol_universe import get_universe
-                symbols = sorted(get_universe(self.db, tier="intraday"))[:300]
+                # v19.34.210 — rotating wave over the FULL qualified universe
+                # (avg_dollar_volume DESC), NOT sorted(...)[:300] alphabetical.
+                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "swing")
+                _wave = int(os.environ.get("PREMARKET_SCAN_WAVE_SIZE", "500"))
+                symbols = self._next_universe_wave("_premarket_wave_offset", _tier, _wave)
             except Exception as e:
                 logger.warning(f"Pre-market scan: canonical universe lookup failed: {e}")
             if not symbols:
