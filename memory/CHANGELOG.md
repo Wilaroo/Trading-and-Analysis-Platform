@@ -1,3 +1,46 @@
+## 2026-06-01 — v19.34.210 KILL ALPHABETICAL EXECUTION BIAS (liquidity-ranked universe rotation)
+
+### Incident
+Operator noticed freshly-opened positions (AMD, AMDL, ARW, BB, AIQ…) skewed
+suspiciously alphabetical. `diag_alpha_bias.py` confirmed **93.9% of OPENED
+positions started with A–E** and 59.7% of *generated alerts* were A–E.
+
+### Root cause
+`_scan_daily_setups` and `_scan_premarket_setups` selected symbols with
+`sorted(get_universe(self.db, tier="intraday"))[:200]` / `[:300]`.
+`get_universe()` returns an **unordered set**, so `sorted()` ordered it
+**alphabetically** and the `[:N]` slice truncated to A–early-B names —
+structurally hiding the entire late-alphabet universe from the daily/premarket
+detectors. (RTH `wave_scanner.py` was already ADV-ranked and unaffected.)
+
+### Patch
+1. **`symbol_universe.py`** — new `get_universe_ranked(db, tier, *, limit)`:
+   qualified symbols ordered by `avg_dollar_volume` DESC (most-liquid first).
+2. **`enhanced_scanner.py`** — new `_next_universe_wave(offset_attr, tier,
+   wave_size)`: rotating per-scan cursor over the ranked universe; wraps for
+   full coverage in `ceil(N/wave)` cycles. Both daily + premarket scans now
+   sweep the **investment tier** ($2M+, ~3,339 names — the full qualified
+   universe, per operator request "run the whole universe every day") at
+   wave=500, env-overridable via `SCAN_UNIVERSE_TIER` /
+   `DAILY_SCAN_WAVE_SIZE` / `PREMARKET_SCAN_WAVE_SIZE`.
+   - Daily scan (~every 2.5 min RTH) → full universe swept every ~7 cycles
+     (~17 min); premarket (~4 min) → ~28 min; after-hours (~20 min).
+   - RTH scalp/intraday (Tier-2 top-200 ≥$50M every 15s) + swing (Tier-3
+     rotating ≥$10M, full sweep ~3.25 min) loop **left untouched**.
+
+### Tests — `backend/tests/test_v19_34_210_liquidity_universe_rotation.py`
+8/8 passing: ranked ordering is liquidity-DESC (ZZZZ before AAAA), tier
+thresholds, unqualifiable exclusion, limit, + wave full-coverage / cursor
+advance / wrap-around / empty-universe.
+
+### Deploy
+Idempotent anchor-script `deploy_v19_34_210.py` (paste.rs → curl) with .bak +
+import-test rollback. Verified against a synthetic old-state DGX sandbox and
+for idempotency. **Requires `git commit` before backend restart** (restart runs
+`git checkout -- .`).
+
+---
+
 ## 2026-06-01 — v19.34.209 OFFLOAD SYNC HTTP OFF THE EVENT LOOP (close-all hang + pusher stall)
 
 ### Incident

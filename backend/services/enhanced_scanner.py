@@ -5885,7 +5885,7 @@ class EnhancedBackgroundScanner:
                 # v19.34.210 — rotating wave over the FULL qualified universe
                 # (avg_dollar_volume DESC), NOT sorted(...)[:200] which was an
                 # alphabetical truncation that pinned daily setups to A–early-B.
-                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "swing")
+                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("DAILY_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_daily_wave_offset", _tier, _wave)
             except Exception as e:
@@ -6470,7 +6470,7 @@ class EnhancedBackgroundScanner:
             try:
                 # v19.34.210 — rotating wave over the FULL qualified universe
                 # (avg_dollar_volume DESC), NOT sorted(...)[:300] alphabetical.
-                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "swing")
+                _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("PREMARKET_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_premarket_wave_offset", _tier, _wave)
             except Exception as e:
