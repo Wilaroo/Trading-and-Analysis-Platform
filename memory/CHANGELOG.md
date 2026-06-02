@@ -1,3 +1,41 @@
+## 2026-06-02 — v19.34.226 KILL-SWITCH FALSE-TRIP FIX (zero-mark unrealized)
+
+### Symptom (operator-reported)
+The v123 daily-loss kill-switch kept tripping: `realized=$155 + unrealized=
+-$18,890 = -$18,735 ≤ -$5,000`, blocking all new trades. Operator suspected a
+recent change.
+
+### Root cause (proven via diag_killswitch_unrealized.py on the live bot)
+The kill-switch sums `unrealized_pnl` over in-memory `_open_trades`. ONE position
+— **CRM**, 95 sh @ $198.92, `current_price = 0.00` (no live quote; dropped from
+the push around the v224/225 pusher restarts) — produced
+`(0 - 198.92) * 95 = -$18,897`, a FAKE loss. Genuine intraday P&L was +$7.23.
+The unrealized calc blindly trusted a zero/missing mark.
+
+### Fix (two defensive guards)
+- `position_manager.py` (~L708): never compute unrealized when
+  `current_price <= 0`; hold the last good value until a real mark arrives (also
+  stops the UI showing a fake -$18,897 on CRM's card).
+- `trading_bot_service._compute_realtime_daily_pnl`: SKIP any open trade with
+  `current_price <= 0` from the kill-switch unrealized sum (logs the skip count).
+  A missing mark must NEVER trip the daily-loss kill-switch.
+- Deploy: `deploy_v19_34_226.py` (paste.rs, base64-guarded, idempotent,
+  multi-file, commit+push). BACKEND change → DGX backend restart required.
+- **LIVE-VERIFIED**: post-restart the kill-switch unrealized dropped from
+  -$18,890 to +$201.76 (all genuine intraday), STALE/ZERO subtotal $0, CRM's
+  quote recovered (+$120.65). False trips stopped. ✅
+
+### Open follow-up (P1)
+CRM had no live quote because an open position that's not in the current scan
+universe can fall out of the quote push (exposed by the v224/225 restarts). The
+guard makes the P&L math safe, but an open position with no mark also can't drive
+local stop checks (IB-side bracket still protects). FOLLOW-UP: force
+quote-subscription for every symbol in `_open_trades` so held positions always
+have a live mark.
+
+---
+
+
 ## 2026-06-02 — v19.34.224/225 L2 DYNAMIC-SUBSCRIBE FIXED (was 100% dead)
 
 ### Symptom (operator-reported, live pusher logs)

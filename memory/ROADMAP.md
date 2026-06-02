@@ -7,6 +7,17 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
+### 🔴 P1 — Force quote-subscription for every open position (queued 2026-06-02)
+Surfaced by the v226 kill-switch false-trip: CRM (an open 95-sh long) lost its
+live quote when it fell out of the scan universe around the v224/225 pusher
+restarts → `current_price=0` → fake -$18,897 unrealized. v226 guards the P&L
+math, but a mark-less open position ALSO can't drive local stop checks (only the
+IB-side bracket protects it). FIX: ensure every symbol in `_open_trades` is
+always quote-subscribed (pin held names into the pusher's quote universe / a
+"protected positions" subscription set independent of scan rotation). Add a
+watchdog log when any open position's `current_price` is stale > N s.
+
+
 ### 🟢 P2 — Enhancement: live order-book imbalance signal (queued 2026-06-02)
 Now that L2 depth flows (v224/225), surface a **bid/ask depth-imbalance** metric
 (e.g. sum(bid size top-N) / sum(ask size top-N), and weighted-mid pressure) as:

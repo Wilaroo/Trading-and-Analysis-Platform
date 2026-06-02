@@ -26,6 +26,21 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-02 (v19.34.226 — DEPLOYED, live-verified)
+
+**Kill-switch false-trip FIXED.** The v123 daily-loss kill-switch kept tripping
+on `unrealized=-$18,890`. Root cause (proven via diag_killswitch_unrealized.py):
+ONE open position (CRM, 95 sh @ $198.92, `current_price=0.00` — lost its quote
+around the v224/225 pusher restarts) yielded a FAKE `(0-198.92)*95 = -$18,897`;
+genuine intraday P&L was +$7. Fix: guard `current_price <= 0` in
+position_manager unrealized calc AND skip zero-mark trades in the kill-switch
+sum. LIVE: total unrealized −$18,890 → +$201.76 (all genuine), false trips
+stopped. Deploy `deploy_v19_34_226.py`.
+**P1 FOLLOW-UP:** force quote-subscription for every `_open_trades` symbol so a
+held position never goes mark-less (also needed for local stop checks).
+
+---
+
 ## 📌 Status snapshot — 2026-06-02 (v19.34.224/225 — DEPLOYED, live-verified)
 
 **L2 dynamic-subscribe was 100% DEAD — now FIXED (v224) + hardened (v225).**
