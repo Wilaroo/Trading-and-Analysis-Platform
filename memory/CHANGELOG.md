@@ -37,8 +37,10 @@ pads the dom list with empty levels (price=0/size=0, filtered by
 `poll_level2_data`) then calls the original. Read-only depth path — zero order
 impact. Validated against real ib_insync (original raises; guard pads+applies;
 normal insert/delete intact; idempotent). Deploy: `deploy_v19_34_225.py`
-(paste.rs). Requires v224. ⚠️ Operator live-check: `[v19.34.225] L2 depth
-IndexError guard installed` at startup + tracebacks stop.
+(paste.rs, commit ba7305ca pushed to GitHub main). Requires v224.
+- **LIVE-VERIFIED on DGX**: after restart, L2 6/6 with `level2: 6` pushes and
+  `5 bids / 5 asks` per symbol, and the `updateMktDepthL2` IndexError tracebacks
+  STOPPED. ✅
 
 ---
 

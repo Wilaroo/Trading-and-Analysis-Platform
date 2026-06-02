@@ -26,6 +26,27 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-02 (v19.34.224/225 — DEPLOYED, live-verified)
+
+**L2 dynamic-subscribe was 100% DEAD — now FIXED (v224) + hardened (v225).**
+- **v224**: `/rpc/subscribe-l2` ran sync `qualifyContracts` inside the IB event
+  loop (reentrant `run_until_complete` → "loop already running"), skipping every
+  symbol → L2 stuck at 0, `level2: 0` in every push since Path B (2026-04-28).
+  New async `subscribe_level2_async` (`await qualifyContractsAsync`) + entitlement
+  probe. LIVE: slots 6/6, `level2: 6`, `5 bids / 5 asks` per sym — account HAS
+  depth entitlement.
+- **v225**: ib_insync `updateMktDepthL2` IndexError (update before insert,
+  `position >= len(dom)`) surfaced once depth flowed; defensive pad-and-retry
+  monkeypatch at pusher import. LIVE: tracebacks stopped, depth still flowing.
+  Commit ba7305ca on GitHub main.
+
+**NEXT (recommended): TQS grade-band recalibration (Task 1)** on the now-honest
+pillar data. Read-only data-gathering diagnostic ready (paste.rs/Rd39n →
+`backend/scripts/diag_tqs_recalibration.py`): dumps percentile breakpoints +
+per-style/per-pillar spread + implied sizing to anchor the new A/B/C/D/F bands.
+
+---
+
 ## 📌 Status snapshot — 2026-06-02 (v19.34.216–223 — DEPLOYED, live-verified)
 
 **Latest (v221–223): L2 slot bump (B) + ma_stack investigation (C).**
