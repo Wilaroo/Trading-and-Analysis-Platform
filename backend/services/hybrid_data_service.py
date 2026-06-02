@@ -25,17 +25,32 @@ import os
 logger = logging.getLogger(__name__)
 
 
+_BARS_PER_RTH_SESSION = {
+    "1min": 390, "5min": 78, "15min": 26, "1hour": 7, "1day": 1,
+}
+
+
+def _trading_days(start_dt: datetime, end_dt: datetime) -> int:
+    """Weekday count in [start, end] inclusive — approximates NYSE sessions
+    (ignores the ~9 market holidays/yr, close enough for a coverage gauge and
+    keeps RTH-complete data reading ~95-100% instead of the old ~70%)."""
+    span = (end_dt.date() - start_dt.date()).days
+    return sum(1 for i in range(span + 1)
+               if (start_dt.date() + timedelta(days=i)).weekday() < 5)
+
+
+def _expected_bars(timeframe: str, start_dt: datetime, end_dt: datetime) -> int:
+    """Expected bars for full RTH coverage of the window — TRADING days (not
+    calendar days) × the per-session bar count for the actual timeframe."""
+    per_session = _BARS_PER_RTH_SESSION.get(timeframe, 78)
+    return max(_trading_days(start_dt, end_dt) * per_session, 1)
+
+
 def _estimate_fallback_bar_count(timeframe: str, start_dt: datetime, end_dt: datetime) -> int:
     """How many bars should we grab for a stale-data fallback?
     Mirrors the coverage math in `_get_from_cache` so the fallback chart has
     roughly the same density the user asked for."""
-    days = max((end_dt - start_dt).days, 1)
-    if timeframe == "1day":
-        return max(int(days * 0.7), 30)
-    if timeframe == "1hour":
-        return max(int(days * 6.5), 40)
-    # default intraday (1min/5min/15min/30min): assume 78 5-min bars/day
-    return max(int(days * 78), 200)
+    return max(_expected_bars(timeframe, start_dt, end_dt), 30)
 
 
 @dataclass
@@ -384,15 +399,13 @@ class HybridDataService:
 
             # Check how much data we have vs what's expected
             if bars:
-                days = (end_dt - start_dt).days
-                if timeframe == "1day":
-                    expected = max(days * 0.7, 1)
-                elif timeframe == "1hour":
-                    expected = max(days * 6.5, 1)
-                else:
-                    expected = max(days * 78, 1)
-
-                coverage = len(bars) / expected
+                # v19.34.212 — expected uses TRADING days (weekdays) × the
+                # timeframe's per-session bar count, NOT calendar days × 78.
+                # The old calendar-day denominator counted weekends/holidays as
+                # sessions, structurally capping RTH-complete data at ~70% so it
+                # never crossed the 0.8 "full" threshold (the AIQ "70%" report).
+                expected = _expected_bars(timeframe, start_dt, end_dt)
+                coverage = min(len(bars) / expected, 1.0)
 
                 # Full-coverage hit — return as a normal cache hit.
                 if coverage >= 0.8:

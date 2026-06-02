@@ -1,3 +1,31 @@
+## 2026-06-01 — v19.34.212 Chart coverage uses TRADING days (AIQ "70%" fix)
+
+### Report
+Operator did an overnight historical backfill but AIQ's chart still showed
+"PARTIAL — 70% COVERAGE".
+
+### Root cause (NOT missing data)
+`hybrid_data_service.get_bars` computed `expected = calendar_days * 78` and
+`coverage = len(bars)/expected`. `78` = 5-min bars in ONE RTH session, but it
+multiplied by every CALENDAR day (weekends + holidays included). Only ~69% of
+calendar days are trading days, so RTH-complete intraday data structurally
+caps at ~70% and never reaches the 0.8 "full" threshold. Diagnostic confirmed
+AIQ has 34,465 5-min bars, 434/443 days full RTH (the 8 "partial" days are
+legit half-sessions — Thanksgiving Fri, Christmas Eve, July 3 = 42 bars), and
+trading-day coverage = 98-101%.
+
+### Fix
+New `_trading_days()` (weekday count) + `_expected_bars(timeframe,...)` =
+trading_days × per-session bar count (`1min`:390 `5min`:78 `15min`:26
+`1hour`:7 `1day`:1). Coverage now `min(len/expected, 1.0)`. Also fixed the
+same calendar-day bug in `_estimate_fallback_bar_count`. AIQ now reads ~100%.
+Chart cache TTL is 30s (intraday) so charts self-heal within ~30s of restart.
+
+### Tests — `backend/tests/test_v19_34_212_coverage_trading_days.py` (4/4)
+Deploy: `deploy_v19_34_212.py` (paste.rs), idempotent, validated vs sandbox.
+
+---
+
 ## 2026-06-01 — v19.34.211b Scoring dedupe (catalyst double-count fix)
 
 `DynamicUniverseBuilder.build().add()` added points every time a source was
