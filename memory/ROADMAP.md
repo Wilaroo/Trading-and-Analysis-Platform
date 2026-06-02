@@ -7,6 +7,28 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
+### 🟢 P2 — Enhancement: live order-book imbalance signal (queued 2026-06-02)
+Now that L2 depth flows (v224/225), surface a **bid/ask depth-imbalance** metric
+(e.g. sum(bid size top-N) / sum(ask size top-N), and weighted-mid pressure) as:
+  - a TQS **technical-pillar** feature input, and/or
+  - a Mission Control tile / position-card badge.
+Lays the groundwork for the backlog **"Tick-level Stop Run Probability ML
+module."** Prereq decision (see L2 depth-quality probe, below): single-venue
+ISLAND book vs SMART-aggregated consolidated book + how many levels (numRows).
+Scope after the TQS grade-band recalibration.
+
+### 🟡 OPEN — L2 depth quality: ISLAND-only & 5 levels? (probe queued 2026-06-02)
+Operator noticed live L2 is "5 bids / 5 asks @ ISLAND" and asked if that's all IB
+offers. Findings: `numRows=5` is a hardcoded pusher default (raise it for more
+levels); "@ ISLAND" is a single venue (good for NASDAQ-listed, partial for
+NYSE-listed like C/GS). Options: (a) raise numRows, (b) per-venue (NYSE/ARCA),
+(c) SMART aggregated depth (`isSmartDepth=True`) for a consolidated multi-venue
+book — needs per-venue depth entitlements (paper accts often partial).
+ACTION: run read-only `probe_l2_depth.py` (paste.rs/8IBuL) on the DGX for a
+NASDAQ name (NFLX) + an NYSE name (GS/C) to measure what's actually served, then
+make ONE informed pusher change (numRows and/or SMART depth).
+
+
 ### Confirmed not-a-bug
 - ✅ **ACMR EOD close** — operator confirmed it was correctly NOT closed because
   it's labeled INVESTMENT (held overnight by design). No action. (Removed from
