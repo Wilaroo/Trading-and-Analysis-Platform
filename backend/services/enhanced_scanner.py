@@ -614,7 +614,9 @@ class LiveAlert:
             reasons.append(f"Negative/unknown EV: {strategy_ev:.2f}R")
         
         # 3. Tape confirmation
-        if self.tape_confirmation and self.tape_score >= 70:
+        # v19.34.213 — tape_score is now on the 0-10 scale; was a dead `>=70`
+        # check against the old raw -1..+1 copy (the +20 bonus never fired).
+        if self.tape_confirmation and self.tape_score >= 7:
             score += 20
             reasons.append(f"Strong tape confirmation: {self.tape_score:.0f}")
         elif self.tape_confirmation:
@@ -3215,7 +3217,15 @@ class EnhancedBackgroundScanner:
                         alert.grade_trade(strategy_ev=stats.expected_value_r, market_context_score=0.5)
                     
                     # Add tape reading to alert
-                    alert.tape_score = tape.tape_score
+                    # v19.34.213 — normalize tape_score from the producer's raw
+                    # -1..+1 scale to the canonical 0..10 scale that ALL consumers
+                    # expect (setup_quality `/10`, dynamic_thresholds 4.0 floor,
+                    # ai_assistant `/10`, default=5). Pre-fix the raw float was
+                    # copied verbatim, which pinned the TQS tape pillar <=30 and
+                    # made the alert grader's `>=70` check dead code. The raw
+                    # -1..+1 value stays on `tape` (TapeReading) for L2 gating and
+                    # the confirmation_for_long/short flags below.
+                    alert.tape_score = round((tape.tape_score + 1.0) * 5.0, 2)
                     alert.tape_confirmation = (tape.confirmation_for_long if alert.direction == "long" else tape.confirmation_for_short)
                     alert.tape_signals = [
                         tape.spread_signal.value,
@@ -7799,6 +7809,8 @@ class EnhancedBackgroundScanner:
                 smb_5var_score=alert.smb_score_total,
                 risk_reward=alert.risk_reward,
                 alert_priority=alert.priority.value if hasattr(alert.priority, 'value') else str(alert.priority),
+                win_rate=getattr(alert, 'strategy_win_rate', None),
+                expected_value_r=getattr(alert, 'strategy_ev_r', None),
                 ai_model_direction=ai_dir,
                 ai_model_confidence=ai_conf,
                 ai_model_agrees=ai_agrees,

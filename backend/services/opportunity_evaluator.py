@@ -687,6 +687,8 @@ class OpportunityEvaluator:
                         smb_5var_score=alert.get("smb_score_total", 25),
                         risk_reward=alert.get("risk_reward", 2.0),
                         alert_priority=alert.get("priority", "medium"),
+                        win_rate=alert.get("strategy_win_rate"),
+                        expected_value_r=alert.get("strategy_ev_r"),
                         ai_model_direction=pred_dir,
                         ai_model_confidence=pred_conf,
                         ai_model_agrees=model_agrees,
