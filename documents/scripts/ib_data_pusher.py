@@ -50,6 +50,53 @@ logger = logging.getLogger("IB-Pusher")
 _MAX_L2_SLOTS = max(1, int(os.environ.get("MAX_L2_SLOTS", "3")))
 
 
+# v19.34.225 — defensive guard around ib_insync's market-depth (L2) handler.
+# Surfaced once L2 actually started flowing in v224 (before that, 0 subs → the
+# handler never fired). IB can send an 'update' (operation=1) for a depth level
+# that was never 'inserted', so the library does `dom[position] = ...` with
+# position >= len(dom) → IndexError "list assignment index out of range". The
+# library catches it at the decoder layer (no crash) but it spams logs and can
+# drop depth levels. Wrap-and-retry: pad the dom list with empty levels so the
+# in-place assignment is in range, then call the original. Read-only depth path
+# (no order impact); placeholders (price=0/size=0) are filtered by
+# poll_level2_data's `item.price > 0 and item.size > 0` guard.
+def _install_l2_depth_indexerror_guard():
+    try:
+        from ib_insync import wrapper as _ibw
+        from ib_insync.objects import DOMLevel
+    except Exception as _e:  # pragma: no cover
+        logger.warning("[v19.34.225] could not install L2 depth guard: %s", _e)
+        return
+    if getattr(_ibw.Wrapper.updateMktDepthL2, "_v225_guarded", False):
+        return
+    _orig = _ibw.Wrapper.updateMktDepthL2
+
+    def _guarded(self, reqId, position, marketMaker, operation, side,
+                 price, size, isSmartDepth=False):
+        try:
+            return _orig(self, reqId, position, marketMaker, operation, side,
+                         price, size, isSmartDepth)
+        except IndexError:
+            try:
+                ticker = self.reqId2Ticker.get(reqId)
+                if ticker is None:
+                    return None
+                dom = ticker.domBids if side else ticker.domAsks
+                while len(dom) <= position:
+                    dom.append(DOMLevel(0.0, 0, ""))
+                return _orig(self, reqId, position, marketMaker, operation, side,
+                             price, size, isSmartDepth)
+            except Exception:
+                return None
+
+    _guarded._v225_guarded = True
+    _ibw.Wrapper.updateMktDepthL2 = _guarded
+    logger.info("[v19.34.225] L2 depth IndexError guard installed")
+
+
+_install_l2_depth_indexerror_guard()
+
+
 # ==================== CLOUDFLARE EVASION ====================
 
 # Standard browser headers to avoid Cloudflare blocks

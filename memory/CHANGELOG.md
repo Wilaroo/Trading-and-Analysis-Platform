@@ -1,3 +1,48 @@
+## 2026-06-02 — v19.34.224/225 L2 DYNAMIC-SUBSCRIBE FIXED (was 100% dead)
+
+### Symptom (operator-reported, live pusher logs)
+Every `/rpc/subscribe-l2` showed `added=[] skipped=[GDX,SGOV,...] (slots 0 → 0 / 6)`
+and every push reported `level2: 0`. L2 (market depth) was completely
+non-functional — 0 of N slots ever filled. The v221–223 slot bump to 6 was moot
+because nothing landed in the slots.
+
+### v19.34.224 — ROOT CAUSE: sync qualifyContracts inside the IB event loop
+`/rpc/subscribe-l2` dispatches `_do_subscribe_l2` ONTO the IB event loop via
+`_run_on_ib_loop` → `asyncio.run_coroutine_threadsafe`. Inside it called the
+SYNC `subscribe_level2`, whose `self.ib.qualifyContracts()` does a reentrant
+`loop.run_until_complete()` — illegal while the loop is already running ("This
+event loop is already running"). It raised for EVERY symbol (both ISLAND and
+NYSE attempts), fell through to `continue`, and left L2 at 0 forever. Same bug
+class as the v19.34.30 `qualifyContractsAsync` sweep — this pusher site was
+missed. (Startup L2 worked because it ran synchronously, but Path B disabled
+startup index L2, routing 100% of L2 through the broken RPC path since 2026-04-28.)
+- **Fix**: new async `subscribe_level2_async` that `await`s
+  `qualifyContractsAsync`; the RPC coroutine now awaits it. Added a built-in
+  entitlement probe (1.5s post-subscribe) that logs `L2 DATA OK <sym>: X bids /
+  Y asks` vs `L2 NO DEPTH DATA <sym> ... entitlement` so the next run reveals
+  whether any 0-data is a code bug or a missing IB depth entitlement.
+- **LIVE-VERIFIED on DGX**: after restart, `added=[AXTI,IBM,MA,V,...] skipped=[]
+  (slots 3 → 6 / 6)`, `L2 DATA OK ...: 5 bids / 5 asks`, pushes now show
+  `level2: 6`. The paper account DOES have depth entitlement. ✅
+- Deploy: `deploy_v19_34_224.py` (paste.rs, base64-guarded, idempotent,
+  commit+push before restart). L2-only — no order-routing/data-push impact.
+
+### v19.34.225 — FOLLOW-UP: ib_insync updateMktDepthL2 IndexError guard
+Once depth actually flowed, ib_insync's `updateMktDepthL2` began throwing
+`IndexError: list assignment index out of range` — it does `dom[position] = ...`
+for an 'update' (operation=1) on a level never 'inserted' (position >= len(dom)).
+Caught by the library decoder (no crash) but spammed logs + could drop depth
+levels. Defensive monkeypatch installed at pusher import: wrap-and-retry that
+pads the dom list with empty levels (price=0/size=0, filtered by
+`poll_level2_data`) then calls the original. Read-only depth path — zero order
+impact. Validated against real ib_insync (original raises; guard pads+applies;
+normal insert/delete intact; idempotent). Deploy: `deploy_v19_34_225.py`
+(paste.rs). Requires v224. ⚠️ Operator live-check: `[v19.34.225] L2 depth
+IndexError guard installed` at startup + tracebacks stop.
+
+---
+
+
 ## 2026-06-02 — v19.34.221–223 L2 SLOT BUMP (B) + ma_stack INVESTIGATION (C)
 
 ### v19.34.221 (B) — L2 router: MAX_L2_SLOTS env + IB-309 cap watch
