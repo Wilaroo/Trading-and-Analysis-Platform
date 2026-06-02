@@ -41,6 +41,15 @@ logging.basicConfig(
 logger = logging.getLogger("IB-Pusher")
 
 
+# v19.34.223 — single env-driven L2-slot cap, matched to the backend's
+# MAX_L2_SLOTS (services/l2_router.py). Default 3 (the historical IB paper-mode
+# market-depth ceiling). RAISING THIS ALSO REQUIRES an IB market-depth
+# entitlement that allows the higher count — paper accounts have previously
+# returned Error 309 above 3 (and at 5). The backend's l2-router cap watch
+# (`cap_rejections` / `last_cap_skipped`) surfaces it if IB rejects the extras.
+_MAX_L2_SLOTS = max(1, int(os.environ.get("MAX_L2_SLOTS", "3")))
+
+
 # ==================== CLOUDFLARE EVASION ====================
 
 # Standard browser headers to avoid Cloudflare blocks
@@ -614,10 +623,11 @@ class IBDataPusher:
         # Known ETFs that trade on ARCA
         arca_symbols = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "XLF", "XLE", "XLK", "VXX", "TQQQ", "SQQQ"}
 
-        # IB paper-mode hard cap: 3 simultaneous L2 subs. (Was 5 — was triggering
-        # IB Error 309 every startup because pusher would attempt to subscribe 5
-        # of SPY/QQQ/IWM/DIA/<inplay> and IB would reject the last 2.)
-        MAX_L2_SUBSCRIPTIONS = 3
+        # v19.34.223 — env-driven cap (MAX_L2_SLOTS), default 3. (Was a hard 5
+        # which triggered IB Error 309 every startup; the env default keeps the
+        # safe paper-mode ceiling unless the operator raises it AND has the IB
+        # market-depth entitlement for it.)
+        MAX_L2_SUBSCRIPTIONS = _MAX_L2_SLOTS
         current_count = len(self.depth_subscriptions)
         
         # Prioritize these symbols for L2 (most liquid ETFs)
@@ -1238,10 +1248,9 @@ class IBDataPusher:
         """
         if os.environ.get("IB_PUSHER_AUTO_INPLAY_L2", "false").strip().lower() not in {"1", "true", "yes", "on"}:
             return
-        # Paper trading has a limit of 3 market depth subscriptions
-        # We keep SPY, QQQ, IWM as our core L2 symbols
-        # Skip dynamic updates to avoid hitting the limit
-        max_l2_subscriptions = 3
+        # Paper trading has a limit of 3 market depth subscriptions by default
+        # (env-overridable via MAX_L2_SLOTS — v19.34.223). Keep core L2 symbols.
+        max_l2_subscriptions = _MAX_L2_SLOTS
         
         if len(self.depth_subscriptions) >= max_l2_subscriptions:
             logger.debug(f"L2 limit reached ({max_l2_subscriptions}), skipping dynamic updates")
@@ -4049,7 +4058,7 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
                     "[RPC] /rpc/subscribe-l2: requested=%s added=%s skipped=%s "
                     "(slots %d → %d / %d)",
                     new_syms, added, skipped_capped,
-                    slots_used_before, len(pusher.depth_subscriptions), 3,
+                    slots_used_before, len(pusher.depth_subscriptions), _MAX_L2_SLOTS,
                 )
 
             try:
@@ -4066,7 +4075,7 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
             "already_subscribed": already,
             "skipped_capped": skipped_capped,
             "total_l2_subscribed": len(pusher.depth_subscriptions),
-            "max_l2_slots": 3,
+            "max_l2_slots": _MAX_L2_SLOTS,
         }
 
     @app.post("/rpc/unsubscribe-l2")
@@ -4103,7 +4112,7 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
             "success": True,
             "symbols": sorted(pusher.depth_subscriptions.keys()),
             "total": len(pusher.depth_subscriptions),
-            "max_slots": 3,
+            "max_slots": _MAX_L2_SLOTS,
             "timestamp": datetime.now().isoformat(),
         }
 
