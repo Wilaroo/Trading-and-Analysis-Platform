@@ -26,6 +26,28 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-02 (v19.34.216–223 — DEPLOYED, live-verified)
+
+**Latest (v221–223): L2 slot bump (B) + ma_stack investigation (C).**
+- **B (L2 slots) — DONE.** `MAX_L2_SLOTS` env knob drives both the backend
+  l2_router and the Windows pusher; default 3, set to 6. Added IB-309 cap watch
+  (`cap_rejections`/`last_cap_skipped` in `/api/ib/l2-router-status`). Backend
+  verified at 6. Operator must add 2 lines to the Windows `.bat` (set
+  MAX_L2_SLOTS=6 + inject into Step-5 pusher launch) — the `.bat` then
+  auto-updates on restart. CAVEAT: 6 only lands if IB grants ≥6 depth lines
+  (paper acct historically 309'd at 5; cap-watch surfaces it).
+- **C (ma_stack) — investigated, REVERTED.** ~78% neutral is accurate, not a
+  bug (conservative intraday trend + the snapshot's intraday/daily EMA mix
+  prevents a clean stack). The v221 EMA-alignment attempt re-introduced the
+  timeframe mix and was reverted to v215 logic in v222.
+
+**NEXT (recommended): TQS grade-band recalibration (Task 1)** on the now-honest
+pillar data — best after EV accrues over 1–2 live sessions. Other backlog:
+`get_ticker_news` 30s IB-historical hang (UI `/api/ib/news/<sym>`),
+`institutional_pct` ~81% default, EV fill-in monitoring.
+
+---
+
 ## 📌 Status snapshot — 2026-06-02 (v19.34.216–220 — DEPLOYED, live-verified)
 
 **TQS PILLAR DE-PINNING: all three big "constant pillar" bugs fixed on DGX.**

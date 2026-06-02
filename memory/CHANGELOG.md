@@ -1,3 +1,50 @@
+## 2026-06-02 — v19.34.221–223 L2 SLOT BUMP (B) + ma_stack INVESTIGATION (C)
+
+### v19.34.221 (B) — L2 router: MAX_L2_SLOTS env + IB-309 cap watch
+- `services/l2_router.py`: `_MAX_L2_SLOTS` now reads `MAX_L2_SLOTS` env (default 3,
+  the historical IB paper-mode ceiling). Deploy appended `MAX_L2_SLOTS=6` to
+  backend/.env. Added an IB-Error-309 / pusher-cap watch — `cap_rejections` +
+  `last_cap_skipped` surfaced in `/api/ib/l2-router-status`, WARN log when the
+  pusher rejects an L2 add (no more silent thrash).
+- Live-verified: status endpoint shows `max_l2_slots: 6`, `cap_rejections: 0`.
+- Tests: `test_v19_34_221_l2_slots.py` 3/3. NOTE the status route is
+  `/api/ib/l2-router-status` (NOT `/api/l2-router/status`).
+
+### v19.34.221 (C) → v19.34.222 — ma_stack: ATTEMPTED, REVERTED
+- Attempt (v221): derive ma_stack from EMA alignment (ema_9>ema_20>ema_50).
+  BACKFIRED — went 78%→84.5% neutral. Root cause: the snapshot's `ema_9`/`ema_20`
+  are INTRADAY (intraday bar EMAs) while `ema_50`/`sma_200` are DAILY, so the
+  stack comparison re-introduced the exact timeframe mix v215 removed.
+- v222: REVERTED `technical_quality.py` to the v215 intraday-`trend` logic.
+  CONCLUSION (investigation result): ma_stack ~78% neutral is NOT a bug — it's an
+  accurate read of the deliberately-conservative intraday trend classifier (v166)
+  on a chopping tape; the snapshot cannot form a clean single-timeframe MA stack.
+- Tests: `test_v19_34_222_ma_stack_trend.py` 4/4 (self-contained). Cleaned up two
+  junk files ('=' and 'main') the terminal accidentally committed in 72087ba9.
+  (v222 first run failed pytest on a prior-job test not present on the DGX repo;
+  v222b finished the commit with a self-contained test. Commit 58b8819e.)
+
+### v19.34.223 — Windows pusher L2 cap → env-driven
+- `documents/scripts/ib_data_pusher.py`: replaced 5 hardcoded 3-slot caps with a
+  single `_MAX_L2_SLOTS = int(os.environ.get("MAX_L2_SLOTS","3"))`, matching the
+  backend so ONE env knob drives both sides. Commit 3f4ef779.
+- Operator action (Windows `.bat`): add `set MAX_L2_SLOTS=6` in CONFIGURATION and
+  inject `&& set MAX_L2_SLOTS=%MAX_L2_SLOTS%` into the Step-5 pusher launch line
+  (alongside IB_PUSHER_L1_AUTO_TOP_N). The `.bat` Step 2 git-pulls both Win + DGX,
+  so it auto-updates on restart once those two lines are added.
+- CAVEAT: 6 only takes effect if the IB account grants ≥6 market-depth lines.
+  Paper accounts historically 309'd at 5 — watch `cap_rejections` in l2-router
+  status; if non-zero, IB is capping below 6 (need entitlement or dial back to 3).
+
+### Deploy discipline
+All via checksum-/content-guarded base64 paste.rs scripts
+(`deploy_v19_34_221..223.py`), idempotent + transactional, commit+push before
+restart. Hardware-bound — no testing agent. The Windows `.bat` restart is now
+SAFE (all work committed+pushed; DGX `git checkout -- .` + `git pull` loses nothing).
+
+---
+
+
 ## 2026-06-02 — v19.34.216–219 TQS PILLAR DE-PINNING (EV live-hook + Execution live-state)
 
 ### Context
