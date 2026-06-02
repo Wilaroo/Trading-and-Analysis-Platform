@@ -178,7 +178,9 @@ class ExecutionQualityService:
         profile_has_data = bool(profile and getattr(profile, "total_trades", 0))
 
         if profile_has_data:
-            # Extract execution data
+            # Extract execution-tendency data (slippage / chase / r-capture /
+            # today). recent_win_rate + consecutive_losses are OVERRIDDEN below
+            # from the live tape (the profile's aggregation is unreliable).
             result.is_tilted = profile.current_tilt_state.is_tilted
             result.tilt_severity = profile.current_tilt_state.tilt_severity
             result.consecutive_losses = profile.current_tilt_state.consecutive_losses
@@ -192,8 +194,15 @@ class ExecutionQualityService:
             # Get recent win rate
             if profile.overall_win_rate > 0:
                 result.recent_win_rate = profile.overall_win_rate
-        elif self._learning_loop:
-            # v19.34.217 — LIVE execution-state fallback from trade_outcomes.
+
+        # v19.34.218 — recent_win_rate + consecutive_losses are OBJECTIVE facts
+        # from the outcome tape. The in-memory trader profile is unreliable for
+        # them (overall_win_rate frequently aggregates to 0; the tilt counter
+        # resets), which left both pinned at default even when total_trades>0.
+        # ALWAYS derive them live from trade_outcomes when any outcomes exist,
+        # overriding the profile so the pillar reflects the real recent streak.
+        # (When the profile has NO data at all, also adopt the live r-capture.)
+        if self._learning_loop:
             try:
                 recent = await self._learning_loop.get_recent_outcomes(limit=30)
                 live = _derive_live_execution_state(recent)
@@ -202,7 +211,7 @@ class ExecutionQualityService:
                     result.consecutive_losses = live["consecutive_losses"]
                     result.is_tilted = live["is_tilted"]
                     result.tilt_severity = live["tilt_severity"]
-                    if live["avg_r_capture_pct"] is not None:
+                    if not profile_has_data and live["avg_r_capture_pct"] is not None:
                         result.avg_r_capture_pct = live["avg_r_capture_pct"]
                         result.tends_to_exit_early = live["avg_r_capture_pct"] < 50
                     result.factors.append(

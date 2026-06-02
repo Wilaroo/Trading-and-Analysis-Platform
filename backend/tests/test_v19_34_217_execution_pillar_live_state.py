@@ -65,20 +65,42 @@ class _EmptyProfile:
     total_trades = 0
 
 
+class _TiltState:
+    is_tilted = False
+    tilt_severity = "none"
+    consecutive_losses = 0
+
+
+class _PopulatedBrokenProfile:
+    """Mirrors the live DGX bug: profile HAS trades (in-memory mutated) but the
+    win-rate aggregation came out 0 and the tilt counter reset — so the pillar
+    must STILL override recent_win_rate + consecutive_losses from the live tape."""
+    total_trades = 42
+    overall_win_rate = 0.0
+    avg_entry_slippage_percent = 0.0
+    tends_to_chase = False
+    avg_r_capture_percent = 70.0
+    tends_to_exit_early = False
+    trades_today = 0
+    pnl_today = 0.0
+    current_tilt_state = _TiltState()
+
+
 class _FakeLoop:
-    def __init__(self, outcomes):
+    def __init__(self, outcomes, profile=None):
         self._o = outcomes
+        self._profile = profile or _EmptyProfile()
 
     async def get_trader_profile(self):
-        return _EmptyProfile()
+        return self._profile
 
     async def get_recent_outcomes(self, limit=20, setup_type=None):
         return self._o[:limit]
 
 
-def _score(outcomes):
+def _score(outcomes, profile=None):
     svc = eq.ExecutionQualityService()
-    svc.set_services(learning_loop=_FakeLoop(outcomes))
+    svc.set_services(learning_loop=_FakeLoop(outcomes, profile))
     return asyncio.get_event_loop().run_until_complete(
         svc.calculate_score("AAA", "squeeze")
     )
@@ -95,3 +117,15 @@ def test_pillar_depins_hot_vs_cold():
     assert cold_score.consecutive_losses == 5
     assert cold_score.tilt_severity == "severe"
     assert round(hot_score.recent_win_rate, 2) == 0.90
+
+
+def test_live_override_when_profile_has_data_but_broken():
+    # v19.34.218 — profile HAS trades but overall_win_rate=0 / consec=0 (DGX bug).
+    # The live tape (5-loss streak, 29% win) must STILL override the profile.
+    cold = [_Outcome("lost")] * 5 + [_Outcome("won")] * 2
+    r = _score(cold, profile=_PopulatedBrokenProfile())
+    assert r.consecutive_losses == 5          # from tape, NOT profile's 0
+    assert r.tilt_severity == "severe"
+    assert round(r.recent_win_rate, 2) == 0.29  # from tape, NOT profile's 0.5 default
+    # and the score reflects the cold streak instead of pinning high
+    assert r.score < 60
