@@ -297,6 +297,12 @@ class TQSEngine:
         smb_5var_score: int = 25,
         risk_reward: float = 2.0,
         alert_priority: str = "medium",
+        # v19.34.213 — win_rate / EV the scanner already computed on the alert
+        # (strategy_win_rate / strategy_ev_r). Forwarded to the Setup pillar so it
+        # stops re-fetching learning_loop (which returned the 0.5/0.0 default for
+        # ~100% of alerts and floored the highest-weighted pillar).
+        win_rate: Optional[float] = None,
+        expected_value_r: Optional[float] = None,
         # Context overrides
         market_regime: Optional[str] = None,
         time_of_day: Optional[str] = None,
@@ -351,7 +357,9 @@ class TQSEngine:
                 smb_grade=smb_grade,
                 smb_5var_score=smb_5var_score,
                 risk_reward=risk_reward,
-                alert_priority=alert_priority
+                alert_priority=alert_priority,
+                win_rate_override=win_rate,
+                ev_r_override=expected_value_r
             )
             result.pillar_grades["setup"] = result.setup_score.grade
             

@@ -122,7 +122,9 @@ class SetupQualityService:
         smb_grade: str = "B",
         smb_5var_score: int = 25,
         risk_reward: float = 2.0,
-        alert_priority: str = "medium"
+        alert_priority: str = "medium",
+        win_rate_override: Optional[float] = None,
+        ev_r_override: Optional[float] = None
     ) -> SetupQualityScore:
         """
         Calculate setup quality score (0-100).
@@ -152,7 +154,17 @@ class SetupQualityService:
         win_rate = 0.5  # Default
         ev_r = 0.0
         
-        if self._learning_loop:
+        # v19.34.213 — prefer the win_rate / EV the scanner already stamped on the
+        # alert (strategy_win_rate / strategy_ev_r). Pre-fix this pillar ALWAYS
+        # re-fetched via learning_loop.get_contextual_win_rate(), which needs >=5
+        # contextual samples and otherwise returned the 0.5/0.0 default for 100%
+        # of alerts — flooring the highest-weighted TQS pillar (empirically the
+        # setup pillar was pinned near 43, never reaching B).
+        if win_rate_override is not None:
+            win_rate = win_rate_override
+            if ev_r_override is not None:
+                ev_r = ev_r_override
+        elif self._learning_loop:
             try:
                 stats = await self._learning_loop.get_contextual_win_rate(setup_type=base_setup)
                 if stats.get("sample_size", 0) >= 5:
