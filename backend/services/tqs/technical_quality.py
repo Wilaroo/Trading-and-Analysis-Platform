@@ -119,15 +119,21 @@ class TechnicalQualityService:
                     rvol = rvol if rvol is not None else getattr(snapshot, "rvol", 1.0)
                     vwap_distance_pct = vwap_distance_pct if vwap_distance_pct is not None else getattr(snapshot, "dist_from_vwap", 0)
                     
-                    # MA stack from moving averages
-                    ema20 = getattr(snapshot, "ema_20", 0)
-                    ema50 = getattr(snapshot, "ema_50", 0)
-                    sma200 = getattr(snapshot, "sma_200", 0)
-                    if ema20 > ema50 > sma200:
+                    # MA stack from the snapshot's already-computed trend.
+                    # v19.34.215 — pre-fix this re-derived a broken
+                    # `ema_20 > ema_50 > sma_200` stack that MIXED timeframes
+                    # (intraday ema_20 vs daily ema_50/sma_200) and fell back to
+                    # current_price when daily bars were missing — pinning
+                    # ma_stack to "neutral" for 100% of alerts. The snapshot
+                    # already classifies trend with intraday EMA9/EMA20 + a 0.25%
+                    # tolerance and the v166 macro-veto; reuse it directly so the
+                    # (already direction-aware) trend sub-score actually moves.
+                    snap_trend = str(getattr(snapshot, "trend", "sideways")).lower()
+                    if snap_trend == "uptrend":
                         ma_stack = "bullish"
-                    elif ema20 < ema50 < sma200:
+                    elif snap_trend == "downtrend":
                         ma_stack = "bearish"
-                    else:
+                    else:  # sideways / unknown
                         ma_stack = "neutral"
                     
                     squeeze_active = squeeze_active if squeeze_active is not None else getattr(snapshot, "squeeze_on", False)
