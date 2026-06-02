@@ -683,7 +683,96 @@ class IBDataPusher:
                     
             except Exception as e:
                 logger.error(f"  Failed to subscribe L2 {symbol}: {e}")
-    
+
+    async def subscribe_level2_async(self, symbols: List[str], num_rows: int = 5):
+        """Async-safe L2 subscribe for the dynamic /rpc/subscribe-l2 path.
+
+        v19.34.224 — ROOT-CAUSE FIX. The RPC path runs this coroutine ON the
+        IB event loop (via `_run_on_ib_loop` → `run_coroutine_threadsafe`).
+        The sync `subscribe_level2` calls `self.ib.qualifyContracts()`, which
+        internally does `loop.run_until_complete(...)` — illegal while the loop
+        is already running ("This event loop is already running"). That raised
+        for EVERY symbol, fell through to `continue`, and silently left L2 at
+        0/N forever (level2:0 in every push). Same bug class as the v19.34.30
+        `qualifyContractsAsync` sweep — this site was missed.
+
+        This variant `await`s `qualifyContractsAsync` instead. It ALSO probes
+        the first depth ticks after subscribing so the logs immediately reveal
+        whether the account actually has IB market-depth entitlement (vs. the
+        code bug we just fixed). `reqMktDepth` itself is non-blocking and safe
+        to call from within the loop.
+        """
+        arca_symbols = {"SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO",
+                        "XLF", "XLE", "XLK", "VXX", "TQQQ", "SQQQ"}
+        max_subs = _MAX_L2_SLOTS
+        current_count = len(self.depth_subscriptions)
+        priority_symbols = ["SPY", "QQQ", "IWM", "DIA"]
+        ordered_symbols = [s for s in priority_symbols if s in symbols]
+        ordered_symbols.extend([s for s in symbols if s not in priority_symbols])
+
+        newly: list = []  # (symbol, ticker, exchange) — for the entitlement probe
+        for symbol in ordered_symbols:
+            if current_count >= max_subs:
+                logger.debug(f"  L2 limit reached ({max_subs}), skipping {symbol}")
+                continue
+            if symbol in self.depth_subscriptions:
+                continue
+            if symbol == "VIX":
+                continue
+
+            exchange = "ARCA" if symbol in arca_symbols else "ISLAND"
+            qualified = None
+            try:
+                q = await self.ib.qualifyContractsAsync(Stock(symbol, exchange, "USD"))
+                qualified = q[0] if q else None
+            except Exception as e:
+                logger.warning(f"  L2 qualify {symbol}@{exchange} failed: {e}")
+
+            if qualified is None and exchange != "NYSE":
+                # Fall back to NYSE listing
+                try:
+                    q = await self.ib.qualifyContractsAsync(Stock(symbol, "NYSE", "USD"))
+                    qualified = q[0] if q else None
+                    if qualified is not None:
+                        exchange = "NYSE"
+                except Exception as e:
+                    logger.warning(f"  L2 qualify {symbol}@NYSE failed: {e}")
+
+            if qualified is None:
+                logger.info(f"  L2 skip {symbol}: contract could not be qualified")
+                continue
+
+            try:
+                ticker = self.ib.reqMktDepth(qualified, numRows=num_rows)
+            except Exception as e:
+                logger.error(f"  L2 reqMktDepth {symbol} failed: {e}")
+                continue
+
+            if ticker:
+                self.depth_subscriptions[symbol] = ticker
+                current_count += 1
+                newly.append((symbol, ticker, exchange))
+                logger.info(f"  L2 Subscribed: {symbol} @ {exchange} ({num_rows} levels) [{current_count}/{max_subs}]")
+
+        # Entitlement probe — let IB deliver the first depth rows, then report.
+        # If slots fill but NO depth arrives, it's an IB market-depth
+        # entitlement issue on this account, NOT the code bug.
+        if newly:
+            try:
+                await asyncio.sleep(1.5)
+            except Exception:
+                pass
+            for symbol, ticker, exchange in newly:
+                n_bids = len(getattr(ticker, "domBids", []) or [])
+                n_asks = len(getattr(ticker, "domAsks", []) or [])
+                if n_bids or n_asks:
+                    logger.info(f"  L2 DATA OK {symbol}: {n_bids} bids / {n_asks} asks @ {exchange}")
+                else:
+                    logger.warning(
+                        f"  L2 NO DEPTH DATA {symbol} after 1.5s @ {exchange} — "
+                        f"subscription landed but IB sent no depth (likely no "
+                        f"market-depth entitlement for this account/exchange)")
+
     def unsubscribe_level2(self, symbols: List[str]):
         """Unsubscribe from Level 2 data to free up resources"""
         for symbol in symbols:
@@ -4045,10 +4134,13 @@ def start_rpc_server(pusher: "IBDataPusher", host: str, port: int) -> bool:
         if new_syms:
             async def _do_subscribe_l2():
                 slots_used_before = len(pusher.depth_subscriptions)
-                # subscribe_level2 enforces MAX_L2_SUBSCRIPTIONS=3 itself,
-                # so anything that doesn't make it landed because of the
-                # cap (or qualify failure).
-                pusher.subscribe_level2(new_syms)
+                # v19.34.224 — MUST use the async-safe variant here. This
+                # coroutine runs ON the IB event loop; the sync
+                # `subscribe_level2` calls sync `qualifyContracts`, which is
+                # illegal while the loop is already running and silently
+                # skipped every symbol (L2 stuck at 0). `subscribe_level2_async`
+                # awaits `qualifyContractsAsync` instead.
+                await pusher.subscribe_level2_async(new_syms)
                 for s in new_syms:
                     if s in pusher.depth_subscriptions:
                         added.append(s)
