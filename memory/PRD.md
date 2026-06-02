@@ -26,6 +26,46 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-02 (v19.34.216–220 — DEPLOYED, live-verified)
+
+**TQS PILLAR DE-PINNING: all three big "constant pillar" bugs fixed on DGX.**
+The Signal Measurement Audit found TQS pillars scoring CONSTANTS (no
+discrimination). All fixed + live-verified via `diag_tqs_pillar_breakdown.py`:
+
+- **v216 — Setup pillar EV live-hook** (`pnl_compute.py`): the modern close path
+  orphaned `strategy_stats` (EV=0 for ~100% of alerts). Now every close upserts
+  EV/win-rate into `strategy_stats` (mirrors `backfill_strategy_stats.py` math +
+  base_setup keying). Backfill seeded 15 setups. EV default-rate 100%→~63% and
+  falling as closes accrue. Tests 7/7.
+- **v217→219 — Execution pillar live-state** (`tqs/execution_quality.py`): pillar
+  was a flat constant (48.80) because it read a never-persisted trader profile
+  AND `learning_loop.get_recent_outcomes()` returns EMPTY in the TQS-engine
+  context (deferred init). Now reads `trade_outcomes` DIRECTLY via pymongo and
+  ALWAYS overrides recent_win_rate + consecutive_losses + tilt from the live
+  tape. recent_win_rate/avg_r_capture default-rate 100%→0% (real ~0.48).
+  consecutive_losses=0 is now CORRECT data (no current streak). Tests 7/7.
+- **v220 — Fundamental pillar catalyst** (`tqs/fundamental_quality.py`): catalyst
+  (30% of pillar) floored at 40 because the pillar called the LIVE
+  get_ticker_news per alert — which hangs ≤30s on IB historical news and is
+  Finnhub-rate-limited. Now reads the fresh local `news_articles` cache (92k
+  docs, FinBERT-scored) directly. Live-verified: 63% of alerts (112/177) lifted
+  off the 40 floor (50 news-neutral / 65 directional). Tests 5/5. Added
+  `news_articles {symbol:1, datetime:-1}` index.
+
+**Deploy discipline:** all via checksum-guarded base64 `paste.rs` scripts
+(`deploy_v19_34_216..220.py`), idempotent + transactional, commit+push BEFORE
+restart. Hardware-bound — no testing agent (manual pytest + diag scripts).
+Last commit: e98ec4e9. `F_GRADE_POLICY=micro` safety rail still ON.
+
+**Still pinned (next levers, lower value):** `ma_stack` ~78% neutral, EV still
+~63% default (fills over time), `institutional_pct` ~81% default. `has_catalyst`
+raw sentinel reads 100% false BY DESIGN (caller-driven flag, separate from the
+now-live catalyst_score). **NEXT: TQS grade-band recalibration (Task 1)** on the
+now-honest pillar data — but recommended to let EV accrue over 1–2 sessions first.
+
+---
+
+
 ## 📌 Status snapshot — 2026-06-01 (v19.34.211 / 211a — DEPLOYED)
 
 **Dynamic Universe Builder + Gameplan Movers UI: LIVE on DGX (commit 6a625e77).**

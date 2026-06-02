@@ -50,6 +50,29 @@ All four shipped via checksum-guarded base64 paste.rs scripts
 (`deploy_v19_34_216..219.py`), idempotent + transactional, commit+push before
 restart. Hardware-bound — no testing agent.
 
+### v19.34.220 — FUNDAMENTAL PILLAR catalyst from news_articles cache
+- Root cause (`diag_news_catalyst.py`): catalyst (30% of the pillar) floored at
+  40 for ~100% of alerts. The pillar called the LIVE `news_service.get_ticker_news`
+  per alert — which tries IB historical news FIRST with a 30s timeout (hangs in
+  this ib-direct deployment; `/api/ib/news/<sym>` timed out >20s for all symbols)
+  then Finnhub (rate-limited ~60/min) — unusable per-alert. Meanwhile the local
+  `news_articles` cache (Finnhub+Yahoo collectors, 92k docs, FinBERT-scored,
+  fresh today) sat unused. (Finnhub itself is healthy: 247 items for AAPL.)
+- Fix: pillar now reads recent (≤72h) news for the symbol directly from
+  `news_articles` (fast indexed lookup; `self._db` already wired) and derives
+  has_recent_news + news_sentiment from the FinBERT `sentiment` dict
+  ({"sentiment","score"}). Lifts catalyst 40→50 (news-neutral) / 65 (directional).
+  Added `news_articles {symbol:1, datetime:-1}` index.
+- Live-verified 2026-06-02: 63% of alerts (112/177) lifted off the 40 floor
+  (90@50, 22@65, 65@40 genuinely no-news). Fundamental pillar max 65→69.5.
+  Sample lifted: INTU, VOO, UPS, LUNR, SNPS, FN, HPE, TMUS…
+- `has_catalyst` raw sentinel still reads 100% false BY DESIGN — it's a separate
+  caller-driven flag, not the catalyst_score (which is now live).
+- Tests: `test_v19_34_220_fundamental_news_cache.py` 5/5. Commit e98ec4e9.
+- FOLLOW-UP (separate bug): the live `get_ticker_news` IB-historical-news path
+  still hangs ≤30s (affects the UI `/api/ib/news/<sym>` endpoint). Lower priority.
+
+
 ### Still pinned (next levers)
 `has_catalyst` 100% false (news feed stale, Issue 2); `institutional_pct` ~75%
 default; `ma_stack` ~66% neutral; EV ~58% default (fills over time as the v216
