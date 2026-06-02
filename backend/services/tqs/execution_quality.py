@@ -16,6 +16,58 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _derive_live_execution_state(outcomes) -> Dict:
+    """v19.34.217 — compute the execution-state inputs the pillar needs from a
+    NEWEST-FIRST list of recent TradeOutcome objects (the fresh trade_outcomes
+    feed). Used when the persisted `trader_profiles` doc is missing/empty so the
+    Execution pillar discriminates instead of pinning at the all-default
+    constant.
+
+      recent_win_rate    = wins / (wins + losses)
+      consecutive_losses = trailing loss streak from the most-recent close
+      tilt_severity      = severe(>=5) / moderate(>=3) / mild(>=2) / none
+      avg_r_capture_pct  = mean of available r_capture_percent, else None
+    """
+    wins = losses = 0
+    consec = 0
+    counting = True  # stop counting the trailing streak at the first non-loss
+    r_caps = []
+    for o in outcomes:  # newest-first (sorted created_at DESC by caller)
+        oc = str(getattr(o, "outcome", "")).lower()
+        if oc == "won":
+            wins += 1
+            counting = False
+        elif oc == "lost":
+            losses += 1
+            if counting:
+                consec += 1
+        else:
+            counting = False
+        ex = getattr(o, "execution", None)
+        rc = getattr(ex, "r_capture_percent", 0) if ex else 0
+        if rc and rc > 0:
+            r_caps.append(rc)
+
+    sample = wins + losses
+    recent_wr = (wins / sample) if sample else 0.5
+    if consec >= 5:
+        sev = "severe"
+    elif consec >= 3:
+        sev = "moderate"
+    elif consec >= 2:
+        sev = "mild"
+    else:
+        sev = "none"
+    return {
+        "sample": sample,
+        "recent_win_rate": recent_wr,
+        "consecutive_losses": consec,
+        "is_tilted": consec >= 2,
+        "tilt_severity": sev,
+        "avg_r_capture_pct": (sum(r_caps) / len(r_caps)) if r_caps else None,
+    }
+
+
 @dataclass
 class ExecutionQualityScore:
     """Result of execution quality evaluation"""
@@ -116,8 +168,16 @@ class ExecutionQualityService:
                 profile = await self._learning_loop.get_trader_profile()
             except Exception as e:
                 logger.debug(f"Could not fetch trader profile: {e}")
-                
-        if profile:
+
+        # v19.34.217 — the persisted `trader_profiles` doc is only written by
+        # the EOD `run_daily_analysis` batch; when that hasn't populated it the
+        # profile comes back at all-defaults (total_trades=0, win_rate=0,
+        # consecutive_losses=0) and the pillar pins at a constant. Detect that
+        # and derive the execution-state inputs LIVE from the fresh
+        # trade_outcomes feed instead.
+        profile_has_data = bool(profile and getattr(profile, "total_trades", 0))
+
+        if profile_has_data:
             # Extract execution data
             result.is_tilted = profile.current_tilt_state.is_tilted
             result.tilt_severity = profile.current_tilt_state.tilt_severity
@@ -132,6 +192,26 @@ class ExecutionQualityService:
             # Get recent win rate
             if profile.overall_win_rate > 0:
                 result.recent_win_rate = profile.overall_win_rate
+        elif self._learning_loop:
+            # v19.34.217 — LIVE execution-state fallback from trade_outcomes.
+            try:
+                recent = await self._learning_loop.get_recent_outcomes(limit=30)
+                live = _derive_live_execution_state(recent)
+                if live["sample"] > 0:
+                    result.recent_win_rate = live["recent_win_rate"]
+                    result.consecutive_losses = live["consecutive_losses"]
+                    result.is_tilted = live["is_tilted"]
+                    result.tilt_severity = live["tilt_severity"]
+                    if live["avg_r_capture_pct"] is not None:
+                        result.avg_r_capture_pct = live["avg_r_capture_pct"]
+                        result.tends_to_exit_early = live["avg_r_capture_pct"] < 50
+                    result.factors.append(
+                        f"Live exec state from {live['sample']} recent closes "
+                        f"(win {live['recent_win_rate']*100:.0f}%, "
+                        f"{live['consecutive_losses']} consec losses)"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not derive live execution state: {e}")
                 
         # 1. Historical Execution Score (25% weight)
         # Based on overall execution quality
