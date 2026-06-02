@@ -91,6 +91,8 @@ def _pillar_scores(rows, pillar):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=0)
+    ap.add_argument("--since-min", type=int, default=0,
+                    help="only alerts created in the last N minutes (isolates post-restart)")
     args = ap.parse_args()
 
     from pymongo import MongoClient
@@ -98,7 +100,12 @@ def main():
     db = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)[db_name]
 
     now = datetime.now(timezone.utc)
-    cutoff = ((now - timedelta(days=args.days)) if args.days else now).strftime("%Y-%m-%d")
+    if args.since_min and args.since_min > 0:
+        cutoff = (now - timedelta(minutes=args.since_min)).isoformat()
+        label = f"last {args.since_min} min (POST-restart isolation)"
+    else:
+        cutoff = ((now - timedelta(days=args.days)) if args.days else now).strftime("%Y-%m-%d")
+        label = f">= {cutoff}"
     rows = list(db["live_alerts"].find(
         {"created_at": {"$gte": cutoff}, "tqs_breakdown": {"$exists": True, "$ne": {}}}
     ))

@@ -80,6 +80,25 @@ def test_tape_component_not_pinned_after_fix():
     assert res.tape_score >= 60  # confirmed tape clamps to >=80 internally
 
 
+def test_none_override_falls_back_to_default():
+    """v19.34.214 — when the alert has no win-rate data (coerced to None at the
+    call site), the pillar must fall back to its 0.5 neutral, NOT score a real 0."""
+    svc = get_setup_quality_service()
+    svc.set_services(learning_loop=None, scanner=None)
+
+    async def run():
+        return await svc.calculate_score(
+            setup_type="bull_flag", symbol="TEST",
+            tape_score=_tape_emit(0.0), tape_confirmation=False,
+            smb_grade="B", smb_5var_score=25, risk_reward=2.0,
+            win_rate_override=None, ev_r_override=None,
+        )
+
+    res = asyncio.get_event_loop().run_until_complete(run())
+    assert abs(res.win_rate - 0.5) < 1e-9       # neutral fallback, not 0.0
+    assert res.win_rate_score >= 50             # not tanked to 0
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
