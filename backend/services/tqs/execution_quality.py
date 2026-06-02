@@ -60,6 +60,93 @@ def _recent_trade_outcomes(limit: int = 30):
         return []
 
 
+# ── v19.34.230 (B3) — per-setup_type execution-history map ────────────────
+# The Execution pillar's `history_score` was pinned at the 60 default for the
+# whole book (diagnostic: history med=60, stdev=0.00) because the per-setup
+# `learning_loop.get_recent_outcomes(setup_type=…)` returns EMPTY in the
+# TQS-engine context. Compute it DIRECTLY from `trade_outcomes`, grouped by
+# setup_type, once per TTL (shared across every alert in a scan cycle → one
+# cheap aggregation, not a query per alert), and shrink toward the 60 neutral by
+# sample size so thin-data setups barely move. Env-gated + fail-open.
+_HIST_CACHE = {"map": {}, "fetched_at": 0.0}
+
+
+def _env_on(key: str, default: bool = True) -> bool:
+    import os
+    v = os.environ.get(key)
+    if v in (None, ""):
+        return default
+    return str(v).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _env_int(key: str, default: int) -> int:
+    import os
+    v = os.environ.get(key)
+    if v in (None, ""):
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _norm_setup(setup_type: str) -> str:
+    return (setup_type or "").lower().replace("_long", "").replace("_short", "")
+
+
+def _setup_history_map() -> Dict[str, Dict]:
+    """{base_setup_type -> {"n": int, "score": float(0-100)}} from trade_outcomes.
+
+    Score prefers avg execution_quality_score (0-1 → 0-100); falls back to the
+    win-rate proxy when exec-quality is unavailable. TTL-cached. Empty/stale-safe.
+    """
+    import time
+    now = time.time()
+    ttl = _env_int("TQS_EXEC_HIST_TTL_SEC", 900)
+    if _HIST_CACHE["map"] and (now - _HIST_CACHE["fetched_at"]) < ttl:
+        return _HIST_CACHE["map"]
+    coll = _get_trade_outcomes_collection()
+    if coll is None:
+        return _HIST_CACHE["map"]
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(days=_env_int("TQS_EXEC_HIST_WINDOW_DAYS", 30))).isoformat()
+    try:
+        rows = list(coll.aggregate([
+            {"$match": {"outcome": {"$in": ["won", "lost", "breakeven"]},
+                        "created_at": {"$gte": cutoff}}},
+            {"$group": {
+                "_id": "$setup_type",
+                "n": {"$sum": 1},
+                "wins": {"$sum": {"$cond": [{"$eq": ["$outcome", "won"]}, 1, 0]}},
+                "avg_exec_q": {"$avg": "$execution.execution_quality_score"},
+            }},
+        ]))
+    except Exception as e:
+        logger.debug("[exec-decompress] aggregation failed: %s", e)
+        return _HIST_CACHE["map"]
+    merged: Dict[str, Dict] = {}
+    for r in rows:
+        base = _norm_setup(r.get("_id") or "")
+        n = int(r.get("n") or 0)
+        if not base or n <= 0:
+            continue
+        aeq = r.get("avg_exec_q")
+        if aeq and aeq > 0:
+            raw = max(0.0, min(100.0, float(aeq) * 100.0))
+        else:
+            raw = (int(r.get("wins") or 0) / n) * 100.0
+        m = merged.setdefault(base, {"n": 0, "wsum": 0.0})
+        m["n"] += n
+        m["wsum"] += raw * n
+    out = {b: {"n": v["n"], "score": (v["wsum"] / v["n"]) if v["n"] else 60.0}
+           for b, v in merged.items()}
+    _HIST_CACHE["map"] = out
+    _HIST_CACHE["fetched_at"] = now
+    logger.info("[exec-decompress] setup-history map refreshed: %d setups", len(out))
+    return out
+
+
 def _field(o, name, default=None):
     """Read `name` from a mongo dict OR a TradeOutcome object."""
     if isinstance(o, dict):
@@ -302,6 +389,28 @@ class ExecutionQualityService:
         # Default if no history
         if result.history_score == 50.0:
             result.history_score = 60  # Slightly optimistic default
+
+        # v19.34.230 (B3) — replace the pinned-60 default with a PER-SETUP_TYPE
+        # history score read live from trade_outcomes (TTL-cached aggregation),
+        # shrunk toward 60 by sample size so thin-data setups barely move. This
+        # gives the Execution pillar real cross-sectional variance by setup
+        # instead of a flat constant (diagnostic: history stdev=0.00). Env-gated;
+        # any failure falls back to exactly the legacy 60 behaviour.
+        if _env_on("TQS_EXEC_DECOMPRESS", True):
+            try:
+                hmap = _setup_history_map()
+                rec = hmap.get(_norm_setup(setup_type))
+                if rec and rec.get("n", 0) > 0:
+                    K = float(_env_int("TQS_EXEC_HIST_SHRINK_K", 10))
+                    n = float(rec["n"])
+                    raw = float(rec["score"])
+                    result.history_score = 60.0 + (raw - 60.0) * (n / (n + K))
+                    result.factors.append(
+                        f"Per-setup exec history {_norm_setup(setup_type)}: "
+                        f"raw {raw:.0f} (n={int(n)}) → {result.history_score:.0f}"
+                    )
+            except Exception as e:
+                logger.debug(f"[exec-decompress] per-setup history failed: {e}")
             
         # 2. Tilt Score (30% weight) - Critical!
         if result.is_tilted:

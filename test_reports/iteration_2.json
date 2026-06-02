@@ -1,0 +1,87 @@
+{
+  "summary": "Completed comprehensive testing of TradeCommand trading platform with new features. Backend APIs are 85.4% functional with new TradingView, Fundamentals, Insider Trading, and COT Data features working. External URL routing issue persists, preventing frontend testing.",
+  "backend_issues": {
+    "critical_bugs": [],
+    "flaky_endpoints": [
+      {
+        "endpoint": "/api/watchlist/generate",
+        "issue": "Returns 500 Internal Server Error",
+        "impact": "Watchlist generation fails completely",
+        "fix_priority": "MEDIUM"
+      },
+      {
+        "endpoint": "/api/newsletter/generate",
+        "issue": "Returns 500 Internal Server Error", 
+        "impact": "Newsletter generation fails completely",
+        "fix_priority": "MEDIUM"
+      },
+      {
+        "endpoint": "/api/newsletter/latest",
+        "issue": "Returns 500 Internal Server Error",
+        "impact": "Cannot retrieve newsletters",
+        "fix_priority": "MEDIUM"
+      }
+    ],
+    "data_issues": [
+      {
+        "endpoint": "/api/insider/unusual",
+        "issue": "Returns empty unusual_activity array despite having all_activity data",
+        "impact": "Unusual insider activity detection not working properly",
+        "fix_priority": "LOW"
+      },
+      {
+        "endpoint": "/api/cot/summary", 
+        "issue": "Returns empty summary array",
+        "impact": "COT market summary not populated",
+        "fix_priority": "LOW"
+      }
+    ],
+    "routing_issues": [
+      {
+        "issue": "External preview URL not routing to backend APIs",
+        "details": "Backend works on localhost:8001 but external URL returns 404 for all /api routes",
+        "impact": "Frontend cannot connect to backend via external URL",
+        "fix_priority": "CRITICAL"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Frontend-Backend Integration",
+        "issue": "Cannot test frontend due to external URL routing failure",
+        "affected_selectors": ["All frontend functionality"],
+        "fix_priority": "CRITICAL"
+      }
+    ],
+    "design_issues": []
+  },
+  "passed_tests": [
+    "Backend health endpoint working",
+    "All 50 trading strategies loaded correctly (20 Intraday, 15 Swing, 15 Investment)",
+    "Strategy filtering by category working",
+    "Scanner presets and scan functionality working", 
+    "Portfolio add/remove positions working",
+    "Alerts generation and clearing working",
+    "Market overview and quotes working",
+    "NEW: Fundamentals API /api/fundamentals/AAPL returns complete data",
+    "NEW: Insider Trading API /api/insider/AAPL returns trades and summary",
+    "NEW: COT Data API /api/cot/ES returns 12 weeks of historical data",
+    "NEW: Historical data API /api/historical/AAPL working",
+    "Fundamentals data structure includes all required fields (symbol, company_name, market_cap, pe_ratio)",
+    "Insider trading data includes trades array and summary with buy/sell analysis",
+    "COT data includes commercial and non-commercial positions with sentiment analysis",
+    "All new API endpoints respond with 200 status codes",
+    "Simulated data generation working when live APIs unavailable"
+  ],
+  "test_report_links": ["/app/backend_test.py"],
+  "action_item_for_main_agent": "CRITICAL: Fix Kubernetes ingress routing so external URL properly routes /api requests to backend port 8001. This prevents all frontend testing. Also investigate 500 errors in watchlist/newsletter generation endpoints.",
+  "updated_files": ["/app/backend_test.py"],
+  "success_percentage": {
+    "backend": "85.4% (35/41 tests passed)",
+    "frontend": "0% (Cannot test due to routing issues)"
+  },
+  "should_call_test_agent_after_fix": "true",
+  "should_main_agent_test_itself": "false"
+}

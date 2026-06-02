@@ -1,0 +1,96 @@
+{
+  "summary": "Enhanced Market Intelligence testing complete. FIXED critical bug where get_quotes_batch returns dict but code was iterating as list. All 7 new context gathering methods now working correctly. 16/16 backend tests pass. Frontend displays enhanced report with all new sections.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "bugs_fixed": [
+    {
+      "file": "/app/backend/services/market_intel_service.py",
+      "issue": "get_quotes_batch returns Dict[str, Dict] but code was iterating as if it was a List",
+      "lines_fixed": [
+        "Lines 191-195: _gather_market_data_context - changed 'for q in quotes' to 'for sym, q in quotes.items()'",
+        "Lines 251-255: _gather_watchlist_context - changed 'for q in quotes' to 'for sym, q in quotes.items()'",
+        "Lines 367-370: _gather_market_regime_context - changed next() iteration to direct dict.get()",
+        "Lines 481-487: _gather_sector_heatmap - changed sorted(quotes) to sorted(quotes.items())",
+        "Lines 598-602: _gather_in_play_technical_context - changed 'for q in quotes' to 'for sym, q in quotes.items()'"
+      ]
+    }
+  ],
+  "passed_tests": [
+    "API health check",
+    "Generate early_market report with force=true",
+    "Report contains Market Regime classification (Choppy/Range Day, UPTREND, etc.)",
+    "Report contains Sector Performance/Rotation data",
+    "Report contains In-Play Stocks section",
+    "Report contains Ticker-Specific News from Finnhub",
+    "Report contains Market Status with SPY/QQQ/IWM/DIA/VIX indices",
+    "Schedule endpoint returns 200 with 5 report types",
+    "Reports endpoint returns list of generated reports",
+    "Current endpoint returns applicable report",
+    "Smart Watchlist integration working (actual symbols not hardcoded)",
+    "Alpaca batch quotes working correctly"
+  ],
+  "features_verified": {
+    "market_regime_classification": {
+      "status": "WORKING",
+      "values_returned": ["CHOPPY/RANGE DAY", "VIX at 15.0", "Strategy recommendations"]
+    },
+    "in_play_stocks": {
+      "status": "WORKING",
+      "values_returned": ["Watchlist symbols with activity status"]
+    },
+    "ticker_specific_news": {
+      "status": "WORKING",
+      "values_returned": ["NVDA, AAPL, ASTS news from Finnhub company-news API"]
+    },
+    "sector_heatmap": {
+      "status": "WORKING",
+      "values_returned": ["Leading sectors (Technology, Financials, Energy)", "Lagging sectors (Utilities, Real Estate, Materials)"]
+    },
+    "earnings_calendar": {
+      "status": "WORKING",
+      "notes": "No watchlist stocks reporting in next 2 weeks at test time"
+    },
+    "smart_watchlist_integration": {
+      "status": "WORKING",
+      "symbols_used": ["NVDA", "AAPL", "ASTS", "MODG", "DENN"]
+    },
+    "in_play_technical_levels": {
+      "status": "WORKING",
+      "notes": "Shows HOD, LOD, VWAP for active stocks"
+    }
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_enhanced_market_intel.py",
+    "/app/test_reports/pytest/pytest_enhanced_market_intel.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Bug found and fixed: Alpaca's get_quotes_batch returns Dict[str, Dict] not List[Dict]. Code was iterating over dict keys instead of values.",
+    "All 5 affected methods in market_intel_service.py have been corrected",
+    "Enhanced report now correctly displays: Market Regime, Sector Rotation, In-Play Stocks, Ticker News, Earnings warnings"
+  ],
+  "updated_files": [
+    "/app/backend/services/market_intel_service.py",
+    "/app/backend/tests/test_enhanced_market_intel.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests pass)",
+    "frontend": "100% - Market Intel panel displays enhanced report correctly"
+  },
+  "test_credentials": "None required",
+  "seed_data_creation": "None - used existing smart watchlist data",
+  "mocked_apis": {
+    "has_mocked_apis": false,
+    "mocked_apis_list": []
+  },
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Enhanced Market Intelligence is fully working. All 7 new context gathering methods are properly integrated: _gather_market_regime_context, _gather_ticker_specific_news, _gather_sector_heatmap, _gather_earnings_context, _gather_in_play_technical_context, _gather_watchlist_context (enhanced). The key fix was changing dict iteration from 'for q in quotes' to 'for sym, q in quotes.items()' since Alpaca service returns Dict[str, Dict]."
+}
