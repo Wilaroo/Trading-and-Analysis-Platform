@@ -1077,7 +1077,16 @@ class EnhancedBackgroundScanner:
                             win_rate=doc.get("win_rate", 0.0),
                             profit_factor=doc.get("profit_factor", 0.0),
                             avg_rr_achieved=doc.get("avg_rr_achieved", 0.0),
-                            last_updated=doc.get("last_updated", "")
+                            last_updated=doc.get("last_updated", ""),
+                            # v19.34.214 — the EV / R-multiple fields were SAVED
+                            # (via asdict) but never reloaded here, so
+                            # expected_value_r reset to 0.0 on every restart —
+                            # zeroing the Setup pillar's EV sub-component for
+                            # 100% of alerts. Reload them so EV survives restarts.
+                            r_outcomes=doc.get("r_outcomes", []) or [],
+                            avg_win_r=doc.get("avg_win_r", 0.0),
+                            avg_loss_r=doc.get("avg_loss_r", 1.0),
+                            expected_value_r=doc.get("expected_value_r", 0.0),
                         )
                 logger.info(f"Loaded strategy stats for {len(self._strategy_stats)} setups")
             except Exception as e:
@@ -7805,8 +7814,11 @@ class EnhancedBackgroundScanner:
                 smb_5var_score=alert.smb_score_total,
                 risk_reward=alert.risk_reward,
                 alert_priority=alert.priority.value if hasattr(alert.priority, 'value') else str(alert.priority),
-                win_rate=getattr(alert, 'strategy_win_rate', None),
-                expected_value_r=getattr(alert, 'strategy_ev_r', None),
+                # v19.34.214 — coerce the no-data default (0.0) to None so the
+                # Setup pillar falls back to its neutral 0.5, instead of scoring
+                # a real "0% win rate" / "0 EV" that tanks setups lacking stats.
+                win_rate=(getattr(alert, 'strategy_win_rate', None) or None),
+                expected_value_r=(getattr(alert, 'strategy_ev_r', None) or None),
                 ai_model_direction=ai_dir,
                 ai_model_confidence=ai_conf,
                 ai_model_agrees=ai_agrees,
