@@ -23158,3 +23158,10 @@ Verified DGX state ahead of resuming trophy training:
 1. **NIA → DataCollectionPanel "Collect Data" button** fires `POST /api/ib-collector/smart-backfill`. Tier-aware, gap-aware, dedupes against pending. ✅ working.
 2. **NIA → TrainingPipelinePanel "Start Training" button** fires `POST /api/ai-training/start`. Has a pre-train safety interlock (`/data-readiness` check). Shift+click overrides the gate. ✅ working.
 3. Buttons are intentionally decoupled — trophy training is a 6+ hour subprocess that should never auto-fire after every backfill.
+
+## v19.34.229 — 2026-06-02 — TQS sizing back to risk-neutral (~0.30x mean)
+Operator option (a): keep the v228 conviction tilt but normalize the
+magnitude (scale x0.808) so the mean position-size multiplier returns to
+the historical ~0.30x (was 0.371x). Env-only, no code change.
+  POSITION_SIZE_GRADE_A_MULT=0.80  B=0.48  C=0.24  D=0.12  F=0.08
+Restart required (.env -> process env at startup).
