@@ -158,21 +158,6 @@ def _record_alert_outcome_bestEffort(
     except Exception as e:
         logger.debug("[pnl_compute] alert_outcomes upsert failed: %s", e)
 
-    # ── v19.34.216 — LIVE EV HOOK ─────────────────────────────────────────
-    # Keep `strategy_stats` (the TQS Setup-pillar EV / real-win-rate feed)
-    # fresh on EVERY close. Pre-v216 only `enhanced_scanner.record_alert_outcome`
-    # updated strategy_stats, and it required alert_id ∈ scanner._live_alerts —
-    # which the modern reconciler/operator/manage-loop close paths bypass. So
-    # strategy_stats was orphaned (EV=0 for ~100% of alerts; see backfill).
-    # This upsert mirrors `backfill_strategy_stats.py` math + keying so the
-    # one-time backfill and the live feed converge. Best-effort; never blocks.
-    try:
-        _upsert_strategy_stats_bestEffort(
-            trade, outcome, r_multiple, pnl.get("net_pnl", 0.0),
-        )
-    except Exception as _ss_err:
-        logger.debug("[v19.34.216 strategy_stats] live hook skipped: %s", _ss_err)
-
     # v19.34.88 — Post-stop cooldown stamp. On any close whose reason
     # starts with "stop" (stop_loss, stop_loss_phantom_recovery,
     # stop_loss_trailing, etc.), record the (symbol, setup_base) pair
@@ -191,100 +176,6 @@ def _record_alert_outcome_bestEffort(
             "[v19.34.88 post-stop-cooldown] stamp failed (non-fatal): %s",
             _cd_err,
         )
-
-
-def _base_setup(setup_type: Any) -> str:
-    """Normalize a setup_type to the family key the TQS Setup pillar queries
-    (`enhanced_scanner` consumer at L3201): strip the _long/_short suffix.
-    MUST match `backfill_strategy_stats.base_setup` exactly."""
-    return str(setup_type or "").split("_long")[0].split("_short")[0]
-
-
-def _upsert_strategy_stats_bestEffort(
-    trade: Any, outcome: str, r_multiple: Optional[float], net_pnl: float,
-) -> None:
-    """v19.34.216 — incrementally fold one closed trade's R-outcome into the
-    `strategy_stats` doc for its setup family, recomputing win_rate + EV with
-    the SAME formula + keying as `backfill_strategy_stats.py` so the live hook
-    and the one-time backfill stay consistent.
-
-    EV (SMB): win_rate*avg_win_r - (1-win_rate)*avg_loss_r, unlocked at >=5
-    r_outcomes; r_outcomes capped to the most-recent 100. Best-effort: any
-    failure is swallowed (never blocks the close path)."""
-    # _get_outcomes_collection() lazily inits the shared _AO_DB handle.
-    if _get_outcomes_collection() is None or _AO_DB is None:
-        return
-    bs = _base_setup(getattr(trade, "setup_type", None))
-    if not bs:
-        return
-
-    # Classify win/loss — mirror backfill _classify priority: outcome -> r -> pnl.
-    cls: Optional[str] = None
-    o = str(outcome or "").lower().strip()
-    if o == "won":
-        cls = "win"
-    elif o == "lost":
-        cls = "loss"
-    elif r_multiple is not None and r_multiple != 0:
-        cls = "win" if r_multiple > 0 else "loss"
-    elif net_pnl:
-        cls = "win" if net_pnl > 0 else "loss"
-    if cls is None:
-        return  # true scratch (0 pnl, 0 R) -- skip, matching the backfill
-
-    coll = _AO_DB["strategy_stats"]
-    try:
-        prev = coll.find_one({"setup_type": bs}) or {}
-        r_out = list(prev.get("r_outcomes", []) or [])
-        if r_multiple is not None:
-            r_out.append(round(float(r_multiple), 4))
-            r_out = r_out[-100:]
-
-        trig = int(prev.get("alerts_triggered", 0) or 0) + 1
-        won = int(prev.get("alerts_won", 0) or 0) + (1 if cls == "win" else 0)
-        lost = int(prev.get("alerts_lost", 0) or 0) + (1 if cls == "loss" else 0)
-        total_pnl = round(float(prev.get("total_pnl", 0.0) or 0.0) + float(net_pnl or 0.0), 2)
-
-        win_rate = (won / trig) if trig else 0.0
-        wins_r = [x for x in r_out if x > 0]
-        losses_r = [x for x in r_out if x <= 0]
-        avg_win_r = (sum(wins_r) / len(wins_r)) if wins_r else 0.0
-        avg_loss_r = abs(sum(losses_r) / len(losses_r)) if losses_r else 1.0
-        ev = 0.0
-        if len(r_out) >= 5:
-            ev = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
-        avg_rr = (sum(r_out) / len(r_out)) if r_out else 0.0
-        profit_factor = (
-            (sum(wins_r) / abs(sum(losses_r)))
-            if losses_r and sum(losses_r) != 0 else 0.0
-        )
-
-        coll.update_one(
-            {"setup_type": bs},
-            {"$set": {
-                "setup_type": bs,
-                "alerts_triggered": trig,
-                "total_alerts": trig,
-                "alerts_won": won,
-                "alerts_lost": lost,
-                "total_pnl": total_pnl,
-                "win_rate": round(win_rate, 4),
-                "profit_factor": round(profit_factor, 3),
-                "avg_rr_achieved": round(avg_rr, 3),
-                "r_outcomes": [round(x, 4) for x in r_out],
-                "avg_win_r": round(avg_win_r, 4),
-                "avg_loss_r": round(avg_loss_r, 4),
-                "expected_value_r": round(ev, 4),
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            }},
-            upsert=True,
-        )
-        logger.info(
-            "[v19.34.216 strategy_stats] %s <- r=%s cls=%s -> EV=%.3fR win=%.0f%% (#r=%d)",
-            bs, r_multiple, cls, round(ev, 3), win_rate * 100, len(r_out),
-        )
-    except Exception as e:
-        logger.debug("[v19.34.216 strategy_stats] upsert failed for %s: %s", bs, e)
 
 
 def compute_close_pnl(
