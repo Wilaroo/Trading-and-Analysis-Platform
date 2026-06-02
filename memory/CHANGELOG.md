@@ -1,3 +1,64 @@
+## 2026-06-02 — v19.34.216–219 TQS PILLAR DE-PINNING (EV live-hook + Execution live-state)
+
+### Context
+Continuation of the P0 Signal Measurement Audit. `diag_tqs_pillar_breakdown.py`
+showed two TQS pillars scoring CONSTANTS for ~100% of alerts: the Setup pillar's
+**EV** (expected_value_r=0.0) and the **Execution** pillar (flat 48.80 — every
+sub-component at its default).
+
+### v19.34.216 — LIVE EV HOOK (strategy_stats stays fresh on every close)
+- Root cause: the modern close path (`pnl_compute.apply_close_pnl`) writes
+  `alert_outcomes` but the scanner's `record_alert_outcome` (the only writer of
+  `strategy_stats`, the TQS Setup-pillar EV feed) requires `alert_id ∈
+  scanner._live_alerts` — which reconciler/operator/manage-loop closes bypass.
+  So `strategy_stats` was orphaned → EV=0 everywhere.
+- Fix: `pnl_compute._record_alert_outcome_bestEffort` now ALSO upserts into
+  `strategy_stats` (`_upsert_strategy_stats_bestEffort`), mirroring
+  `backfill_strategy_stats.py` math + `base_setup` keying exactly, on every close.
+- Backfill (operator-run `backfill_strategy_stats.py --commit`) seeded 15 setups
+  (squeeze −0.01/54, accumulation_entry +0.62/44, daily_breakout +2.61/5…).
+- Tests: `test_v19_34_216_strategy_stats_live_hook.py` 7/7.
+
+### v19.34.217 / 218 / 219 — EXECUTION PILLAR LIVE-STATE (read trade_outcomes direct)
+- Root cause (3-step diagnosis via `diag_execution_pillar.py` + `probe_live_exec_state.py`):
+  the pillar reads `get_trader_profile()`, but (a) the persisted `trader_profiles`
+  "default" doc was MISSING (the EOD daily batch never populated it), and (b) the
+  in-memory profile that DOES exist has a broken win-rate aggregation (0) + a tilt
+  counter that resets, and (c) `learning_loop.get_recent_outcomes()` returns EMPTY
+  in the TQS-engine context (collections wired in a deferred background init).
+- v217: derive recent_win_rate + consecutive_losses live from outcomes when the
+  profile is empty (only fired when profile_has_data=False — but live profile had
+  total_trades>0, so it didn't fire).
+- v218: ALWAYS override those fields from outcomes (but still via learning_loop →
+  returned empty → pillar pinned at the no-data constant 76.50).
+- v219 (definitive): read `trade_outcomes` DIRECTLY via a cached pymongo client
+  (same pattern as pnl_compute), independent of the flaky learning_loop ref.
+  `_derive_live_execution_state` handles raw mongo dicts OR TradeOutcome objects.
+  Emits a WARN if the direct read ever returns 0.
+- Live-verified 2026-06-02: `recent_win_rate` + `avg_r_capture_pct` default-rate
+  dropped 100% → 0% (now real ~0.48 win-rate). `consecutive_losses=0` is now
+  CORRECT data (no current losing streak), not a default. Pillar 48.80→72.00.
+  The pillar is identical across simultaneous alerts BY DESIGN (it measures the
+  trader's global state, not per-symbol); it tracks performance over time.
+- Tests: `test_v19_34_217_execution_pillar_live_state.py` 7/7.
+- NOTE: per-setup `history_score` (25% of the pillar) is still constant because
+  it ALSO uses learning_loop.get_recent_outcomes — a lower-value follow-up
+  (would add per-setup execution-quality variation).
+
+### Deploy
+All four shipped via checksum-guarded base64 paste.rs scripts
+(`deploy_v19_34_216..219.py`), idempotent + transactional, commit+push before
+restart. Hardware-bound — no testing agent.
+
+### Still pinned (next levers)
+`has_catalyst` 100% false (news feed stale, Issue 2); `institutional_pct` ~75%
+default; `ma_stack` ~66% neutral; EV ~58% default (fills over time as the v216
+hook accrues closes). TQS grade-band recalibration (Task 1) should wait until
+these settle.
+
+---
+
+
 ## 2026-06-01 — v19.34.212 Chart coverage uses TRADING days (AIQ "70%" fix)
 
 ### Report
