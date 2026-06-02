@@ -48,7 +48,10 @@ logger = logging.getLogger(__name__)
 
 
 _TICK_SEC = 15.0          # how often to evaluate desired L2 set
-_MAX_L2_SLOTS = 3         # IB paper-mode hard cap
+# v19.34.221 — env-configurable so the operator can raise the L2 fan-out once
+# the Windows pusher's own max_slots (and the IB market-depth entitlement) are
+# raised in lock-step. Default stays 3 (the historical IB paper-mode cap).
+_MAX_L2_SLOTS = max(1, int(os.environ.get("MAX_L2_SLOTS", "3")))
 _AUDIT_RING_SIZE = 50     # last-N routing decisions for /api/l2-router/status
 _ALERT_FRESHNESS_SEC = 600  # 10 min — alerts older than this don't qualify
 
@@ -73,6 +76,12 @@ class L2DynamicRouter:
         self._sub_calls: int = 0
         self._unsub_calls: int = 0
         self._errors: int = 0
+        # v19.34.221 — IB Error 309 / pusher-cap watch. When the pusher rejects
+        # an L2 add because IB's market-depth limit is hit, it returns the
+        # symbol(s) in `skipped_capped`. Track that so a too-high MAX_L2_SLOTS
+        # (relative to the live IB entitlement) is visible, not silent thrash.
+        self._cap_rejections: int = 0
+        self._last_cap_skipped: List[str] = []
 
     def set_scanner(self, scanner) -> None:
         self._scanner = scanner
@@ -225,6 +234,17 @@ class L2DynamicRouter:
         self._audit.append(decision)
         self._last_routed_at = time.time()
         self._last_desired = desired
+        # v19.34.221 — surface IB-309 / pusher-cap rejections.
+        capped = sub_resp.get("skipped_capped") or []
+        if capped:
+            self._cap_rejections += 1
+            self._last_cap_skipped = list(capped)
+            logger.warning(
+                f"[L2-ROUTER] pusher CAPPED {len(capped)} L2 add(s) {capped} — "
+                f"MAX_L2_SLOTS={_MAX_L2_SLOTS} exceeds the pusher/IB market-depth "
+                f"limit (IB Error 309?). Lower MAX_L2_SLOTS or raise the Windows "
+                f"pusher max_slots + IB depth entitlement."
+            )
         logger.info(
             f"[L2-ROUTER] desired={desired} added={decision['added']} "
             f"removed={decision['removed']} skipped={decision['skipped_capped']}"
@@ -284,6 +304,8 @@ class L2DynamicRouter:
             "last_desired": list(self._last_desired),
             "tick_interval_sec": _TICK_SEC,
             "max_l2_slots": _MAX_L2_SLOTS,
+            "cap_rejections": self._cap_rejections,
+            "last_cap_skipped": list(self._last_cap_skipped),
             "alert_freshness_sec": _ALERT_FRESHNESS_SEC,
             "recent_decisions": list(self._audit)[-10:],
         }
