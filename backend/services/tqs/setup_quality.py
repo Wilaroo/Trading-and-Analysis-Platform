@@ -16,6 +16,16 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+def _env_on(key: str, default: bool = True) -> bool:
+    """True if env var `key` is truthy (or unset and default=True). Used to gate
+    the v19.34.230 setup-pillar de-compression so it is instantly reversible."""
+    import os
+    v = os.environ.get(key)
+    if v in (None, ""):
+        return default
+    return str(v).strip().lower() not in ("0", "false", "no", "off")
+
+
 @dataclass
 class SetupQualityScore:
     """Result of setup quality evaluation"""
@@ -153,6 +163,11 @@ class SetupQualityService:
         # 2. Historical Win Rate Score (25% weight)
         win_rate = 0.5  # Default
         ev_r = 0.0
+        # v19.34.230 (A1) — track whether a REAL expected-value figure was
+        # available. When it wasn't (the common case — learning loop lacks
+        # per-setup samples), the de-compression path derives the EV sub-score
+        # from the alert's R:R instead of pinning it at the flat 30.
+        has_ev_data = False
         
         # v19.34.213 — prefer the win_rate / EV the scanner already stamped on the
         # alert (strategy_win_rate / strategy_ev_r). Pre-fix this pillar ALWAYS
@@ -164,12 +179,14 @@ class SetupQualityService:
             win_rate = win_rate_override
             if ev_r_override is not None:
                 ev_r = ev_r_override
+                has_ev_data = True
         elif self._learning_loop:
             try:
                 stats = await self._learning_loop.get_contextual_win_rate(setup_type=base_setup)
                 if stats.get("sample_size", 0) >= 5:
                     win_rate = stats.get("win_rate", 0.5)
                     ev_r = stats.get("expected_value_r", 0.0)
+                    has_ev_data = True
             except Exception as e:
                 logger.debug(f"Could not get learning stats: {e}")
                 
@@ -194,7 +211,19 @@ class SetupQualityService:
             
         # 3. Expected Value Score (20% weight)
         # EV of 0.5R+ is good, 1R+ is excellent
-        if ev_r >= 1.0:
+        # v19.34.230 (A1) — when NO real EV figure is available (the common case;
+        # learning loop lacks per-setup samples), the legacy code pinned ev_score
+        # at the flat 30 (ev_r=0 default) for ~the whole book, freezing 20% of the
+        # Setup pillar (diagnostic: expected_value med=30, p10-p90 all 20-30).
+        # Instead derive the EV sub-score from the alert's R:R — a real, per-alert
+        # varying input — so the pillar regains variance AND a high-R:R setup can
+        # lift its ceiling. Env-gated; reversible to the legacy mapping.
+        _decompress_setup = _env_on("TQS_SETUP_DECOMPRESS", True)
+        if _decompress_setup and not has_ev_data:
+            _rr = risk_reward if (risk_reward and risk_reward > 0) else 2.0
+            result.ev_score = max(10.0, min(95.0, 25.0 + (_rr - 1.0) * 22.0))
+            result.factors.append(f"EV proxy from R:R {_rr:.1f}:1 (no live EV data)")
+        elif ev_r >= 1.0:
             result.ev_score = 100
             result.factors.append(f"Excellent EV: {ev_r:.2f}R (++)")
         elif ev_r >= 0.5:
@@ -222,7 +251,20 @@ class SetupQualityService:
                 
         # 5. SMB Grade Score (15% weight)
         smb_grade_scores = {"A+": 100, "A": 95, "B+": 80, "B": 65, "C+": 50, "C": 35, "D": 20, "F": 0}
-        result.smb_score = smb_grade_scores.get(smb_grade, 65)
+        # v19.34.230 (A2) — a MISSING / uninformative SMB grade was scored as
+        # "C" (35), a near-failing constant that dragged 15% of the Setup pillar
+        # down for ~the whole book (diagnostic: smb med=35, stdev=1.5). An absent
+        # signal should be NEUTRAL (50), not punitive. Real, corroborated grades
+        # are scored exactly as before. "Uninformative" = no grade / "C" with the
+        # default-ish 5-var band (no strong 5-var lift either way). Env-gated.
+        _smb_uninformative = (
+            (smb_grade in (None, "", "C")) and (20 <= (smb_5var_score or 0) < 40)
+        )
+        if _env_on("TQS_SETUP_DECOMPRESS", True) and _smb_uninformative:
+            result.smb_score = 50.0
+            result.factors.append("SMB grade uninformative → neutral 50 (decompress)")
+        else:
+            result.smb_score = smb_grade_scores.get(smb_grade, 65)
         
         # Also factor in 5-variable score (0-50 scale)
         if smb_5var_score >= 40:
@@ -239,13 +281,15 @@ class SetupQualityService:
         elif alert_priority == "high":
             result.pattern_score = min(100, result.pattern_score + 5)
             
-        # R:R bonus
-        if risk_reward >= 3.0:
-            result.ev_score = min(100, result.ev_score + 10)
-            result.factors.append(f"Excellent R:R of {risk_reward:.1f}:1 (+)")
-        elif risk_reward < 1.5:
-            result.ev_score = max(0, result.ev_score - 10)
-            result.factors.append(f"Poor R:R of {risk_reward:.1f}:1 (-)")
+        # R:R bonus — skip when the EV sub-score was ALREADY derived from R:R
+        # (v19.34.230 A1 decompress path) to avoid double-counting R:R.
+        if not (_decompress_setup and not has_ev_data):
+            if risk_reward >= 3.0:
+                result.ev_score = min(100, result.ev_score + 10)
+                result.factors.append(f"Excellent R:R of {risk_reward:.1f}:1 (+)")
+            elif risk_reward < 1.5:
+                result.ev_score = max(0, result.ev_score - 10)
+                result.factors.append(f"Poor R:R of {risk_reward:.1f}:1 (-)")
             
         # Calculate weighted total
         result.score = (
