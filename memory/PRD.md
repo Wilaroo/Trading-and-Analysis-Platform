@@ -630,3 +630,9 @@ Three operator-requested features (16 tests, all pass; deploy paste.rs a3R1H):
   and routes there with a "Force-flatten" button instead of erroring.
 See CHANGELOG.md.
 
+
+---
+### Update 2026-06-02 — v19.34.229 + v19.34.230 (TQS sizing + pillar de-compression)
+- v229: TQS position-size multipliers dialed to risk-neutral (~0.30x mean), conviction tilt kept (A=0.80 B=0.48 C=0.24 D=0.12 F=0.08). Deployed, live.
+- v230: Pillar de-compression (env-gated A1 EV-from-RR, A2 SMB-neutral-50, B3 per-setup exec history). Setup median+4.6/ceiling+6; clears v228 calibration floors. 15/15 tests. Deployed. LIVE-VERIFY 2026-06-03 RTH (grade distribution should spread from C+/C lump).
+- DGX-only conventions reconfirmed: deploy via paste.rs+curl (auto git-commit), pytest under .venv, restart via ./start_backend.sh --force. No automated testing agents (hardware-bound).

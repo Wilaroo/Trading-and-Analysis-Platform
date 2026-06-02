@@ -2043,3 +2043,19 @@ Operator option (a): keep the v228 conviction tilt but normalize the magnitude
 ~0.30x (was 0.371x). Env-only, no code change. Deployed to DGX via paste.rs/xo0cs,
 commit af7fab67. POSITION_SIZE_GRADE_A_MULT=0.80 B=0.48 C=0.24 D=0.12 F=0.08.
 Verified mean=0.297x against live grade mix + real _resolve_grade_multiplier path.
+
+## v19.34.230 — 2026-06-02 — TQS pillar de-compression (A1/A2/B3, env-gated)
+Durable follow-up to v228/v229. Widen the raw TQS so the percentile calibration
+has headroom over its absolute floors.
+  A1 (setup_quality.py) — EV-from-R:R when no live EV: ev_score=clamp(25+(RR-1)*22,10,95)
+    (was frozen at 30). A2 — missing/uninformative SMB -> neutral 50 (was C/35).
+  B3 (execution_quality.py) — history_score per-setup_type from a 15-min-cached
+    trade_outcomes aggregation, shrunk toward 60 by sample size (was pinned 60).
+  Flags: TQS_SETUP_DECOMPRESS / TQS_EXEC_DECOMPRESS (default ON; revert via env+restart).
+  Tunables: TQS_EXEC_HIST_TTL_SEC=900, TQS_EXEC_HIST_WINDOW_DAYS=30, TQS_EXEC_HIST_SHRINK_K=10.
+  Offline recompute (4000 alerts): setup median 48.9->53.5, ceiling 67.6->73.6,
+  stdev 6.68->7.44; composite stdev +0.06 (level shift, not spread) BUT clears the
+  v228 B>=57/A>=60 floors -> should mint B/A live (was 66% C+/34% C/0.1% B).
+  B3 currently ~no-op (sparse per-setup outcomes); grows as outcomes accrue.
+  15/15 pytest (tests/test_v19_34_230_pillar_decompress.py). Deployed paste.rs/E5sQn,
+  commit 2ea26925. LIVE-VERIFY 2026-06-03 RTH via diag_tqs_dist.py.

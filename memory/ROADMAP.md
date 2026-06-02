@@ -7,7 +7,26 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
-### 🔴 P0-NEXT (②) — De-compress the TQS pillars (queued 2026-06-02)
+### 🟡 P0-NEXT (②) — De-compress the TQS pillars — PARTIALLY DONE v19.34.230 (LIVE-VERIFY 2026-06-03)
+v19.34.230 shipped (env-gated A1/A2/B3):
+  - `setup` (A1) — EV-from-R:R when no live EV data: replaced the frozen
+    ev_score=30 with clamp(25+(RR-1)*22,10,95). (A2) missing/uninformative SMB →
+    neutral 50 (was punitive C/35). Offline recompute: setup median 48.9→53.5,
+    ceiling 67.6→**73.6**, stdev 6.68→7.44.
+  - `execution` (B3) — history_score now per-setup_type from a 15-min-cached
+    trade_outcomes aggregation, shrunk toward 60 by sample size. CURRENTLY a
+    near-no-op (sparse per-setup outcomes) — grows as outcomes accrue.
+  - Composite stdev barely moved (+0.06) — most of the setup change is a LEVEL
+    shift, not spread. BUT the +4.6 median / +6 ceiling pushes the composite over
+    the v228 calibration FLOORS (B≥57, A≥60) — the real unlock for grades stuck at
+    C+/C. Flags: TQS_SETUP_DECOMPRESS / TQS_EXEC_DECOMPRESS (default ON, reversible).
+  - 🔴 LIVE-VERIFY 2026-06-03 RTH: re-run `diag_tqs_dist.py 1` on fresh alerts;
+    expect B's to start appearing (was 66% C+ / 34% C / 0.1% B). If grades still
+    don't spread, options: steeper EV slope / lift WR curve / re-weight pillars
+    toward high-variance technical, OR lower TQS_CAL_FLOOR_A/B (1-line env tweak).
+  - Still TODO: `context` ~62 near-constant (range 54-70) — low dynamic range.
+
+### 🔴 P0-NEXT (②, original) — De-compress the TQS pillars (queued 2026-06-02)
 The composite TQS is a weighted AVERAGE of 5 pillars → crushed to 48-66/stdev 2.9.
 v228 calibration spreads the GRADES (relabeling), but the durable fix is widening
 the RAW composite by de-compressing the pillars that barely move:
