@@ -1,3 +1,26 @@
+## 2026-06-02 — v19.34.227 HELD-POSITION QUOTE PIN + watchdog wiring fix
+
+Follow-up to v226. ROOT of the CRM mark-less issue + two latent bugs:
+- **position_manager manage loop**: an open trade with NO quote at all hit
+  `if not quote: continue` and was NEVER flagged for re-subscribe (only the
+  "stale quote" branch flagged symbols) → it stayed mark-less forever. Now it's
+  added to `_stale_resub_set` so the resub drain + watchdog re-pin it.
+- **quote_resub_watchdog_loop was a silent no-op in production**: it read
+  `getattr(bot,"position_manager")` / `getattr(bot,"db")`, but the bot stores
+  `_position_manager` / `_db` → `_tick` NEVER ran. Fixed the lookups, AND the
+  watchdog now proactively PINS every `_open_trades` symbol into the pusher
+  quote universe each cycle (subscribes any held name missing from the live
+  subs). Held positions can no longer go mark-less (also needed for local stop
+  checks).
+- Tests: 11/11 pass (6 existing watchdog + 5 new pin —
+  `test_v19_34_227_open_position_quote_pin.py`). Deploy:
+  `deploy_v19_34_227.py` (paste.rs, multi-file, idempotent, commit+push).
+  BACKEND restart required. ⚠️ Operator live-check pending: confirm
+  `[v19.34.227 ... PINNING ...]` log + no open position with current_price=0.
+
+---
+
+
 ## 2026-06-02 — v19.34.226 KILL-SWITCH FALSE-TRIP FIX (zero-mark unrealized)
 
 ### Symptom (operator-reported)

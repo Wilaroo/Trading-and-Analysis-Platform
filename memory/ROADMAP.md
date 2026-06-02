@@ -7,15 +7,15 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
-### 🔴 P1 — Force quote-subscription for every open position (queued 2026-06-02)
-Surfaced by the v226 kill-switch false-trip: CRM (an open 95-sh long) lost its
-live quote when it fell out of the scan universe around the v224/225 pusher
-restarts → `current_price=0` → fake -$18,897 unrealized. v226 guards the P&L
-math, but a mark-less open position ALSO can't drive local stop checks (only the
-IB-side bracket protects it). FIX: ensure every symbol in `_open_trades` is
-always quote-subscribed (pin held names into the pusher's quote universe / a
-"protected positions" subscription set independent of scan rotation). Add a
-watchdog log when any open position's `current_price` is stale > N s.
+### ✅ P1 — Force quote-subscription for every open position — DONE v19.34.227
+Surfaced by the v226 kill-switch false-trip: CRM (open 95-sh long) lost its live
+quote when it fell out of the scan universe → `current_price=0` → fake -$18,897.
+DONE (v227): (1) manage loop now flags no-quote open trades into
+`_stale_resub_set`; (2) fixed quote_resub_watchdog wiring (`_position_manager`/
+`_db` — it was a prod no-op) and added a proactive PIN of every `_open_trades`
+symbol into the pusher quote universe each cycle. 11/11 tests. Also covers local
+stop-check reliability (a mark-less position can't drive local stops). Remaining
+nice-to-have: a stale-mark age watchdog log + UI tile (see P2 enhancement).
 
 
 ### 🟢 P2 — Enhancement: live order-book imbalance signal (queued 2026-06-02)

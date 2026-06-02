@@ -111,7 +111,8 @@ async def _record_escalation_event(
         )
 
 
-async def _tick(state: _State, position_manager: Any, db: Any) -> Dict[str, Any]:
+async def _tick(state: _State, position_manager: Any, db: Any,
+                open_position_symbols: Optional[set] = None) -> Dict[str, Any]:
     """One watchdog tick. Returns a summary dict for tests + telemetry."""
     summary: Dict[str, Any] = {
         "checked": 0,
@@ -119,23 +120,25 @@ async def _tick(state: _State, position_manager: Any, db: Any) -> Dict[str, Any]
         "resubscribed": 0,
         "escalated": 0,
         "cleared": 0,
+        "pinned": 0,
     }
 
-    # Pull the current stale set from position_manager. If the attribute
-    # doesn't exist yet (first manage loop hasn't run), there's nothing
-    # to do — exit early.
+    # v19.34.227 — held positions to PIN into the pusher quote universe so an
+    # open name can never go mark-less (separate from the stale set, which only
+    # catches names that still have a — stale — quote).
+    open_syms = {str(s).upper().strip() for s in (open_position_symbols or set()) if s}
+
+    # Pull the current stale set from position_manager.
     stale_set = getattr(position_manager, "_stale_resub_set", None)
-    if not stale_set:
-        # No symbols stale right now. Clear any tracked attempts whose
-        # symbol is no longer in the stale set (quote recovered).
+    tracked = sorted({str(s).upper().strip() for s in (stale_set or set()) if s})
+
+    # Nothing to verify AND nothing to pin → clear recovered attempts + exit.
+    if not tracked and not open_syms:
         for sym in list(state.snapshot().keys()):
             state.clear(sym)
             summary["cleared"] += 1
         return summary
 
-    # Snapshot the set so we can safely iterate while position_manager
-    # may be mutating it on its own thread.
-    tracked = sorted({str(s).upper().strip() for s in stale_set if s})
     summary["checked"] = len(tracked)
 
     try:
@@ -193,6 +196,29 @@ async def _tick(state: _State, position_manager: Any, db: Any) -> Dict[str, Any]
                 pusher_subs_count=pusher_subs_count,
             )
 
+    # ── v19.34.227 — proactive PIN of held positions ──────────────────
+    # Any open-position symbol missing from the pusher's live quote set is
+    # subscribed NOW so the position always has a live mark (also needed for
+    # local stop checks). This catches names that fell entirely out of the
+    # quote universe — which the stale set above can't, since a mark-less
+    # position has no (stale) quote to flag.
+    held_missing = [s for s in sorted(open_syms) if s not in pusher_subs]
+    if held_missing:
+        logger.warning(
+            "[v19.34.227 quote-resub-watchdog] PINNING %d held position(s) "
+            "missing from the pusher quote universe: %s%s",
+            len(held_missing), held_missing[:8],
+            "…" if len(held_missing) > 8 else "",
+        )
+        try:
+            await asyncio.to_thread(rpc.subscribe_symbols, set(held_missing))
+            summary["pinned"] = len(held_missing)
+        except Exception as e:
+            logger.warning(
+                "[v19.34.227 quote-resub-watchdog] pin subscribe failed: "
+                "%s: %s", type(e).__name__, e,
+            )
+
     # Any symbol that was missing-tracked but is now confirmed in the
     # live subscription set has effectively recovered — clear its state
     # so future drops start the attempt counter from 0.
@@ -231,10 +257,31 @@ async def quote_resub_watchdog_loop(
 
     while getattr(bot, "_running", True):
         try:
-            position_manager = getattr(bot, "position_manager", None)
-            db = getattr(bot, "db", None)
+            # v19.34.227 — the bot stores these as `_position_manager` / `_db`
+            # (the non-underscore lookups returned None, so `_tick` NEVER ran
+            # and the stale-mark watchdog was a silent no-op in production).
+            position_manager = (
+                getattr(bot, "_position_manager", None)
+                or getattr(bot, "position_manager", None)
+            )
+            db = getattr(bot, "_db", None)
+            if db is None:
+                db = getattr(bot, "db", None)
+            # v19.34.227 — proactively PIN every held position into the pusher
+            # quote universe so an open name never goes mark-less (root cause of
+            # the CRM current_price=0 → fake kill-switch trip).
+            open_syms = set()
+            try:
+                for _t in (getattr(bot, "_open_trades", {}) or {}).values():
+                    _s = (getattr(_t, "symbol", "") or "").upper().strip()
+                    _rs = abs(float(getattr(_t, "remaining_shares", 0) or 0))
+                    if _s and _rs > 0:
+                        open_syms.add(_s)
+            except Exception:
+                open_syms = set()
             if position_manager is not None:
-                await _tick(state, position_manager, db)
+                await _tick(state, position_manager, db,
+                            open_position_symbols=open_syms)
         except Exception as e:
             logger.debug(
                 "[v19.34.80 quote-resub-watchdog] tick error "

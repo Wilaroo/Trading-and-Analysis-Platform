@@ -565,6 +565,19 @@ class PositionManager:
                     quote = await bot._alpaca_service.get_quote(trade.symbol)
 
                 if not quote:
+                    # v19.34.227 — a held position with NO quote at all (fell
+                    # entirely out of the pusher's quote universe, e.g. CRM
+                    # after a scan-universe rotation) never reached the stale
+                    # branch below, so it was never re-subscribed and went
+                    # mark-less (current_price stuck → fake -$18,897 kill-switch
+                    # trip, v226). Flag it so the held name gets re-pinned into
+                    # the quote feed by the resub drain + quote_resub_watchdog.
+                    try:
+                        if not hasattr(self, "_stale_resub_set"):
+                            self._stale_resub_set = set()
+                        self._stale_resub_set.add(trade.symbol.upper())
+                    except Exception:
+                        pass
                     continue
 
                 # v19.13 — staleness guard. Skip stop checks when quote
