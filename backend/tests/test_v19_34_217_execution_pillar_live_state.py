@@ -101,9 +101,24 @@ class _FakeLoop:
 def _score(outcomes, profile=None):
     svc = eq.ExecutionQualityService()
     svc.set_services(learning_loop=_FakeLoop(outcomes, profile))
+    # v19.34.219 — pillar reads trade_outcomes directly; patch that read to the
+    # test's outcome list (newest-first). _derive handles objects OR dicts.
+    eq._recent_trade_outcomes = lambda limit=30: list(outcomes)[:limit]
     return asyncio.get_event_loop().run_until_complete(
         svc.calculate_score("AAA", "squeeze")
     )
+
+
+def test_derive_handles_raw_dicts():
+    # v19.34.219 — raw trade_outcomes mongo dicts must derive identically.
+    outs = [{"outcome": "lost"}, {"outcome": "lost"}, {"outcome": "won"},
+            {"outcome": "won", "execution": {"r_capture_percent": 80.0}}]
+    s = eq._derive_live_execution_state(outs)
+    assert s["sample"] == 4
+    assert s["consecutive_losses"] == 2
+    assert s["tilt_severity"] == "mild"
+    assert round(s["recent_win_rate"], 2) == 0.5
+    assert s["avg_r_capture_pct"] == 80.0
 
 
 def test_pillar_depins_hot_vs_cold():

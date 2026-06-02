@@ -16,12 +16,62 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.219 — direct trade_outcomes reader ─────────────────────────────
+# The Execution pillar previously pulled recent outcomes via
+# `learning_loop.get_recent_outcomes()`, but that reference returns EMPTY inside
+# the TQS-engine context (the learning loop's collections are wired in a
+# deferred background init, and the engine captured the loop before/around it),
+# so the pillar fell back to the all-default constant. Read `trade_outcomes`
+# DIRECTLY via a cached pymongo client (same pattern as pnl_compute) so the
+# pillar's recent_win_rate / consecutive_losses are always the live tape.
+_TO_CLIENT = None
+_TO_DB = None
+
+
+def _get_trade_outcomes_collection():
+    global _TO_CLIENT, _TO_DB
+    if _TO_DB is not None:
+        return _TO_DB["trade_outcomes"]
+    import os
+    mongo_url = os.environ.get("MONGO_URL")
+    if not mongo_url:
+        return None
+    try:
+        from pymongo import MongoClient
+        _TO_CLIENT = MongoClient(mongo_url, serverSelectionTimeoutMS=1500)
+        _TO_DB = _TO_CLIENT[os.environ.get("DB_NAME", "tradecommand")]
+        return _TO_DB["trade_outcomes"]
+    except Exception as e:
+        logger.debug("[exec-pillar] trade_outcomes mongo init failed: %s", e)
+        return None
+
+
+def _recent_trade_outcomes(limit: int = 30):
+    """Newest-first raw trade_outcomes dicts. Empty list on any failure."""
+    coll = _get_trade_outcomes_collection()
+    if coll is None:
+        return []
+    try:
+        return list(coll.find(
+            {}, {"outcome": 1, "actual_r": 1, "created_at": 1, "execution": 1}
+        ).sort("created_at", -1).limit(limit))
+    except Exception as e:
+        logger.debug("[exec-pillar] trade_outcomes read failed: %s", e)
+        return []
+
+
+def _field(o, name, default=None):
+    """Read `name` from a mongo dict OR a TradeOutcome object."""
+    if isinstance(o, dict):
+        return o.get(name, default)
+    return getattr(o, name, default)
+
+
 def _derive_live_execution_state(outcomes) -> Dict:
-    """v19.34.217 — compute the execution-state inputs the pillar needs from a
-    NEWEST-FIRST list of recent TradeOutcome objects (the fresh trade_outcomes
-    feed). Used when the persisted `trader_profiles` doc is missing/empty so the
-    Execution pillar discriminates instead of pinning at the all-default
-    constant.
+    """v19.34.217/219 — compute the execution-state inputs the pillar needs from
+    a NEWEST-FIRST list of recent outcomes (raw `trade_outcomes` dicts OR
+    TradeOutcome objects) so the Execution pillar discriminates instead of
+    pinning at the all-default constant.
 
       recent_win_rate    = wins / (wins + losses)
       consecutive_losses = trailing loss streak from the most-recent close
@@ -33,7 +83,7 @@ def _derive_live_execution_state(outcomes) -> Dict:
     counting = True  # stop counting the trailing streak at the first non-loss
     r_caps = []
     for o in outcomes:  # newest-first (sorted created_at DESC by caller)
-        oc = str(getattr(o, "outcome", "")).lower()
+        oc = str(_field(o, "outcome", "")).lower()
         if oc == "won":
             wins += 1
             counting = False
@@ -43,8 +93,9 @@ def _derive_live_execution_state(outcomes) -> Dict:
                 consec += 1
         else:
             counting = False
-        ex = getattr(o, "execution", None)
-        rc = getattr(ex, "r_capture_percent", 0) if ex else 0
+        ex = _field(o, "execution", None)
+        rc = (ex.get("r_capture_percent", 0) if isinstance(ex, dict)
+              else getattr(ex, "r_capture_percent", 0) if ex else 0)
         if rc and rc > 0:
             r_caps.append(rc)
 
@@ -195,32 +246,38 @@ class ExecutionQualityService:
             if profile.overall_win_rate > 0:
                 result.recent_win_rate = profile.overall_win_rate
 
-        # v19.34.218 — recent_win_rate + consecutive_losses are OBJECTIVE facts
-        # from the outcome tape. The in-memory trader profile is unreliable for
-        # them (overall_win_rate frequently aggregates to 0; the tilt counter
-        # resets), which left both pinned at default even when total_trades>0.
-        # ALWAYS derive them live from trade_outcomes when any outcomes exist,
-        # overriding the profile so the pillar reflects the real recent streak.
-        # (When the profile has NO data at all, also adopt the live r-capture.)
-        if self._learning_loop:
-            try:
+        # v19.34.218/219 — recent_win_rate + consecutive_losses are OBJECTIVE
+        # facts from the outcome tape. The in-memory trader profile is unreliable
+        # for them (overall_win_rate aggregates to 0; tilt counter resets) AND
+        # learning_loop.get_recent_outcomes() returns EMPTY in the TQS-engine
+        # context (deferred init). So read `trade_outcomes` DIRECTLY via pymongo
+        # and ALWAYS override these fields when any outcomes exist.
+        try:
+            recent = _recent_trade_outcomes(limit=30)
+            if not recent and self._learning_loop:
+                # last-resort fallback to the loop (e.g. tests with a fake loop)
                 recent = await self._learning_loop.get_recent_outcomes(limit=30)
-                live = _derive_live_execution_state(recent)
-                if live["sample"] > 0:
-                    result.recent_win_rate = live["recent_win_rate"]
-                    result.consecutive_losses = live["consecutive_losses"]
-                    result.is_tilted = live["is_tilted"]
-                    result.tilt_severity = live["tilt_severity"]
-                    if not profile_has_data and live["avg_r_capture_pct"] is not None:
-                        result.avg_r_capture_pct = live["avg_r_capture_pct"]
-                        result.tends_to_exit_early = live["avg_r_capture_pct"] < 50
-                    result.factors.append(
-                        f"Live exec state from {live['sample']} recent closes "
-                        f"(win {live['recent_win_rate']*100:.0f}%, "
-                        f"{live['consecutive_losses']} consec losses)"
-                    )
-            except Exception as e:
-                logger.debug(f"Could not derive live execution state: {e}")
+            live = _derive_live_execution_state(recent)
+            if live["sample"] > 0:
+                result.recent_win_rate = live["recent_win_rate"]
+                result.consecutive_losses = live["consecutive_losses"]
+                result.is_tilted = live["is_tilted"]
+                result.tilt_severity = live["tilt_severity"]
+                if not profile_has_data and live["avg_r_capture_pct"] is not None:
+                    result.avg_r_capture_pct = live["avg_r_capture_pct"]
+                    result.tends_to_exit_early = live["avg_r_capture_pct"] < 50
+                result.factors.append(
+                    f"Live exec state from {live['sample']} recent closes "
+                    f"(win {live['recent_win_rate']*100:.0f}%, "
+                    f"{live['consecutive_losses']} consec losses)"
+                )
+            else:
+                logger.warning(
+                    "[v19.34.219 exec-pillar] no recent trade_outcomes found — "
+                    "recent_win_rate/consecutive_losses fall back to defaults"
+                )
+        except Exception as e:
+            logger.debug(f"Could not derive live execution state: {e}")
                 
         # 1. Historical Execution Score (25% weight)
         # Based on overall execution quality
