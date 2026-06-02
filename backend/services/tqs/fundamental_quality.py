@@ -131,39 +131,49 @@ class FundamentalQualityService:
         except Exception as e:
             logger.debug(f"unified_fundamentals_cache lookup failed for {symbol}: {e}")
                 
-        # v19.34.201 — live news → catalyst/sentiment when the caller didn't
-        # supply it. The TQS engine now wires `news_service` into this pillar
-        # (was always None → catalyst stuck at the "no catalyst" floor of 40,
-        # which is 30% of the pillar and the single biggest cause of the flat
-        # ~57 fundamental score). `_analyze_sentiment` returns a STRING
-        # (bullish/bearish/neutral) → map to a float the scorer understands.
-        if (self._news_service is not None and has_catalyst is None
+        # v19.34.220 — read recent news from the FRESH local `news_articles`
+        # cache (Finnhub + Yahoo collectors, ~92k docs, updated continuously,
+        # FinBERT-scored) instead of the live `news_service.get_ticker_news`.
+        # That live path tries IB historical news FIRST with a 30s timeout (it
+        # hangs in this ib-direct deployment) and then Finnhub (rate-limited to
+        # ~60/min) — completely unusable per-alert across 100+ alerts/scan, which
+        # is why catalyst was floored at "no catalyst" (40 → 30% of the pillar).
+        # The cache query is a fast indexed lookup: no hang, no rate limit.
+        # `news_articles.sentiment` is the FinBERT dict
+        # {"sentiment": "positive|negative|neutral", "score": <pos-neg, -1..1>}
+        # (None until scored).
+        if (self._db is not None and has_catalyst is None
                 and has_recent_news is None):
             try:
                 from datetime import datetime, timezone, timedelta
-                items = await self._news_service.get_ticker_news(symbol, max_items=10)
-                real = [it for it in (items or []) if not it.get("is_placeholder")]
-                if real:
-                    cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
-                    recent = []
-                    for it in real:
-                        try:
-                            ts = datetime.fromisoformat(
-                                str(it.get("timestamp", "")).replace("Z", "+00:00"))
-                            if ts >= cutoff:
-                                recent.append(it)
-                        except (ValueError, TypeError):
-                            recent.append(it)  # keep undated items
-                    pool = recent or real
-                    _smap = {"bullish": 1.0, "positive": 1.0,
-                             "bearish": -1.0, "negative": -1.0}
-                    vals = [_smap.get(str(it.get("sentiment", "")).lower(), 0.0)
-                            for it in pool]
-                    if pool:
-                        has_recent_news = True
+                cutoff = (datetime.now(timezone.utc)
+                          - timedelta(hours=72)).isoformat()
+                rows = list(self._db["news_articles"].find(
+                    {"symbol": symbol, "datetime": {"$gte": cutoff}},
+                    {"_id": 0, "sentiment": 1},
+                ).sort("datetime", -1).limit(20))
+                if rows:
+                    has_recent_news = True
+                    vals = []
+                    for r in rows:
+                        s = r.get("sentiment")
+                        if isinstance(s, dict):
+                            sc = s.get("score")
+                            if sc is not None:
+                                vals.append(max(-1.0, min(1.0, float(sc))))
+                            else:
+                                lbl = str(s.get("sentiment", "")).lower()
+                                vals.append(1.0 if lbl == "positive"
+                                            else -1.0 if lbl == "negative" else 0.0)
+                        elif isinstance(s, str) and s:
+                            lbl = s.lower()
+                            vals.append(1.0 if lbl in ("positive", "bullish")
+                                        else -1.0 if lbl in ("negative", "bearish")
+                                        else 0.0)
+                    if vals:
                         news_sentiment = sum(vals) / len(vals)
             except Exception as e:
-                logger.debug(f"news enrichment failed for {symbol}: {e}")
+                logger.debug(f"news cache enrichment failed for {symbol}: {e}")
 
         # Check earnings calendar
         if self._db is not None and days_to_earnings is None:
