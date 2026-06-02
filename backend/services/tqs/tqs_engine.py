@@ -429,21 +429,34 @@ class TQSEngine:
             }
             result.trade_timeframe = timeframe_map.get(trade_style, "Intraday")
             
-            # Assign overall grade
-            if result.score >= 85:
-                result.grade = "A"
-            elif result.score >= 75:
-                result.grade = "B+"
-            elif result.score >= 65:
-                result.grade = "B"
-            elif result.score >= 55:
-                result.grade = "C+"
-            elif result.score >= 45:
-                result.grade = "C"
-            elif result.score >= 35:
-                result.grade = "D"
-            else:
-                result.grade = "F"
+            # Assign overall grade.
+            # v19.34.228 — calibrate the grade by PERCENTILE RANK against a
+            # rolling reference instead of fixed absolute bands. The composite
+            # is a weighted AVERAGE of 5 pillars → crushed into ~48-66, so the
+            # old bands (A>=85 ...) lumped ~100% of trades into C/C+ and sized
+            # everything at 0.3x. Calibration spreads grades by rank with an
+            # absolute floor (hybrid) and falls back to static bands if the
+            # rolling reference is unavailable. Monotonic/safe: only relabels.
+            try:
+                from services.tqs.grade_calibration import calibrate_grade
+                result.grade = calibrate_grade(result.score)
+            except Exception as _cal_err:
+                logger.warning("[tqs-cal] calibrate_grade failed (%s) — static fallback",
+                               _cal_err)
+                if result.score >= 85:
+                    result.grade = "A"
+                elif result.score >= 75:
+                    result.grade = "B+"
+                elif result.score >= 65:
+                    result.grade = "B"
+                elif result.score >= 55:
+                    result.grade = "C+"
+                elif result.score >= 45:
+                    result.grade = "C"
+                elif result.score >= 35:
+                    result.grade = "D"
+                else:
+                    result.grade = "F"
                 
             # Determine action
             if result.score >= self.ACTION_THRESHOLDS["STRONG_BUY"]:

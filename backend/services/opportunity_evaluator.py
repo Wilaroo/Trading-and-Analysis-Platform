@@ -25,12 +25,18 @@ logger = logging.getLogger(__name__)
 # Operator choices:
 #   Q1b: D=0.1× (vanishingly small, real money for learning — not skip)
 #   Q2b: unknown/missing → treated as D (strict, no silent default-to-B)
-# Tunable via env: `POSITION_SIZE_GRADE_{A,B,C,D}_MULT`.
+# v19.34.228 — recalibrated for the percentile-graded TQS (grades now spread
+# A/B/C/D/F by rank instead of 100% C). Conservative + risk-neutral on average:
+# C unchanged at 0.3× so the mean position size stays ~today's, just
+# concentrated into higher-conviction setups. F added explicitly (was falling
+# through to D's default).
+# Tunable via env: `POSITION_SIZE_GRADE_{A,B,C,D,F}_MULT`.
 _GRADE_MULTIPLIER_DEFAULTS = {
     "A": 1.0,
-    "B": 0.7,
+    "B": 0.6,
     "C": 0.3,
-    "D": 0.1,
+    "D": 0.15,
+    "F": 0.1,
 }
 
 
@@ -42,7 +48,7 @@ def _resolve_grade_multiplier(grade: Optional[str]) -> Tuple[float, str]:
         per operator choice Q2b).
       • Letter is upper-cased and only the first character considered
         (so "A-", "A+", "a", "A grade" all collapse to "A").
-      • Letters outside {A,B,C,D} → "D" (strict).
+      • Letters outside {A,B,C,D,F} → "D" (strict).
     """
     import os as _os
 
@@ -60,6 +66,7 @@ def _resolve_grade_multiplier(grade: Optional[str]) -> Tuple[float, str]:
         "B": _envf("POSITION_SIZE_GRADE_B_MULT", _GRADE_MULTIPLIER_DEFAULTS["B"]),
         "C": _envf("POSITION_SIZE_GRADE_C_MULT", _GRADE_MULTIPLIER_DEFAULTS["C"]),
         "D": _envf("POSITION_SIZE_GRADE_D_MULT", _GRADE_MULTIPLIER_DEFAULTS["D"]),
+        "F": _envf("POSITION_SIZE_GRADE_F_MULT", _GRADE_MULTIPLIER_DEFAULTS["F"]),
     }
     if not isinstance(grade, str) or not grade.strip():
         return (table["D"], "D")
