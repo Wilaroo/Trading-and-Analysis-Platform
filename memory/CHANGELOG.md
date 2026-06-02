@@ -2036,3 +2036,10 @@ dormant since 2026-04-07).
   dist_from_ema9=-0.01%
 
 ---
+
+## v19.34.229 — 2026-06-02 — TQS sizing back to risk-neutral (~0.30x mean)
+Operator option (a): keep the v228 conviction tilt but normalize the magnitude
+(scale x0.808) so the mean position-size multiplier returns to the historical
+~0.30x (was 0.371x). Env-only, no code change. Deployed to DGX via paste.rs/xo0cs,
+commit af7fab67. POSITION_SIZE_GRADE_A_MULT=0.80 B=0.48 C=0.24 D=0.12 F=0.08.
+Verified mean=0.297x against live grade mix + real _resolve_grade_multiplier path.
