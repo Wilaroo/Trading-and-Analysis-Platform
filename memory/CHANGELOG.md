@@ -1,3 +1,47 @@
+## 2026-06-02 — v19.34.228 TQS GRADE CALIBRATION (percentile rank + floor) — DEPLOYED, live-verified
+
+### Problem (validated, not guessed)
+The composite TQS is a weighted AVERAGE of 5 pillars (tqs_engine.calculate_tqs).
+Averaging crushes variance → scores live in ~48-66, stdev ~2.9 (verified live:
+`recomputed==stored` for every alert, left tail pre-gated `<48 ≈ 0%`, only 19
+distinct integer scores). The old absolute bands (A≥85 …) lumped ~100% of trades
+into C/C+ → 100% sized at 0.3× (the 1-share TSEM/MU positions). The absolute
+score is a poor ruler but the RANKING is valid.
+
+### Fix
+- NEW `services/tqs/grade_calibration.py`: grade by PERCENTILE RANK against a
+  rolling reference (trailing 5d of `live_alerts.tqs_score`, TTL-cached 15min,
+  dedicated sync MongoClient like execution_quality) + ABSOLUTE FLOOR (no A
+  unless raw≥60, no B unless ≥57). Monotonic/safe (only relabels), self-adapting
+  (auto-respreads when pillars are later de-compressed — no redeploy), static-band
+  fallback if reference unavailable/too small.
+- `tqs_engine.calculate_tqs`: score→grade now calls `calibrate_grade` (static
+  fallback on error).
+- `opportunity_evaluator`: sizer recalibrated A=1.0 B=0.6 C=0.3 D=0.15 F=0.1
+  (F added explicitly; was falling through to D). Env-overridable.
+- Tests: `test_v19_34_228_tqs_grade_calibration.py` 7/7 pass.
+- Env knobs: `TQS_CAL_ENABLED`, `TQS_CAL_PCT_{A,B,C,D}`, `TQS_CAL_FLOOR_{A,B}`,
+  `TQS_CAL_WINDOW_DAYS`, `TQS_CAL_TTL_SEC`, `TQS_CAL_MIN_SAMPLE`,
+  `POSITION_SIZE_GRADE_{A,B,C,D,F}_MULT`.
+- Deploy `deploy_v19_34_228.py` (paste.rs, multi-file incl. new file, idempotent,
+  runs pytest, commit+push). Commit 3374b43c on GitHub main.
+
+### LIVE-VERIFIED (verify_tqs_calibration_live.py, market closed)
+reference n=6492. New grade spread: A 9.3% / B 20.9% / C 35.4% / D 24.4% /
+F 10.0% (target ~10/20/35/25/10 ✓). Mean size multiplier 0.371× (up from flat
+0.30×) — a ~24% avg size-up because ~9% now earn A@1.0× (taken trades ~0.33-0.35×
+since the bot doesn't take only top-ranked). Tunable live via env. Calibration
+applies to NEW alerts going forward (historical grades unchanged).
+
+### Durable follow-up (②, P0-next)
+De-compress the pillars that squeeze the raw composite: `setup` (median 48,
+caps ~65) and `execution` (median 49 = its floor; still defaults — not enough
+per-setup trade_outcomes). Widening these widens the raw score; the calibration
+layer then auto-respreads.
+
+---
+
+
 ## 2026-06-02 — v19.34.227 HELD-POSITION QUOTE PIN + watchdog wiring fix
 
 Follow-up to v226. ROOT of the CRM mark-less issue + two latent bugs:

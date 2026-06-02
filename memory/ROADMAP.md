@@ -7,6 +7,25 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
+### 🔴 P0-NEXT (②) — De-compress the TQS pillars (queued 2026-06-02)
+The composite TQS is a weighted AVERAGE of 5 pillars → crushed to 48-66/stdev 2.9.
+v228 calibration spreads the GRADES (relabeling), but the durable fix is widening
+the RAW composite by de-compressing the pillars that barely move:
+  - `setup`: median 48, caps ~65 — why does setup quality top out so low? Audit
+    setup_quality.py scoring ceiling/inputs.
+  - `execution`: median 49 = its floor — still defaults (not enough per-setup
+    `trade_outcomes` to lift it). Either widen the prior or accelerate outcome
+    accrual.
+  - `context`: ~62 nearly constant (range 54-70) — low dynamic range.
+When the raw score widens, the v228 calibration layer auto-respreads (no
+redeploy). After this, revisit whether the sizer magnitude (mean ~0.37× on
+alerts) is right.
+
+### ✅ P0 — TQS grade-band recalibration — DONE v19.34.228 (calibration layer)
+Shipped percentile-rank + absolute-floor grade calibration. LIVE: grades spread
+A 9.3% / B 20.9% / C 35.4% / D 24.4% / F 10.0%; mean size mult 0.371× (was flat
+0.30×). Tunable live via TQS_CAL_* / POSITION_SIZE_GRADE_*_MULT. See CHANGELOG.
+
 ### ✅ P1 — Force quote-subscription for every open position — DONE v19.34.227
 Surfaced by the v226 kill-switch false-trip: CRM (open 95-sh long) lost its live
 quote when it fell out of the scan universe → `current_price=0` → fake -$18,897.

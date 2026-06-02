@@ -26,7 +26,23 @@
 
 ---
 
-## 📌 Status snapshot — 2026-06-02 (v19.34.226 — DEPLOYED, live-verified)
+## 📌 Status snapshot — 2026-06-02 (v19.34.228 — DEPLOYED, live-verified)
+
+**TQS grade calibration shipped (the "score it better" fix).** Validated that
+the composite is a weighted AVERAGE of 5 pillars → crushed to 48-66/stdev 2.9
+(recomputed==stored, left tail pre-gated, 19 distinct scores). So everything was
+C/C+ → 100% sized 0.3×. NEW `grade_calibration.py` grades by PERCENTILE RANK vs a
+rolling 5d reference + absolute floor (no A<60, no B<57); monotonic/safe,
+self-adapting, static fallback. Sizer recalibrated A=1.0/B=0.6/C=0.3/D=0.15/F=0.1.
+LIVE (n=6492): A 9.3% / B 20.9% / C 35.4% / D 24.4% / F 10.0%; mean mult 0.371×
+(~24% avg size-up from the old flat 0.30× — tunable live via TQS_CAL_* /
+POSITION_SIZE_GRADE_*_MULT). Applies to new alerts going forward. Commit 3374b43c.
+**P0-NEXT (②):** de-compress the `setup` (caps ~65) and `execution` (floor 49)
+pillars so the RAW composite widens; calibration then auto-respreads.
+
+---
+
+## 📌 Status snapshot — 2026-06-02 (v19.34.226/227 — DEPLOYED, live-verified)
 
 **Kill-switch false-trip FIXED.** The v123 daily-loss kill-switch kept tripping
 on `unrealized=-$18,890`. Root cause (proven via diag_killswitch_unrealized.py):
