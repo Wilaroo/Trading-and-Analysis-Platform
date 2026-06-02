@@ -714,11 +714,21 @@ class PositionManager:
                         )
                         trade._unstopped_warned_at = time.time()
 
-                # Calculate unrealized P&L on remaining shares
-                if trade.direction == TradeDirection.LONG:
-                    trade.unrealized_pnl = (trade.current_price - trade.fill_price) * trade.remaining_shares
+                # Calculate unrealized P&L on remaining shares.
+                # v19.34.226 — NEVER mark off a missing/zero price. A stale
+                # current_price <= 0 (symbol dropped from the quote push or a
+                # freshly-restored/adopted trade) would yield
+                # (0 - fill) * shares = a catastrophic FAKE loss (CRM 95sh @
+                # $198.92 → -$18,897) that repeatedly tripped the v123
+                # daily-loss kill-switch. Leave unrealized at its last good
+                # value until a valid mark arrives.
+                _cp = trade.current_price
+                if not _cp or _cp <= 0:
+                    pass
+                elif trade.direction == TradeDirection.LONG:
+                    trade.unrealized_pnl = (_cp - trade.fill_price) * trade.remaining_shares
                 else:
-                    trade.unrealized_pnl = (trade.fill_price - trade.current_price) * trade.remaining_shares
+                    trade.unrealized_pnl = (trade.fill_price - _cp) * trade.remaining_shares
 
                 # === MFE/MAE TRACKING ===
                 # Track from moment of fill for the full trade lifecycle

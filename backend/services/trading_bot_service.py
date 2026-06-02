@@ -5355,16 +5355,31 @@ class TradingBotService:
         except Exception as e:
             logger.debug("[v123 kill-switch] realized-pnl query failed: %s", e)
 
-        # Unrealized — sum from in-memory open trades (best-effort)
+        # Unrealized — sum from in-memory open trades (best-effort).
+        # v19.34.226 — SKIP any trade with no valid mark (current_price <= 0).
+        # A single stale-priced position (CRM 95sh, current_price=0) produced a
+        # FAKE -$18,897 unrealized that repeatedly tripped the daily-loss
+        # kill-switch even though genuine intraday P&L was +$7. A missing mark
+        # must NEVER trip the kill-switch.
         unrealized = 0.0
+        skipped_no_mark = 0
         try:
             for t in self._open_trades.values():
                 try:
+                    cur = float(getattr(t, "current_price", 0) or 0)
+                    if cur <= 0:
+                        skipped_no_mark += 1
+                        continue
                     unrealized += float(getattr(t, "unrealized_pnl", 0) or 0)
                 except (TypeError, ValueError):
                     continue
         except Exception:
             pass
+        if skipped_no_mark:
+            logger.warning(
+                "[v123 kill-switch] skipped %d open trade(s) with no valid mark "
+                "(current_price<=0) from the unrealized sum", skipped_no_mark,
+            )
 
         return {
             "realized":     round(realized, 2),
