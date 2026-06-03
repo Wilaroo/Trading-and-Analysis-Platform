@@ -1,3 +1,18 @@
+## 2026-06-03 — v19.34.246 CHART-CACHE RTH FRESHNESS CEILING (C/#1, BUILT paste.rs xZQbP)
+
+Root cause CONFIRMED for frozen live charts: `CHART_CACHE_TTL_INTRADAY_S=28800`
+(8h) on the DGX cached the MAIN chart's full-window response for the whole
+session → IBM 5min stuck at 10:17 with no newer candles (cache rows showed
+cached_at 12:33 → expires_at 20:33, +8h). The session-aware rollover clamp only
+prevented crossing into the NEXT session, not staleness DURING RTH.
+Fix: `_is_session_active_now` (04:00-20:00 ET, DST-safe) + an RTH ceiling — during
+the active session the intraday TTL is capped to `CHART_CACHE_RTH_MAX_S` (default
+60s); the long 8h TTL still applies overnight for instant revisits. 5 pytest.
+FOLLOW-UP: verify the chart-tail WS is actually appending live bars (the skeleton
+should be topped up between cache rebuilds) — if it is, charts are near-instant;
+if not, worst-case lag is now 60s instead of 8h.
+
+
 ## 2026-06-03 — v19.34.245 EOD CLOSE HONOURS TRADE-STYLE (B / #6, BUILT paste.rs 3CEck)
 
 Recurring bug (logged v19.34.63/69): both EOD-close paths trusted a per-trade

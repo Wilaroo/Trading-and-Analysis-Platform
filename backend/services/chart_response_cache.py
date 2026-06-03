@@ -265,6 +265,25 @@ def get_chart_response_cache(db=None) -> ChartResponseCache:
     return _singleton
 
 
+def _is_session_active_now(now: Optional[datetime] = None) -> bool:
+    """v19.34.246 — True during the extended US-equity session (Mon-Fri,
+    04:00-20:00 ET) when new intraday bars are continuously forming. Used to cap
+    the intraday chart-cache TTL so the live chart can't outlive fresh data.
+    DST-safe via zoneinfo. Overnight returns False (no new bars → long TTL is
+    fine for instant revisits)."""
+    from zoneinfo import ZoneInfo
+
+    et = ZoneInfo("America/New_York")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    n = now.astimezone(et)
+    if n.weekday() >= 5:
+        return False
+    mins = n.hour * 60 + n.minute
+    return (4 * 60) <= mins < (20 * 60)
+
+
 def _seconds_until_session_rollover(
     now: Optional[datetime] = None,
     rollover_hour_et: int = 17,
@@ -336,6 +355,16 @@ def chart_cache_ttl_for(timeframe: str, now: Optional[datetime] = None) -> int:
     is_daily = tf in {"1day", "daily", "1d", "1week", "weekly", "1w"}
     if is_daily:
         return daily
+
+    # v19.34.246 — RTH FRESHNESS CEILING. During the active session new intraday
+    # bars form continuously, so a long full-window TTL (the operator's 8h
+    # CHART_CACHE_TTL_INTRADAY_S=28800) FREEZES the live chart at the first fetch
+    # of the session (observed: IBM 5min stuck at 10:17, no newer candles for
+    # hours). Cap the effective intraday TTL to a small ceiling while the session
+    # is active; the long TTL still applies overnight for instant revisits when
+    # no new bars exist. Env CHART_CACHE_RTH_MAX_S (default 60 = original default).
+    if _is_session_active_now(now):
+        intraday = min(intraday, _envint("CHART_CACHE_RTH_MAX_S", 60))
 
     # Intraday — apply the session-aware rollover clamp unless disabled.
     session_aware = (
