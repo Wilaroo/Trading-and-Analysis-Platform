@@ -55,10 +55,13 @@ def main():
     print("\n--- peak CONCURRENT open positions per day (interval sweep) ---")
     by_day = defaultdict(list)
     for t in trades:
-        ex = _dt(t.get("executed_at") or t.get("created_at"))
+        if str(t.get("status", "")).lower() not in ("open", "closed"):
+            continue
+        ex = _dt(t.get("executed_at"))
+        if not ex:
+            continue
         cl = _dt(t.get("closed_at")) or datetime.now(timezone.utc)
-        if ex:
-            by_day[(ex - timedelta(hours=4)).date()].append((ex, cl, t.get("symbol", "?")))
+        by_day[(ex - timedelta(hours=4)).date()].append((ex, cl, t.get("symbol", "?")))
     for day in sorted(by_day):
         events = []
         for ex, cl, _ in by_day[day]:
