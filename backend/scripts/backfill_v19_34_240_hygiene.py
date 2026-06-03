@@ -149,8 +149,11 @@ def main():
             )
 
     # ---- JOB 2: retro-tag alert_outcomes ----
-    ao = list(db.alert_outcomes.find({"created_at": {"$gte": since}}, {"_id": 1}))
-    ao_full = list(db.alert_outcomes.find({"created_at": {"$gte": since}}))
+    # NOTE: alert_outcomes docs are keyed on `closed_at` (pnl_compute writer),
+    # NOT `created_at` — matches landscape_grading_service's reader. Earlier
+    # builds queried created_at here and silently matched nothing (scanned=0).
+    ao_full = list(db.alert_outcomes.find(
+        {"$or": [{"closed_at": {"$gte": since}}, {"created_at": {"$gte": since}}]}))
     tagged = 0
     for o in ao_full:
         if "genuine" in o:
@@ -162,13 +165,14 @@ def main():
             exit_price=_f(o.get("exit_price")),
             net_pnl=_f(o.get("net_pnl") or o.get("pnl")),
             hold_seconds=None,
+            setup_type=str(o.get("setup_type") or ""),
         )
         if not DRY:
             db.alert_outcomes.update_one(
                 {"_id": o["_id"]}, {"$set": {"genuine": g, "hygiene_tag": htag}})
         if not g:
             tagged += 1
-    print(f"\n  alert_outcomes scanned={len(ao)}  newly tagged non-genuine={tagged}")
+    print(f"\n  alert_outcomes scanned={len(ao_full)}  newly tagged non-genuine={tagged}")
 
     # ---- JOB 3: backfill bot_trades mfe_r / mae_r excursion floor ----
     filled = 0
