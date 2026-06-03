@@ -10,12 +10,29 @@ Evaluates market context and timing:
 """
 
 import logging
-from typing import Optional, Dict
+import math
+import time
+from typing import Optional, Dict, List
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from data.index_symbols import benchmark_for
+
 logger = logging.getLogger(__name__)
+
+# v19.34.254 — per-symbol Relative-Strength → 0-100 mapping. Calibrated from the
+# v253 live diag: rs_1d (stock-minus-benchmark daily %) has stdev ~5.5% with a
+# fat right tail to +44%. A linear ±3% map saturated hard (p10=0/p90=100, all
+# info lost), so we use a smooth tanh squash that only saturates at true
+# extremes. blended = 0.6*rs_1d + 0.4*rs_5d (percent points).
+#   ±3% → ~63/37 · ±6% → ~75/25 · ±9% → ~87/13 · +44% → ~99
+RS_SCALE = 9.0      # divisor inside tanh (lower = more sensitive)
+RS_AMPLITUDE = 48.0  # max deviation from the 50 midpoint
+
+
+def _rs_to_score(blended_pct: float) -> float:
+    return max(1.0, min(99.0, 50.0 + RS_AMPLITUDE * math.tanh(blended_pct / RS_SCALE)))
 
 
 @dataclass
@@ -30,7 +47,8 @@ class ContextQualityScore:
     sector_score: float = 50.0
     vix_score: float = 50.0
     day_score: float = 50.0
-    
+    rs_score: float = 50.0  # v19.34.254 — per-symbol relative strength
+
     # Raw values
     market_regime: str = "unknown"
     time_of_day: str = "midday"
@@ -40,6 +58,10 @@ class ContextQualityScore:
     vix_level: float = 18.0
     day_of_week: int = 2  # Wednesday
     spy_change_pct: float = 0.0
+    # v19.34.254 — relative strength raw values
+    rs_benchmark: str = ""       # QQQ | SPY | IWM
+    rs_1d: float = 0.0           # stock-minus-benchmark 1-day %
+    rs_5d: float = 0.0           # stock-minus-benchmark 5-day %
     
     # Reasoning
     factors: list = None
@@ -54,6 +76,7 @@ class ContextQualityScore:
             "grade": self.grade,
             "components": {
                 "regime": round(self.regime_score, 1),
+                "relative_strength": round(self.rs_score, 1),
                 "time": round(self.time_score, 1),
                 "sector": round(self.sector_score, 1),
                 "vix": round(self.vix_score, 1),
@@ -67,7 +90,10 @@ class ContextQualityScore:
                 "is_sector_leader": self.is_sector_leader,
                 "vix_level": round(self.vix_level, 1),
                 "day_of_week": self.day_of_week,
-                "spy_change_pct": round(self.spy_change_pct, 2)
+                "spy_change_pct": round(self.spy_change_pct, 2),
+                "rs_benchmark": self.rs_benchmark,
+                "rs_1d": round(self.rs_1d, 2),
+                "rs_5d": round(self.rs_5d, 2)
             },
             "factors": self.factors
         }
@@ -104,13 +130,85 @@ class ContextQualityService:
         self._alpaca_service = None
         self._sector_service = None
         self._ib_service = None
-        
-    def set_services(self, alpaca_service=None, sector_service=None, ib_service=None):
+        self._db = None
+        # short-lived cache of benchmark daily closes (SPY/QQQ/IWM) so a full
+        # scan doesn't re-read the same index bars for every symbol.
+        self._bench_cache = {}  # bench -> (ts, [closes newest-first])
+        self._bench_ttl = 300
+
+    def set_services(self, alpaca_service=None, sector_service=None, ib_service=None, db=None):
         """Wire up dependencies"""
         self._alpaca_service = alpaca_service
         self._sector_service = sector_service
         self._ib_service = ib_service
-        
+        if db is not None:
+            self._db = db
+
+    # ── daily-bar helpers (v19.34.254) ──────────────────────────────────────
+    # On the ib-direct DGX the live alpaca quote path is effectively dead, so
+    # regime/RS sourced from live quotes froze the pillar at ~62. These read
+    # `ib_historical_data` daily bars (which ARE populated) instead.
+    def _recent_closes(self, symbol: str, n: int = 8) -> List[float]:
+        if self._db is None or not symbol:
+            return []
+        try:
+            rows = list(self._db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "date": 1, "close": 1},
+            ).sort("date", -1).limit(n))
+            return [r["close"] for r in rows if r.get("close")]
+        except Exception as e:
+            logger.debug(f"[context] daily-bar read failed {symbol}: {e}")
+            return []
+
+    def _benchmark_closes(self, bench: str) -> List[float]:
+        now = time.time()
+        c = self._bench_cache.get(bench)
+        if c and now - c[0] < self._bench_ttl:
+            return c[1]
+        closes = self._recent_closes(bench, 8)
+        self._bench_cache[bench] = (now, closes)
+        return closes
+
+    @staticmethod
+    def _ret(closes: List[float], lookback: int) -> Optional[float]:
+        if len(closes) <= lookback or not closes[lookback]:
+            return None
+        return (closes[0] - closes[lookback]) / closes[lookback] * 100.0
+
+    def _compute_relative_strength(self, symbol: str, is_long: bool):
+        """Per-symbol RS vs the index it belongs to (QQQ/SPY/IWM).
+        Returns (rs_score, benchmark, rs_1d, rs_5d) or None if no bars."""
+        bench = benchmark_for(symbol)
+        sc = self._recent_closes(symbol, 8)
+        bc = self._benchmark_closes(bench)
+        if len(sc) < 2 or len(bc) < 2:
+            return None
+        rs_1d = (self._ret(sc, 1) or 0.0) - (self._ret(bc, 1) or 0.0)
+        if len(sc) > 5 and len(bc) > 5:
+            rs_5d = (self._ret(sc, 5) or 0.0) - (self._ret(bc, 5) or 0.0)
+        else:
+            rs_5d = rs_1d
+        blended = 0.6 * rs_1d + 0.4 * rs_5d
+        # For a short, outperformance is a HEADWIND — invert so the RS score
+        # rewards the side the trade is actually taking.
+        directional = blended if is_long else -blended
+        return _rs_to_score(directional), bench, rs_1d, rs_5d
+
+    def _multi_index_regime_change(self) -> Optional[float]:
+        """v19.34.254 — composite SPY/QQQ/IWM 1-day % change (0.5/0.3/0.2 blend)
+        from daily bars, used to classify regime when no live SPY quote is
+        available (the common case on the ib-direct DGX). Mirrors the
+        market_regime_engine TrendSignalBlock blend weights."""
+        blend = [("SPY", 0.5), ("QQQ", 0.3), ("IWM", 0.2)]
+        total, wsum = 0.0, 0.0
+        for idx, w in blend:
+            r = self._ret(self._benchmark_closes(idx), 1)
+            if r is not None:
+                total += r * w
+                wsum += w
+        return (total / wsum) if wsum > 0 else None
+
     async def calculate_score(
         self,
         symbol: str,
@@ -224,6 +322,11 @@ class ContextQualityService:
                 logger.debug(f"Could not fetch sector data: {e}")
                 
         # Use defaults
+        # v19.34.254 — when no live SPY quote is available (the common case on
+        # the ib-direct DGX, which froze regime at range_bound→55), fall back to
+        # the multi-index SPY/QQQ/IWM composite computed from daily bars.
+        if spy_change_pct is None:
+            spy_change_pct = self._multi_index_regime_change()
         spy_change_pct = spy_change_pct if spy_change_pct is not None else 0.0
         vix_level = vix_level if vix_level is not None else 18.0
         sector = sector if sector else "unknown"
@@ -367,14 +470,33 @@ class ContextQualityService:
                 ai_score = 35
                 result.factors.append("AI model weakly disagrees (-)")
             
-        # Calculate weighted total (updated weights to include AI alignment)
+        # 7. Relative Strength Score (per-symbol) — v19.34.254
+        # The single per-symbol input with real dynamic range. Computed vs the
+        # index the symbol belongs to (QQQ/SPY/IWM via benchmark_for), from
+        # daily bars. This is what de-compresses the pillar off its frozen ~62.
+        rs = self._compute_relative_strength(symbol, is_long)
+        if rs is not None:
+            result.rs_score, result.rs_benchmark, result.rs_1d, result.rs_5d = rs
+            if result.rs_score >= 70:
+                result.factors.append(
+                    f"Strong RS vs {result.rs_benchmark} (1d {result.rs_1d:+.1f}%) (+)")
+            elif result.rs_score <= 30:
+                result.factors.append(
+                    f"Weak RS vs {result.rs_benchmark} (1d {result.rs_1d:+.1f}%) (-)")
+        else:
+            result.rs_score = 50.0  # neutral when no daily bars
+
+        # Calculate weighted total (v19.34.254 weights — added per-symbol RS at
+        # 20%, fed regime the multi-index composite, and trimmed the dead
+        # day-of-week slice 10%→3% since it carries zero per-symbol information).
         result.score = (
-            result.regime_score * 0.25 +
-            result.time_score * 0.20 +
-            result.sector_score * 0.20 +
-            result.vix_score * 0.15 +
+            result.regime_score * 0.22 +
+            result.rs_score * 0.20 +
+            result.time_score * 0.18 +
+            result.sector_score * 0.15 +
+            result.vix_score * 0.12 +
             ai_score * 0.10 +
-            result.day_score * 0.10
+            result.day_score * 0.03
         )
         
         # Assign grade
