@@ -335,6 +335,62 @@ STRATEGY_CONFIG = {
         "scale_out_pcts": [0.2, 0.3, 0.5],
         "close_at_eod": False
     },
+    # ──────────────────────────────────────────────────────────────────
+    # v19.34.165 (2026-05-27) — Momentum-playbook setups newly surfaced
+    # by v19.34.164 trade_drops persistence. Scanner had been emitting
+    # 446 alerts/hour against these names but the bot was silently
+    # dropping them at the setup_disabled gate. Parameters tuned per the
+    # canonical playbook for each setup (O'Neil / Kacher / Weinstein /
+    # Minervini); see CHANGELOG.md v165 entry for source citations.
+    # ──────────────────────────────────────────────────────────────────
+    "rs_leader_break": {
+        # IBD/CAN SLIM relative-strength leader breakout. O'Neil 8-week
+        # hold rule when stock gains 20%+ in first 3 weeks; trail under
+        # 50-day MA otherwise. Same family as base_breakout but with
+        # the RS-leader pre-filter.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],   # partial at 8-10%, 20%, ride
+        "close_at_eod": False,
+    },
+    "stage_2_breakout": {
+        # Weinstein Stage-2 base breakout, weeks-to-months hold.
+        # Trail under the rising 30-week MA; some traders use 1-1.5 ATR.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.04,
+        "scale_out_pcts": [0.2, 0.3, 0.5],
+        "close_at_eod": False,
+    },
+    "three_week_tight": {
+        # Minervini TWT — break above 3-week compressed range on volume.
+        # Hold while constructive; partial at 2R (~20-25% gain), ride
+        # remainder with trailing stop. Slightly tighter trail than a
+        # fresh base breakout because TWT is a continuation pattern
+        # already partway into the move.
+        "timeframe": TradeTimeframe.POSITION,
+        "trail_pct": 0.035,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False,
+    },
+    "power_trend_stack": {
+        # Minervini Power-Play / Stage-2 continuation with EMA stack
+        # alignment. Faster mover than fresh-base breakouts so we run
+        # the SWING tier (days to weeks). Stop below the last
+        # contraction low; trail under 10-day MA.
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.03,
+        "scale_out_pcts": [0.25, 0.25, 0.5],
+        "close_at_eod": False,
+    },
+    "pocket_pivot": {
+        # Kacher pocket pivot — early entry inside a constructive base
+        # when up-volume exceeds the heaviest prior-10-day down-volume.
+        # Days-to-weeks hold, exit if closes below 10-day MA. SWING tier.
+        "timeframe": TradeTimeframe.SWING,
+        "trail_pct": 0.025,
+        "scale_out_pcts": [0.33, 0.33, 0.34],   # 1R/2R/3R style
+        "close_at_eod": False,
+    },
     "accumulation_entry": {
         "timeframe": TradeTimeframe.POSITION,
         "trail_pct": 0.05,
@@ -895,6 +951,26 @@ class DailyStats:
     daily_limit_hit: bool = False
 
 
+def _reaper_should_skip_filled(symbol: str, ib_pos_syms: set, bot_open_syms: set) -> bool:
+    """v19.34.234 — Reaper safety guard.
+
+    Return True when a stale `pending` row must NOT be reaped because its
+    symbol still shows a LIVE IB position that the bot is not tracking as an
+    open trade. That combination almost always means the pre-submitted order
+    DID fill at IB but the fill was never attributed back to the bot (the
+    `entry_order_id=None` race seen 2026-06-03 on SOXX/LRCX/ALAB/ASTS): the
+    blind reaper would falsely record the real fill as `rejected` and let the
+    live shares become an orphan that the consolidator then over-sizes.
+
+    Blast radius is intentionally tiny: at worst this leaves a benign
+    `pending` DB row in place (it places no orders). It can never close a
+    position or submit an order.
+    """
+    s = (symbol or "").upper()
+    return bool(s) and s in ib_pos_syms and s not in bot_open_syms
+
+
+
 class TradingBotService:
     """
     Main trading bot service that orchestrates scanning, evaluation,
@@ -905,8 +981,6 @@ class TradingBotService:
         self._mode = BotMode.AUTONOMOUS  # Start in autonomous mode for auto-trading
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
-        # v19.34.182 — dedicated EOD supervisor task (no wait_for wall)
-        self._eod_supervisor_task: Optional[asyncio.Task] = None
 
         # v19.34.25 — Patches G/H/I (post-2026-02-bot-stampede-disaster).
         # These three timestamps + flag coordinate the startup-gate trio:
@@ -979,6 +1053,18 @@ class TradingBotService:
             "up_through_open",       # Reversal through the opening print (long)
             "daily_breakout",        # Daily timeframe breakout (EOD setup)
             "daily_squeeze",         # Daily timeframe squeeze (EOD setup)
+            # ─────────────────────────────────────────────────────────
+            # v19.34.165 (2026-05-27) — 5 momentum-playbook setups the
+            # scanner had been emitting (446 alerts/hr observed via v164
+            # trade_drops persistence) but the bot was silently rejecting
+            # at the setup_disabled gate. Entries also added to
+            # STRATEGY_CONFIG above so they don't fall to DEFAULT.
+            # ─────────────────────────────────────────────────────────
+            "rs_leader_break",       # IBD/CAN SLIM RS leader breakout
+            "power_trend_stack",     # Minervini Power-Play continuation
+            "pocket_pivot",          # Kacher pocket pivot
+            "stage_2_breakout",      # Weinstein Stage-2 base breakout
+            "three_week_tight",      # Minervini 3-week-tight continuation
         ]
 
         # 2026-05-01 v19.20 — WATCHLIST-ONLY setups: these fire from the scanner
@@ -2236,13 +2322,6 @@ class TradingBotService:
         self._patch_f_audit_started_at = None
         self._mode = BotMode.AUTONOMOUS if self._mode == BotMode.PAUSED else self._mode
         self._scan_task = asyncio.create_task(self._scan_loop())
-        # v19.34.182 — independent EOD supervisor. Runs EOD close /
-        # scalp decay / grading every 15s with NO asyncio.wait_for
-        # wall, so a slow IB roundtrip can't kill EOD like v181 fixed
-        # at the scan-loop level. Belt + suspenders: scan_loop ALSO
-        # calls these (with 60s wall); both paths are idempotent
-        # because of _eod_close_executed_today + grading per-day key.
-        self._eod_supervisor_task = asyncio.create_task(self._eod_supervisor_loop())
         # v19.34.123 — Continuous real-time kill-switch monitor.
         # Reads realized PnL directly from `bot_trades` (post-v123 with
         # full PnL coverage on every close path) PLUS live unrealized
@@ -3442,9 +3521,49 @@ class TradingBotService:
                         if stale:
                             stamp = datetime.now(timezone.utc).isoformat()
                             updated_ids: List[str] = []
+                            # v19.34.234 — fill-race guard: gather live IB
+                            # positions + the bot's open-trade symbols ONCE so
+                            # we never reap a pending whose order actually
+                            # filled at IB but wasn't attributed back.
+                            ib_pos_syms: set = set()
+                            try:
+                                from services.ib_direct_service import get_ib_direct_service
+                                _ibd = get_ib_direct_service()
+                                if _ibd is not None and await _ibd.ensure_connected():
+                                    for _p in (await _ibd.get_positions()) or []:
+                                        if abs(float(_p.get("position") or 0)) >= 1:
+                                            ib_pos_syms.add((_p.get("symbol") or "").upper())
+                            except Exception as _e:
+                                logger.debug(
+                                    "[v19.34.234 reaper-guard] IB positions check failed: %s", _e
+                                )
+                            bot_open_syms: set = {
+                                (getattr(t, "symbol", "") or "").upper()
+                                for t in (self._open_trades or {}).values()
+                            }
+                            skipped_filled: List[str] = []
                             for row in stale:
                                 tid = row.get("id")
                                 if not tid:
+                                    continue
+                                _sym = (row.get("symbol") or "").upper()
+                                if _reaper_should_skip_filled(_sym, ib_pos_syms, bot_open_syms):
+                                    skipped_filled.append(f"{_sym}:{tid}")
+                                    try:
+                                        db["state_integrity_events"].insert_one({
+                                            "event": "reaper_skip_likely_filled",
+                                            "severity": "high",
+                                            "symbol": _sym,
+                                            "trade_id": tid,
+                                            "detail": (
+                                                "stale pending NOT reaped — IB holds a live "
+                                                "position for this symbol the bot isn't tracking "
+                                                "as open (likely unattributed fill)."
+                                            ),
+                                            "ts": stamp,
+                                        })
+                                    except Exception:
+                                        pass
                                     continue
                                 res = db["bot_trades"].update_one(
                                     {"id": tid, "status": "pending"},
@@ -3465,6 +3584,13 @@ class TradingBotService:
                                 )
                                 for tid in updated_ids:
                                     self._pending_trades.pop(tid, None)
+                            if skipped_filled:
+                                logger.warning(
+                                    "[v19.34.234 reaper-guard] SKIPPED %d stale pending(s) — IB "
+                                    "holds live position(s) the bot isn't tracking (likely "
+                                    "unattributed fill): %s",
+                                    len(skipped_filled), ", ".join(skipped_filled),
+                                )
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -3831,13 +3957,6 @@ class TradingBotService:
                 await self._scan_task
             except asyncio.CancelledError:
                 pass
-        # v19.34.182 — cancel EOD supervisor task on shutdown.
-        if self._eod_supervisor_task:
-            self._eod_supervisor_task.cancel()
-            try:
-                await self._eod_supervisor_task
-            except asyncio.CancelledError:
-                pass
         # v19.31.13 — also cancel the realized-PnL auto-sync background task.
         task = getattr(self, "_pnl_autosync_task", None)
         if task is not None:
@@ -3989,7 +4108,7 @@ class TradingBotService:
                 # tick. Total worst-case per scan: ~33s vs unbounded.
                 _SCAN_WALL_S = 20.0
                 _POS_WALL_S = 8.0
-                _EOD_WALL_S = 60.0
+                _EOD_WALL_S = 5.0
                 if not pause_intake:
                     try:
                         await asyncio.wait_for(self._scan_for_opportunities(), timeout=_SCAN_WALL_S)
@@ -4036,124 +4155,6 @@ class TradingBotService:
                 print(f"❌ [TradingBot] Scan loop error: {e}")
 
             await asyncio.sleep(self._scan_interval)
-    # ── v19.34.182 — EOD Supervisor ──
-    async def _eod_supervisor_loop(self):
-        """v19.34.182 — Dedicated EOD supervisor.
-
-        Runs every 15s, independent of `_scan_loop`. Calls EOD close /
-        scalp decay / EOD grading directly with NO asyncio.wait_for wall.
-
-        Belt-and-suspenders: `_scan_loop` also calls these (with a 60s
-        wall as of v181). Both paths are idempotent — check_eod_close()
-        uses `_eod_close_executed_today` and grading uses a per-day key.
-
-        Also fires a CRITICAL 16:00 ET post-close alarm if any
-        close_at_eod=True position is still open at 4:00 PM ET.
-        """
-        try:
-            from zoneinfo import ZoneInfo
-        except ImportError:
-            from backports.zoneinfo import ZoneInfo
-
-        et_tz = ZoneInfo("America/New_York")
-        post_close_alarm_date = None
-        print("🛡️  [TradingBot] v19.34.182 EOD supervisor started (15s cadence, no wait_for wall)")
-
-        while self._running:
-            try:
-                now_et = datetime.now(et_tz)
-                weekday = now_et.weekday()
-                hour = now_et.hour
-
-                # Only run on weekdays during/near market hours (09:00-17:00 ET).
-                if weekday < 5 and 9 <= hour <= 17:
-                    # === 1. EOD close — no wall. Idempotent.
-                    try:
-                        await self._position_manager.check_eod_close(self)
-                    except Exception as e:
-                        logger.warning(f"[EOD-SUPERVISOR] check_eod_close raised: {type(e).__name__}: {e}")
-
-                    # === 2. Scalp decay — no wall.
-                    try:
-                        await self._position_manager.check_scalp_decay(self)
-                    except Exception as e:
-                        logger.warning(f"[EOD-SUPERVISOR] check_scalp_decay raised: {type(e).__name__}: {e}")
-
-                    # === 3. EOD setup grading. Idempotent per trading-date.
-                    try:
-                        await self._check_eod_grading()
-                    except Exception as e:
-                        logger.warning(f"[EOD-SUPERVISOR] _check_eod_grading raised: {type(e).__name__}: {e}")
-
-                    # === 4. v19.34.182 — 16:00 ET post-close hard alarm.
-                    today_iso = now_et.strftime("%Y-%m-%d")
-                    if hour >= 16 and post_close_alarm_date != today_iso:
-                        try:
-                            stragglers = [
-                                t for t in self._open_trades.values()
-                                if getattr(t, "close_at_eod", False)
-                                and int(getattr(t, "remaining_shares", 0) or 0) > 0
-                            ]
-                            if stragglers:
-                                straggler_syms = sorted({getattr(s, "symbol", "?") for s in stragglers})
-                                alarm_text = (
-                                    f"🚨 [CRITICAL] EOD POST-CLOSE ALARM at "
-                                    f"{now_et.strftime('%H:%M:%S')} ET — "
-                                    f"{len(stragglers)} close_at_eod positions still open "
-                                    f"after 4:00 PM: {', '.join(straggler_syms[:10])}"
-                                    f"{'…' if len(straggler_syms) > 10 else ''}. "
-                                    f"FLATTEN MANUALLY IN TWS NOW."
-                                )
-                                logger.error(alarm_text)
-                                # Persist
-                                if self._db is not None:
-                                    try:
-                                        from utils.timestamps import now_bson, now_iso
-                                        await asyncio.to_thread(
-                                            self._db.sentcom_thoughts.insert_one,
-                                            {
-                                                "kind": "alarm",
-                                                "category": "eod_post_close_alarm",
-                                                "content": alarm_text,
-                                                "thought": alarm_text,
-                                                "symbol": None,
-                                                "timestamp": now_iso(),
-                                                "created_at": now_bson(),
-                                                "metadata": {
-                                                    "stragglers": straggler_syms,
-                                                    "count": len(stragglers),
-                                                    "trading_date": today_iso,
-                                                },
-                                            },
-                                        )
-                                    except Exception as db_err:
-                                        logger.debug(f"[EOD-SUPERVISOR] alarm persist failed: {db_err}")
-                                # WS
-                                try:
-                                    from services.sentcom_service import emit_stream_event
-                                    await emit_stream_event({
-                                        "kind": "alarm",
-                                        "event": "eod_post_close_stragglers",
-                                        "text": alarm_text,
-                                        "metadata": {
-                                            "stragglers": straggler_syms,
-                                            "count": len(stragglers),
-                                        },
-                                    })
-                                except Exception as ws_err:
-                                    logger.debug(f"[EOD-SUPERVISOR] alarm WS failed: {ws_err}")
-                            # Mark fired regardless — dedupe per day.
-                            post_close_alarm_date = today_iso
-                        except Exception as alarm_err:
-                            logger.debug(f"[EOD-SUPERVISOR] post-close alarm failed: {alarm_err}")
-
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.warning(f"[EOD-SUPERVISOR] loop error: {type(e).__name__}: {e}")
-
-            await asyncio.sleep(15)
-
     def _compute_live_unrealized_pnl(self) -> tuple:
         """Sum unrealized P&L across all open trades, gated on quote freshness.
 
