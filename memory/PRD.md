@@ -641,3 +641,9 @@ See CHANGELOG.md.
 ### Update 2026-06-03 — v19.34.239 (dynamic trigger_probability — always-on)
 - Wired the v238 `compute_live_trigger_probability` helper (was defined-never-called) into the single chokepoint `enhanced_scanner._apply_setup_context`. Each detector's hardcoded `trigger_probability` is now a calibrated BASE moved by live distance-to-trigger + RVOL, clamped [0.15, 0.90]. Always-on; fail-open. Affects new alerts only.
 - 8/8 pytest (`test_v19_34_239_dynamic_trigger_prob.py`). BUILT, paste.rs dGeht. Closes the IN-PROGRESS Phase D follow-up Task 1.
+
+---
+### Update 2026-06-03 — v19.34.240 (trade-outcome hygiene + MFE/MAE floor)
+- Investigated 🟡P1 accumulation_entry "early exit": found it was a MEASUREMENT artifact, not a stop problem — ~94% of its trades were May 19-26 phantom/drift wreckage polluting strategy_stats EV.
+- Shipped hygiene filter (services/trade_outcome_hygiene.py): non-genuine closes (phantom/sweep/reconcile/operator-flatten/instant-external-unwind/corrupt-pnl) are tagged + excluded from the strategy_stats EV feed; edge-ranker excludes genuine:False + |R|>20. Part B: finalize bot_trades mfe_r/mae_r from realized excursion floor when manage loop left them 0.
+- 23 pytest + 24 edge-ranker regression green. BUILT paste.rs g2qmv (deploy) / tAYth (backfill). Closes the accumulation_entry investigation.

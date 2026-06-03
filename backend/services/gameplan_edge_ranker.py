@@ -130,6 +130,7 @@ class GamePlanEdgeRanker:
     SHRINK_K0 = 10.0     # Bayesian shrinkage half-weight constant
     W_EV = 0.65          # max EV weight (asymptotic, large sample)
     LOOKBACK_DAYS = 120
+    MAX_ABS_R = 20.0     # v19.34.240 — drop corrupt-attribution rows (entry==exit inflated R)
 
     def __init__(self, outcomes: List[Dict]):
         # key tuple -> aggregate dict
@@ -146,7 +147,11 @@ class GamePlanEdgeRanker:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
             cur = col.find(
                 {"created_at": {"$gte": cutoff},
-                 "outcome": {"$in": ["won", "lost"]}},
+                 "outcome": {"$in": ["won", "lost"]},
+                 # v19.34.240 — exclude rows explicitly tagged non-genuine by the
+                 # hygiene filter. `$ne: False` keeps genuine==True AND legacy
+                 # rows missing the field (backward compatible).
+                 "genuine": {"$ne": False}},
                 {"_id": 0, "setup_type": 1, "outcome": 1, "actual_r": 1,
                  "catalyst_tag": 1, "gap_pct": 1,
                  "context.market_regime": 1, "context.fundamentals": 1},
@@ -190,6 +195,11 @@ class GamePlanEdgeRanker:
             cat = _outcome_catalyst(o)
             gb = gap_bucket(o.get("gap_pct"))
             r = _safe_float(o.get("actual_r"))
+            # v19.34.240 — drop corrupt-attribution rows (entry==exit inflated R
+            # from phantom/operator-flatten artifacts) defensively at read-time,
+            # in case any slipped into trade_outcomes pre-hygiene-filter.
+            if abs(r) > self.MAX_ABS_R:
+                continue
             for key in (
                 ("L4", setup, dr, cat, gb, rb),
                 ("L3", setup, dr, cat, rb),

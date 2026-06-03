@@ -1,3 +1,42 @@
+## 2026-06-03 — v19.34.240 TRADE-OUTCOME HYGIENE (EV de-pollution) + MFE/MAE FLOOR (BUILT, paste.rs g2qmv)
+
+### Why
+`diag_accum_oca_drill` proved the `accumulation_entry` "underperformance" was a
+MEASUREMENT artifact: ~94% of its closed trades were 2026-05-19→26 phantom/drift
+wreckage (1-min external OCA unwinds, phantom sweeps, operator flattens with
+±$20k P&L on entry==exit rows) polluting the `strategy_stats` EV scoreboard.
+The pollution vector is `apply_close_pnl → _record_alert_outcome_bestEffort →
+strategy_stats`, which runs on EVERY close. (`trade_outcomes`/edge-ranker is fed
+only by the genuine manage-loop close at position_manager:3300, so it was clean.)
+
+### What (Part A — hygiene)
+- NEW `services/trade_outcome_hygiene.py` — single DRY classifier
+  `classify_close(reason, entered_by, entry, exit, net_pnl, hold_s) -> (genuine, tag)`.
+  Artifact rules: reason ∈ {phantom/sweep/purge/reconcile/operator_external/
+  external_flatten}; entered_by ∈ {reconcil/phantom}; `oca_closed_externally`
+  held <120s; entry==exit with |pnl|>$5.
+- `pnl_compute`: tags `alert_outcomes` with genuine/hygiene_tag (audit preserved)
+  and SKIPS the strategy_stats EV upsert for non-genuine closes.
+- `gameplan_edge_ranker`: read-side defense — query excludes `genuine:False`
+  (backward-compatible `$ne`), and drops rows with `|actual_r|>20` (corrupt R).
+
+### What (Part B — MFE/MAE floor)
+- `excursion_floor(direction, entry, exit, stop)` computes realized entry→exit R.
+- `pnl_compute` finalizes `bot_trades.mfe_r/mae_r` from the floor when the manage
+  loop left them 0 (sub-minute closes) — never overwrites a real peak. Was 34%
+  populated globally because artifact trades die before any manage tick.
+
+### Backfill (run AFTER deploy; idempotent; --dry-run first) paste.rs tAYth
+`backfill_v19_34_240_hygiene.py`: rebuilds strategy_stats genuine-only over a
+lookback window (CORRECTS the polluted EV now), retro-tags alert_outcomes, fills
+bot_trades excursion floor. Writes ONLY stat fields — no order logic.
+
+### Verification
+23 pytest pass (`test_v19_34_240_outcome_hygiene.py`) + 24 edge-ranker regression
+tests green. Hardware-bound: no testing agent. Deploy idempotent, pytest-gated,
+git commit+push before restart.
+
+
 ## 2026-06-03 — v19.34.239 DYNAMIC trigger_probability (always-on) (BUILT, paste.rs dGeht)
 
 ### What
