@@ -5,6 +5,19 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## 💡 SAVED ENHANCEMENT — Live "EV Leaderboard" on Mission Control (operator-requested 2026-06-03)
+
+Now that strategy_stats EV is honest per-setup (v19.34.249/F3), surface a compact
+live leaderboard on Mission Control: genuine **EV-R + sample size + win-rate per
+setup**, color-coded green/red, sorted by EV. Lets the operator see at a glance
+which setups the bot should lean into (e.g. daily_breakout +2.7R) vs avoid
+(vwap_fade −4.5R, accumulation_entry −0.4R) — turning the cleaned learning data
+into an at-a-glance edge dashboard. Data already exists at `strategy_stats`
+(read via a small `/api/trading-bot/ev-leaderboard` endpoint or extend
+`/stats/performance`). P1 once F2/shadow land.
+
+
+
 ## 🆕🔥 Operator field observations — 2026-06-03 (post-hygiene batch)
 
 _Captured from a live-session review. Prioritized below. Several are recurring._
