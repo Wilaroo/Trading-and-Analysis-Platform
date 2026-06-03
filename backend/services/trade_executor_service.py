@@ -1136,6 +1136,23 @@ class TradeExecutorService:
 
             action = "SELL" if trade.direction.value == "long" else "BUY"
             qty = int(trade.shares)
+            # v19.34.235 (Part B) — clamp protective qty to live IB position
+            # (queue path; mirrors the ib_direct direct path). Fail-open.
+            try:
+                from services.ib_direct_service import (
+                    get_ib_direct_service as _g_ibd, clamp_protective_qty as _clamp,
+                )
+                _ibd2 = _g_ibd()
+                if _ibd2 is not None:
+                    _live2 = await _ibd2.live_position_abs(str(trade.symbol).upper())
+                    qty, _dc2 = _clamp(qty, _live2)
+                    if _dc2:
+                        logger.warning(
+                            "[v19.34.235 clamp] %s queue-path protective qty %d -> %d "
+                            "(live IB position).", trade.symbol, int(trade.shares), qty,
+                        )
+            except Exception as _ce:
+                logger.debug("[v19.34.235 clamp] queue-path clamp skipped: %s", _ce)
 
             # TIF per trade style (swing → GTC+outside_rth, intraday → DAY).
             leg_tif, leg_outside_rth = bracket_tif(

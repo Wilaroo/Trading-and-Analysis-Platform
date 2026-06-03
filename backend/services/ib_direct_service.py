@@ -101,6 +101,28 @@ class IBDirectConfig:
 # ─────────────────────────────────────────────────────────────────────
 
 
+def clamp_protective_qty(requested_qty, live_abs):
+    """v19.34.235 (Part B) — clamp a protective/closing-order qty to the live
+    IB position.
+
+    Returns (qty, clamped: bool). It only ever SHRINKS the order to a
+    confirmed, smaller live position (0 < live < requested); it NEVER grows
+    one and NEVER touches the requested value when the live size is unknown
+    (`live_abs=None`) — fail-open. This is the guard that stops a stale
+    `trade.shares` (e.g. SOXX 43) from arming a closing order larger than the
+    position actually holds (17) and flipping it on fill (2026-06-03).
+    """
+    req = int(abs(requested_qty or 0))
+    if live_abs is None:
+        return req, False
+    live = int(abs(live_abs))
+    if 0 < live < req:
+        return live, True
+    return req, False
+
+
+
+
 class IBDirectService:
     """Singleton wrapper around an `ib_async.IB()` connection.
 
@@ -2127,6 +2149,28 @@ class IBDirectService:
                     "error": f"ib_direct_stop_error: {str(e)[:200]}",
                     "broker": "ib_direct", "simulated": False}
 
+    async def live_position_abs(self, symbol: str):
+        """v19.34.235 (Part B) — return |live IB position| for `symbol` as an
+        int, or None when it can't be read confidently (get_positions raised,
+        empty snapshot, or the symbol is absent). Returning None on absence is
+        deliberate: the clamp must only ever SHRINK a closing order to a
+        confirmed, present position — never down to 0 on a snapshot gap."""
+        try:
+            positions = await self.get_positions()
+        except Exception as e:
+            logger.debug("[v19.34.235 clamp] get_positions failed for %s: %s", symbol, e)
+            return None
+        if not positions:
+            return None
+        s = (symbol or "").upper()
+        signed = 0.0
+        found = False
+        for p in positions:
+            if (p.get("symbol") or "").upper() == s and p.get("sec_type") in (None, "STK"):
+                signed += float(p.get("position") or 0.0)
+                found = True
+        return int(abs(signed)) if found else None
+
     async def place_oca_stop_target(
         self,
         trade,
@@ -2174,6 +2218,17 @@ class IBDirectService:
             if qty <= 0:
                 return {"success": False, "error": f"bad shares: {qty}",
                         "broker": "ib_direct", "simulated": False}
+            # v19.34.235 (Part B) — clamp the protective qty to the live IB
+            # position so a stale `trade.shares` can never arm a closing order
+            # larger than the position holds (SOXX Sell-43-vs-17 flip hazard).
+            _live_abs = await self.live_position_abs(symbol)
+            qty, _did_clamp = clamp_protective_qty(qty, _live_abs)
+            if _did_clamp:
+                logger.warning(
+                    "[v19.34.235 clamp] %s OCA protective qty %d -> %d (live IB position) "
+                    "— prevented oversized closing order / flip.",
+                    symbol, int(trade.shares), qty,
+                )
             stop_px = float(trade.stop_price)
             targets = getattr(trade, "target_prices", None) or []
             if not targets:
