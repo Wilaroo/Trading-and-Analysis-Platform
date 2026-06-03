@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.entry_gate import per_entry_gate_should_stop  # noqa: E402
+from services.entry_gate import per_entry_gate_should_stop, parse_disabled_setups  # noqa: E402
 
 
 # ── pause halts the batch immediately ──────────────────────────────────────
@@ -50,3 +50,23 @@ def test_malformed_counts_fail_open():
 
 def test_malformed_still_respects_pause():
     assert per_entry_gate_should_stop(None, None, 25, paused=True) is True
+
+
+# ── v19.34.244 DISABLED_SETUPS blocklist parsing ───────────────────────────
+def test_disabled_default_blocks_vwap_fade_short():
+    s = parse_disabled_setups(None)  # env unset -> default
+    assert "vwap_fade_short" in s
+    assert "vwap_fade_long" not in s  # profitable long stays tradable
+
+
+def test_disabled_env_override():
+    s = parse_disabled_setups("vwap_fade_short, big_dog, OFF_SIDES")
+    assert s == {"vwap_fade_short", "big_dog", "off_sides"}
+
+
+def test_disabled_empty_string_clears_blocklist():
+    assert parse_disabled_setups("") == set()
+
+
+def test_disabled_is_case_insensitive():
+    assert "vwap_fade_short" in parse_disabled_setups("VWAP_Fade_Short")

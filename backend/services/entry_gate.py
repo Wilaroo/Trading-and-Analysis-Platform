@@ -30,3 +30,18 @@ def per_entry_gate_should_stop(open_count, pending_count, cap, paused: bool) -> 
         return (int(open_count) + int(pending_count)) >= int(cap)
     except (TypeError, ValueError):
         return False
+
+
+# v19.34.244 — DISABLED_SETUPS blocklist. Confirmed money-losing setup VARIANTS
+# the bot must not TRADE (scanner still surfaces them for monitoring). Default
+# blocks vwap_fade_short (8% win, -4.26R, -$22k/120d); vwap_fade_long (+0.51R)
+# stays enabled. Operator overrides via the DISABLED_SETUPS env var.
+DEFAULT_DISABLED_SETUPS = "vwap_fade_short"
+
+
+def parse_disabled_setups(raw, default: str = DEFAULT_DISABLED_SETUPS) -> set:
+    """Parse a comma-separated DISABLED_SETUPS string into a lowercase set.
+    `raw=None` (env unset) falls back to `default`; `raw=""` yields an empty set
+    (operator explicitly cleared the blocklist)."""
+    src = default if raw is None else raw
+    return {s.strip().lower() for s in str(src).split(",") if s.strip()}

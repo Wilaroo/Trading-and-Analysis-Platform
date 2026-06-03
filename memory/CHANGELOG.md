@@ -1,3 +1,30 @@
+## 2026-06-03 — v19.34.243 PER-ENTRY GATE + v19.34.244 DISABLE vwap_fade_short
+
+### v19.34.243 — per-entry batch gate (P0, DEPLOYED 4e238d51)
+Fixed two entry-control incidents. The scan→execute loop checked PAUSE + the
+position CAP once per cycle then fired the whole alert batch without re-checking.
+Diag (`diag_entry_control.py`): normal peak concurrent 8-9; 06-02 overshot to 27
+(busy day, batch spilled past the 25 cap); CEG (06-03) was a fresh 17s-lag market
+entry in an in-flight batch. Fix: NEW `services/entry_gate.py` pure
+`per_entry_gate_should_stop(open, pending, cap, paused)` re-checked before EVERY
+entry — halts the batch on mid-cycle pause OR open+pending>=cap (counts pending,
+closing the overshoot). Operator kept the 25 cap. 8 pytest.
+
+### v19.34.244 — disable vwap_fade_short (P1, BUILT paste.rs g0vUR)
+vwap_fade bleed diagnosed (`diag_vwap_fade_bleed.py`): the SHORT side is the whole
+leak — n=53, 8% win, **-4.26R, -$22k**; 39% of trades blew past the 1R stop
+(WTI -18R, PRCT shorted 8x at -8.88R = post-stop re-entry loop); only 7% ever went
+green (fading into strength). vwap_fade_LONG is profitable (+0.51R, 31% win) and
+stays on. Fix: NEW `DISABLED_SETUPS` env-blocklist (default `vwap_fade_short`)
+checked at the bot entry gate — scanner still surfaces it for monitoring, only
+TRADING is blocked. `parse_disabled_setups` in entry_gate.py. 12 pytest.
+
+### Still open from the vwap_fade finding (queued)
+- Per-trade max-loss circuit breaker (-1.5R hard market exit) so NO setup can ever
+  do another -18R. Needs careful scoping of the manage/close path.
+- CEG-style retry storm (9x stale_pending_auto_reaper/hr) — per-symbol retry backoff.
+
+
 ## 2026-06-03 — v19.34.241 hygiene: reject reconciliation/import setup_types (BUILT, paste.rs 0gajg)
 
 The v240 dry-run showed `reconciled_excess_slice` (n=20), `reconciled_orphan` (n=5),

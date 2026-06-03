@@ -2167,6 +2167,16 @@ class TradingBotService:
         except Exception:
             pass  # State will be saved on next start/stop
     
+    def _disabled_setups(self) -> set:
+        """v19.34.244 — setup_types the bot must NOT trade even if their base is
+        enabled. Confirmed money-losing variants live here. Operator-overridable
+        via the DISABLED_SETUPS env (comma-separated setup_types). Default blocks
+        `vwap_fade_short` (8% win, -4.26R, -$22k/120d). The scanner still emits
+        these for monitoring; only TRADING is suppressed."""
+        import os
+        from services.entry_gate import parse_disabled_setups
+        return parse_disabled_setups(os.environ.get("DISABLED_SETUPS"))
+
     def set_enabled_setups(self, setups: List[str]):
         """Set which setup types to trade"""
         self._enabled_setups = setups
@@ -4514,6 +4524,24 @@ class TradingBotService:
                         )
                     except Exception:
                         pass
+                    continue
+
+                # v19.34.244 — DISABLED_SETUPS blocklist. Some setup VARIANTS
+                # are confirmed money-losers (e.g. vwap_fade_short: 8% win,
+                # -4.26R, -$22k over 120d — while vwap_fade_long is +0.51R and
+                # stays enabled). Block the exact setup_type from TRADING here
+                # while leaving the scanner free to still surface it for
+                # monitoring/shadow. Operator-overridable via the DISABLED_SETUPS
+                # env (comma-sep setup_types); default blocks vwap_fade_short.
+                if alert.setup_type.lower() in self._disabled_setups():
+                    print(f"   🚫 {alert.symbol} {alert.setup_type} in DISABLED_SETUPS — not trading")
+                    self.record_rejection(
+                        symbol=alert.symbol,
+                        setup_type=alert.setup_type,
+                        direction=alert.direction or "long",
+                        reason_code="setup_in_disabled_blocklist_v19_34_244",
+                        context={"disabled_setups": sorted(self._disabled_setups())},
+                    )
                     continue
 
                 # Check if setup is enabled.

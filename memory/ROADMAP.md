@@ -9,6 +9,23 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 _Captured from a live-session review. Prioritized below. Several are recurring._
 
+### ✅ RESOLVED 2026-06-03
+- **P0-1 (27 positions)** + **P0-2 (CEG entered while paused)** — FIXED in
+  v19.34.243 (`4e238d51`). Root cause: the scan→execute loop checked PAUSE + the
+  position CAP once per cycle, then fired the whole alert batch without
+  re-checking. Diag (`diag_entry_control.py`) confirmed: normal peak concurrent
+  8-9; 06-02 overshot to 27 (busy day, batch spilled past the 25 cap); CEG was a
+  fresh 17s-lag market entry in an in-flight batch. Fix: `services/entry_gate.py`
+  per-entry gate re-checks pause + (open+pending >= cap) before EVERY entry and
+  halts the batch. 8/8 tests. (Operator chose to KEEP the 25 cap.)
+
+### 🟡 P1-NEW — CEG-style entry RETRY STORM (found during P0 diag)
+- CEG hit `stale_pending_auto_reaper` 9× every ~5 min (06-02 13:15→14:11) — the
+  bot re-attempts the SAME symbol indefinitely after a stuck-pending reap. Wasteful
+  + risky (a single name can over-fire / churn brokers). Add a per-symbol retry
+  cap / exponential backoff after N consecutive reaps (or a longer cooldown on
+  `stale_pending_auto_reaper`). Backend.
+
 ### 🔴 P0 — Safety / operator-control
 - **P0-1 — Bot opened 27 simultaneous positions** (verified in IB). How? Adjust?
   Hypotheses: burst entries before max-position re-check; cap is per-tier not global;
