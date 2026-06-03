@@ -1,3 +1,53 @@
+## 2026-06-03 — v19.34.234 BOT-vs-IB DRIFT: source-side guard (DEPLOYED, live-verified during RTH)
+
+### Trigger
+Live RTH: bot positions/brackets diverged from TWS. Forensics (read-only
+`/tmp/diag_bot_vs_ib_today.py`, paste.rs 2RsUs) traced it to SOXX: bot tracked
+a stale `reconciled_excess_v19_34_15b` slice and IB held **Sell 43** bracket
+orders against a **17**-share long → flip-to-short-26 hazard. Operator
+flattened manually; root-caused and patched.
+
+### Root cause chain
+1. Pre-submit entry orders had `entry_order_id=None` → IB `execDetails` fill
+   never attributed back → `bot_trades` row stayed `pending`, `executed_at=None`.
+2. `_stale_pending_reaper_loop` (v19.34.30) blindly marked it `rejected /
+   stale_pending_auto_reaper` after 300s **without checking IB for a fill**.
+3. The real (now-orphaned) IB shares got adopted as a synthetic
+   `reconciled_excess` slice; the consolidator merged 17+26→43 and reissued a
+   **43-share bracket**, then tracking shrank 43→17 (LIFO) but the 43 IB
+   orders were never resized. Same reaper-vs-fill race churned SOXX/LRCX/ALAB/
+   ASTS/NXPI/SMH all session (Day Tape full of reconciled_orphan/excess).
+4. `positions/truth-diff` compared IB against the stale `.shares` (43) not
+   `.remaining_shares` (17) → falsely flagged a 26-share mismatch while the
+   bot's tracked position (17) actually matched IB.
+
+### Shipped (commit e694a5e9, two low-blast-radius fixes safe for live RTH)
+- **Pending-reaper fill-race guard** (`trading_bot_service.py`): new
+  module-level `_reaper_should_skip_filled(sym, ib_pos_syms, bot_open_syms)`.
+  Reaper now pulls live IB positions once per tick and SKIPS any stale pending
+  whose symbol shows an IB position the bot isn't tracking as open (→ likely
+  unattributed fill); logs `[v19.34.234 reaper-guard]` + writes a
+  `state_integrity_events{event:"reaper_skip_likely_filled"}` audit row instead
+  of falsely rejecting the real fill. Worst case = a benign lingering pending
+  row; never places/closes an order.
+- **truth-diff** (`routers/trading_bot.py`): compares IB against
+  `remaining_shares` (live) with `.shares` fallback.
+- Tests: `test_v19_34_234_reaper_fill_guard.py` 5/5. Lint clean (pre-existing
+  F-warnings untouched). Deployed via paste.rs P5Lj9 + `./start_backend.sh
+  --force` while flat. Post-boot: truth-diff `in_sync`, bot/ib=1/1, no false
+  mismatch; bot resumed trading in sync.
+
+### NOT yet done — the full cure (larger, safety-critical; do PAUSED / after close)
+- Capture `entry_order_id` on pre-submit + attribute `execDetails`/
+  `orderStatus` so a filled pending flips to `open` (never reaches the reaper).
+- Clamp every bracket (re)issue to the live IB position size so a
+  consolidator/naked-sweep can never arm an oversized closing order (flip).
+- Secondary observability gaps surfaced: `ib_executions` collection empty for
+  the day (exec audit trail not persisting); executor `/positions` returns
+  empty while ib_direct returns data.
+
+---
+
 ## 2026-06-03 — v19.34.233 PHASE D: Game Plan ranked by REALIZED open-session edge — BUILT, paste.rs https://paste.rs/edC3b (operator deploy pending)
 
 ### What
