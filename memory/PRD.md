@@ -26,6 +26,31 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-04 (v19.34.251 — BUILT, paste.rs CujQu, deploy+backfill pending)
+
+**Shadow Tracker measurement fix — the fake "18pt gap" / 4,407 `would_have_r==0.00`
+is a MEASUREMENT bug, not lost edge.** Three root causes fixed: (1) `would_have_r`
+was hardcoded 0 (track_pending never passed a stop + no stop stored on the
+decision); (2) `would_have_pnl` was direction-blind (winning shorts scored as
+losses — no direction stored); (3) `was_executed` was set from the AI "proceed"
+recommendation (~100% true) instead of a real fill. Fix: capture
+`direction`/`stop_price`/`target_price` at log time (the consult call site already
+had them), compute direction-aware pnl + real R from the stored stop, and link
+`was_executed`→real IB fill via new `mark_executed()` (trade_execution pre-submit
+hook). `backfill_shadow_outcomes_v19_34_251.py` repairs history by joining to the
+nearest `bot_trades` fill. 8 new + 20 regression pytest pass.
+**NEXT (P1, operator-approved):** ~~F2 — populate `catalyst_tag` + `gap_pct` at
+entry~~ ✅ **BUILT v19.34.252 (paste.rs d7Vfo)** — catalyst now stamped on ALL
+alerts (was premarket-only) via local `news_articles`/`earnings_calendar` (Mongo,
+no live-API hang), gap_pct+catalyst_tag persisted through entry_context →
+trade_outcomes (reconciler already reads them). Deploy pending. Then:
+EV Leaderboard on Mission Control. Per-trade −1.5R circuit breaker ON HOLD (await
+more data). Backlog: per-symbol reaper retry cap, batched close-all, Mission
+Control sticky filter + bot-vitals header, L2 probe.
+
+---
+
+
 ## 📌 Status snapshot — 2026-06-03 (v19.34.247 — BUILT, paste.rs URYip, live-verify pending)
 
 **EOD-aware thresholds — two run-into-the-close fixes (operator checklist #7).**

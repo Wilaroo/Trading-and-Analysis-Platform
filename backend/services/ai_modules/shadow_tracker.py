@@ -35,6 +35,16 @@ class ShadowDecision:
     price_at_decision: float = 0.0
     market_regime: str = ""
     vix_level: float = 0.0
+
+    # v19.34.251 — Trade geometry captured at decision time. WITHOUT these
+    # `would_have_r` is uncomputable (it needs the stop) and `would_have_pnl`
+    # is direction-blind (a winning short scores as a loss). The 4,407-deep
+    # `would_have_r==0.00` / fake-18pt-gap bug was caused by these never
+    # being stored. The consult call site (trade_consultation.py) already
+    # has all three — they were just never passed through.
+    direction: str = "long"        # "long" | "short"
+    stop_price: float = 0.0
+    target_price: float = 0.0
     
     # Module contributions
     debate_result: Dict = field(default_factory=dict)  # {bull_score, bear_score, winner, reasoning}
@@ -150,6 +160,9 @@ class ShadowTracker:
         price_at_decision: float,
         market_regime: str = "",
         vix_level: float = 0.0,
+        direction: str = "long",
+        stop_price: float = 0.0,
+        target_price: float = 0.0,
         debate_result: Dict = None,
         risk_assessment: Dict = None,
         institutional_context: Dict = None,
@@ -163,7 +176,17 @@ class ShadowTracker:
     ) -> ShadowDecision:
         """
         Log an AI decision with all module contributions.
+
+        v19.34.251: `was_executed` now defaults False and is a REAL-FILL flag —
+        it is flipped to True via `mark_executed()` only when the bot actually
+        fires the order at IB (see trade_execution.py pre-submit hook). It must
+        NOT be set from the AI's "proceed" recommendation (that intent lives in
+        `combined_recommendation`); doing so over-flagged was_executed on ~100%
+        of decisions and broke the apples-to-apples shadow-vs-real join.
         """
+        norm_dir = str(getattr(direction, "value", direction) or "long").lower()
+        if norm_dir not in ("long", "short"):
+            norm_dir = "long"
         modules_used = []
         if debate_result:
             modules_used.append("debate_agents")
@@ -182,6 +205,9 @@ class ShadowTracker:
             price_at_decision=price_at_decision,
             market_regime=market_regime,
             vix_level=vix_level,
+            direction=norm_dir,
+            stop_price=float(stop_price or 0.0),
+            target_price=float(target_price or 0.0),
             debate_result=debate_result or {},
             risk_assessment=risk_assessment or {},
             institutional_context=institutional_context or {},
@@ -230,16 +256,26 @@ class ShadowTracker:
             
         decision = ShadowDecision.from_dict(decision_doc)
         
-        # Calculate would-have P&L if we have entry/stop/target
+        # v19.34.251 — direction-aware P&L + R computed from the stop captured
+        # at decision time. Pre-fix this was `outcome_price - entry` with NO
+        # stop fallback, so `would_have_r` was hardcoded 0.00 (track_pending
+        # never passes a stop) and shorts that won scored as losses.
         entry = entry_price or decision.price_at_decision
-        would_have_pnl = outcome_price - entry
+        direction = str(decision.direction or "long").lower()
+        if direction == "short":
+            would_have_pnl = entry - outcome_price
+        else:
+            would_have_pnl = outcome_price - entry
+
+        # Prefer an explicitly-passed stop, else the one stored on the
+        # decision (the whole reason we now persist it).
+        eff_stop = stop_price if stop_price else decision.stop_price
         would_have_r = 0.0
-        
-        if stop_price and entry:
-            risk = abs(entry - stop_price)
+        if eff_stop and entry:
+            risk = abs(entry - eff_stop)
             if risk > 0:
                 would_have_r = would_have_pnl / risk
-                
+
         self._decisions_col.update_one(
             {"id": decision_id},
             {"$set": {
@@ -258,6 +294,34 @@ class ShadowTracker:
             "would_have_pnl": would_have_pnl,
             "would_have_r": would_have_r
         }
+
+    async def mark_executed(self, decision_id: str, trade_id: str = "") -> Dict[str, Any]:
+        """
+        v19.34.251 — flip a shadow decision to `was_executed=True` and link the
+        REAL `trade_id` once the bot actually fires the order at IB. This is the
+        single source of truth for the execution flag — it replaces the old
+        (broken) behaviour of setting `was_executed` from the AI's "proceed"
+        recommendation at log time. Best-effort + idempotent; never blocks the
+        execution path.
+        """
+        if self._decisions_col is None or not decision_id:
+            return {"success": False, "error": "no_db_or_id"}
+        try:
+            res = self._decisions_col.update_one(
+                {"id": decision_id},
+                {"$set": {
+                    "was_executed": True,
+                    "trade_id": trade_id or "",
+                    "execution_reason": "bot_fired",
+                }}
+            )
+            # Bust the stats cache so the next /shadow/stats reflects the fill.
+            if hasattr(self, "_stats_cache_time"):
+                self._stats_cache_time = 0
+            return {"success": res.matched_count > 0, "decision_id": decision_id}
+        except Exception as e:
+            logger.warning(f"Shadow: mark_executed failed for {decision_id}: {e}")
+            return {"success": False, "error": str(e)}
         
     async def track_pending_outcomes(
         self, batch_size: int = 50, max_batches: int = 1

@@ -3325,7 +3325,12 @@ class PositionManager:
                         pnl=trade.realized_pnl,
                         entry_time=getattr(trade, 'executed_at', None) or getattr(trade, 'created_at', None),
                         exit_time=trade.closed_at,
-                        confirmation_signals=getattr(trade, 'confirmation_signals', [])
+                        confirmation_signals=getattr(trade, 'confirmation_signals', []),
+                        # v19.34.251 (F2) — carry catalyst_tag + gap_pct from the
+                        # entry_context captured at entry so trade_outcomes are
+                        # bucketable by the Phase-D edge ranker (was 100% empty).
+                        catalyst_tag=(trade.entry_context or {}).get("catalyst_tag", "") if isinstance(getattr(trade, 'entry_context', None), dict) else "",
+                        gap_pct=(trade.entry_context or {}).get("gap_pct", 0.0) if isinstance(getattr(trade, 'entry_context', None), dict) else 0.0
                     ))
                 except Exception as e:
                     logger.warning(f"Failed to record trade to learning loop: {e}")

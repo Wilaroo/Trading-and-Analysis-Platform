@@ -7758,10 +7758,12 @@ class EnhancedBackgroundScanner:
            os.environ.get("PREMARKET_TQS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off"):
             await self._enrich_alert_with_tqs(alert)
 
-        # v19.34.232 (task B) — categorical catalyst tag for PREMARKET gappers
-        # (why is it gapping?). Informational only; fully fail-open.
-        if str(getattr(alert, 'time_window', '') or '').lower() == "premarket" or \
-           str(getattr(alert, 'id', '') or '').startswith("pm_"):
+        # v19.34.232 (task B) / v19.34.251 (F2) — categorical catalyst tag for
+        # EVERY alert (was premarket-only, which left RTH trades — i.e. the
+        # ones that actually fire — with an empty catalyst_tag, starving the
+        # Phase-D edge ranker). `mongo_only=True` keeps it off the slow live
+        # news path so the RTH hot loop never hangs. Informational + fail-open.
+        if not (getattr(alert, 'catalyst_tag', '') or ''):
             try:
                 clf = self._get_catalyst_classifier()
                 if clf is not None:
@@ -7769,6 +7771,7 @@ class EnhancedBackgroundScanner:
                         symbol=getattr(alert, 'symbol', ''),
                         direction=getattr(alert, 'direction', 'long') or 'long',
                         gap_pct=float(getattr(alert, 'gap_pct', 0.0) or 0.0),
+                        mongo_only=True,
                     )
                     alert.catalyst_tag = res.get("tag", "")
                     alert.catalyst_summary = res.get("summary", "")

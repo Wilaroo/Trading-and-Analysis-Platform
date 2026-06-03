@@ -569,7 +569,18 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.233 (2026-06-03, Phase D — Game Plan ranked by
+- **Current version**: v19.34.252 (2026-06-04, F2 — catalyst_tag + gap_pct
+  populated at entry: catalyst now stamped on ALL alerts via local
+  news_articles/earnings_calendar Mongo caches (mongo_only, no live-API hang),
+  gap_pct+catalyst persisted through entry_context→trade_outcomes; unblocks the
+  Phase-D edge ranker. paste.rs d7Vfo, deploy pending).
+- **Prior**: v19.34.251 (2026-06-04, Shadow Tracker measurement fix —
+  capture direction/stop/target at log time, direction-aware would_have_pnl, real
+  would_have_r from the stored stop, and was_executed linked to a REAL IB fill via
+  `ShadowTracker.mark_executed()` (trade_execution pre-submit hook). Fixes the fake
+  "18pt gap" / 4,407 `would_have_r==0.00`. +backfill script. BUILT, paste.rs CujQu,
+  deploy+backfill pending operator). Prior chain below.
+- **Prior**: v19.34.233 (2026-06-03, Phase D — Game Plan ranked by
   realized open-session edge: `gameplan_edge_ranker.py` buckets `trade_outcomes`
   by setup+catalyst+gap+regime (shrinkage walk) → EV-R blended with TQS, TQS
   cold-start fallback; +catalyst_tag/gap_pct on TradeOutcome; #edge_rank badge.

@@ -90,13 +90,18 @@ class CatalystClassifierService:
         return out
 
     # ── news (cached) ─────────────────────────────────────────────────────
-    async def _recent_headlines(self, symbol: str) -> List[str]:
+    async def _recent_headlines(self, symbol: str, mongo_only: bool = False) -> List[str]:
         now = time.time()
         c = self._news_cache.get(symbol)
         if c and now - c[0] < self._news_ttl:
             return c[1]
-        heads: List[str] = []
-        if self._news is not None:
+        # v19.34.251 (F2) — Mongo `news_articles` cache FIRST (fast indexed
+        # lookup, FinBERT-scored, ~92k docs). The live get_ticker_news path
+        # hits IB historical news with a 30s timeout that HANGS in this
+        # ib-direct deployment — unusable per-alert across 100+ RTH alerts/scan.
+        # mongo_only=True (the RTH hot-path) NEVER touches the live service.
+        heads = self._recent_headlines_mongo(symbol)
+        if not heads and not mongo_only and self._news is not None:
             try:
                 items = await self._news.get_ticker_news(symbol, max_items=8) or []
                 heads = [(i.get("headline") or "").strip()
@@ -105,6 +110,24 @@ class CatalystClassifierService:
                 logger.debug("[catalyst] news fetch failed %s: %s", symbol, e)
         self._news_cache[symbol] = (now, heads)
         return heads
+
+    def _recent_headlines_mongo(self, symbol: str) -> List[str]:
+        """Read recent headlines directly from the local `news_articles`
+        cache (last 72h). Zero API calls, zero hang. Mirrors the v220
+        fundamental-pillar pattern."""
+        if self.db is None:
+            return []
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+            rows = list(self.db["news_articles"].find(
+                {"symbol": symbol, "datetime": {"$gte": cutoff}},
+                {"_id": 0, "headline": 1},
+            ).sort("datetime", -1).limit(8))
+            return [(r.get("headline") or "").strip() for r in rows
+                    if (r.get("headline") or "").strip()]
+        except Exception as e:
+            logger.debug("[catalyst] news_articles read failed %s: %s", symbol, e)
+            return []
 
     @staticmethod
     def _analyst_headline(headlines: List[str]) -> Optional[str]:
@@ -137,7 +160,13 @@ class CatalystClassifierService:
 
     # ── main ──────────────────────────────────────────────────────────────
     async def classify(self, symbol: str, direction: str = "long",
-                       gap_pct: float = 0.0) -> Dict:
+                       gap_pct: float = 0.0, mongo_only: bool = False) -> Dict:
+        """Classify the catalyst behind a gap/alert.
+
+        v19.34.251 (F2): `mongo_only=True` restricts ALL sources to local Mongo
+        (earnings_calendar + news_articles) so the RTH hot path can stamp every
+        alert without risking the 30s live-news hang.
+        """
         symbol = (symbol or "").upper().strip()
         if not symbol or not _enabled():
             return _no_catalyst()
@@ -153,7 +182,7 @@ class CatalystClassifierService:
                     "summary": f"Earnings {when} ({em[symbol].get('date')})."}
 
         # 2/3) analyst / news
-        heads = await self._recent_headlines(symbol)
+        heads = await self._recent_headlines(symbol, mongo_only=mongo_only)
         if heads:
             ah = self._analyst_headline(heads)
             if ah:

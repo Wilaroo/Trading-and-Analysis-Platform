@@ -358,6 +358,9 @@ class AITradeConsultation:
                     price_at_decision=entry_price,
                     market_regime=market_context.get("regime", ""),
                     vix_level=market_context.get("vix", 0),
+                    direction=direction,
+                    stop_price=stop_price,
+                    target_price=target_price,
                     debate_result=result["debate_result"],
                     risk_assessment=result["risk_assessment"],
                     institutional_context=result["institutional_context"],
@@ -365,7 +368,12 @@ class AITradeConsultation:
                     combined_recommendation=combined_rec,
                     confidence_score=self._calculate_combined_confidence(result),
                     reasoning=result["reasoning"],
-                    was_executed=result["proceed"],  # Will be updated later
+                    # v19.34.251 — DO NOT set was_executed from the AI's
+                    # "proceed" intent (that lives in combined_recommendation).
+                    # It is flipped to True only on a real IB fill via
+                    # shadow_tracker.mark_executed() (trade_execution pre-submit
+                    # hook). Pre-fix this over-flagged ~100% of decisions and
+                    # broke the apples-to-apples shadow-vs-real join.
                     execution_reason="Pre-trade consultation"
                 )
 

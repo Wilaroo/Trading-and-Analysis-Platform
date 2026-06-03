@@ -685,6 +685,20 @@ class TradeExecution:
                     float(trade.entry_price or 0),
                     trade.id,
                 )
+                # v19.34.251 — link the shadow decision to this REAL fill.
+                # Fires only for genuine broker-bound trades (status PENDING —
+                # PAPER/SIMULATED/VETOED/REJECTED were filtered above), giving
+                # was_executed an honest meaning + a real trade_id back-ref.
+                _sd_id = getattr(trade, "ai_shadow_decision_id", None)
+                if _sd_id and trade.status == _TS.PENDING:
+                    try:
+                        from services.ai_modules.shadow_tracker import get_shadow_tracker
+                        await get_shadow_tracker().mark_executed(_sd_id, trade_id=trade.id)
+                    except Exception as _sd_err:
+                        logger.warning(
+                            "[v19.34.251] shadow mark_executed failed for %s: %s",
+                            getattr(trade, "symbol", "?"), _sd_err,
+                        )
             except Exception as _pre_save_err:
                 # NEVER fail-closed on the pre-submit save — better to
                 # risk a missing audit row than block a real entry. Log

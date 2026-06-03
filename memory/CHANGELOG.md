@@ -1,3 +1,58 @@
+## 2026-06-04 — v19.34.252 (F2) CATALYST_TAG + GAP_PCT POPULATED AT ENTRY (BUILT, paste.rs d7Vfo, deploy pending)
+
+Unblocks the Phase-D edge ranker, which starved because the `catalyst_tag` and
+`gap_pct` buckets on `trade_outcomes` were ~100% empty. Two root causes:
+1. **catalyst_tag was stamped on PREMARKET alerts only** (`_process_new_alert`
+   gated on `time_window=="premarket"`), so the RTH alerts that actually fire
+   never got a tag. Now stamped on EVERY alert lacking one.
+2. **gap_pct/catalyst_tag never flowed to trade_outcomes** — `build_entry_context`
+   didn't capture them and the live-close path didn't pass them through.
+
+Fix (IB/local-data-first per operator directive — no live API on the hot path):
+- `CatalystClassifierService`: new `_recent_headlines_mongo()` reads the local
+  `news_articles` cache directly (FinBERT-scored, ~92k docs), + a `mongo_only`
+  flag on `classify()`. The RTH stamping passes `mongo_only=True` so it NEVER
+  hits the 30s live IB-news hang (mirrors the v220 fundamental-pillar fix).
+  Earnings still come from the local `earnings_calendar` Mongo collection.
+- `enhanced_scanner._process_new_alert`: stamps `catalyst_tag` on all untagged
+  alerts (was premarket-only), fail-open + cached.
+- `opportunity_evaluator.build_entry_context`: persists `catalyst_tag` +
+  `catalyst_summary` + signed `gap_pct` into `entry_context`.
+- `position_manager` live close: passes both from `trade.entry_context` into
+  `record_trade_outcome`. The `learning_reconciler` already reads them from
+  entry_context, so backfilled closes are covered too.
+7 new pytest (`test_v19_34_251_f2_catalyst_gap.py`). Hardware-bound — pytest +
+lint + import validated, no testing agent.
+
+
+## 2026-06-04 — v19.34.251 SHADOW TRACKER MEASUREMENT FIX (BUILT, paste.rs CujQu, deploy+backfill pending)
+
+Killed the fake "18pt gap" / 4,407 `would_have_r==0.00` shadow bug. Three root
+causes, all fixed:
+1. **`would_have_r` hardcoded 0.00** — `track_pending_outcomes()` called
+   `update_outcome()` WITHOUT a stop, AND no stop was stored on the decision, so
+   the R formula was always skipped. Fix: capture `stop_price` at log time;
+   `update_outcome` now falls back to the stored stop.
+2. **`would_have_pnl` direction-blind** (`outcome_price - entry`) — a winning
+   SHORT scored as a loss. Fix: store `direction`; pnl is now
+   `entry - outcome` for shorts, `outcome - entry` for longs.
+3. **`was_executed` = the AI "proceed" recommendation** (~100% true), not a real
+   fill. Fix: `was_executed` defaults False at log time and is flipped to True +
+   linked to the real `trade_id` via new `ShadowTracker.mark_executed()`, called
+   from the `trade_execution.py` pre-submit hook (status==PENDING, genuine
+   broker-bound trades only). The recommendation intent still lives in
+   `combined_recommendation`.
+
+The consult call site (`trade_consultation.py`) already had direction/stop/target
+— they were just never passed through to `log_decision`. Added `direction`,
+`stop_price`, `target_price` to the `ShadowDecision` dataclass (legacy docs
+deserialize with safe defaults). One-time `backfill_shadow_outcomes_v19_34_251.py`
+repairs the ~4,407 historical decisions by joining to the nearest `bot_trades`
+fill (recovers direction/stop/entry, recomputes pnl+R, corrects was_executed).
+8 new pytest + 20 existing shadow-drain regression all pass. Hardware-bound — no
+testing agent (pytest + lint + import + dry-run validated).
+
+
 ## 2026-06-03 — v19.34.249b RECONCILER FIXES (DEPLOYED + LIVE-VERIFIED, paste.rs FjHvv)
 
 First `--commit` exposed two bugs (caught via the post-commit audit): alert_outcomes
