@@ -24,9 +24,6 @@ import TradeTypeChip from './TradeTypeChip';
 // swing/investment/position) so the operator sees what kind of trade
 // every open position is at a glance.
 import TradeStyleChip from './TradeStyleChip';
-// v19.34.113 — Rolling 30-day grade for the position's setup_type.
-// Read-only signal; does NOT block exits. Hover for full stat card.
-import SetupGradeChip from './SetupGradeChip';
 // v19.34.2 (2026-05-04) — quote-freshness chip + legend popover.
 import QuoteFreshnessChip from './QuoteFreshnessChip';
 import OpenPositionsLegend from './OpenPositionsLegend';
@@ -45,13 +42,9 @@ import PositionThoughtsInline from './PositionThoughtsInline';
 import { isScalpStyle } from '../../../utils/tradeStyleMeta';
 // v19.34.72 — Operator Close panel (Market/Limit + percentage).
 import CloseTradeModal from './CloseTradeModal';
-// v19.34.159 — "Why this size?" hover/click pill that surfaces the
-// v156 grade-scaling × v157 MR-regime sizing chain stamped on every
-// fill in `entry_context.multipliers`.
-import WhyThisSizePill from './WhyThisSizePill';
-// v19.34.175 — TQS 5-pillar drill-down (entry_context.tqs). TQS is now
-// the single source of truth for the trade's grade.
-import TqsPillarPanel from './TqsPillarPanel';
+// v19.34.258 — single trusted TQS score on the face + shared drill-down.
+import TqsBadge from './TqsBadge';
+import { openTqsDrawer } from './tqsDrawerBus';
 
 // v19.34.175 — Resolve the canonical (unified) grade for a position.
 // TQS is the single source of truth; fall back through the legacy
@@ -337,15 +330,16 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
-          {/* v19.34.113 — rolling 30-day grade for this setup_type */}
-          {position.setup_type && (
-            <SetupGradeChip
-              setupType={position.setup_type}
-              compact={true}
-              size="xs"
-              testIdSuffix={`open-pos-${position.symbol}`}
-            />
-          )}
+          {/* v19.34.258 — single trusted TQS score on the position face;
+              click opens the consolidated drill-down drawer. Replaces the
+              standalone SetupGradeChip / SMB display. */}
+          <TqsBadge
+            symbol={position.symbol}
+            score={position.tqs_score}
+            gradeFallback={unifiedGrade(position)}
+            source="position"
+            testIdSuffix={`open-pos-${position.symbol}`}
+          />
           {/* 2026-05-04 — ORPHAN/PARTIAL/STALE badge moved inline to the
               left cluster so it stops overlapping the right-aligned PnL.
               Multi-trade count rendered next to it. */}
@@ -637,16 +631,19 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             {position.market_regime && (
               <span>· regime {position.market_regime}</span>
             )}
-            {/* v19.34.159 — sizing-chain explainer (only renders when
-                entry_context.multipliers has at least one v156/v157 key). */}
-            <WhyThisSizePill multipliers={position?.entry_context?.multipliers} />
           </div>
 
-          {/* v19.34.175 — TQS 5-pillar drill-down (expand-on-click). */}
-          <TqsPillarPanel
-            tqs={position?.entry_context?.tqs}
-            testIdSuffix={`open-pos-${position.symbol}`}
-          />
+          {/* v19.34.258 — TQS pillars + sizing rationale now live in the
+              shared drill-down drawer (single source of truth). Open it
+              from the expand too. */}
+          <button
+            type="button"
+            data-testid={`open-position-tqs-drilldown-${position.symbol}`}
+            onClick={(e) => { e.stopPropagation(); openTqsDrawer({ symbol: position.symbol, source: 'position' }); }}
+            className="w-full text-left px-3 py-1.5 rounded-md border border-zinc-800 bg-zinc-950/60 text-[12px] text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200 transition-colors"
+          >
+            View full TQS breakdown · 5 pillars + context →
+          </button>
 
           {/* v19.34.11 — Bracket lifecycle history (lazy-loaded on click) */}
           <BracketHistoryPanel

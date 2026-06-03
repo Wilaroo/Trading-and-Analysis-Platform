@@ -21,6 +21,8 @@
 import React, { memo, useEffect, useState, useCallback, useMemo } from 'react';
 import { ChevronRight, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 import api from '../../../utils/api';
+// v19.34.258 — single trusted TQS score on the gameplan card face.
+import TqsBadge from './TqsBadge';
 
 const fmtPrice = (v) =>
   v == null || Number.isNaN(Number(v)) ? '—' : `$${Number(v).toFixed(2)}`;
@@ -225,6 +227,15 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
             @ {fmtPrice(levels.entry)}
           </span>
         )}
+        {/* v19.34.258 — single trusted TQS score; click opens drill-down.
+            Edge-rank badge above is kept as a ranking signal. */}
+        <TqsBadge
+          symbol={symbol}
+          score={stock?.tqs_score ?? card?.tqs_score}
+          gradeFallback={stock?.tqs_grade ?? card?.grade}
+          source="alert"
+          testIdSuffix={`gp-${symbol}`}
+        />
       </button>
 
       {/* Expanded detail */}
