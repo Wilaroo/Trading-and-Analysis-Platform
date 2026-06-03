@@ -80,6 +80,52 @@ def _get_outcomes_collection():
         return None
 
 
+def _hold_seconds(trade: Any) -> Optional[float]:
+    """Best-effort hold time (s) from executed_at -> closed_at. v19.34.240."""
+    a = getattr(trade, "executed_at", None) or getattr(trade, "created_at", None)
+    b = getattr(trade, "closed_at", None)
+    if not a or not b:
+        return None
+    try:
+        da = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+        db_ = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+        return (db_ - da).total_seconds()
+    except Exception:
+        return None
+
+
+def _backfill_excursion_floor(trade: Any, mfe_r_floor: float, mae_r_floor: float) -> None:
+    """v19.34.240 (Part B) — fill mfe_r/mae_r on the trade + bot_trades doc from
+    the realized entry->exit excursion ONLY when the manage loop left them 0
+    (sub-minute closes never accumulated a tick). Never overwrites a real peak."""
+    if _get_outcomes_collection() is None or _AO_DB is None:
+        return
+    cur_mfe = float(getattr(trade, "mfe_r", 0) or 0)
+    cur_mae = float(getattr(trade, "mae_r", 0) or 0)
+    set_fields: Dict[str, Any] = {}
+    if cur_mfe == 0 and mfe_r_floor:
+        v = round(float(mfe_r_floor), 3)
+        set_fields["mfe_r"] = v
+        try:
+            trade.mfe_r = v
+        except Exception:
+            pass
+    if cur_mae == 0 and mae_r_floor:
+        v = round(float(mae_r_floor), 3)
+        set_fields["mae_r"] = v
+        try:
+            trade.mae_r = v
+        except Exception:
+            pass
+    if set_fields:
+        set_fields["excursion_floor_source"] = "pnl_compute_v19_34_240"
+        tid = getattr(trade, "id", None)
+        if tid:
+            _AO_DB["bot_trades"].update_one(
+                {"$or": [{"trade_id": tid}, {"id": tid}]}, {"$set": set_fields}
+            )
+
+
 def _record_alert_outcome_bestEffort(
     trade: Any, reason: str, pnl: Dict[str, float],
     exit_price: float, exit_source: str,
@@ -118,6 +164,27 @@ def _record_alert_outcome_bestEffort(
     except Exception:
         pass
 
+    # v19.34.240 — trade-outcome hygiene: classify GENUINE strategy close vs
+    # execution/reconciliation artifact (phantom sweep, sub-minute external OCA
+    # unwind, operator flatten, corrupt entry==exit pnl). Non-genuine closes are
+    # tagged + EXCLUDED from the strategy_stats EV feed so the setup scoreboard
+    # isn't polluted by drift/phantom wreckage (see diag_accum_oca_drill).
+    try:
+        from services.trade_outcome_hygiene import classify_close, excursion_floor
+        _entry_px = float(getattr(trade, "fill_price", 0) or 0)
+        _stop_px = float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0)
+        _dir_obj = getattr(trade, "direction", None)
+        _dir = getattr(_dir_obj, "value", str(_dir_obj) if _dir_obj else "long").lower()
+        _genuine, _hyg_tag = classify_close(
+            close_reason=reason,
+            entered_by=str(getattr(trade, "entered_by", "") or ""),
+            entry_price=_entry_px, exit_price=exit_price,
+            net_pnl=pnl.get("net_pnl", 0.0), hold_seconds=_hold_seconds(trade),
+        )
+        _mfe_r_floor, _mae_r_floor = excursion_floor(_dir, _entry_px, exit_price, _stop_px)
+    except Exception:
+        _genuine, _hyg_tag, _mfe_r_floor, _mae_r_floor = True, "genuine", 0.0, 0.0
+
     doc = {
         # Use trade.id as the de-duplication / join key. Schema is a
         # SUPERSET of scanner's writer — extra fields are additive.
@@ -132,7 +199,12 @@ def _record_alert_outcome_bestEffort(
         "pnl": realized,
         "net_pnl": pnl.get("net_pnl", 0.0),
         "r_multiple": r_multiple,
-        # v19.34.89 — fall back to smb_grade (canonical SMB grade lives there)
+        # v19.34.89 — trade_grade fallback chain.
+        # Historical bug: writer read ONLY `trade.trade_grade`, but the
+        # canonical SMB grade (set by setup_grader at signal time) lives
+        # on `trade.smb_grade`. Result: ~180 `alert_outcomes` docs had
+        # `trade_grade=None`, breaking `setup_retro.py`'s A/B/C bucket
+        # analysis. Fall back to `smb_grade` when `trade_grade` is unset.
         "trade_grade": (
             getattr(trade, "trade_grade", None)
             or getattr(trade, "smb_grade", None)
@@ -146,6 +218,11 @@ def _record_alert_outcome_bestEffort(
         "close_reason": reason,
         "closed_at": getattr(trade, "closed_at", datetime.now(timezone.utc).isoformat()),
         "recorded_by": "pnl_compute_v19_34_124",
+        # v19.34.240 — hygiene classification + excursion floor (audit-preserved)
+        "genuine": _genuine,
+        "hygiene_tag": _hyg_tag,
+        "mfe_r_floor": round(_mfe_r_floor, 3),
+        "mae_r_floor": round(_mae_r_floor, 3),
     }
     try:
         # Upsert keyed on trade_id so retry-on-failure paths don't
@@ -166,19 +243,37 @@ def _record_alert_outcome_bestEffort(
     # strategy_stats was orphaned (EV=0 for ~100% of alerts; see backfill).
     # This upsert mirrors `backfill_strategy_stats.py` math + keying so the
     # one-time backfill and the live feed converge. Best-effort; never blocks.
-    try:
-        _upsert_strategy_stats_bestEffort(
-            trade, outcome, r_multiple, pnl.get("net_pnl", 0.0),
+    # v19.34.240 — but ONLY for GENUINE strategy closes. Artifact closes
+    # (phantom sweep / instant external unwind / operator flatten / corrupt pnl)
+    # are excluded so they can't pollute the EV scoreboard.
+    if _genuine:
+        try:
+            _upsert_strategy_stats_bestEffort(
+                trade, outcome, r_multiple, pnl.get("net_pnl", 0.0),
+            )
+        except Exception as _ss_err:
+            logger.debug("[v19.34.216 strategy_stats] live hook skipped: %s", _ss_err)
+    else:
+        logger.debug(
+            "[v19.34.240 hygiene] strategy_stats SKIPPED for %s close (%s)",
+            getattr(trade, "symbol", "?"), _hyg_tag,
         )
-    except Exception as _ss_err:
-        logger.debug("[v19.34.216 strategy_stats] live hook skipped: %s", _ss_err)
+
+    # v19.34.240 (Part B) — finalize MFE/MAE on bot_trades from the realized
+    # entry->exit excursion when the manage loop never populated it.
+    try:
+        _backfill_excursion_floor(trade, _mfe_r_floor, _mae_r_floor)
+    except Exception as _ex_err:
+        logger.debug("[v19.34.240 excursion] floor backfill skipped: %s", _ex_err)
 
     # v19.34.88 — Post-stop cooldown stamp. On any close whose reason
     # starts with "stop" (stop_loss, stop_loss_phantom_recovery,
     # stop_loss_trailing, etc.), record the (symbol, setup_base) pair
     # into the in-memory cooldown registry so opportunity_evaluator
     # can refuse same-symbol+setup re-entries for the next
-    # POST_STOP_COOLDOWN_MINUTES window.
+    # POST_STOP_COOLDOWN_MINUTES window. This is the v19.34.87
+    # setup_retro finding fix: prevents ETHU-style 5x-stops-in-22min
+    # bleed cascades.
     try:
         if str(reason or "").lower().startswith("stop"):
             from services.post_stop_cooldown import get_registry
@@ -218,7 +313,7 @@ def _upsert_strategy_stats_bestEffort(
     if not bs:
         return
 
-    # Classify win/loss — mirror backfill _classify priority: outcome -> r -> pnl.
+    # Classify win/loss — mirror backfill _classify priority: outcome → r → pnl.
     cls: Optional[str] = None
     o = str(outcome or "").lower().strip()
     if o == "won":
@@ -230,7 +325,7 @@ def _upsert_strategy_stats_bestEffort(
     elif net_pnl:
         cls = "win" if net_pnl > 0 else "loss"
     if cls is None:
-        return  # true scratch (0 pnl, 0 R) -- skip, matching the backfill
+        return  # true scratch (0 pnl, 0 R) — skip, matching the backfill
 
     coll = _AO_DB["strategy_stats"]
     try:
@@ -280,7 +375,7 @@ def _upsert_strategy_stats_bestEffort(
             upsert=True,
         )
         logger.info(
-            "[v19.34.216 strategy_stats] %s <- r=%s cls=%s -> EV=%.3fR win=%.0f%% (#r=%d)",
+            "[v19.34.216 strategy_stats] %s ← r=%s cls=%s → EV=%.3fR win=%.0f%% (#r=%d)",
             bs, r_multiple, cls, round(ev, 3), win_rate * 100, len(r_out),
         )
     except Exception as e:
