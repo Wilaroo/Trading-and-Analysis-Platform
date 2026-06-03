@@ -71,6 +71,17 @@ def normalize_setup(setup) -> str:
     return str(setup or "").strip().lower().replace(" ", "_")
 
 
+def normalize_direction(value) -> str:
+    """v19.34.237 — collapse any direction label to {long, short}. A setup's
+    realized edge differs by side, so direction is a bucket dimension. Unknown
+    defaults to 'long' (consistent on both the index and scoring side so they
+    still match)."""
+    s = (getattr(value, "value", None) or str(value or "")).strip().lower()
+    if s in ("short", "sell", "sld", "s", "down"):
+        return "short"
+    return "long"
+
+
 _CATALYST_TYPE_MAP = {
     "earnings": "earnings",
     "news": "news",
@@ -175,14 +186,15 @@ class GamePlanEdgeRanker:
                 continue
             ctx = o.get("context") or {}
             rb = regime_bias(ctx.get("market_regime"))
+            dr = normalize_direction(o.get("direction") or ctx.get("direction"))
             cat = _outcome_catalyst(o)
             gb = gap_bucket(o.get("gap_pct"))
             r = _safe_float(o.get("actual_r"))
             for key in (
-                ("L4", setup, cat, gb, rb),
-                ("L3", setup, cat, rb),
-                ("L2", setup, rb),
-                ("L1", setup),
+                ("L4", setup, dr, cat, gb, rb),
+                ("L3", setup, dr, cat, rb),
+                ("L2", setup, dr, rb),
+                ("L1", setup, dr),
             ):
                 self._accum(key, outcome, r)
 
@@ -197,13 +209,13 @@ class GamePlanEdgeRanker:
         avg_loss = abs(a["loss_r_sum"] / a["loss_n"]) if a["loss_n"] else 1.0
         return wr * avg_win - (1.0 - wr) * avg_loss
 
-    def _lookup(self, setup: str, cat: str, gb: str, rb: str) -> Optional[Tuple[float, int, str]]:
+    def _lookup(self, setup: str, dr: str, cat: str, gb: str, rb: str) -> Optional[Tuple[float, int, str]]:
         """Shrinkage walk L4 -> L1. First level with >= MIN_SAMPLES wins."""
         for key in (
-            ("L4", setup, cat, gb, rb),
-            ("L3", setup, cat, rb),
-            ("L2", setup, rb),
-            ("L1", setup),
+            ("L4", setup, dr, cat, gb, rb),
+            ("L3", setup, dr, cat, rb),
+            ("L2", setup, dr, rb),
+            ("L1", setup, dr),
         ):
             a = self._b.get(key)
             if a and (a["wins"] + a["losses"]) >= self.MIN_SAMPLES:
@@ -229,11 +241,12 @@ class GamePlanEdgeRanker:
     def score_stock(self, stock: Dict, rb: str) -> Dict:
         """Annotate a single stock entry in place with edge_* fields."""
         setup = normalize_setup(stock.get("setup_type"))
+        dr = normalize_direction(stock.get("direction"))
         cat = str(stock.get("catalyst_tag") or "").strip().lower()
         gb = gap_bucket(stock.get("gap_pct"))
         tqs_comp = self._tqs_component(stock)
 
-        hit = self._lookup(setup, cat, gb, rb)
+        hit = self._lookup(setup, dr, cat, gb, rb)
         if hit is None:
             # Cold-start: rank by TQS, preserving the existing heuristic order.
             stock["edge_source"] = "tqs_fallback"
@@ -270,3 +283,20 @@ class GamePlanEdgeRanker:
         for i, s in enumerate(stocks, 1):
             s["edge_rank"] = i
         return stocks
+
+    def coverage_summary(self) -> Dict[str, Dict[str, int]]:
+        """v19.34.237 — audit how often each bucket level is actually usable
+        (>= MIN_SAMPLES decided trades). Surfaces whether the fine L4/L3
+        catalyst+gap+direction buckets are firing or everything is falling
+        back to L2/L1, so we can tune granularity as history accrues.
+        Returns {level: {"total": n_buckets, "usable": n_with_min_samples}}.
+        """
+        out = {lvl: {"total": 0, "usable": 0} for lvl in ("L1", "L2", "L3", "L4")}
+        for key, a in self._b.items():
+            lvl = key[0]
+            if lvl not in out:
+                continue
+            out[lvl]["total"] += 1
+            if (a["wins"] + a["losses"]) >= self.MIN_SAMPLES:
+                out[lvl]["usable"] += 1
+        return out

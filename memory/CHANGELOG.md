@@ -1,3 +1,24 @@
+## 2026-06-03 — v19.34.237 (Phase D follow-up B) DIRECTION-AWARE EDGE BUCKETS + COVERAGE AUDIT (BUILT, paste.rs MQsVr)
+
+### What
+- **Direction** added to every realized-edge bucket key (L1-L4) in
+  `gameplan_edge_ranker.py`. A setup's EV differs long vs short, so long
+  history no longer leaks into a short setup's score (and vice-versa).
+  `normalize_direction()` defaults unknown → long (consistent both sides).
+- **`coverage_summary()`** audit method: per-level {total, usable(≥MIN_SAMPLES)}
+  bucket counts, so we can see how often the fine L4/L3 catalyst+gap+direction
+  buckets actually fire vs falling back to L2/L1 as history accrues (Phase D
+  follow-up item 3).
+- Tests: `test_v19_34_237_edge_direction.py` 5/5 + v233 regression 10/10 = 15/15.
+  Lint clean. Backend-only, no trading-path impact — deploy anytime.
+
+### Deferred (Phase D follow-up item 2)
+- Live `trigger_probability` formula port lives in the SCANNER (alert_system/
+  enhanced_scanner), not the edge ranker — separate task, currently static per
+  setup. Flagged for a follow-up when the scanner work resumes.
+
+---
+
 ## 2026-06-03 — v19.34.236 (Part A) PENDING FILL ATTRIBUTION (BUILT, flag-gated OFF; deploy at close)
 
 ### What (the deep cure for bot-vs-IB drift)

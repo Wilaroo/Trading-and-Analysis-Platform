@@ -4705,7 +4705,9 @@ class TradingBotService:
         (v235-clamped) naked-position sweep to protect on its next cycle.
         """
         import os as _os
-        if _os.environ.get("PENDING_FILL_ATTRIBUTION_ENABLED", "false").strip().lower() \
+        # v19.34.236 — ON by default (operator-enabled 2026-06-03). Instant
+        # disable via PENDING_FILL_ATTRIBUTION_ENABLED=0 + restart.
+        if _os.environ.get("PENDING_FILL_ATTRIBUTION_ENABLED", "true").strip().lower() \
                 not in ("1", "true", "yes", "on"):
             return
         if not self._pending_trades:

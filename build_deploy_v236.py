@@ -14,14 +14,14 @@ FILES = [
     "backend/tests/test_v19_34_236_pending_fill_attribution.py",     # NEW
 ]
 COMMIT_MSG = (
-    "v19.34.236 (Part A): pending fill attribution (FLAG-GATED, default OFF). "
+    "v19.34.236 (Part A): pending fill attribution (ON by default). "
     "When an entry actually fills at IB but the fill isn't attributed back "
     "(entry_order_id=None race), the reaper tick now MATCHES the live IB "
     "orphan to its original PENDING row and PROMOTES it to OPEN (preserving "
     "entered_by=bot_fired/setup/TQS), instead of falsely rejecting it and "
     "letting the reconciler re-adopt the shares as a synthetic slice. Submits "
     "NO orders — leaves the promoted trade for the v235-clamped naked-sweep to "
-    "protect. Enable via PENDING_FILL_ATTRIBUTION_ENABLED=1."
+    "protect. Disable via PENDING_FILL_ATTRIBUTION_ENABLED=0."
 )
 
 
@@ -89,18 +89,14 @@ def main():
     print('''
 NEXT STEPS:
   1) .venv/bin/python -m pytest backend/tests/test_v19_34_236_pending_fill_attribution.py -q   # expect 12 passed
-  2) ./start_backend.sh --force        # deploys the code INERT (flag still OFF)
-
-  --- WHEN READY TO ENABLE (recommend at/after the close, bot flat, then watch) ---
-  3) Add to backend/.env:   PENDING_FILL_ATTRIBUTION_ENABLED=1
-  4) ./start_backend.sh --force
-  5) Watch it work the next time a fill goes unattributed:
+  2) ./start_backend.sh --force        # deploys + ENABLES it (ON by default)
+  3) Watch it work the next time a fill goes unattributed:
        grep "v19.34.236" /tmp/backend.log
        # Mongo audit:  db.state_integrity_events.find({event:"pending_fill_attributed"})
      A promoted name shows up in _open_trades with entered_by=bot_fired (NOT a
      reconciled_excess slice) and the v235-clamped naked-sweep protects it.
 
-Revert / disable instantly: set PENDING_FILL_ATTRIBUTION_ENABLED=0 (or remove) + restart.
+Disable instantly: set PENDING_FILL_ATTRIBUTION_ENABLED=0 in backend/.env + restart.
 Notes: matcher requires pre_submit age 30s..3600s, same symbol+direction, and
 order size that could produce the fill. Promoter submits NO orders.
 ''')
