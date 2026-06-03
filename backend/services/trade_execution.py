@@ -435,22 +435,6 @@ class TradeExecution:
                 atr_14 = getattr(trade, "atr_14", None)
                 if atr_14 is None and hasattr(bot, "_atr_cache"):
                     atr_14 = bot._atr_cache.get(trade.symbol)
-                # v19.34.28 Bug X (2026-05-18) — opportunity_evaluator stamps
-                # atr/atr_percent into trade.entry_context but never onto
-                # trade.atr_14 or bot._atr_cache. Pre-fix every entry hit
-                # the guardrail's "no ATR available" branch (0.10% × entry
-                # fallback) which vetoed nearly every signal as
-                # `stop_too_tight_pct`. Read from entry_context as a 3rd
-                # fallback before declaring ATR unavailable.
-                if atr_14 is None:
-                    try:
-                        ec = getattr(trade, "entry_context", None) or {}
-                        if isinstance(ec, dict):
-                            _atr = ec.get("atr") or (ec.get("technicals") or {}).get("atr")
-                            if _atr and float(_atr) > 0:
-                                atr_14 = float(_atr)
-                    except Exception:
-                        pass
 
                 account_equity = None
                 try:
@@ -701,6 +685,20 @@ class TradeExecution:
                     float(trade.entry_price or 0),
                     trade.id,
                 )
+                # v19.34.251 — link the shadow decision to this REAL fill.
+                # Fires only for genuine broker-bound trades (status PENDING —
+                # PAPER/SIMULATED/VETOED/REJECTED were filtered above), giving
+                # was_executed an honest meaning + a real trade_id back-ref.
+                _sd_id = getattr(trade, "ai_shadow_decision_id", None)
+                if _sd_id and trade.status == _TS.PENDING:
+                    try:
+                        from services.ai_modules.shadow_tracker import get_shadow_tracker
+                        await get_shadow_tracker().mark_executed(_sd_id, trade_id=trade.id)
+                    except Exception as _sd_err:
+                        logger.warning(
+                            "[v19.34.251] shadow mark_executed failed for %s: %s",
+                            getattr(trade, "symbol", "?"), _sd_err,
+                        )
             except Exception as _pre_save_err:
                 # NEVER fail-closed on the pre-submit save — better to
                 # risk a missing audit row than block a real entry. Log
@@ -875,10 +873,7 @@ class TradeExecution:
                 trade.entered_by = "bot_fired"
 
                 # Record actual entry (Phase 1 Learning)
-                # v19.34.31 — skip when fill_price is None (bracket submitted
-                # to IB but not yet filled; fill callback records later).
-                if (hasattr(bot, '_learning_loop') and bot._learning_loop
-                        and trade.fill_price is not None):
+                if hasattr(bot, '_learning_loop') and bot._learning_loop:
                     try:
                         bot._learning_loop.record_trade_entry(
                             trade_id=trade.id,
@@ -918,16 +913,7 @@ class TradeExecution:
                 await bot._log_trade_to_journal(trade, "entry")
 
                 sim_tag = " (SIMULATED)" if result.get('simulated') else ""
-                # v19.34.31 — guard against fill_price=None for submitted-but-
-                # not-yet-filled brackets (ib-direct returns success on SUBMIT;
-                # IB sends the fill async). Without this, every async-fill
-                # bracket crashed execute_trade at the success log line,
-                # bubbled up as [TRADE_DROP] gate=execution_exception, and
-                # left a zombie PENDING row in bot_trades.
-                if trade.fill_price is not None:
-                    logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
-                else:
-                    logger.info(f"📤 Trade submitted{sim_tag}: {trade.symbol} {trade.shares} (awaiting IB fill)")
+                logger.info(f"✅ Trade executed{sim_tag}: {trade.symbol} {trade.shares} @ ${trade.fill_price:.2f}")
 
                 # Surface to V5 Unified Stream so operators see fills land
                 # in the same place they see scanner / safety events.
