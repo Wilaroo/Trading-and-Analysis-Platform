@@ -297,6 +297,11 @@ class GamePlanService:
         target = getattr(alert, 'target', 0) or 0
         reasoning = self._reasoning_text(alert)
         setup = (getattr(alert, 'setup_type', '') or '').replace('_', ' ').title()
+        # v19.34.232 (task B) — surface the catalyst tag + the premarket TQS grade
+        # on the gameplan (prefer the catalyst one-liner as the displayed catalyst).
+        catalyst_tag = getattr(alert, 'catalyst_tag', '') or ''
+        catalyst_summary = getattr(alert, 'catalyst_summary', '') or ''
+        catalyst_text = catalyst_summary or reasoning
         return {
             "symbol": symbol,
             "setup_type": setup,
@@ -306,7 +311,11 @@ class GamePlanService:
                 "stop": stop,
                 "target": target,
             },
-            "catalyst": reasoning,
+            "catalyst": catalyst_text,
+            "catalyst_tag": catalyst_tag,
+            "catalyst_summary": catalyst_summary,
+            "tqs_score": getattr(alert, 'tqs_score', 0) or 0,
+            "tqs_grade": getattr(alert, 'tqs_grade', '') or '',
             "timeframe": getattr(alert, 'scan_tier', 'intraday'),
             "if_then_statements": [
                 {

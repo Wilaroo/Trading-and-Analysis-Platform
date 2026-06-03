@@ -2076,3 +2076,21 @@ alerts ever (log always printed "0 morning watchlist alerts").
     -> premarket graded AGAINST the RTH reference, never skews it.
   - 13/13 pytest (tests/test_v19_34_231_premarket_tqs.py). Deployed paste.rs/uA1UC
     (gzip+base64, full-file replace, anchor-guarded + idempotent).
+
+## v19.34.232 — 2026-06-03 — Catalyst classification for premarket gappers (task B)
+NEW services/catalyst_classifier_service.py: categorical tag (earnings|analyst|news|
+sympathy|no_catalyst) answering "why is it gapping". Composes EXISTING plumbing —
+earnings from earnings_calendar Mongo collection (zero hot-path Finnhub), news from
+IB-first NewsService (cached 30m), sympathy from sector classifier (light v1: sector
+regime moving in gap direction). Informational only in v1, fail-open, env-gated
+CATALYST_TAGGING_ENABLED (default ON).
+  - enhanced_scanner.py: LiveAlert.catalyst_tag/catalyst_summary; lazy classifier;
+    premarket alerts classified in _process_new_alert.
+  - gameplan_service._alert_to_stock_entry: stocks-in-play now carry catalyst_tag/
+    summary + premarket tqs_score/tqs_grade (surface on the Game Plan, not a new
+    digest — decided existing 8:30 Pre-Market Briefing + Game Plan already cover it).
+  - 9/9 v232 pytest (+13 v231). Deployed paste.rs/De4Hb as a SUPERSET incl v231
+    (byte-idempotent, anchor-guarded, gzip+base64). Supersedes the standalone v231
+    deploy (paste.rs/uA1UC).
+Premarket intelligence initiative: A (v231) + B (v232) DONE; C (Daily Ops Digest)
+de-scoped in favor of enriching Game Plan; D (gameplan ranking by realized edge) open.

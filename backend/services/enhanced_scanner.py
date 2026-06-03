@@ -481,6 +481,10 @@ class LiveAlert:
     # Earnings catalyst score (if applicable)
     earnings_score: int = 0              # -10 to +10
     trading_approach: str = ""           # "max_conviction", "aggressive", "directional", "limited", "avoid"
+
+    # v19.34.232 (task B) — categorical "why is it gapping" tag (premarket).
+    catalyst_tag: str = ""               # earnings | analyst | news | sympathy | no_catalyst
+    catalyst_summary: str = ""           # human-readable one-liner for the gameplan / HUD
     
     # ADV Scan Tier (Phase 4)
     scan_tier: str = "intraday"          # "intraday" (≥500K ADV), "swing" (≥100K), "investment" (≥50K)
@@ -725,6 +729,8 @@ class EnhancedBackgroundScanner:
         self.db = db
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
+        # v19.34.232 (task B) — lazy catalyst classifier (built on first use).
+        self._catalyst_classifier = None
 
         # v19.34.155 — Throttle for scanner thoughts so we don't flood
         # the stream during the noisy first scan tick of each cycle.
@@ -6490,6 +6496,26 @@ class EnhancedBackgroundScanner:
 
 
 
+    def _get_catalyst_classifier(self):
+        """Lazily build the catalyst classifier (task B) with the existing news +
+        sector services. Returns None if construction fails (fail-open)."""
+        if self._catalyst_classifier is None:
+            try:
+                from services.catalyst_classifier_service import get_catalyst_classifier_service
+                from services.news_service import get_news_service
+                from services.sector_regime_classifier import get_sector_regime_classifier
+                from services.sector_tag_service import get_sector_tag_service
+                self._catalyst_classifier = get_catalyst_classifier_service(
+                    db=self.db,
+                    news_service=get_news_service(),
+                    sector_classifier=get_sector_regime_classifier(db=self.db),
+                    sector_tagger=get_sector_tag_service(db=self.db),
+                )
+            except Exception as e:
+                logger.warning(f"[catalyst] classifier init failed: {e}")
+                self._catalyst_classifier = None
+        return self._catalyst_classifier
+
     # ── v19.34.231 — premarket alert factory ──────────────────────────────
     # The inline premarket LiveAlert(...) constructors had drifted off the model
     # schema (stop_price/target_price/score/timestamp) and silently threw for a
@@ -7661,6 +7687,23 @@ class EnhancedBackgroundScanner:
         if (getattr(alert, 'tqs_score', 0) or 0) <= 0 and \
            os.environ.get("PREMARKET_TQS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off"):
             await self._enrich_alert_with_tqs(alert)
+
+        # v19.34.232 (task B) — categorical catalyst tag for PREMARKET gappers
+        # (why is it gapping?). Informational only; fully fail-open.
+        if str(getattr(alert, 'time_window', '') or '').lower() == "premarket" or \
+           str(getattr(alert, 'id', '') or '').startswith("pm_"):
+            try:
+                clf = self._get_catalyst_classifier()
+                if clf is not None:
+                    res = await clf.classify(
+                        symbol=getattr(alert, 'symbol', ''),
+                        direction=getattr(alert, 'direction', 'long') or 'long',
+                        gap_pct=float(getattr(alert, 'gap_pct', 0.0) or 0.0),
+                    )
+                    alert.catalyst_tag = res.get("tag", "")
+                    alert.catalyst_summary = res.get("summary", "")
+            except Exception as e:
+                logger.debug(f"[catalyst] classify failed for {getattr(alert,'symbol','?')}: {e}")
 
         # Persist to database
         if self.db is not None:
