@@ -1,3 +1,12 @@
+## 2026-06-03 — v19.34.241 hygiene: reject reconciliation/import setup_types (BUILT, paste.rs 0gajg)
+
+The v240 dry-run showed `reconciled_excess_slice` (n=20), `reconciled_orphan` (n=5),
+`imported_from_ib` (n=2) still grading as genuine setups — they reached bot_trades as
+a `setup_type` but never came from a strategy detector. Added `_ARTIFACT_SETUP_SUBSTRINGS`
+({reconciled, imported, phantom}) to `classify_close(setup_type=...)`; wired at the
+pnl_compute live hook + backfill. 17 hygiene pytest pass. Re-deploy then re-run backfill.
+
+
 ## 2026-06-03 — v19.34.240 TRADE-OUTCOME HYGIENE (EV de-pollution) + MFE/MAE FLOOR (BUILT, paste.rs g2qmv)
 
 ### Why

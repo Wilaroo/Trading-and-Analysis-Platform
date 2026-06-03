@@ -180,6 +180,7 @@ def _record_alert_outcome_bestEffort(
             entered_by=str(getattr(trade, "entered_by", "") or ""),
             entry_price=_entry_px, exit_price=exit_price,
             net_pnl=pnl.get("net_pnl", 0.0), hold_seconds=_hold_seconds(trade),
+            setup_type=str(getattr(trade, "setup_type", "") or ""),
         )
         _mfe_r_floor, _mae_r_floor = excursion_floor(_dir, _entry_px, exit_price, _stop_px)
     except Exception:

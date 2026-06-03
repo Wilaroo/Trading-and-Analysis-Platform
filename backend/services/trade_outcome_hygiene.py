@@ -35,6 +35,16 @@ _ARTIFACT_ENTERED_BY_SUBSTRINGS = (
     "phantom",
 )
 
+# setup_type substrings that are themselves reconciliation/import artifacts —
+# NOT real strategy setups (v19.34.241). e.g. reconciled_excess_slice,
+# reconciled_orphan, imported_from_ib. These reached bot_trades as a setup_type
+# but never came from a strategy detector, so they must not grade any setup.
+_ARTIFACT_SETUP_SUBSTRINGS = (
+    "reconciled",
+    "imported",
+    "phantom",
+)
+
 # An `oca_closed_externally` close held shorter than this is an immediate
 # bracket unwind (drift/phantom era), not a real managed exit.
 INSTANT_UNWIND_MAX_HOLD_S = 120.0
@@ -51,6 +61,7 @@ def classify_close(
     exit_price: Optional[float] = None,
     net_pnl: Optional[float] = None,
     hold_seconds: Optional[float] = None,
+    setup_type: str = "",
 ) -> Tuple[bool, str]:
     """Return (is_genuine, tag).
 
@@ -60,6 +71,11 @@ def classify_close(
     """
     r = str(close_reason or "").lower()
     eb = str(entered_by or "").lower()
+    st = str(setup_type or "").lower()
+
+    for sub in _ARTIFACT_SETUP_SUBSTRINGS:
+        if sub in st:
+            return False, f"artifact_setup:{st[:24]}"
 
     for sub in _ARTIFACT_REASON_SUBSTRINGS:
         if sub in r:
