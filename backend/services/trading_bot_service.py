@@ -3503,6 +3503,15 @@ class TradingBotService:
             while self._running:
                 try:
                     db = getattr(self, "_db", None)
+                    # v19.34.236 (Part A) — attribute unattributed IB fills to
+                    # their original PENDING rows BEFORE the reap decision, so
+                    # a filled entry is promoted to OPEN (preserving its real
+                    # setup/intent) instead of being reaped + re-adopted as a
+                    # synthetic slice. Flag-gated; no-op when disabled.
+                    try:
+                        await self._attribute_pending_fills()
+                    except Exception as _afe:
+                        logger.debug("[v19.34.236] attribute_pending_fills tick failed: %s", _afe)
                     if db is not None:
                         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_s)).isoformat()
                         query = {
@@ -4682,6 +4691,121 @@ class TradingBotService:
     
     # ==================== TRADE EXECUTION ====================
     
+    async def _attribute_pending_fills(self):
+        """v19.34.236 (Part A) — promote PENDING rows whose entry actually
+        FILLED at IB (but the fill was never attributed back) into OPEN
+        trades, matched to the live IB orphan — instead of letting the reaper
+        falsely reject them and the reconciler re-adopt the shares as a
+        synthetic slice (the entry_order_id=None race, 2026-06-03).
+
+        Flag-gated (`PENDING_FILL_ATTRIBUTION_ENABLED`, default OFF) so the
+        deployed code is inert until the operator enables + watches it.
+
+        Submits NO orders: the promoted OPEN trade is left for the existing
+        (v235-clamped) naked-position sweep to protect on its next cycle.
+        """
+        import os as _os
+        # v19.34.236 — ON by default (operator-enabled 2026-06-03). Instant
+        # disable via PENDING_FILL_ATTRIBUTION_ENABLED=0 + restart.
+        if _os.environ.get("PENDING_FILL_ATTRIBUTION_ENABLED", "true").strip().lower() \
+                not in ("1", "true", "yes", "on"):
+            return
+        if not self._pending_trades:
+            return
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ibd = get_ib_direct_service()
+            if ibd is None or not await ibd.ensure_connected():
+                return
+            positions = await ibd.get_positions() or []
+        except Exception as e:
+            logger.debug("[v19.34.236] get_positions failed: %s", e)
+            return
+
+        bot_open_syms = {
+            (getattr(t, "symbol", "") or "").upper()
+            for t in (self._open_trades or {}).values()
+        }
+        # symbol -> (signed_qty, avg_cost) for orphans the bot isn't tracking.
+        orphans: Dict[str, tuple] = {}
+        for p in positions:
+            sym = (p.get("symbol") or "").upper()
+            q = float(p.get("position") or 0.0)
+            if sym and abs(q) >= 1 and sym not in bot_open_syms:
+                orphans[sym] = (q, float(p.get("avg_cost") or p.get("avgCost") or 0.0))
+        if not orphans:
+            return
+
+        from services.pending_fill_attribution import (
+            match_pending_to_orphan, build_promotion_update,
+        )
+        pending_rows = []
+        for t in self._pending_trades.values():
+            pending_rows.append({
+                "id": getattr(t, "id", None),
+                "symbol": (getattr(t, "symbol", "") or "").upper(),
+                "direction": (getattr(t.direction, "value", None) or str(getattr(t, "direction", ""))).lower(),
+                "shares": int(getattr(t, "shares", 0) or 0),
+                "pre_submit_at": getattr(t, "pre_submit_at", None),
+            })
+
+        now = datetime.now(timezone.utc)
+        for sym, (signed_qty, avg_cost) in orphans.items():
+            tid = match_pending_to_orphan(sym, signed_qty, pending_rows, now)
+            if not tid:
+                continue
+            trade = self._pending_trades.get(tid)
+            if trade is None:
+                continue
+            qty_abs = abs(int(round(signed_qty)))
+            fill_price = avg_cost or float(getattr(trade, "entry_price", 0) or 0)
+            upd = build_promotion_update(qty_abs, fill_price, now.isoformat())
+
+            trade.status = TradeStatus.OPEN
+            trade.fill_price = upd["fill_price"]
+            trade.executed_at = upd["executed_at"]
+            trade.remaining_shares = upd["remaining_shares"]
+            trade.original_shares = upd["original_shares"]
+            trade.shares = upd["shares"]
+            trade.close_reason = None
+            trade.notes = (getattr(trade, "notes", "") or "") + (
+                f" [v19.34.236 PENDING-FILL-ATTRIBUTED {qty_abs}@{fill_price:.2f}]"
+            )
+
+            self._pending_trades.pop(tid, None)
+            self._open_trades[tid] = trade
+
+            try:
+                save_fn = getattr(self, "_save_trade", None) or getattr(self, "_persist_trade", None)
+                if save_fn:
+                    r = save_fn(trade)
+                    if asyncio.iscoroutine(r):
+                        await r
+            except Exception:
+                pass
+            try:
+                if getattr(self, "_db", None) is not None:
+                    self._db["state_integrity_events"].insert_one({
+                        "event": "pending_fill_attributed",
+                        "severity": "high",
+                        "symbol": sym,
+                        "trade_id": tid,
+                        "qty": qty_abs,
+                        "fill_price": fill_price,
+                        "detail": (
+                            "PENDING row promoted to OPEN — matched an "
+                            "unattributed live IB fill; naked-sweep will protect it."
+                        ),
+                        "ts": now.isoformat(),
+                    })
+            except Exception:
+                pass
+            logger.warning(
+                "[v19.34.236] PROMOTED pending %s %s -> OPEN (attributed IB fill %d @ %.2f) "
+                "— left for naked-sweep to protect.",
+                sym, tid, qty_abs, fill_price,
+            )
+
     async def _execute_trade(self, trade: BotTrade):
         """Execute a trade — delegated to TradeExecution module, gated by the
         central safety guardrails (daily-loss / stale-quote / exposure caps).
