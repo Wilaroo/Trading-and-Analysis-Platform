@@ -95,12 +95,50 @@ Run: `.venv/bin/python backend/scripts/diag_learning_loop_audit_v19_34_248.py --
 
 ---
 
-## 5. Candidate fixes (pending live numbers to prioritize)
-- F1: route `close_trade_custom` outcomes into the same 3 sinks (shared helper, not a
-  fork of the safety-critical close). **High value if §2 shows a real leak.**
-- F2: pass `catalyst_tag`/`gap_pct` (+ entry context) from the trade into
-  `record_trade_outcome`.
-- F3: wrap the create_task body in a guarded coroutine that logs + writes a
-  `learning_write_failures` breadcrumb on exception.
-- F4: converge the 3 EV stores (or make one canonical + others derived) to kill divergence.
-- F5: weighted-avg entry + realized R from fills for accurate actual_r.
+## 6. VERIFICATION PASS (v248b, 2026-06-03) — confirmed-real vs audit artifacts
+
+After the first live run, every finding was re-checked against the actual code +
+schemas. Result: **4 findings were audit artifacts** (wrong field/collection names in
+the v248 script), **4 are confirmed real**.
+
+### ✅ CONFIRMED REAL (verified in code, not just the audit)
+1. **Coverage leak (trade_outcomes ~18%).** The OCA-external sweep
+   (`position_manager.py` ~357-378) sets `status/close_reason/realized_pnl` inline and
+   calls `_persist_trade` — it does NOT call `apply_close_pnl`, `record_trade_outcome`,
+   or the regime log. `record_trade_outcome` lives ONLY in `close_trade` (L3306). No
+   script backfills `bot_trades → trade_outcomes` (`backfill_learning_stats.py` only
+   rebuilds `learning_stats` FROM `trade_outcomes`). → 186 OCA-external + EOD/reconciler
+   closes never reach `trade_outcomes`.
+2. **trade_outcomes (18%) < alert_outcomes (28%) — explained precisely.** `alert_outcomes`
+   has a 2nd feeder: `apply_close_pnl` → `_record_alert_outcome_bestEffort` (v124), called
+   from EOD (`position_manager:2876`) + reconciler paths. `trade_outcomes` has no such
+   secondary feeder. The OCA-external sweep bypasses BOTH.
+3. **strategy_stats EV is structurally inconsistent.** `win_rate = alerts_won /
+   alerts_triggered` uses MONOTONIC all-time counters, but `EV = wr*avg_win_r −
+   (1−wr)*avg_loss_r` draws `avg_win_r/avg_loss_r` from a LAST-100-capped `r_outcomes`
+   series — mismatched denominators + a different R-series/sample than `trade_outcomes`'
+   realized `actual_r`. This is why accumulation_entry shows +0.62R (SS) vs −0.43R
+   (realized) and daily_breakout +2.61R vs −1.00R. Real, and it directly misleads the TQS
+   setup pillar.
+4. **catalyst_tag / gap_pct 100% empty** — `close_trade`'s `record_trade_outcome` call
+   omits them.
+
+### ❌ AUDIT ARTIFACTS (v248 script bugs — NOT real problems)
+- **shadow executed=0**: real fields are `was_executed` / `outcome_tracked` /
+  `actual_outcome` / `would_have_pnl` / `would_have_r` (v248 queried executed/outcome/
+  would_pnl → all None). Re-checked in v248b.
+- **calibration_log empty "never runs"**: calibration persists to **`calibration_history`**
+  (n=132, rich: parameter/recommended_value/applied/impact_after_applied) +
+  `calibration_config`. It IS running.
+- **regime_performance stale/low**: it's an AGGREGATE (per strategy×regime); per-trade is
+  `regime_trade_log`; ts field differs.
+- **setup_grade_records / weekly "last —"**: wrong ts field — they use `computed_at` /
+  `generated_at`.
+
+### Still to confirm on live data (v248b run)
+shadow `outcome_tracked` %, calibration_history freshness, regime_trade_log per-trade
+count, the EV-decomp numbers, and the keying-artifact guard proving the 18% is a true
+leak (not an ID-format mismatch).
+
+Verification script: `backend/scripts/diag_learning_loop_audit_v19_34_248b.py`
+
