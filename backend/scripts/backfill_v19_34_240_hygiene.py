@@ -101,6 +101,7 @@ def main():
             exit_price=_f(t.get("exit_price")),
             net_pnl=_f(t.get("net_pnl") or t.get("realized_pnl")),
             hold_seconds=_hold_seconds(t),
+            setup_type=str(t.get("setup_type") or t.get("setup_variant") or ""),
         )
         if not g:
             artifact_n += 1

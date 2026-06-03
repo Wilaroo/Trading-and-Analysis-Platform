@@ -74,6 +74,20 @@ def test_reconciled_entered_by_is_artifact():
     assert g is False and tag.startswith("non_bot_entry")
 
 
+def test_reconciled_setup_type_is_artifact():
+    # v19.34.241 — reconciliation/import artifacts that became a setup_type.
+    for st in ("reconciled_excess_slice", "reconciled_orphan", "imported_from_ib"):
+        g, tag = classify_close("stop_loss", entry_price=100, exit_price=101,
+                                net_pnl=50, hold_seconds=3600, setup_type=st)
+        assert g is False and tag.startswith("artifact_setup"), st
+
+
+def test_genuine_setup_type_passes():
+    g, _ = classify_close("target_hit", entry_price=100, exit_price=108,
+                          net_pnl=800, hold_seconds=7200, setup_type="squeeze_long")
+    assert g is True
+
+
 # ── excursion floor ────────────────────────────────────────────────────────
 def test_excursion_floor_long_winner():
     mfe, mae = excursion_floor("long", entry_price=100, exit_price=104, stop_price=98)
