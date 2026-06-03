@@ -21,6 +21,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { gradeFromScore } from './TqsBadge';
 
 // Canonical pillar order (matches services/tqs/tqs_engine.py weighting).
 const PILLAR_ORDER = ['setup', 'technical', 'fundamental', 'context', 'execution'];
@@ -168,7 +169,12 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
   const overallScore = tqs.score != null
     ? Math.round(Number(tqs.score))
     : (tqs.post_gate_score != null ? Math.round(Number(tqs.post_gate_score)) : null);
-  const overallGrade = tqs.unified_grade || tqs.post_gate_grade || '';
+  // v19.34.259 — trusted drawer: derive the grade FROM the score (single
+  // source of truth) so it never contradicts the displayed number. The
+  // stored unified_grade/post_gate_grade can be the legacy 3-tier value.
+  const overallGrade = overallScore != null
+    ? gradeFromScore(overallScore)
+    : (tqs.unified_grade || tqs.post_gate_grade || '');
 
   const weightLabel = (key) => {
     const w = weights[key];
@@ -206,6 +212,11 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
           const pb = breakdown[key] || {};
           const score = pb.score != null ? pb.score : pillarScores[key];
           if (score == null && !pb.grade && !pillarGrades[key]) return null;
+          // v19.34.259 — derive per-pillar grade from its score too, so the
+          // grade chip always agrees with the bar/number.
+          const derivedGrade = score != null
+            ? gradeFromScore(Number(score))
+            : (pb.grade || pillarGrades[key] || '');
           return (
             <PillarRow
               key={key}
@@ -213,7 +224,7 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
               meta={pmeta}
               breakdown={pb}
               score={score}
-              grade={pb.grade || pillarGrades[key] || ''}
+              grade={derivedGrade}
               weight={weightLabel(key)}
               testIdSuffix={testIdSuffix}
             />
