@@ -37,9 +37,11 @@ to 120s inside 15:40-16:05 ET (env-tunable); truly-dead (age-None) still trips.
 time (was a stale hardcoded 15:55) via `_eod_cut_times` — closes the 15:45-15:55
 hole where a fresh entry could open *during* the flatten loop, and all stream/UI
 text now derives from the resolved time (no more stale "3:55pm"). 9/9 pytest.
-**NEXT (P1, approved plan):** learning/feedback-loop audit → shadow-vs-real 18pt
-gap → per-trade max-loss circuit breaker → per-symbol reaper retry cap → batched
-close-all endpoint.
+**NEXT (P1, approved plan):** ~~learning/feedback-loop audit~~ ✅ (v248/v248b) →
+~~F1 reconciler + F3 canonical EV~~ ✅ BUILT v19.34.249 (paste.rs X5mTv, awaiting
+deploy + historical backfill) → F2 (catalyst_tag/gap_pct populate) → shadow-vs-real
+18pt gap → per-trade max-loss circuit breaker → per-symbol reaper retry cap →
+batched close-all endpoint. ev_tracking sink: retire (P2).
 
 ---
 

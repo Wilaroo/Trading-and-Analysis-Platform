@@ -1,3 +1,38 @@
+## 2026-06-03 — v19.34.249 LEARNING-LOOP COVERAGE RECONCILER (F1) + CANONICAL GENUINE strategy_stats EV (F3) (BUILT, paste.rs X5mTv)
+
+Root-cause fix for the learning audit (v248/v248b). The loop only saw ~17% of
+closed trades and the TQS setup pillar trusted an inflated EV.
+
+**F1 — coverage reconciler (`services/learning_reconciler.py`, NEW).** The
+OCA-external sweep / EOD auto-close / operator close-panel / consolidation paths
+set status INLINE and skip `record_trade_outcome` + `alert_outcomes`, so 238
+genuine closes (mostly bracket target/stop fills) never reached the sinks.
+`reconcile(db, days, commit)` scans closed `bot_trades` missing from the sinks and
+ingests them idempotently using each trade's STORED entry-time `entry_context` /
+`market_regime` (not a stale recapture), honoring the hygiene `genuine` tag:
+alert_outcomes ← all missing closes (tagged); trade_outcomes ← GENUINE only. It
+does NOT call `LearningLoopService.record_trade_outcome` (that has live tilt/gate/
+session side-effects that replaying history would corrupt). Wired into the nightly
+`_run_learning_stats_rebuild` (days=7) so the rebuild sees the complete set. ZERO
+close-path edits → no risk to the cancel/close handshake.
+
+**F3 — canonical genuine whole-trade EV (`pnl_compute.py`).** The v216
+`_upsert_strategy_stats_bestEffort` incremented monotonic counters per close-EVENT,
+so scale-out partials double-counted (accumulation_entry read 52% win / +0.62R EV
+vs the realized 11% / −0.43R; daily_breakout +2.61R vs −1.00R). Replaced with
+`recompute_strategy_stats_for_setup(base, genuine_only)` which recomputes win_rate
+AND EV from `alert_outcomes` (1 row/trade) so they share ONE whole-trade sample and
+the live feed converges with the nightly backfill. `_upsert_strategy_stats_bestEffort`
+is now a thin wrapper calling it.
+
+**One-time backlog repair (manual, dry-run-first):**
+`backend/scripts/backfill_v19_34_249_learning_coverage.py` [--commit] [--days N].
+
+8/8 pytest (`test_v19_34_249_learning_reconciler.py`, mongomock). Hardware-bound —
+no testing agent. Audit/verification scripts shipped too (v248, v248b).
+
+
+
 ## 2026-06-03 — v19.34.247 EOD-AWARE THRESHOLDS (#7 false pusher-dead banner + stale 3:55 gate, BUILT paste.rs URYip)
 
 Two related run-into-the-close fixes:

@@ -365,7 +365,26 @@ class TradingScheduler:
     async def _run_learning_stats_rebuild(self):
         """v19.34.200 — Nightly full rebuild of learning_stats from all
         trade_outcomes (robust replacement for the fragile incremental path
-        that left learning_stats empty and starved the TQS setup pillar)."""
+        that left learning_stats empty and starved the TQS setup pillar).
+
+        v19.34.249 — Reconcile FIRST: ingest any closed bot_trades that the
+        OCA-external/EOD/operator close paths left out of trade_outcomes /
+        alert_outcomes (the ~17% coverage leak), so the rebuild below sees the
+        complete genuine set. Zero close-path risk (post-close ingest only)."""
+        try:
+            from services import pnl_compute
+            from services.learning_reconciler import reconcile
+            pnl_compute._get_outcomes_collection()  # init shared _AO_DB handle
+            db = pnl_compute._AO_DB
+            if db is not None:
+                rep = reconcile(db, days=7, commit=True, verbose=True)
+                logger.info(
+                    "[scheduler] learning reconcile: +%d trade_outcomes, +%d alert_outcomes, "
+                    "%d setups recomputed", rep["to_written"], rep["ao_written"],
+                    len(rep["affected_setups"]),
+                )
+        except Exception as e:
+            logger.error("[scheduler] learning reconcile failed (continuing to rebuild): %s", e)
         try:
             from services.learning_loop_service import get_learning_loop_service
             n = await get_learning_loop_service().rebuild_learning_stats_from_all_outcomes()

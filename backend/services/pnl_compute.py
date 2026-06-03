@@ -296,91 +296,129 @@ def _base_setup(setup_type: Any) -> str:
     return str(setup_type or "").split("_long")[0].split("_short")[0]
 
 
-def _upsert_strategy_stats_bestEffort(
-    trade: Any, outcome: str, r_multiple: Optional[float], net_pnl: float,
-) -> None:
-    """v19.34.216 — incrementally fold one closed trade's R-outcome into the
-    `strategy_stats` doc for its setup family, recomputing win_rate + EV with
-    the SAME formula + keying as `backfill_strategy_stats.py` so the live hook
-    and the one-time backfill stay consistent.
+_WIN_TOK = {"won", "win", "winner", "target", "target_hit", "profit", "tp",
+            "take_profit", "profit_target"}
+_LOSS_TOK = {"lost", "loss", "loser", "stopped", "stop", "stop_hit",
+             "stopped_out", "sl", "stop_loss"}
 
-    EV (SMB): win_rate*avg_win_r - (1-win_rate)*avg_loss_r, unlocked at >=5
-    r_outcomes; r_outcomes capped to the most-recent 100. Best-effort: any
-    failure is swallowed (never blocks the close path)."""
-    # _get_outcomes_collection() lazily inits the shared _AO_DB handle.
-    if _get_outcomes_collection() is None or _AO_DB is None:
-        return
-    bs = _base_setup(getattr(trade, "setup_type", None))
-    if not bs:
-        return
 
-    # Classify win/loss — mirror backfill _classify priority: outcome → r → pnl.
-    cls: Optional[str] = None
+def _classify_outcome(outcome, r, pnl):
+    """win/loss/None — outcome string first, then R, then pnl (matches
+    backfill_strategy_stats._classify)."""
     o = str(outcome or "").lower().strip()
-    if o == "won":
-        cls = "win"
-    elif o == "lost":
-        cls = "loss"
-    elif r_multiple is not None and r_multiple != 0:
-        cls = "win" if r_multiple > 0 else "loss"
-    elif net_pnl:
-        cls = "win" if net_pnl > 0 else "loss"
-    if cls is None:
-        return  # true scratch (0 pnl, 0 R) — skip, matching the backfill
+    if o in _WIN_TOK:
+        return "win"
+    if o in _LOSS_TOK:
+        return "loss"
+    if r is not None and r != 0:
+        return "win" if r > 0 else "loss"
+    if pnl:
+        return "win" if pnl > 0 else "loss"
+    return None
 
-    coll = _AO_DB["strategy_stats"]
+
+def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> Optional[dict]:
+    """v19.34.249 (F3) — CANONICAL strategy_stats recompute for ONE setup family
+    from `alert_outcomes` (which is upserted 1-row-per-trade, keyed on trade_id).
+
+    Replaces the v216 per-close-EVENT incremental counter, which double-counted
+    scale-out partials — every `apply_close_pnl` call bumped alerts_triggered/won
+    and appended to r_outcomes — inflating win_rate + EV away from the realized
+    whole-trade truth (accumulation_entry read 52%/+0.62R when the realized rate
+    was 11%/-0.43R). Recomputing from alert_outcomes makes win_rate AND EV share
+    the SAME whole-trade sample and makes the live feed converge with the nightly
+    backfill_strategy_stats.py. Math/keying mirror that script exactly.
+    `genuine_only` excludes hygiene-tagged artifacts."""
+    if _get_outcomes_collection() is None or _AO_DB is None or not base:
+        return None
     try:
-        prev = coll.find_one({"setup_type": bs}) or {}
-        r_out = list(prev.get("r_outcomes", []) or [])
-        if r_multiple is not None:
-            r_out.append(round(float(r_multiple), 4))
-            r_out = r_out[-100:]
+        ao = _AO_DB["alert_outcomes"]
+        rows = [
+            d for d in ao.find(
+                {}, {"_id": 1, "setup_type": 1, "outcome": 1, "r_multiple": 1,
+                     "net_pnl": 1, "pnl": 1, "closed_at": 1, "genuine": 1})
+            if _base_setup(d.get("setup_type")) == base
+        ]
+        if genuine_only:
+            rows = [d for d in rows if d.get("genuine", True) is not False]
+        rows.sort(key=lambda d: (str(d.get("closed_at", "")), str(d.get("_id", ""))))
 
-        trig = int(prev.get("alerts_triggered", 0) or 0) + 1
-        won = int(prev.get("alerts_won", 0) or 0) + (1 if cls == "win" else 0)
-        lost = int(prev.get("alerts_lost", 0) or 0) + (1 if cls == "loss" else 0)
-        total_pnl = round(float(prev.get("total_pnl", 0.0) or 0.0) + float(net_pnl or 0.0), 2)
+        trig = won = lost = 0
+        r_all = []
+        total_pnl = 0.0
+        for d in rows:
+            r = d.get("r_multiple")
+            r = float(r) if isinstance(r, (int, float)) else None
+            pnl_v = d.get("net_pnl")
+            if pnl_v is None:
+                pnl_v = d.get("pnl")
+            pnl_v = float(pnl_v) if isinstance(pnl_v, (int, float)) else 0.0
+            cls = _classify_outcome(d.get("outcome"), r, pnl_v)
+            if cls is None:
+                continue
+            trig += 1
+            won += 1 if cls == "win" else 0
+            lost += 1 if cls == "loss" else 0
+            total_pnl += pnl_v
+            if r is not None:
+                r_all.append(r)
 
+        r_out = r_all[-100:]
         win_rate = (won / trig) if trig else 0.0
         wins_r = [x for x in r_out if x > 0]
         losses_r = [x for x in r_out if x <= 0]
         avg_win_r = (sum(wins_r) / len(wins_r)) if wins_r else 0.0
         avg_loss_r = abs(sum(losses_r) / len(losses_r)) if losses_r else 1.0
-        ev = 0.0
-        if len(r_out) >= 5:
-            ev = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
+        ev = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r) if len(r_out) >= 5 else 0.0
         avg_rr = (sum(r_out) / len(r_out)) if r_out else 0.0
         profit_factor = (
             (sum(wins_r) / abs(sum(losses_r)))
             if losses_r and sum(losses_r) != 0 else 0.0
         )
-
-        coll.update_one(
-            {"setup_type": bs},
-            {"$set": {
-                "setup_type": bs,
-                "alerts_triggered": trig,
-                "total_alerts": trig,
-                "alerts_won": won,
-                "alerts_lost": lost,
-                "total_pnl": total_pnl,
-                "win_rate": round(win_rate, 4),
-                "profit_factor": round(profit_factor, 3),
-                "avg_rr_achieved": round(avg_rr, 3),
-                "r_outcomes": [round(x, 4) for x in r_out],
-                "avg_win_r": round(avg_win_r, 4),
-                "avg_loss_r": round(avg_loss_r, 4),
-                "expected_value_r": round(ev, 4),
-                "last_updated": datetime.now(timezone.utc).isoformat(),
-            }},
-            upsert=True,
+        doc = {
+            "setup_type": base,
+            "total_alerts": trig,
+            "alerts_triggered": trig,
+            "alerts_won": won,
+            "alerts_lost": lost,
+            "total_pnl": round(total_pnl, 2),
+            "win_rate": round(win_rate, 4),
+            "profit_factor": round(profit_factor, 3),
+            "avg_rr_achieved": round(avg_rr, 3),
+            "r_outcomes": [round(x, 4) for x in r_out],
+            "avg_win_r": round(avg_win_r, 4),
+            "avg_loss_r": round(avg_loss_r, 4),
+            "expected_value_r": round(ev, 4),
+            "genuine_only": genuine_only,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "recomputed_by": "pnl_compute_v19_34_249",
+        }
+        _AO_DB["strategy_stats"].update_one(
+            {"setup_type": base}, {"$set": doc}, upsert=True,
         )
-        logger.info(
-            "[v19.34.216 strategy_stats] %s ← r=%s cls=%s → EV=%.3fR win=%.0f%% (#r=%d)",
-            bs, r_multiple, cls, round(ev, 3), win_rate * 100, len(r_out),
-        )
+        return doc
     except Exception as e:
-        logger.debug("[v19.34.216 strategy_stats] upsert failed for %s: %s", bs, e)
+        logger.debug("[v19.34.249 strategy_stats] recompute failed for %s: %s", base, e)
+        return None
+
+
+def _upsert_strategy_stats_bestEffort(
+    trade: Any, outcome: str, r_multiple: Optional[float], net_pnl: float,
+) -> None:
+    """v19.34.249 (F3) — now a thin wrapper. Stats are RECOMPUTED whole-trade from
+    `alert_outcomes` for the trade's setup family (the alert_outcomes row for THIS
+    trade is already upserted by the caller before this runs), so scale-out
+    partials can no longer inflate the counters. The `outcome`/`r_multiple`/
+    `net_pnl` args are retained for signature compatibility with the v216 caller."""
+    bs = _base_setup(getattr(trade, "setup_type", None))
+    if not bs:
+        return
+    doc = recompute_strategy_stats_for_setup(bs, genuine_only=True)
+    if doc is not None:
+        logger.info(
+            "[v19.34.249 strategy_stats] %s recomputed → EV=%.3fR win=%.0f%% (#trades=%d)",
+            bs, doc["expected_value_r"], doc["win_rate"] * 100, doc["alerts_triggered"],
+        )
 
 
 def compute_close_pnl(
