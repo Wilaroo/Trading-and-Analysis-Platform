@@ -278,7 +278,8 @@ class TQSEngine:
         self._context_service.set_services(
             alpaca_service=alpaca_service,
             sector_service=sector_service,
-            ib_service=ib_service
+            ib_service=ib_service,
+            db=db,
         )
         self._execution_service.set_services(
             learning_loop=learning_loop
