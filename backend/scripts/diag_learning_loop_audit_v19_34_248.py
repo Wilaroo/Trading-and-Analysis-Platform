@@ -30,10 +30,15 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 try:
-    from database import get_database
-    db = get_database()
+    from pymongo import MongoClient
+    mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+    db_name = os.environ.get("DB_NAME", "tradecommand")
+    _client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
+    _client.admin.command("ping")  # fail fast if Mongo unreachable
+    db = _client[db_name]
+    print(f"[db] connected: {mongo_url} / {db_name}")
 except Exception as e:  # pragma: no cover
-    print(f"[FATAL] cannot get database: {e}")
+    print(f"[FATAL] cannot connect to Mongo (set MONGO_URL/DB_NAME): {e}")
     sys.exit(1)
 
 NOW = datetime.now(timezone.utc)
