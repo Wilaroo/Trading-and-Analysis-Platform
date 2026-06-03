@@ -1,3 +1,48 @@
+## 2026-06-03 — v19.34.236 (Part A) PENDING FILL ATTRIBUTION (BUILT, flag-gated OFF; deploy at close)
+
+### What (the deep cure for bot-vs-IB drift)
+When an entry actually FILLS at IB but the fill is never attributed back
+(`entry_order_id=None` race: `place_bracket_order` raises/times-out after the
+parent is live, `_execute_trade` leaves the row PENDING), the reaper used to
+falsely reject it and the reconciler re-adopted the shares as a SYNTHETIC
+`reconciled_excess` slice (losing setup/intent, pre-v235 re-arming an oversized
+bracket). Now the reaper tick first MATCHES the live IB orphan to its original
+PENDING row and PROMOTES it to OPEN, preserving `entered_by=bot_fired` + setup
++ TQS + AI context.
+
+### How
+- NEW `services/pending_fill_attribution.py` (pure/testable):
+  `match_pending_to_orphan(symbol, signed_qty, pending_rows, now)` — same
+  symbol+direction, pre_submit age in [30s, 3600s] (avoids racing in-flight
+  entries / ancient pendings), order size able to produce the fill
+  (`|orphan| <= shares*1.5`); picks closest share count then oldest. Plus
+  `build_promotion_update()`.
+- `trading_bot_service._attribute_pending_fills()` — flag-gated
+  (`PENDING_FILL_ATTRIBUTION_ENABLED`, default OFF). Pulls live IB positions,
+  finds orphans the bot isn't tracking as open, promotes the matched pending
+  in-memory (pending→open) + persists + writes a `state_integrity_events`
+  audit row. **Submits NO orders** — leaves protection to the v235-clamped
+  naked-sweep. Called at the TOP of the reaper tick (before the reap decision)
+  so a filled entry is promoted, not reaped/re-adopted.
+- Tests: `test_v19_34_236_pending_fill_attribution.py` 12/12 (exact/partial/
+  direction/symbol/too-young/too-old/overfill/closest/tie/zero/promotion-shape).
+  Full drift suite 23/23 (234+235+236). Lint clean. paste.rs JmtSH.
+
+### Deploy (at close, bot flat, then watch)
+1. deploy script → inert (flag OFF). 2. enable `PENDING_FILL_ATTRIBUTION_ENABLED=1`
++ restart. 3. `grep v19.34.236 /tmp/backend.log` / `state_integrity_events
+{event:"pending_fill_attributed"}`. Disable instantly via flag=0.
+
+### Note — v1 scope
+Promoter runs in the reaper loop (60s). If the reconciler wins a race and
+spawns a synthetic first, the promoter skips (symbol now tracked) — no worse
+than today; when the promoter wins, attribution is correct. Future: move the
+hook into the reconciler's adoption decision for race-free promotion. Also
+still open: `ib_executions` empty-for-day + executor `/positions` empty
+(observability).
+
+---
+
 ## 2026-06-03 — v19.34.235 (Part B) BRACKET-SIZE CLAMP (DEPLOYED, live during RTH w/ scanner paused)
 
 ### What
