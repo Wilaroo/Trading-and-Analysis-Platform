@@ -2059,3 +2059,20 @@ has headroom over its absolute floors.
   B3 currently ~no-op (sparse per-setup outcomes); grows as outcomes accrue.
   15/15 pytest (tests/test_v19_34_230_pillar_decompress.py). Deployed paste.rs/E5sQn,
   commit 2ea26925. LIVE-VERIFY 2026-06-03 RTH via diag_tqs_dist.py.
+
+## v19.34.231 — 2026-06-03 — Premarket scanner REPAIR + TQS grading
+Found the premarket scanner silently dead: all 7 inline LiveAlert(...) constructors
+used a stale schema (stop_price/target_price/score/timestamp + missing required
+fields) and threw TypeError, swallowed by `except Exception: pass` -> ZERO premarket
+alerts ever (log always printed "0 morning watchlist alerts").
+  - NEW enhanced_scanner._make_premarket_alert() factory: schema-valid LiveAlert,
+    risk_reward from stop/target, time_window="premarket", live regime, priority
+    from score (>=85 crit / >=75 high / >=60 med / else low), trigger/win prob
+    from setup base rate. All 7 setups repaired (gap-go/fade/reversal, ORB x2,
+    opening-drive x2).
+  - _process_new_alert: TQS-grade any UNenriched alert (premarket + non-RTH);
+    RTH skipped (tqs_score>0). Flag PREMARKET_TQS_ENABLED (default ON).
+  - grade_calibration._refresh_reference: exclude time_window in {premarket,closed}
+    -> premarket graded AGAINST the RTH reference, never skews it.
+  - 13/13 pytest (tests/test_v19_34_231_premarket_tqs.py). Deployed paste.rs/uA1UC
+    (gzip+base64, full-file replace, anchor-guarded + idempotent).
