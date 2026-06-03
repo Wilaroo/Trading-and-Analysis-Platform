@@ -5,6 +5,59 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## 🆕🔥 Operator field observations — 2026-06-03 (post-hygiene batch)
+
+_Captured from a live-session review. Prioritized below. Several are recurring._
+
+### 🔴 P0 — Safety / operator-control
+- **P0-1 — Bot opened 27 simultaneous positions** (verified in IB). How? Adjust?
+  Hypotheses: burst entries before max-position re-check; cap is per-tier not global;
+  some IB lines are orphan bracket legs / dup slices (we just found 45% of CLOSED
+  trades were artifacts — live positions may carry the same). Audit entry gate +
+  max-positions config + reconcile the 27 IB lines (genuine vs orphan). Backend.
+- **P0-2 — CEG entered while scanner was PAUSED** (today, several min after pause).
+  Latent/pending order that filled, OR pause only gates new SCANS not the
+  trade/entry loop (or a gameplan auto-entry path bypasses pause). Map what
+  "pause" actually gates vs the order loop + pending-order behaviour. Backend.
+
+### 🟡 P1 — Correctness / data integrity / leaks
+- **P1-A — vwap_fade bleed** (IN PROGRESS): genuine n=130, 14% win, −1.60R, −$28.5k.
+  Avg LOSS >1R ⇒ stops blown through / fading into strength. NOTE: flagged
+  historically too (ROADMAP line ~634: 35% win −0.16R). Building bleed diagnostic.
+- **P1-3 — EOD close ignores trade-style** (RECURRING — see v19.34.63 backlog line
+  ~791 + v73 line ~761). Yesterday's EOD closed EVERY position incl. swing/
+  investment/multi-day; data confirms `eod_auto_close` on `accumulation_entry`
+  (close_at_eod=False). Closing multi-day/week trades pre-stop/target skews the
+  learning loop. FIX: EOD executor must honour `close_at_eod` (close intraday/scalp
+  only). Flag already exists in order_policy_registry — the executor isn't filtering.
+- **P1-4 — Charts laggy / stale / cache-frozen** all timeframes. IBM froze ~10:17am,
+  no newer candles as day progressed. Clue: health repeatedly shows
+  `live_bar_cache: 0/N fresh`. Trace bar-agg → cache freshness → chart-tail WS
+  (`since` key) → frontend cache key, per timeframe. Both.
+- **P1-5 — Scalp decay timer persistence across restarts** — does decay anchor to
+  persisted `executed_at` or a runtime timer that resets on restart? If runtime, a
+  mid-session restart gives scalps a fresh clock → wrong exit + polluted data. Backend.
+- **P1-6 — False "IB pusher data dead" red banner near EOD** though bot+pusher OK.
+  Likely dead-detection threshold too aggressive vs the natural low push cadence as
+  market closes. (Ties to queued "Pusher-dead RTH forensic watchdog.") Both.
+- **P1-7 — Full learning/feedback-loop audit (post-hygiene).** Now that scoring +
+  pipeline changed (hygiene, EV recompute, dynamic trigger_prob), audit
+  signal→alert→trade→outcome→strategy_stats/learning_models→scoring. Ensure
+  `genuine` propagates everywhere (incl. learning_models + retro scripts), no
+  double-counting; wire `genuine` into the two live bleeder readers
+  (diagnostic_router:2054, scanner:473). Backend.
+- **P1-8 — Shadow-vs-Real 18-pt gap** (carried; now analyzable on clean data).
+
+### 🟢 P2 — UX / features / ideas
+- **P2-1 — Scanner feed grouping & filtering UX.** How does the feed group/display
+  setups today? Make easier to filter/understand. (Overlaps Mission Control sticky
+  per-symbol filter.)
+- **P2-2 — IDEA: EOD-close popup modal** — self-updating list of positions being
+  closed at EOD with live confirmations + per-position errors. Pairs with P1-3.
+
+---
+
+
 ## 🧭 Premarket Smarts initiative — status (updated 2026-06-03)
 - ✅ Phase A — premarket scanner REPAIR + TQS grading (v19.34.231, deployed)
 - ✅ Phase B — catalyst tagging for gappers (v19.34.232, deployed)
