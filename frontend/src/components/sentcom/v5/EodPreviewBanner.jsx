@@ -1,6 +1,7 @@
 /**
  * EodPreviewBanner — auto-expanding banner that surfaces what the EOD
- * sweep WILL do, BEFORE the operator reaches 3:55 PM ET.
+ * sweep WILL do, BEFORE the operator reaches the EOD close (3:45 PM ET,
+ * dynamic via `eod_hour_et`/`eod_minute_et`).
  *
  * Behaviour (per operator spec 2026-05-13):
  *   • Hidden until 3:30 PM ET (server-computed `is_eod_window`).

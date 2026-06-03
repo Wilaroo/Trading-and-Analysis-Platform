@@ -378,7 +378,7 @@ class TradingRulesEngine:
             },
             "time_exits": {
                 "orb_time_stops": ["10:30 AM", "11:30 AM"],
-                "end_of_day": "Close all intraday positions by 3:55 PM"
+                "end_of_day": "Close all intraday positions by 3:45 PM ET (v19.34.154)"
             }
         }
     

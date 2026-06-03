@@ -26,7 +26,24 @@
 
 ---
 
-## 📌 Status snapshot — 2026-06-02 (v19.34.228 — DEPLOYED, live-verified)
+## 📌 Status snapshot — 2026-06-03 (v19.34.247 — BUILT, paste.rs URYip, live-verify pending)
+
+**EOD-aware thresholds — two run-into-the-close fixes (operator checklist #7).**
+(1) Killed the FALSE "IB PUSHER DEAD" banner near EOD: the 30s dead threshold
+tripped on the natural EOD push slowdown (thin ticks + serialized 15:45 flatten
+loop lagging the push-data handler). `_resolve_pusher_dead_threshold` relaxes it
+to 120s inside 15:40-16:05 ET (env-tunable); truly-dead (age-None) still trips.
+(2) Re-pinned the v19.29 no-new-entries gate to the bot's ACTUAL 15:45 flatten
+time (was a stale hardcoded 15:55) via `_eod_cut_times` — closes the 15:45-15:55
+hole where a fresh entry could open *during* the flatten loop, and all stream/UI
+text now derives from the resolved time (no more stale "3:55pm"). 9/9 pytest.
+**NEXT (P1, approved plan):** learning/feedback-loop audit → shadow-vs-real 18pt
+gap → per-trade max-loss circuit breaker → per-symbol reaper retry cap → batched
+close-all endpoint.
+
+---
+
+
 
 **TQS grade calibration shipped (the "score it better" fix).** Validated that
 the composite is a weighted AVERAGE of 5 pillars → crushed to 48-66/stdev 2.9

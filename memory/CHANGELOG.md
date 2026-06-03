@@ -1,3 +1,37 @@
+## 2026-06-03 — v19.34.247 EOD-AWARE THRESHOLDS (#7 false pusher-dead banner + stale 3:55 gate, BUILT paste.rs URYip)
+
+Two related run-into-the-close fixes:
+
+(1) **FALSE "IB PUSHER DEAD" banner near EOD (#7, P0).** `/api/ib/pusher-health`
+used a hard 30s dead threshold during all market hours. Near EOD the push cadence
+legitimately slows — thin ticks into the bell PLUS the serialized 15:45 flatten
+loop (many cancel/close IB round-trips) briefly lags the push-data handler past
+30s — flashing a false dead banner at the exact moment the operator is watching
+the close. New pure helper `_resolve_pusher_dead_threshold(et_minutes)` relaxes the
+threshold (default 120s) inside the 15:40-16:05 ET window. The age-None ("never saw
+a push") case is unchanged — a truly dead pusher still trips. Response now surfaces
+`eod_relaxed` + the active `dead_threshold_s`. Env: `PUSHER_DEAD_THRESHOLD_S`,
+`PUSHER_DEAD_EOD_THRESHOLD_S`, `PUSHER_DEAD_EOD_WINDOW_{START,END}_MIN`.
+
+(2) **STALE "EOD fires at 3:55pm" gate text + 15:45-15:55 entry hole.** The v19.29
+no-new-entries gate hardcoded HARD_CUT=15:55 / SOFT_CUT=15:45 and emitted "past
+3:55pm ET, EOD flatten window owns the last 5 minutes" — but the EOD-flatten loop
+moved to **15:45 ET** in v19.34.154. That left a 15:45-15:55 hole where the bot
+could open a FRESH entry *while the flatten loop was already running* (the exact
+unprotected-overnight risk this gate exists to stop), and the stream text was
+stale. New pure helper `_eod_cut_times(eod_hour, eod_minute, grace_min)` re-pins
+HARD cut to the bot's ACTUAL flatten time (half-day aware: 12:55), SOFT = HARD −
+grace (env `EOD_NO_ENTRY_GRACE_MIN`, default 10m, warn-only). All operator-facing
+strings derive from the resolved times → never goes stale again. Also fixed the
+static trading-rules string ("by 3:45 PM ET") + two frontend banner comments
+(COMMENT-ONLY, no yarn build needed).
+
+9/9 pytest (`test_v19_34_247_eod_aware_thresholds.py`). Hardware-bound — no testing
+agent. LIVE-VERIFY at 15:45 ET: pusher-dead banner should NOT flash during the
+flatten slowdown; any late-day rejection should read "past 3:45pm" not "3:55pm".
+
+
+
 ## 2026-06-03 — v19.34.246 CHART-CACHE RTH FRESHNESS CEILING (C/#1, BUILT paste.rs xZQbP)
 
 Root cause CONFIRMED for frozen live charts: `CHART_CACHE_TTL_INTRADAY_S=28800`
