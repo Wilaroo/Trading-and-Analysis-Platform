@@ -2289,6 +2289,18 @@ class OpportunityEvaluator:
         ctx["atr_percent"] = round(atr_percent, 2) if atr_percent else 0
         ctx["rvol"] = alert.get("rvol", 0) or alert.get("relative_volume", 0)
 
+        # v19.34.251 (F2) — persist catalyst_tag + signed gap_pct at entry so the
+        # Phase-D edge ranker can bucket realized trade_outcomes by catalyst+gap.
+        # Stamped on the alert at scan time (enhanced_scanner._process_new_alert);
+        # captured here into entry_context, which both the live close path and
+        # the learning_reconciler read when writing trade_outcomes.
+        ctx["catalyst_tag"] = (alert.get("catalyst_tag") or "") or ""
+        ctx["catalyst_summary"] = alert.get("catalyst_summary", "") or ""
+        try:
+            ctx["gap_pct"] = round(float(alert.get("gap_pct", 0.0) or 0.0), 2)
+        except (TypeError, ValueError):
+            ctx["gap_pct"] = 0.0
+
         # 5. Technical signals from intelligence
         if intelligence:
             tech = intelligence.get("technicals") or {}
