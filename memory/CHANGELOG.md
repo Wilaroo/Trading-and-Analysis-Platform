@@ -1,4 +1,4 @@
-## 2026-06-03 — v19.34.249b RECONCILER FIXES (BUILT, paste.rs FjHvv)
+## 2026-06-03 — v19.34.249b RECONCILER FIXES (DEPLOYED + LIVE-VERIFIED, paste.rs FjHvv)
 
 First `--commit` exposed two bugs (caught via the post-commit audit): alert_outcomes
 wrote 0 and strategy_stats never recomputed because `pnl_compute._AO_DB` is None in a
@@ -6,8 +6,18 @@ standalone script (no `MONGO_URL` in-env) → canonical writers silently no-op'd
 OCA-external/EOD sweeps persist `realized_pnl` but NOT `exit_price`, so the 186 bracket
 target/stop fills landed in `skipped_no_prices`. Fixes: `reconcile()` now points
 `_AO_DB` at the passed db when None, and reconstructs `exit_price` from
-`realized_pnl/shares`. (`trade_outcomes` +297 from the first run already landed; re-run
-is idempotent.) 10/10 pytest.
+`realized_pnl/shares`. 10/10 pytest.
+
+**LIVE-VERIFIED on DGX (full historical backfill committed):**
+- Coverage: trade_outcomes 17%→**75%** (240/320, 14d); alert_outcomes 28%→**100%**.
+  Connector map: oca_closed_externally 191→**147 TO / 191 AO** (was 5/8).
+- strategy_stats EV now matches realized trade_outcomes (the F3 win): accumulation_entry
+  **+0.62→−0.44**, vwap_fade **−0.15→−4.46**, daily_breakout +2.73 (genuine), rs_leader_break
+  −0.18 (exact match), rubber_band −0.05 (exact). The TQS setup pillar now reads honest EV.
+- Remaining TO gap (~25%) is hygiene-excluded artifacts (phantom/wrong-direction/recovery)
+  + 44 OCA lacking stop/shares — correct by design.
+- **Actionable signal surfaced:** vwap_fade avg_loss_r=5.92 (stops blown to −18R+), −3.66R
+  realized over 138 trades → strongly justifies the deferred per-trade −1.5R circuit breaker.
 
 
 

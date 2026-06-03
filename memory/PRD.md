@@ -38,10 +38,13 @@ time (was a stale hardcoded 15:55) via `_eod_cut_times` — closes the 15:45-15:
 hole where a fresh entry could open *during* the flatten loop, and all stream/UI
 text now derives from the resolved time (no more stale "3:55pm"). 9/9 pytest.
 **NEXT (P1, approved plan):** ~~learning/feedback-loop audit~~ ✅ (v248/v248b) →
-~~F1 reconciler + F3 canonical EV~~ ✅ BUILT v19.34.249 (paste.rs X5mTv, awaiting
-deploy + historical backfill) → F2 (catalyst_tag/gap_pct populate) → shadow-vs-real
-18pt gap → per-trade max-loss circuit breaker → per-symbol reaper retry cap →
-batched close-all endpoint. ev_tracking sink: retire (P2).
+~~F1 reconciler + F3 canonical EV~~ ✅✅ **DEPLOYED + LIVE-VERIFIED v19.34.249/249b**
+(coverage 17%→75% TO / 28%→100% AO; SS EV now matches realized TO —
+accumulation_entry +0.62→−0.44, vwap_fade −0.15→−4.46). NEXT: per-trade −1.5R
+circuit breaker (Issue #3 — data now screams for it: vwap_fade avg_loss_r=5.92,
+−3.66R realized over 138 trades) → F2 (catalyst_tag/gap_pct populate) →
+shadow-vs-real 18pt gap → per-symbol reaper retry cap → batched close-all.
+ev_tracking sink: retire (P2).
 
 ---
 
