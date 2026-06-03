@@ -285,6 +285,10 @@ class TradeOutcome:
     strategy_name: str = ""
     direction: str = "long"  # "long" or "short"
     trade_style: str = "move_2_move"  # SMB style
+    # v19.34.233 (Phase D) — captured so the GamePlan edge ranker can bucket
+    # realized outcomes by catalyst + gap size (matches the v232 alert tags).
+    catalyst_tag: str = ""  # earnings/analyst/news/sympathy/no_catalyst
+    gap_pct: float = 0.0    # gap % at alert time (signed)
     
     # Prices
     entry_price: float = 0.0

@@ -5,6 +5,22 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ---
 
+## 🧭 Premarket Smarts initiative — status (updated 2026-06-03)
+- ✅ Phase A — premarket scanner REPAIR + TQS grading (v19.34.231, deployed)
+- ✅ Phase B — catalyst tagging for gappers (v19.34.232, deployed)
+- ✅ Phase C — surface catalyst + TQS on the Game Plan (v19.34.232)
+- ✅ **Phase D — rank Game Plan by REALIZED open-session edge** (v19.34.233,
+  BUILT — paste.rs https://paste.rs/edC3b, operator deploy pending). EV-R from
+  `trade_outcomes` (setup+catalyst+gap+regime, shrinkage walk) blended with TQS;
+  cold-start → TQS order. `#edge_rank` badge on GamePlanStockCard.
+  - ▶️ Follow-ups (P2): include trade **direction** in the bucket key; add a
+    `trigger_probability` live-formula port (currently static per setup); after
+    a few weeks of catalyst_tag/gap accrual, audit how often L4/L3 fine buckets
+    actually fire vs falling back to L2.
+
+---
+
+
 ## 🆕 Operator requests + open questions — 2026-02 (post v19.34.192)
 
 ### 🟡 P0-NEXT (②) — De-compress the TQS pillars — PARTIALLY DONE v19.34.230 (LIVE-VERIFY 2026-06-03)

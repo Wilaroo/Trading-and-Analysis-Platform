@@ -1,3 +1,47 @@
+## 2026-06-03 — v19.34.233 PHASE D: Game Plan ranked by REALIZED open-session edge — BUILT, paste.rs https://paste.rs/edC3b (operator deploy pending)
+
+### What
+Replaced the heuristic pm→daily→intraday *append order* of the Game Plan's
+`stocks_in_play` with a DATA-DRIVEN ranking from the bot's own realized
+history (`trade_outcomes`). Each name is scored by Expected Value in R (EV-R)
+the bot has historically captured for that *kind* of setup, blended with the
+alert's TQS grade.
+
+### How
+- NEW `services/gameplan_edge_ranker.py` (`GamePlanEdgeRanker`, pure/testable):
+  buckets decided outcomes by `(setup_type, catalyst_tag, gap_bucket,
+  regime_bias)` and does a **shrinkage walk** to coarser buckets when a fine
+  one is thin — L4 (full) → L3 (drop gap) → L2 (setup+regime) → L1 (setup) —
+  picking the first level with ≥ MIN_SAMPLES (5) decided trades.
+  - EV-R = win_rate·avg_win_R − loss_rate·avg_loss_R.
+  - Blend: `score = (W_EV·k)·ev_comp + (1−W_EV·k)·tqs_comp`, with sample-size
+    shrinkage `k = n/(n+10)`, `W_EV=0.65`. Thin buckets lean on TQS.
+  - COLD-START (no bucket qualifies): `edge_source="tqs_fallback"`, ranks by
+    TQS (preserves the prior heuristic order). Per operator choice.
+  - Regime vocabularies differ (`CONFIRMED_UP` vs `strong_uptrend`) → both
+    reduced to a shared bias bucket {up, down, range} so the dim is comparable.
+- `gameplan_service._auto_populate_game_plan`: after stocks built + regime
+  resolved, calls `GamePlanEdgeRanker.from_db(db).rank(...)`. Best-effort
+  (never blocks a gameplan). `_alert_to_stock_entry` now carries `gap_pct`.
+- `models/learning_models.TradeOutcome`: + `catalyst_tag` / `gap_pct` fields;
+  `learning_loop_service.record_trade_outcome` accepts + persists them
+  (default-safe) so the FINE buckets sharpen as outcomes accrue.
+- FE `GamePlanStockCard.jsx`: `#edge_rank` badge in the card header — cyan =
+  realized edge (title shows EV-R + sample size), grey = TQS fallback.
+- Tests: `test_v19_34_233_gameplan_edge_rank.py` 10/10 (EV ordering, cold-start,
+  shrinkage walk, MIN_SAMPLES gate, regime separation, fundamentals-catalyst
+  fallback). Adjacent v231+v232 still green → 32/32 total. ruff + ESLint clean.
+
+### Notes
+- Additive: no existing path removed; ranking + 2 nullable outcome fields.
+- Historical rows lack catalyst_tag/gap → fine buckets are empty for them; the
+  shrinkage walk transparently lands on (setup+regime), which IS populated.
+- Deploy script embeds full files (gzip+b64), idempotent, `git commit && push`
+  (the `.bat` `git checkout -- .` would wipe uncommitted work). FE needs
+  `yarn build`.
+
+---
+
 ## 2026-06-02 — v19.34.228 TQS GRADE CALIBRATION (percentile rank + floor) — DEPLOYED, live-verified
 
 ### Problem (validated, not guessed)

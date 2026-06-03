@@ -569,7 +569,14 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.209 (2026-06-01, "Offload synchronous `requests.get` (Finnhub news/earnings/fundamentals, FMP quality) off the asyncio event loop via `asyncio.to_thread` — sync HTTP on the loop was freezing it (wedge watchdog 'EVENT LOOP BLOCKED'), which hung the manual close-all and stalled the pusher/ib_direct heartbeats. 11 call sites across 4 services.")
+- **Current version**: v19.34.233 (2026-06-03, Phase D — Game Plan ranked by
+  realized open-session edge: `gameplan_edge_ranker.py` buckets `trade_outcomes`
+  by setup+catalyst+gap+regime (shrinkage walk) → EV-R blended with TQS, TQS
+  cold-start fallback; +catalyst_tag/gap_pct on TradeOutcome; #edge_rank badge.
+  BUILT, paste.rs deploy pending operator).
+- **Prior**: v19.34.232 (catalyst tags) + v231 (premarket repair+TQS) + v230
+  (TQS pillar de-compress) + v229 (risk-neutral sizing).
+- **Pre-232 pointer**: v19.34.209 (2026-06-01, "Offload synchronous `requests.get` (Finnhub news/earnings/fundamentals, FMP quality) off the asyncio event loop via `asyncio.to_thread` — sync HTTP on the loop was freezing it (wedge watchdog 'EVENT LOOP BLOCKED'), which hung the manual close-all and stalled the pusher/ib_direct heartbeats. 11 call sites across 4 services.")
 - **Prior**: v19.34.208 (apply SMB score without registry config) + v207 (SMB 5-var wired) + v205/v206 (institutional ownership R4).
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section

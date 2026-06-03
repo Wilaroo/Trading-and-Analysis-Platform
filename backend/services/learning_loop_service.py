@@ -294,7 +294,9 @@ class LearningLoopService:
         entry_time: str,
         exit_time: str,
         confirmation_signals: List[str] = None,
-        expected_hold_minutes: int = 30
+        expected_hold_minutes: int = 30,
+        catalyst_tag: str = "",
+        gap_pct: float = 0.0
     ) -> TradeOutcome:
         """
         Record complete trade outcome for learning.
@@ -373,7 +375,11 @@ class LearningLoopService:
             execution=execution,
             confirmation_signals=confirmation_signals or [],
             entry_time=entry_time,
-            exit_time=exit_time
+            exit_time=exit_time,
+            # v19.34.233 (Phase D) — persist catalyst + gap for realized-edge
+            # bucketing; default-safe for callers that don't supply them.
+            catalyst_tag=catalyst_tag or "",
+            gap_pct=gap_pct or 0.0
         )
         
         # Store in database
