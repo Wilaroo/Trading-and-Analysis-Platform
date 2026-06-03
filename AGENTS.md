@@ -569,7 +569,14 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.252 (2026-06-04, F2 — catalyst_tag + gap_pct
+- **Current version**: v19.34.256 (2026-06-04, Part B backend — `GET /api/tqs/
+  card-detail/{symbol}` serves the PERSISTED TQS breakdown that drove a card +
+  folded context (setup perf, catalyst, position metrics); the drill-down drawer's
+  data contract. paste.rs HW0GQ, deploy pending). Prior chain: v254 TQS context
+  de-compression (per-symbol RS QQQ/SPY/IWM via benchmark_for() + multi-index
+  regime + reweight day 10%→3%; LIVE-VERIFIED context stdev 3.54→5.24), v255
+  direction-aware RS factor wording, v253 context diag + benchmark_for().
+- **Prior**: v19.34.252 (2026-06-04, F2 — catalyst_tag + gap_pct
   populated at entry: catalyst now stamped on ALL alerts via local
   news_articles/earnings_calendar Mongo caches (mongo_only, no live-API hang),
   gap_pct+catalyst persisted through entry_context→trade_outcomes; unblocks the

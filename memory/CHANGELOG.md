@@ -1,3 +1,32 @@
+## 2026-06-04 — TQS PILLAR + UI SSOT WORK (Part A deployed, Part B in progress)
+
+**v19.34.254 — TQS context pillar de-compression (DEPLOYED + LIVE-VERIFIED).**
+Context was frozen at ~62 ±3.5 because on the ib-direct DGX the live alpaca quote
+path is dead (regime → range_bound=55) and the only per-symbol inputs (sector,
+AI) defaulted to 50. Fix: added a per-symbol **Relative Strength** component (20%
+weight) — stock vs the index it belongs to (QQQ/SPY/IWM via new
+`data/index_symbols.benchmark_for()`), computed from `ib_historical_data` daily
+bars (the data that's actually alive), smooth **tanh** map (calibrated from the
+v253 diag: rs_1d stdev ~5.5%, fat tail to +44% → linear ±3% saturated, tanh
+doesn't), **inverted for shorts**. Also: multi-index regime fallback (SPY/QQQ/IWM
+0.5/0.3/0.2 composite from daily bars when no live SPY quote), and re-weight
+(day-of-week 10%→3%, that weight → RS). New weights: regime 22 / RS 20 / time 18 /
+sector 15 / VIX 12 / AI 10 / day 3. **Verified live:** context stdev 3.54→5.24
+(+48%), rel_strength spans 2-98 (stdev 23.9). 7 pytest.
+**v19.34.255 — direction-aware RS factor wording** (drill-down trust fix: a +1d
+move is a tailwind for a long but a headwind for a short; show 1d+5d, frame by
+side). DEPLOYED.
+**v19.34.256 (Part B backend) — `GET /api/tqs/card-detail/{symbol}`** returns the
+PERSISTED TQS breakdown that drove the card (not a fresh recompute) + folded
+context (rolling 30d setup perf, catalyst+gap, position entry/SL/TP/PnL). The
+drill-down drawer's data contract. paste.rs HW0GQ, deploy pending.
+**Part B frontend (NEXT):** `TqsBadge` (single trusted badge on every ticker) +
+`TqsDrillDownDrawer` (shadcn Sheet, 5 collapsible pillars + folded context) per
+`/app/design_guidelines.json`; integrate into ScannerCardsV5 / GamePlanStockCard /
+OpenPositionsV5; remove SMB + SetupGradeChip + edge-rank/why-size/shadow badges
+from card faces (fold into drawer).
+
+
 ## 2026-06-04 — v19.34.252 (F2) CATALYST_TAG + GAP_PCT POPULATED AT ENTRY (BUILT, paste.rs d7Vfo, deploy pending)
 
 Unblocks the Phase-D edge ranker, which starved because the `catalyst_tag` and

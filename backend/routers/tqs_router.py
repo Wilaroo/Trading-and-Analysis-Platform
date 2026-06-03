@@ -133,6 +133,91 @@ async def get_tqs_breakdown(
     }
 
 
+@router.get("/card-detail/{symbol}")
+async def get_tqs_card_detail(
+    symbol: str,
+    source: str = Query(default="alert", description="alert | position"),
+):
+    """
+    v19.34.256 (Part B) — the TQS drill-down data contract.
+
+    Returns the PERSISTED TQS breakdown that actually drove the card (NOT a
+    fresh recompute with default inputs, which `/breakdown` does and which
+    would not match what the operator saw). Folds in the context that used to
+    live in separate badges: rolling 30d setup performance, catalyst+gap, and —
+    for open positions — entry/current/SL/TP + unrealized P&L.
+    """
+    sym = symbol.upper().strip()
+    db = getattr(get_tqs_engine(), "_db", None)
+    if db is None:
+        return {"success": False, "error": "db_unavailable"}
+
+    detail = {"success": True, "symbol": sym, "source": source}
+
+    # ── pull the persisted record (position entry_context.tqs, else alert) ──
+    rec, breakdown = None, None
+    if source == "position":
+        rec = db["bot_trades"].find_one(
+            {"symbol": sym, "status": {"$in": ["open", "OPEN", "pending", "PENDING", "filled", "FILLED"]}},
+            sort=[("created_at", -1)])
+        if rec:
+            breakdown = (rec.get("entry_context") or {}).get("tqs")
+            detail["position"] = {
+                "direction": rec.get("direction"),
+                "entry_price": rec.get("fill_price") or rec.get("entry_price"),
+                "current_price": rec.get("current_price") or rec.get("last_price"),
+                "stop_price": rec.get("stop_price") or rec.get("stop_loss"),
+                "target_price": rec.get("target_price"),
+                "shares": rec.get("shares"),
+                "unrealized_pnl": rec.get("unrealized_pnl"),
+                "unrealized_r": rec.get("pnl_r") or rec.get("unrealized_r"),
+                "entry_time": rec.get("executed_at") or rec.get("created_at"),
+            }
+    if breakdown is None:
+        rec = db["live_alerts"].find_one(
+            {"symbol": sym, "tqs_breakdown": {"$exists": True}},
+            sort=[("created_at", -1)])
+        if rec:
+            breakdown = rec.get("tqs_breakdown")
+
+    if not rec or not breakdown:
+        return {"success": False, "error": "no_persisted_tqs", "symbol": sym}
+
+    tqs = get_tqs_engine()
+    score = float(rec.get("tqs_score") or 0)
+    detail.update({
+        "tqs_score": round(score, 1),
+        "tqs_grade": rec.get("tqs_grade") or "",
+        "tqs_action": tqs.get_threshold_guidance(score).get("action", "") if score else "",
+        "setup_type": rec.get("setup_type") or "",
+        "direction": rec.get("direction") or (detail.get("position") or {}).get("direction") or "long",
+        "trade_style": rec.get("trade_style") or "",
+        "breakdown": breakdown,
+        "weights": rec.get("tqs_weights") or tqs.WEIGHTS,
+        # folded-in context (previously separate badges)
+        "catalyst_tag": rec.get("catalyst_tag") or "",
+        "catalyst_summary": rec.get("catalyst_summary") or "",
+        "gap_pct": rec.get("gap_pct"),
+        "scored_at": rec.get("created_at"),
+    })
+
+    # rolling 30d setup performance (the SetupGradeChip data, folded in)
+    setup_type = detail["setup_type"]
+    if setup_type:
+        ss = db["strategy_stats"].find_one({"strategy": setup_type}) \
+            or db["strategy_stats"].find_one({"setup_type": setup_type})
+        if ss:
+            detail["setup_perf"] = {
+                "win_rate": ss.get("win_rate"),
+                "expected_value_r": ss.get("expected_value_r") or ss.get("genuine_ev_r"),
+                "avg_r": ss.get("avg_r"),
+                "sample_size": ss.get("sample_size") or ss.get("total_trades"),
+            }
+
+    return detail
+
+
+
 @router.post("/batch")
 async def batch_score(request: BatchScoreRequest):
     """

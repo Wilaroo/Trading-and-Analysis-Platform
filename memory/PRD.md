@@ -26,6 +26,27 @@
 
 ---
 
+## 📌 Status snapshot — 2026-06-04 (TQS pillar + UI SSOT; Part A done, Part B in progress)
+
+**Part A — TQS context de-compression: DONE + LIVE-VERIFIED (v254/255).** Context
+pillar was frozen ~62 ±3.5 (dead alpaca quote path → regime stuck at range_bound;
+sector/AI default 50). Added per-symbol **Relative Strength** (20% weight, stock
+vs its index QQQ/SPY/IWM via `benchmark_for()`, from daily bars, tanh-mapped,
+short-inverted) + multi-index regime fallback + reweight (day 10%→3%). Live result:
+context stdev 3.54→**5.24**, rel_strength spans 2-98. Drill-down factor wording
+made direction-aware (v255).
+**Part B — TQS as the single trusted UI number + deep drill-down: IN PROGRESS.**
+Backend `GET /api/tqs/card-detail/{symbol}` built (v256, paste.rs HW0GQ, deploy
+pending) — serves the PERSISTED breakdown + folded context (setup perf, catalyst,
+position metrics). Design blueprint ready at `/app/design_guidelines.json`.
+**NEXT:** build `TqsBadge` + `TqsDrillDownDrawer` (shadcn Sheet, 5 collapsible
+pillars), wire into ScannerCardsV5 / GamePlanStockCard / OpenPositionsV5, strip SMB
++ SetupGradeChip + edge-rank/why-size/shadow badges off the card faces. Then EV
+Leaderboard, then P1s (EOD trade-style close, retry-storm cap, charts lag).
+
+---
+
+
 ## 📌 Status snapshot — 2026-06-04 (v19.34.251 — BUILT, paste.rs CujQu, deploy+backfill pending)
 
 **Shadow Tracker measurement fix — the fake "18pt gap" / 4,407 `would_have_r==0.00`
