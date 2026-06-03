@@ -449,6 +449,39 @@ def get_etf_symbols() -> tuple:
     """Get key ETFs (always scanned) - CACHED"""
     return tuple(set(ETF_SYMBOLS))
 
+
+# ===================== BENCHMARK SELECTION (v19.34.253) =====================
+# Per-symbol Relative-Strength benchmark routing for the TQS context pillar.
+# A stock's RS is only meaningful vs the index it actually belongs to:
+#   • Nasdaq-100 names → compare vs QQQ
+#   • S&P 500 large caps → compare vs SPY
+#   • Russell 2000 small caps (and everything else) → compare vs IWM
+# QQQ is checked FIRST because Nasdaq-100 megacaps are also in the S&P 500;
+# the more specific (and more correlated) benchmark wins.
+
+@lru_cache(maxsize=4096)
+def benchmark_for(symbol: str) -> str:
+    """Return the RS benchmark ETF ('QQQ' | 'SPY' | 'IWM') for a symbol.
+
+    Membership-based (uses the SPY/QQQ/IWM constituent sets above). Unknown
+    symbols default to IWM (small-cap broad market) — true small caps are the
+    long tail not enumerated in the large-cap sets, so IWM is the safest
+    fallback. The benchmark assignment is logged by the context diag so the
+    operator can sanity-check routing on live data before this drives scoring.
+    """
+    s = (symbol or "").upper().strip()
+    if not s:
+        return "SPY"
+    if s in set(QQQ_SYMBOLS):
+        return "QQQ"
+    if s in set(SPY_SYMBOLS):
+        return "SPY"
+    if s in set(IWM_SYMBOLS):
+        return "IWM"
+    return "IWM"
+
+
+
 @lru_cache(maxsize=1)
 def get_tier1_symbols() -> tuple:
     """
