@@ -718,6 +718,51 @@ class LiveAlert:
         return result
 
 
+def compute_live_trigger_probability(base: float, distance_pct: float, rvol: float) -> float:
+    """v19.34.238 — make `trigger_probability` LIVE instead of a fixed per-setup
+    constant.
+
+    Ports the distance-to-trigger + RVOL logic from
+    `alert_system._calculate_breakout_trigger_prob`, but applies it as DELTAS
+    around each setup's existing hardcoded value (used as a calibrated base) so
+    every setup keeps its identity while the probability responds to how close
+    price is to the trigger and how strong volume is. Clamped to [0.15, 0.90].
+    """
+    try:
+        p = float(base)
+    except (TypeError, ValueError):
+        p = 0.55
+
+    d = abs(float(distance_pct or 0.0))
+    # Closer to the trigger -> more likely to fire. ~0.6% is neutral (0 delta).
+    if d < 0.3:
+        p += 0.12
+    elif d < 0.7:
+        p += 0.06
+    elif d < 1.2:
+        p += 0.0
+    elif d < 2.0:
+        p -= 0.06
+    else:
+        p -= 0.12
+
+    rv = float(rvol or 0.0)
+    # More relative volume -> higher conviction. ~1.0-2.0x is neutral.
+    if rv >= 4.0:
+        p += 0.12
+    elif rv >= 3.0:
+        p += 0.08
+    elif rv >= 2.0:
+        p += 0.04
+    elif rv >= 1.0:
+        p += 0.0
+    else:
+        p -= 0.06
+
+    return max(0.15, min(0.90, p))
+
+
+
 class EnhancedBackgroundScanner:
     """
     Enhanced background scanner with all SMB strategies,
