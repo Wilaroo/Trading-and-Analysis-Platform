@@ -19,8 +19,10 @@ import PreMarketModeBanner from './PreMarketModeBanner';
 // scanner card so the operator sees the setup type + style + horizon at
 // a glance for setups, alerts, open positions, and closed trades.
 import TradeStyleChip from './TradeStyleChip';
-// v19.34.113 — Rolling 30-day grade for the card's setup_type.
-import SetupGradeChip from './SetupGradeChip';
+// v19.34.258 — TQS is now the single source of truth on the card face.
+// SetupGradeChip / SMB / edge-rank scatter folds into the drill-down drawer.
+import TqsBadge from './TqsBadge';
+import { openTqsDrawer } from './tqsDrawerBus';
 // v19.34.29 (2026-05-14, mid-market) — Operator feedback: scanner cards
 // were showing only ONE Bot: line ("45sh · Holding ABNB @ ..."), no
 // scanner decision narrative. The v19.34.26 wiring already emits skip /
@@ -114,6 +116,8 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       // v19.34.99 — carry style/setup data so the trade-style chip can render.
       setup_type: s.setup_type || s.type || null,
       trade_style: s.trade_style || s.scan_tier || s.tier || null,
+      tqs_score: s.tqs_score ?? s.confidence ?? null,
+      source: 'alert',
       change_pct: s.change_pct ?? s.relative_change ?? null,
       bot_text: s.bot_note || s.narrative || `${s.setup_type || 'setup'} flagged${s.confidence ? ` · conf ${formatPct(s.confidence)}` : ''}${s.relative_volume ? ` · RVol ${formatNum(s.relative_volume, 1)}×` : ''}.`,
       metrics: {
@@ -152,6 +156,8 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       // v19.34.99 — carry style/setup data so the trade-style chip can render.
       setup_type: a.setup_type || a.alert_type || null,
       trade_style: a.trade_style || a.scan_tier || a.tier || a.symbol_tier || null,
+      tqs_score: a.tqs_score ?? a.confidence ?? null,
+      source: 'alert',
       change_pct: a.change_pct ?? null,
       // Wave-1 (#2) — counter-trend warning. Surfaces the v17 soft-gate
       // matrix decision so the operator can see when an alert is
@@ -243,6 +249,9 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       // v19.34.99 — open-position card carries style/setup data.
       setup_type: p.setup_type || null,
       trade_style: p.trade_style || p.scan_tier || p.tier || null,
+      tqs_score: p.tqs_score ?? null,
+      tqs_grade: p.tqs_grade ?? null,
+      source: 'position',
       change_pct: p.change_pct ?? null,
       // v19.34.56 — show the CONSOLIDATED share total, not whichever
       // fragment row hashed last. Append `(N slices)` when the bot
@@ -340,7 +349,7 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
     <div
       data-testid={`v5-scanner-card-${card.symbol}`}
       data-card-index={dataCardIndex}
-      onClick={onClick}
+      onClick={() => openTqsDrawer({ symbol: card.symbol, source: card.source || 'alert' })}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
       className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}${isNew ? ' just-arrived' : ''}`}
@@ -348,8 +357,10 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           <span
-            className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors"
+            className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors cursor-pointer"
             data-testid={`scanner-card-symbol-${card.symbol}`}
+            onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+            title="Load chart"
           >
             {card.symbol}
           </span>
@@ -374,15 +385,16 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
               testIdSuffix={`scanner-${card.symbol}`}
             />
           )}
-          {/* v19.34.113 — rolling 30-day grade for this scanner card's setup */}
-          {card.setup_type && (
-            <SetupGradeChip
-              setupType={card.setup_type}
-              compact={true}
-              size="xs"
-              testIdSuffix={`scanner-${card.symbol}`}
-            />
-          )}
+          {/* v19.34.258 — single trusted TQS score on the face; click
+              opens the consolidated drill-down drawer. Replaces the old
+              SetupGradeChip / SMB scatter. */}
+          <TqsBadge
+            symbol={card.symbol}
+            score={card.tqs_score}
+            gradeFallback={card.tqs_grade}
+            source={card.source || 'alert'}
+            testIdSuffix={`scanner-${card.symbol}`}
+          />
           {card.stage_note && card.stage_note !== 'setup' && card.stage !== 'manage' && card.stage !== 'close' && (
             <span
               className="v5-chip"

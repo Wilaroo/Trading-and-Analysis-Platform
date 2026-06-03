@@ -2365,6 +2365,9 @@ class SentComService:
                             "quality_score": trade.get("quality_score", 0),
                             "quality_grade": trade.get("quality_grade", ""),
                             "smb_grade": trade.get("smb_grade", ""),
+                            # v19.34.258 — TQS as the single trusted UI score.
+                            "tqs_score": trade.get("tqs_score", 0),
+                            "tqs_grade": trade.get("tqs_grade", ""),
                             "mfe_pct": trade.get("mfe_pct", 0),
                             "mae_pct": trade.get("mae_pct", 0),
                             "ai_context": trade.get("ai_context"),
@@ -2717,6 +2720,9 @@ class SentComService:
                         "timeframe": (enrich_trade or {}).get("timeframe", ""),
                         "quality_grade": (enrich_trade or {}).get("quality_grade", ""),
                         "smb_grade": (enrich_trade or {}).get("smb_grade", ""),
+                        # v19.34.258 — TQS as the single trusted UI score.
+                        "tqs_score": (enrich_trade or {}).get("tqs_score", 0),
+                        "tqs_grade": (enrich_trade or {}).get("tqs_grade", ""),
                         "risk_amount": (enrich_trade or {}).get("risk_amount", 0),
                         "risk_reward_ratio": (enrich_trade or {}).get("risk_reward_ratio", 0),
                         "potential_reward": (enrich_trade or {}).get("potential_reward", 0),
@@ -2983,6 +2989,7 @@ class SentComService:
                         "trigger_price": alert.trigger_price,
                         "setup_type": alert.setup_type,
                         "grade": alert.tqs_grade or alert.trade_grade,
+                        "tqs_score": getattr(alert, "tqs_score", 0) or 0,
                         "risk_reward": alert.risk_reward,
                         "timestamp": timestamp,
                         "action_suggestion": f"Entry: ${alert.trigger_price:.2f} | Stop: ${alert.stop_loss:.2f}" if alert.trigger_price and alert.stop_loss else "Review setup"

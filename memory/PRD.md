@@ -35,14 +35,24 @@ vs its index QQQ/SPY/IWM via `benchmark_for()`, from daily bars, tanh-mapped,
 short-inverted) + multi-index regime fallback + reweight (day 10%→3%). Live result:
 context stdev 3.54→**5.24**, rel_strength spans 2-98. Drill-down factor wording
 made direction-aware (v255).
-**Part B — TQS as the single trusted UI number + deep drill-down: IN PROGRESS.**
-Backend `GET /api/tqs/card-detail/{symbol}` built (v256, paste.rs HW0GQ, deploy
-pending) — serves the PERSISTED breakdown + folded context (setup perf, catalyst,
-position metrics). Design blueprint ready at `/app/design_guidelines.json`.
-**NEXT:** build `TqsBadge` + `TqsDrillDownDrawer` (shadcn Sheet, 5 collapsible
-pillars), wire into ScannerCardsV5 / GamePlanStockCard / OpenPositionsV5, strip SMB
-+ SetupGradeChip + edge-rank/why-size/shadow badges off the card faces. Then EV
-Leaderboard, then P1s (EOD trade-style close, retry-storm cap, charts lag).
+**Part B — TQS as the single trusted UI number + deep drill-down: BUILT (v19.34.258,
+paste.rs iL4GN, deploy pending).** New `TqsBadge.jsx` (single score pill, grade+color
+derived FROM the numeric score — never the legacy 3-tier `tqs_grade` which can
+disagree) + `TqsDrillDownDrawer.jsx` (right slide-over fed by `GET /api/tqs/card-detail`,
+hand-rolled Tailwind — this repo has no shadcn Sheet/Collapsible; reuses `TqsPillarPanel`
+for the 5 pillars + folded context: 30d setup win%/avg-R, EV-R, catalyst+gap, and for
+open positions an entry/current/SL-TP/unrealized-P&L block) + `tqsDrawerBus.js` (window-
+event open). Mounted once at the V5 root (`SentComV5View`). Wired into ScannerCardsV5
+(whole card → drawer, symbol → chart), GamePlanStockCard (badge added, edge-rank #N
+KEPT per operator), OpenPositionsV5 (badge on face + "View full TQS breakdown" in
+expand). Stripped standalone SetupGradeChip/SMB off scanner+position faces, removed the
+(dead — `entry_context` was never in the payload) inline TqsPillarPanel + WhyThisSizePill.
+Backend added `tqs_score`/`tqs_grade` to the position payloads + `tqs_score` to the alert
+payload (sentcom_service.py) so the face shows the number. Entry time/price/current/SL-TP
+preserved as required. Verified: yarn build OK, lint clean, app boots. DGX deploy +
+`cd frontend && yarn build` pending operator.
+**NEXT:** EV Leaderboard on Mission Control, then P1s (EOD trade-style close, retry-storm
+cap, charts lag).
 
 ---
 

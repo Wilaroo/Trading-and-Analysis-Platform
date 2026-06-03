@@ -35,6 +35,8 @@ import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
 import { BriefingsCompactStrip } from './v5/BriefingsCompactStrip';
 import { OpenPositionsV5 } from './v5/OpenPositionsV5';
+// v19.34.258 — single shared TQS drill-down drawer (opened via tqsDrawerBus).
+import TqsDrillDownDrawer from './v5/TqsDrillDownDrawer';
 import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5, IbLiveChipV5, ScannerPausedBannerV5 } from './v5/SafetyV5';
@@ -939,6 +941,9 @@ export const SentComV5View = ({
           to `?v4=1`) has been removed. V5 is the only non-embedded
           layout; any `?v4=1` query param is silently ignored upstream
           in SentCom.jsx. */}
+      {/* v19.34.258 — single shared TQS drill-down drawer. Mounted once
+          at the V5 root; cards open it via openTqsDrawer(). */}
+      <TqsDrillDownDrawer />
     </div>
   );
 };
