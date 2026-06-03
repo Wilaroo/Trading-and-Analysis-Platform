@@ -143,7 +143,12 @@ def _refresh_reference() -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=_window_days())).strftime("%Y-%m-%d")
     try:
         rows = list(db["live_alerts"].find(
-            {"created_at": {"$gte": cutoff}, "tqs_score": {"$gt": 0}},
+            # v19.34.231 — keep the percentile reference RTH-PURE. Premarket /
+            # after-hours ("closed") alerts are now also TQS-graded, but they are
+            # graded AGAINST this RTH reference — they must not skew it. Docs
+            # missing `time_window` (legacy) are still included ($nin matches absent).
+            {"created_at": {"$gte": cutoff}, "tqs_score": {"$gt": 0},
+             "time_window": {"$nin": ["premarket", "closed"]}},
             {"tqs_score": 1, "_id": 0},
         ))
         scores = [float(r["tqs_score"]) for r in rows

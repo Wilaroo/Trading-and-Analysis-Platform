@@ -1853,9 +1853,6 @@ class EnhancedBackgroundScanner:
         # Save to outcomes collection with R-multiple data
         if self.alert_outcomes_collection is not None:
             try:
-                # v19.34.172 — dual-shape timestamps on closed_at.
-                from utils.timestamps import stamps as _v172_stamps
-                _v172 = _v172_stamps()
                 self.alert_outcomes_collection.insert_one({
                     "alert_id": alert_id,
                     "symbol": alert.symbol,
@@ -1871,10 +1868,7 @@ class EnhancedBackgroundScanner:
                     "target": alert.target,
                     "projected_rr": alert.risk_reward,
                     "created_at": alert.created_at,
-                    "closed_at": _v172["ts"],
-                    "closed_at_dt": _v172["ts_dt"],
-                    "ts": _v172["ts"],
-                    "ts_dt": _v172["ts_dt"],
+                    "closed_at": datetime.now(timezone.utc).isoformat()
                 })
             except Exception as e:
                 logger.warning(f"Could not save alert outcome: {e}")
@@ -1994,6 +1988,13 @@ class EnhancedBackgroundScanner:
             regime, metadata = self._classify_market_regime(spy, qqq, iwm)
             self._market_regime = regime
             self._market_data = metadata  # NEW: per-index breakdown
+
+            # v19.34.168 — persist on regime/agreement/divergence change
+            try:
+                from services.regime_persistence_service import record_if_changed
+                record_if_changed(self.db, regime.value, metadata)
+            except Exception as e:
+                logger.debug(f"regime persistence skipped: {e}")
 
             logger.debug(
                 f"Market regime updated: {regime.value} | "
@@ -5933,7 +5934,9 @@ class EnhancedBackgroundScanner:
             # killed every non-RS detector. Restore the canonical pull.
             symbols = []
             try:
-                from services.symbol_universe import get_universe
+                # v19.34.210 — rotating wave over the FULL qualified universe
+                # (avg_dollar_volume DESC), NOT sorted(...)[:200] which was an
+                # alphabetical truncation that pinned daily setups to A–early-B.
                 _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("DAILY_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_daily_wave_offset", _tier, _wave)
@@ -6487,6 +6490,76 @@ class EnhancedBackgroundScanner:
 
 
 
+    # ── v19.34.231 — premarket alert factory ──────────────────────────────
+    # The inline premarket LiveAlert(...) constructors had drifted off the model
+    # schema (stop_price/target_price/score/timestamp) and silently threw for a
+    # long time → ZERO premarket alerts ever persisted (swallowed by the
+    # per-symbol `except Exception: pass`). This factory builds a SCHEMA-VALID
+    # LiveAlert with every required field, computes risk_reward, stamps
+    # time_window="premarket" + the live regime, and maps the heuristic score to
+    # a priority. Premarket alerts are TQS-graded downstream in _process_new_alert.
+    _PM_BASE_RATE = {
+        "gap_give_go": 0.55, "gap_fade": 0.52, "orb": 0.54,
+        "opening_drive": 0.55, "premarket_high_break": 0.53,
+    }
+
+    def _premarket_priority(self, score: float):
+        if score >= 85:
+            return AlertPriority.CRITICAL
+        if score >= 75:
+            return AlertPriority.HIGH
+        if score >= 60:
+            return AlertPriority.MEDIUM
+        return AlertPriority.LOW
+
+    def _make_premarket_alert(self, *, alert_id, symbol, setup_type, direction,
+                              trigger_price, stop, target, score, reasoning,
+                              current_price=None, gap_pct=0.0, atr_percent=0.0,
+                              rvol=0.0):
+        """Build a schema-valid premarket LiveAlert (replaces the broken inline
+        constructors). risk_reward is computed from stop/target; trigger/win
+        probability seed from the setup's base rate; priority from `score`."""
+        risk = abs(float(trigger_price) - float(stop))
+        reward = abs(float(target) - float(trigger_price))
+        rr = round(reward / risk, 2) if risk > 0 else 0.0
+        base = self._PM_BASE_RATE.get(setup_type, 0.5)
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+            mins = max(0, int((open_et - now_et).total_seconds() // 60))
+        except Exception:
+            mins = 0
+        try:
+            regime = self._market_regime.value if getattr(self, "_market_regime", None) else "unknown"
+        except Exception:
+            regime = "unknown"
+        return LiveAlert(
+            id=alert_id,
+            symbol=symbol,
+            setup_type=setup_type,
+            strategy_name=setup_type,
+            direction=direction,
+            priority=self._premarket_priority(score),
+            current_price=float(current_price if current_price is not None else trigger_price),
+            trigger_price=float(trigger_price),
+            stop_loss=float(stop),
+            target=float(target),
+            risk_reward=rr,
+            trigger_probability=base,
+            win_probability=base,
+            minutes_to_trigger=mins,
+            headline=f"{symbol} {setup_type.replace('_', ' ')} — premarket {direction}",
+            reasoning=[reasoning] if isinstance(reasoning, str) else (reasoning or []),
+            time_window="premarket",
+            market_regime=regime,
+            gap_pct=float(gap_pct or 0.0),
+            atr_percent=float(atr_percent or 0.0),
+            rvol=float(rvol or 0.0),
+            scan_tier="intraday",
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat(),
+        )
+
     async def _scan_premarket_setups(self):
         """Pre-market scanner: Build morning watchlist for opening trades.
         
@@ -6518,7 +6591,8 @@ class EnhancedBackgroundScanner:
             # for the same fix.
             symbols = []
             try:
-                from services.symbol_universe import get_universe
+                # v19.34.210 — rotating wave over the FULL qualified universe
+                # (avg_dollar_volume DESC), NOT sorted(...)[:300] alphabetical.
                 _tier = os.environ.get("SCAN_UNIVERSE_TIER", "investment")
                 _wave = int(os.environ.get("PREMARKET_SCAN_WAVE_SIZE", "500"))
                 symbols = self._next_universe_wave("_premarket_wave_offset", _tier, _wave)
@@ -6612,20 +6686,13 @@ class EnhancedBackgroundScanner:
                         if prev_close > sma20:
                             stop = pm_price - atr
                             target = pm_price + (atr * 2)
-                            alert = LiveAlert(
-                                id=f"pm_gap_go_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="gap_give_go",
-                                direction="long",
-                                trigger_price=pm_price,
-                                current_price=pm_price,
-                                stop_price=stop,
-                                target_price=target,
-                                score=70 + min(gap_pct * 3, 20),
-                                scan_tier="intraday",
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_gap_go_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="gap_give_go", direction="long",
+                                trigger_price=pm_price, current_price=pm_price,
+                                stop=stop, target=target, score=70 + min(gap_pct * 3, 20),
                                 reasoning=f"Pre-market gap +{gap_pct:.1f}% from ${prev_close:.2f}. Uptrend intact (above 20 SMA). Watch for opening drive continuation.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / pm_price * 100) if pm_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -6639,20 +6706,13 @@ class EnhancedBackgroundScanner:
                         if dist_from_sma > 5:
                             stop = pm_price + atr
                             target = pm_price - (atr * 1.5)
-                            alert = LiveAlert(
-                                id=f"pm_gap_fade_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="gap_fade",
-                                direction="short",
-                                trigger_price=pm_price,
-                                current_price=pm_price,
-                                stop_price=stop,
-                                target_price=target,
-                                score=65 + min(gap_pct * 2, 15),
-                                scan_tier="intraday",
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_gap_fade_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="gap_fade", direction="short",
+                                trigger_price=pm_price, current_price=pm_price,
+                                stop=stop, target=target, score=65 + min(gap_pct * 2, 15),
                                 reasoning=f"Pre-market gap +{gap_pct:.1f}%, {dist_from_sma:.1f}% extended above 20 SMA. Fade candidate at open.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / pm_price * 100) if pm_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -6665,20 +6725,13 @@ class EnhancedBackgroundScanner:
                         if pm_price <= support_zone * 1.02:  # Within 2% of support
                             stop = support_zone - atr
                             target = pm_price + (atr * 2)
-                            alert = LiveAlert(
-                                id=f"pm_gap_reversal_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="gap_give_go",
-                                direction="long",
-                                trigger_price=pm_price,
-                                current_price=pm_price,
-                                stop_price=stop,
-                                target_price=target,
-                                score=65,
-                                scan_tier="intraday",
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_gap_reversal_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="gap_give_go", direction="long",
+                                trigger_price=pm_price, current_price=pm_price,
+                                stop=stop, target=target, score=65,
                                 reasoning=f"Gap down {gap_pct:.1f}% into support at ${support_zone:.2f}. Watch for reversal off the open.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / pm_price * 100) if pm_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -6693,20 +6746,14 @@ class EnhancedBackgroundScanner:
                             orb_price = pm_price if pm_price > 0 else prev_close
                             stop = orb_price - atr
                             target = orb_price + (atr * 2.5)
-                            alert = LiveAlert(
-                                id=f"pm_orb_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="orb",
-                                direction="long",
-                                trigger_price=orb_price,
-                                current_price=orb_price,
-                                stop_price=stop,
-                                target_price=target,
-                                score=60 + min(pm_rvol * 5, 25),
-                                scan_tier="intraday",
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_orb_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="orb", direction="long",
+                                trigger_price=orb_price, current_price=orb_price,
+                                stop=stop, target=target, score=60 + min(pm_rvol * 5, 25),
                                 reasoning=f"ORB candidate: PM volume {pm_rvol:.1f}x avg, yesterday's range {prev_range_pct:.1f}% (tight). Watch first 5-min candle for breakout.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / orb_price * 100) if orb_price else 0.0,
+                                rvol=pm_rvol,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -6718,20 +6765,13 @@ class EnhancedBackgroundScanner:
                             orb_price = pm_price if pm_price > 0 else prev_close
                             stop = orb_price - atr
                             target = orb_price + (atr * 2.5)
-                            alert = LiveAlert(
-                                id=f"pm_orb_tight_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="orb",
-                                direction="long",
-                                trigger_price=orb_price,
-                                current_price=orb_price,
-                                stop_price=stop,
-                                target_price=target,
-                                score=60,
-                                scan_tier="intraday",
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_orb_tight_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="orb", direction="long",
+                                trigger_price=orb_price, current_price=orb_price,
+                                stop=stop, target=target, score=60,
                                 reasoning=f"ORB candidate: 3-day contracting range ({ranges[-1]:.1f}%, {ranges[-2]:.1f}%, {ranges[-3]:.1f}%). Breakout watch at open.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / orb_price * 100) if orb_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -6740,38 +6780,26 @@ class EnhancedBackgroundScanner:
                         sma20 = sum(closes[-20:]) / 20
                         # Gap aligns with trend = opening drive candidate
                         if gap_pct > 1.0 and prev_close > sma20:
-                            alert = LiveAlert(
-                                id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="opening_drive",
-                                direction="long",
-                                trigger_price=pm_price,
-                                current_price=pm_price,
-                                stop_price=pm_price - atr,
-                                target_price=pm_price + (atr * 2),
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="opening_drive", direction="long",
+                                trigger_price=pm_price, current_price=pm_price,
+                                stop=pm_price - atr, target=pm_price + (atr * 2),
                                 score=65 + min(gap_pct * 3, 15),
-                                scan_tier="intraday",
                                 reasoning=f"Opening drive candidate: gap +{gap_pct:.1f}% aligned with daily uptrend. Above 20 SMA.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / pm_price * 100) if pm_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
                         elif gap_pct < -1.0 and prev_close < sma20:
-                            alert = LiveAlert(
-                                id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
-                                symbol=symbol,
-                                setup_type="opening_drive",
-                                direction="short",
-                                trigger_price=pm_price,
-                                current_price=pm_price,
-                                stop_price=pm_price + atr,
-                                target_price=pm_price - (atr * 2),
+                            alert = self._make_premarket_alert(
+                                alert_id=f"pm_opening_drive_{symbol}_{datetime.now().strftime('%H%M')}",
+                                symbol=symbol, setup_type="opening_drive", direction="short",
+                                trigger_price=pm_price, current_price=pm_price,
+                                stop=pm_price + atr, target=pm_price - (atr * 2),
                                 score=65 + min(abs(gap_pct) * 3, 15),
-                                scan_tier="intraday",
                                 reasoning=f"Opening drive candidate: gap {gap_pct:.1f}% aligned with daily downtrend. Below 20 SMA.",
-                                timestamp=datetime.now(timezone.utc),
-                                expires_at=(datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+                                gap_pct=gap_pct, atr_percent=(atr / pm_price * 100) if pm_price else 0.0,
                             )
                             await self._process_new_alert(alert)
                             alerts_found += 1
@@ -7624,6 +7652,16 @@ class EnhancedBackgroundScanner:
             except Exception as e:
                 logger.debug(f"Could not add sentiment context: {e}")
         
+        # v19.34.231 — TQS-grade any alert that arrived UNenriched (premarket and
+        # other non-RTH paths persist via _process_new_alert without the upstream
+        # AI→TQS enrichment the RTH scan does). RTH alerts already have
+        # tqs_score>0 → skipped (no double work). Gated by PREMARKET_TQS_ENABLED
+        # (default on). _enrich_alert_with_tqs is fully try/except internally, so
+        # thin premarket data degrades to neutral pillars rather than failing.
+        if (getattr(alert, 'tqs_score', 0) or 0) <= 0 and \
+           os.environ.get("PREMARKET_TQS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off"):
+            await self._enrich_alert_with_tqs(alert)
+
         # Persist to database
         if self.db is not None:
             try:
