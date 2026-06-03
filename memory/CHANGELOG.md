@@ -1,3 +1,40 @@
+## 2026-06-03 — v19.34.235 (Part B) BRACKET-SIZE CLAMP (DEPLOYED, live during RTH w/ scanner paused)
+
+### What
+Every protective stop+target (re)issue now clamps its qty to the LIVE IB
+position, so a stale `trade.shares` can never arm a closing order larger than
+the position holds — the SOXX `Sell-43-vs-17` flip hazard is now structurally
+impossible.
+
+### How
+- New module-level `clamp_protective_qty(requested, live_abs) -> (qty, clamped)`
+  in `ib_direct_service.py`: only SHRINKS to a confirmed smaller position
+  (0 < live < requested), never grows, and fail-opens (no clamp) when
+  `live_abs is None`.
+- New `IBDirectService.live_position_abs(symbol)`: returns |live IB position|
+  or None (None on get_positions error / empty snapshot / symbol absent — so a
+  snapshot gap never clamps a closing order down to 0).
+- Applied at the two adoption/re-issue chokepoints that sized off
+  `int(trade.shares)`:
+  - `ib_direct.place_oca_stop_target` (the active BOT_ORDER_PATH=direct path)
+  - `trade_executor.attach_oca_stop_target` queue path
+- DELIBERATELY NOT applied to the two-step entry stop (`ib_direct.place_stop`):
+  it sizes to a just-filled entry, and clamping there could under-protect a
+  fresh fill if get_positions lags. Minimal blast radius.
+- Tests: `test_v19_34_235_bracket_clamp.py` 6/6. Imports clean; the 3 lint
+  warnings shown were pre-existing/unrelated. Deployed via paste.rs px3ub +
+  `./start_backend.sh --force` (commit 6767e69e). Post-boot: healthy, clamp
+  silent for BE (29==29) as expected.
+
+### Still pending — Part A (the deep cure; DO at close / when flat)
+- Capture `entry_order_id` on pre-submit + attribute IB execDetails/orderStatus
+  so a filled pending flips to `open` and never reaches the reaper (eliminates
+  the orphan creation at the source; v234 only guards the reaper symptom).
+- Plus observability: `ib_executions` collection empty for the day; executor
+  `/positions` returns empty while ib_direct returns data.
+
+---
+
 ## 2026-06-03 — v19.34.234 BOT-vs-IB DRIFT: source-side guard (DEPLOYED, live-verified during RTH)
 
 ### Trigger
