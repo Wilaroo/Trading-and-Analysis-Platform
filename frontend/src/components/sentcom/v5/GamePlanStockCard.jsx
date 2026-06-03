@@ -187,6 +187,24 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
         <ChevronRight
           className={`w-4 h-4 text-zinc-500 transition-transform ${expanded ? 'rotate-90' : ''}`}
         />
+        {/* v19.34.233 (Phase D) — realized open-session edge rank badge */}
+        {stock?.edge_rank != null && (
+          <span
+            data-testid={`gp-card-edge-rank-${symbol}`}
+            title={
+              stock.edge_source === 'realized'
+                ? `Realized edge #${stock.edge_rank} · EV ${Number(stock.edge_ev_r ?? 0).toFixed(2)}R over ${stock.edge_sample_size} similar trades`
+                : `Ranked #${stock.edge_rank} by TQS (not enough realized history yet)`
+            }
+            className={`v5-mono text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 border ${
+              stock.edge_source === 'realized'
+                ? 'text-cyan-300 bg-cyan-500/10 border-cyan-500/20'
+                : 'text-zinc-500 bg-zinc-800/40 border-zinc-700'
+            }`}
+          >
+            #{stock.edge_rank}
+          </span>
+        )}
         <button
           type="button"
           data-testid={`gp-card-symbol-${symbol}`}

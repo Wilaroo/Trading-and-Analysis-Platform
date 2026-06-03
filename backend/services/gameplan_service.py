@@ -272,6 +272,23 @@ class GamePlanService:
         # (SPY/QQQ support & resistance) + the regime engine (VIX).
         await self._populate_key_levels(game_plan, regime_dict)
 
+        # v19.34.233 (Phase D) — rank stocks_in_play by the bot's REALIZED
+        # open-session edge (EV-R from `trade_outcomes`) blended with TQS,
+        # replacing the pm->daily->intraday append order. Cold-start names
+        # fall back to TQS ordering. Best-effort; never blocks the gameplan.
+        try:
+            from services.gameplan_edge_ranker import GamePlanEdgeRanker
+            regime_for_edge = (
+                game_plan.get("market_regime")
+                or game_plan.get("regime")
+                or game_plan.get("big_picture", {}).get("market_regime")
+                or ""
+            )
+            ranker = GamePlanEdgeRanker.from_db(self.db)
+            ranker.rank(game_plan.get("stocks_in_play", []), regime_for_edge)
+        except Exception as e:
+            print(f"gameplan edge-rank skipped: {e}")
+
         return game_plan
 
     @staticmethod
@@ -316,6 +333,9 @@ class GamePlanService:
             "catalyst_summary": catalyst_summary,
             "tqs_score": getattr(alert, 'tqs_score', 0) or 0,
             "tqs_grade": getattr(alert, 'tqs_grade', '') or '',
+            # v19.34.233 (Phase D) — gap_pct carried so the edge ranker can
+            # bucket this name by its gap size.
+            "gap_pct": getattr(alert, 'gap_pct', 0) or 0,
             "timeframe": getattr(alert, 'scan_tier', 'intraday'),
             "if_then_statements": [
                 {
