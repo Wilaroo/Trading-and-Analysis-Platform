@@ -107,6 +107,40 @@ def test_build_trade_outcome_doc_short_and_missing_prices():
     assert LR._build_trade_outcome_doc({"id": "X", "fill_price": 10}, genuine=True) is None
 
 
+def test_exit_price_reconstructed_from_realized_pnl():
+    """v249b — OCA-external/EOD sweeps lack exit_price; reconstruct from
+    realized_pnl/shares so the bracket target/stop fills aren't lost."""
+    # long, entry 100, +600 pnl over 200sh → +3/sh → exit 103 ; risk (100-98)=2 → R=1.5
+    bt = {"id": "OCA1", "direction": "long", "fill_price": 100.0, "stop_price": 98.0,
+          "realized_pnl": 600.0, "shares": 200}  # NOTE: no exit_price
+    assert LR._resolve_exit(bt, 100.0, "long") == pytest.approx(103.0)
+    doc = LR._build_trade_outcome_doc(bt, genuine=True)
+    assert doc is not None and doc["exit_price"] == pytest.approx(103.0)
+    assert doc["actual_r"] == pytest.approx(1.5)
+    # short reconstruction
+    assert LR._resolve_exit(
+        {"direction": "short", "realized_pnl": 200, "shares": 100}, 50.0, "short"
+    ) == pytest.approx(48.0)
+
+
+def test_reconcile_autowires_ao_db_when_none():
+    """Standalone-script bug fix: reconcile must point pnl_compute._AO_DB at the
+    passed db when it's None, else alert_outcomes/strategy_stats writes no-op."""
+    db = mongomock.MongoClient().db
+    PC._AO_DB = None  # simulate standalone (no MONGO_URL)
+    db["bot_trades"].insert_one(
+        {"id": "W1", "status": "closed", "symbol": "AMD", "setup_type": "squeeze_long",
+         "direction": "long", "fill_price": 100, "stop_price": 98, "target_prices": [106],
+         "realized_pnl": 300, "net_pnl": 295, "shares": 100,  # no exit_price → reconstruct
+         "close_reason": "oca_closed_externally_v19_31", "entered_by": "bot",
+         "closed_at": "2026-06-03T18:00:00+00:00", "entry_context": {}})
+    rep = LR.reconcile(db, commit=True, verbose=False)
+    assert PC._AO_DB is db                           # auto-wired
+    assert rep["ao_written"] == 1 and rep["to_written"] == 1
+    assert db["alert_outcomes"].count_documents({}) == 1   # actually persisted now
+    assert db["strategy_stats"].count_documents({"setup_type": "squeeze"}) == 1  # recomputed
+
+
 def _seed_db():
     db = mongomock.MongoClient().db
     _wire_pc_to(db)

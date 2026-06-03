@@ -1,4 +1,16 @@
-## 2026-06-03 — v19.34.249 LEARNING-LOOP COVERAGE RECONCILER (F1) + CANONICAL GENUINE strategy_stats EV (F3) (BUILT, paste.rs X5mTv)
+## 2026-06-03 — v19.34.249b RECONCILER FIXES (BUILT, paste.rs FjHvv)
+
+First `--commit` exposed two bugs (caught via the post-commit audit): alert_outcomes
+wrote 0 and strategy_stats never recomputed because `pnl_compute._AO_DB` is None in a
+standalone script (no `MONGO_URL` in-env) → canonical writers silently no-op'd; and
+OCA-external/EOD sweeps persist `realized_pnl` but NOT `exit_price`, so the 186 bracket
+target/stop fills landed in `skipped_no_prices`. Fixes: `reconcile()` now points
+`_AO_DB` at the passed db when None, and reconstructs `exit_price` from
+`realized_pnl/shares`. (`trade_outcomes` +297 from the first run already landed; re-run
+is idempotent.) 10/10 pytest.
+
+
+
 
 Root-cause fix for the learning audit (v248/v248b). The loop only saw ~17% of
 closed trades and the TQS setup pillar trusted an inflated EV.

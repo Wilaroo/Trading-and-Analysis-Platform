@@ -47,6 +47,21 @@ def _dir_str(d) -> str:
     return str(getattr(d, "value", d) or "long").lower()
 
 
+def _resolve_exit(bt: Dict[str, Any], entry: Optional[float], direction: str) -> Optional[float]:
+    """Exit price for R/outcome. OCA-external/EOD sweeps set realized_pnl from the
+    IB fill but never persist exit_price — reconstruct it from realized_pnl/shares
+    so those (the bulk of bracket target/stop fills) aren't lost to no-price skip."""
+    xp = _f(bt.get("exit_price"))
+    if xp:
+        return xp
+    realized = _f(bt.get("realized_pnl"))
+    shares = _f(bt.get("shares"))
+    if entry and realized is not None and shares and shares > 0:
+        pps = realized / shares
+        return round(entry + pps, 4) if direction == "long" else round(entry - pps, 4)
+    return None
+
+
 def _time_of_day_et(entry_time: Optional[str]) -> str:
     """Coarse ET session bucket from an ISO entry timestamp (best-effort)."""
     try:
@@ -98,11 +113,11 @@ def _build_trade_outcome_doc(bt: Dict[str, Any], genuine: bool) -> Optional[dict
     """Construct a trade_outcomes doc directly from the stored bot_trade, using
     its entry-time context. Returns None if it lacks the prices to compute R."""
     entry = _f(bt.get("fill_price"))
-    exit_p = _f(bt.get("exit_price"))
+    direction = _dir_str(bt.get("direction"))
+    exit_p = _resolve_exit(bt, entry, direction)
     stop = _f(bt.get("stop_price")) or _f(bt.get("stop_loss"))
     if not (entry and exit_p and stop):
         return None
-    direction = _dir_str(bt.get("direction"))
     risk = abs(entry - stop)
     pps = (exit_p - entry) if direction == "long" else (entry - exit_p)
     actual_r = round(pps / risk, 4) if risk > 0 else 0.0
@@ -164,6 +179,14 @@ def reconcile(db, *, days: Optional[int] = None, commit: bool = False,
     from services.trade_outcome_hygiene import classify_close
     from services import pnl_compute
 
+    # v19.34.249b — ensure the canonical alert_outcomes/strategy_stats writers
+    # use THIS db. Standalone scripts run without MONGO_URL in-env, so
+    # pnl_compute's lazy _AO_DB would be None and every write/recompute would
+    # silently no-op (the first --commit run wrote 0 alert_outcomes for exactly
+    # this reason). In-server _AO_DB is already set → this is a no-op there.
+    if getattr(pnl_compute, "_AO_DB", None) is None:
+        pnl_compute._AO_DB = db
+
     q: Dict[str, Any] = {"status": {"$in": ["closed", "CLOSED"]}}
     if days:
         from datetime import timedelta
@@ -183,7 +206,8 @@ def reconcile(db, *, days: Optional[int] = None, commit: bool = False,
         if not tid:
             continue
         entry = _f(bt.get("fill_price"))
-        exit_p = _f(bt.get("exit_price"))
+        direction = _dir_str(bt.get("direction"))
+        exit_p = _resolve_exit(bt, entry, direction)
         genuine, _tag = classify_close(
             close_reason=bt.get("close_reason"),
             entered_by=str(bt.get("entered_by") or ""),
