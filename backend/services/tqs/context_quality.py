@@ -477,12 +477,14 @@ class ContextQualityService:
         rs = self._compute_relative_strength(symbol, is_long)
         if rs is not None:
             result.rs_score, result.rs_benchmark, result.rs_1d, result.rs_5d = rs
+            # Direction-aware wording (a +1d move is a TAILWIND for a long but a
+            # HEADWIND for a short) — show both timeframes so the drill-down
+            # explanation never contradicts the score.
+            _tf = f"1d {result.rs_1d:+.1f}% / 5d {result.rs_5d:+.1f}% vs {result.rs_benchmark}"
             if result.rs_score >= 70:
-                result.factors.append(
-                    f"Strong RS vs {result.rs_benchmark} (1d {result.rs_1d:+.1f}%) (+)")
+                result.factors.append(f"Relative strength favors {direction} ({_tf}) (+)")
             elif result.rs_score <= 30:
-                result.factors.append(
-                    f"Weak RS vs {result.rs_benchmark} (1d {result.rs_1d:+.1f}%) (-)")
+                result.factors.append(f"Relative strength against {direction} ({_tf}) (-)")
         else:
             result.rs_score = 50.0  # neutral when no daily bars
 
