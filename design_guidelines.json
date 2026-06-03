@@ -1,137 +1,144 @@
 {
-  "project_name": "SentCom AI Trading Bot Dashboard",
-  "theme_and_archetype": {
-    "domain": "Hybrid Fullstack - Realtime AI Trading Dashboard",
+  "metadata": {
+    "project": "SentCom / TradeCommand V5",
     "theme": "DARK",
-    "archetype": "Archetype 4 (Swiss & High-Contrast) adapted for 'Control Room' density",
-    "reasoning": "High-frequency trading and algorithmic bot monitoring require immense data density without cognitive overload. Dark mode prevents eye strain during extended monitor time. Swiss typography rules ensure alignment and readability. The design strips away unnecessary decoration (no heavy gradients or shadows) in favor of 1px borders, rigid grids, and color-coded status indicators (Bloomberg Terminal meets modern Fintech)."
+    "archetype": "Archetype 2: The Performance Pro (Dark Variant)",
+    "vibe": "Command-center focus, tactical minimalism, elite execution.",
+    "core_philosophy": "Tactical Minimalism. Density over white space. Objective truth via data correlation. Absolute precision.",
+    "anti_patterns": [
+      "No playful styling",
+      "No light theme elements",
+      "No generic SaaS blue",
+      "No center-aligned text for data",
+      "Avoid purple or teal"
+    ]
   },
   "typography": {
-    "headings": "Inter (Weights: 600, 700) - Tight tracking for space efficiency.",
-    "body": "IBM Plex Sans (Weights: 400, 500) - Excellent legibility at 10px-12px sizes.",
-    "mono_data": "JetBrains Mono (Weights: 400, 500) - MANDATORY for all tickers, PnL numbers, confidence scores, and latencies. Ensures perfect vertical alignment of tabular data.",
-    "hierarchy_rules": {
-      "h1_panel": "text-sm font-bold uppercase tracking-widest text-zinc-400",
-      "h2_sub": "text-xs font-semibold text-zinc-300",
-      "body_base": "text-xs text-zinc-300",
-      "body_small": "text-[10px] text-zinc-500",
-      "data_large": "text-lg font-mono font-bold",
-      "data_standard": "text-xs font-mono"
+    "primary_font": "IBM Plex Sans",
+    "mono_font": "JetBrains Mono",
+    "hierarchy": {
+      "headings": "IBM Plex Sans",
+      "body": "IBM Plex Sans",
+      "numbers_and_data": "JetBrains Mono",
+      "rules": [
+        "All quantitative data (prices, scores, times, percentages) MUST use JetBrains Mono",
+        "Headings use tracking-tight, uppercase labels use tracking-[0.2em] with text-[10px]",
+        "No font weights between 400 and 600 for data. Use 400 for labels, 700 for exact values."
+      ]
     }
   },
   "colors": {
-    "background": {
-      "base": "#09090b",
-      "panel": "#18181b",
-      "panel_hover": "#27272a",
-      "overlay": "rgba(0, 0, 0, 0.8)"
+    "backgrounds": {
+      "app_base": "bg-zinc-950",
+      "card_surface": "bg-zinc-900/80",
+      "drawer_surface": "bg-zinc-950/95 backdrop-blur-xl",
+      "hover_surface": "hover:bg-zinc-800/50",
+      "accent_neutral": "bg-zinc-800"
     },
-    "text": {
-      "primary": "#f4f4f5",
-      "secondary": "#a1a1aa",
-      "muted": "#71717a",
-      "inverse": "#000000"
+    "borders": {
+      "default": "border-zinc-800",
+      "focus": "border-zinc-700",
+      "divider": "border-zinc-800/60"
     },
-    "border": {
-      "default": "#27272a",
-      "focus": "#52525b"
-    },
-    "semantic": {
-      "profit": "#22c55e",
-      "loss": "#ef4444",
-      "info": "#3b82f6",
-      "warning": "#eab308",
-      "highlight": "#a855f7"
-    },
-    "pipeline_stages": {
-      "scan": "#8b5cf6",
-      "evaluate": "#3b82f6",
-      "order": "#eab308",
-      "manage": "#22c55e",
-      "close": "#64748b"
-    }
-  },
-  "spacing_and_density": {
-    "philosophy": "Zero wasted pixels. Maximum data per square inch.",
-    "paddings": "Panel containers use p-2 or p-3 (never p-6). Inner elements use p-1.",
-    "gaps": "gap-1 or gap-2 for lists. gap-3 or gap-4 for major panel separations.",
-    "borders": "Rely on 1px solid borders (border-zinc-800) instead of shadows or large padding for separation.",
-    "radii": "rounded-sm (2px) or rounded-md (4px) max. Sharp corners feel more technical and precise."
-  },
-  "mockups_and_layouts": [
-    {
-      "option": "1",
-      "name": "Pipeline-HUD + Follow-Symbol",
-      "description": "A persistent top-bar HUD tracks the macro 5-stage funnel. Below is a 3-column layout. Clicking any ticker globally filters all panels to that specific symbol.",
-      "zones": {
-        "Top Strip (10%)": "Persistent Pipeline HUD. 5 blocks: [SCAN: 47 Hits] -> [EVAL: 8 Gates] -> [ORDER: 3 Sent] -> [MANAGE: 2 Open] -> [CLOSE: 4 (+2.1R)]. Plus Bot Health (Latency, Model Status).",
-        "Left Column (20%)": "Market Scanner & Alerts. Extremely dense list of tickers with micro sparklines and 1-line text explaining the trigger.",
-        "Middle Column (50%)": "Dynamic Focus Area. If no symbol selected: Shows Morning Briefing. If symbol selected: Shows deep-dive for that ticker (13-layer Confidence Gate radar chart, Live Model Pred, Order Status).",
-        "Right Column (30%)": "Stream of Consciousness & Open Positions. Auto-scrolling feed of bot thoughts (top half). Dense table of Open Positions with inline reasoning (bottom half)."
-      }
-    },
-    {
-      "option": "2",
-      "name": "Unified Trade Lifecycle Matrix",
-      "description": "A massive, dense data grid akin to an institutional options chain. Everything is visible at a glance without tab switching.",
-      "zones": {
-        "Top Strip (5%)": "Global PnL, Strategy Phase (SIM/PAPER/LIVE), Active Ticker Count.",
-        "Main View (95%)": "Data Table. Rows = Tickers. Columns = Pipeline Stages. Col 1: Ticker/Setup. Col 2: Scanner Rationale (text snippet). Col 3: Eval 13-layer Gate (horizontal segmented bar graph). Col 4: Order Status (Pending/Filled). Col 5: Position Size/PnL/Bot Manage Rationale. Col 6: Autopsy. Sorting by stage allows seeing bottlenecks instantly."
-      }
-    },
-    {
-      "option": "3",
-      "name": "Decision Timeline Stream",
-      "description": "Chronological, event-driven architecture. Treats the bot like a highly communicative employee sending Slack updates, augmented by sidecar data panels.",
-      "zones": {
-        "Left Sidebar (25%)": "Morning Briefing & Setup Coverage. Static panels showing overnight news, active catalysts, and regime detection.",
-        "Center Feed (50%)": "The 'Brain Stream'. A timeline feed of distinct cards. E.g. A card says 'AAPL: Discovered -> Evaluated (Score 82) -> Executed'. Each card expands in place to reveal the 13-layer gate score and exact CNN/FinBERT reasoning.",
-        "Right Sidebar (25%)": "Active Management. Only shows positions currently open or pending. Mini-charts with inline text: 'Holding NVDA: CNN-LSTM predicts 15m momentum up'."
+    "tqs_grades": {
+      "A_StrongBuy": {
+        "text": "text-emerald-400",
+        "bg": "bg-emerald-500/10",
+        "border": "border-emerald-500/20",
+        "glow": "shadow-[0_0_12px_rgba(52,211,153,0.15)]",
+        "fill": "bg-emerald-500"
+      },
+      "B_Buy": {
+        "text": "text-sky-400",
+        "bg": "bg-sky-500/10",
+        "border": "border-sky-500/20",
+        "glow": "shadow-[0_0_12px_rgba(56,189,248,0.15)]",
+        "fill": "bg-sky-500"
+      },
+      "C_Hold": {
+        "text": "text-amber-400",
+        "bg": "bg-amber-500/10",
+        "border": "border-amber-500/20",
+        "glow": "shadow-[0_0_12px_rgba(251,191,36,0.15)]",
+        "fill": "bg-amber-500"
+      },
+      "D_F_Avoid": {
+        "text": "text-rose-400",
+        "bg": "bg-rose-500/10",
+        "border": "border-rose-500/20",
+        "glow": "shadow-[0_0_12px_rgba(244,63,94,0.15)]",
+        "fill": "bg-rose-500"
       }
     }
-  ],
-  "morning_briefing_design": {
-    "layout": "Bento Grid ('Control Room' style)",
-    "sections": [
-      { "name": "Overnight/Macro Regime", "col_span": "col-span-12", "content": "1-sentence AI summary of global market state + Regime indicator (e.g., 'High Volatility Trend')." },
-      { "name": "News & Catalysts", "col_span": "col-span-6", "content": "Dense list of up/downgrades, earnings drops. Uses FinBERT sentiment scores (Green/Red text) inline." },
-      { "name": "In-Play Tickers", "col_span": "col-span-6", "content": "List of tickers with a 'WHY' pill next to each (e.g., 'TSLA [Unusual Options Vol]', 'AMD [Sympathy Setup]')." },
-      { "name": "Game Plan A / B", "col_span": "col-span-12", "content": "Two distinct colored panels. Plan A (Green border): 'If SPY > 510, target Tech scalps'. Plan B (Amber border): 'If SPY rejects 510, load inverse ETFs'. Bulleted specific triggers." }
-    ]
   },
-  "inline_explanations_design": {
-    "problem": "Raw data without context causes cognitive load.",
-    "solution": "The 'Subtitle / Meta-Text' Pattern.",
-    "implementation": [
-      "No separate tooltip popups (they require hovering and hide data).",
-      "Every data row has a primary metric (e.g., AAPL Long $150.23) and directly underneath it, a smaller text-[10px] text-zinc-500 line explaining the WHY.",
-      "Example Position Row: Line 1: [NVDA] [+3.2%] [Size: 100]. Line 2: 'Holding: CNN visual identifies bull flag continuation. TFT trailing stop updated to $885.'",
-      "Example Scanner Alert: Line 1: [AMD] [Setup: Volatility Breakout]. Line 2: 'Trigger: Unusual options volume + AI Consensus 88%. Map to SIM.'",
-      "Use text truncation (truncate) only if strictly necessary, but prefer text wrapping in fixed-width columns to ensure the 'Why' is always readable."
-    ]
+  "spacing_and_layout": {
+    "grid_system": "MODE B: THE CONTROL ROOM GRID",
+    "density": "Tight padding (p-2, p-3, p-4 maximum for cards). 1px solid strokes for separation.",
+    "borders": "border-collapse style layout for inner data grids. 1px subtle border-border.",
+    "alignment": "Optical alignment over geometrical. Left-align dense tabular data."
   },
-  "refactor_plan": {
-    "current_state": "SentCom.jsx is 3,614 lines, monolithic, mixing state and UI.",
-    "strategy": "Feature-Sliced Design (FSD) mapped to the 5 stages.",
-    "new_structure": [
-      "src/features/PipelineHUD/ (The top macro-stats strip)",
-      "src/features/MarketScanner/ (Alerts, triggers, setup coverage)",
-      "src/features/Evaluator/ (Stream of Consciousness, 13-layer Confidence Gate viz, Revalidation)",
-      "src/features/Execution/ (IB bracket logic, latency health, QuickTrade)",
-      "src/features/PositionManager/ (Active holdings, real-time PnL, inline hold/sell rationale)",
-      "src/features/TradeJournal/ (Autopsy, Closed trades, Performance charts)",
-      "src/features/MorningBriefing/ (Pre-market prep, news, plan A/B)",
-      "src/pages/Dashboard/ (The master layout component that orchestrates the features above using a React Context or Zustand store for global 'follow-symbol' state)"
-    ]
+  "components": {
+    "TqsBadge": {
+      "description": "The single primary score indicator placed on every ticker card.",
+      "compact_variant": "inline-flex items-center gap-1.5 px-2 py-1 rounded-sm border border-zinc-800 text-[11px] font-mono transition-all cursor-pointer hover:-translate-y-[1px] data-[state=open]:ring-1 data-[state=open]:ring-zinc-600",
+      "full_variant": "flex flex-col items-center justify-center p-4 rounded-md border border-zinc-800 bg-gradient-to-b from-transparent to-black/20",
+      "interaction": "Hover lifts slightly and triggers a subtle neon glow matching the grade color. Click opens the TQS Drill-Down Sheet."
+    },
+    "TickerCardFace": {
+      "description": "Minimalist card face focusing strictly on actionable core metrics.",
+      "layout": "Grid layout. grid-cols-[auto_1fr_auto] gap-3 items-center p-3 border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900 transition-colors rounded-md",
+      "elements": [
+        "Symbol (JetBrains Mono, text-sm, text-zinc-100, font-bold)",
+        "Price & Move (JetBrains Mono, text-xs, color-coded based on positive/negative)",
+        "Setup Name & Direction (IBM Plex Sans, text-[10px], text-zinc-400 uppercase tracking-wider)",
+        "TQS Badge (Right aligned, compact variant)",
+        "OPEN POSITION EXTRA ROW: Grid cols-4. Entry Time, Entry Price, Current, SL/TP (All text-[10px] mono, text-zinc-500, pt-2 mt-2 border-t border-zinc-800)"
+      ]
+    },
+    "TqsDrillDownDrawer": {
+      "description": "Right-side slide-over containing all consolidated grade/score elements.",
+      "container": "shadcn Sheet component. side='right'. w-[100vw] sm:w-[540px] border-l border-zinc-800 bg-zinc-950 text-zinc-300",
+      "header": {
+        "layout": "Sticky top, p-6 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md z-10 flex flex-col gap-2",
+        "elements": "Massive Symbol text (text-3xl font-bold font-mono text-white), Direction Pill (Long/Short), Setup Name, Timeframe, and the Full TQS Badge variant prominently displayed."
+      },
+      "pillars_section": {
+        "description": "5 weighted pillars mapping to overall score.",
+        "layout": "Use shadcn Collapsible components for each of the 5 pillars. Stacked vertically, separated by border-b border-zinc-800/50.",
+        "pillar_header": "Grid cols-[100px_1fr_40px_30px] items-center gap-4 py-3 px-6 hover:bg-zinc-900/50 cursor-pointer. Columns: Pillar Name (text-[11px] uppercase tracking-wider text-zinc-400), Progress Bar (h-1.5 rounded-full bg-zinc-800, fill matches grade), Score (text-xs font-mono), Grade (text-sm font-mono font-bold).",
+        "expanded_content": "bg-zinc-900/20 px-6 py-4 border-l-2 border-zinc-700 ml-6 grid gap-3. Shows sub-factors (Regime/Time/Sector/VIX) as a text-xs grid layout (cols-2), and a bulleted list for +/- 'factor' explanation strings."
+      },
+      "context_section": {
+        "description": "Folded-in sections that were previously isolated badges.",
+        "layout": "Grid cols-2 gap-4 p-6 border-b border-zinc-800",
+        "elements": "Small widget cards (bg-zinc-900/40 rounded border border-zinc-800/50 p-3) for: 30-Day Win% & Avg-R, Expected Value (EV R), Catalyst Tag & Gap %, AI-Model Alignment, Sizing Rationale."
+      },
+      "open_position_section": {
+        "description": "Renders conditionally at the top of the drawer content (below header) ONLY for active trades.",
+        "layout": "Dense 2-row metrics block. bg-zinc-900 border-l-2 border-sky-500 p-4 mb-4",
+        "elements": "Entry Time, Entry Price, Current Price, SL / TP, Unrealized P&L/R, 'Shadow would-have' comparison. Emphasize P&L with font-mono and directional colors."
+      }
+    }
   },
-  "testing_requirements": {
-    "mandatory_attribute": "data-testid",
-    "rule": "ALL interactive and key informational elements MUST include a data-testid attribute.",
-    "examples": [
-      "data-testid='ticker-select-aapl'",
-      "data-testid='pipeline-hud-scan-count'",
-      "data-testid='morning-briefing-plan-a'",
-      "data-testid='confidence-gate-score'"
-    ]
-  }
+  "motion_and_interactions": {
+    "drawer_slide": "duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
+    "progress_bars": "transition-all duration-700 ease-out fill-on-mount",
+    "hover_states": "Text colors brighten, borders shift from zinc-800 to zinc-600, subtle translate-y on interactive badges.",
+    "collapsible": "Smooth height transition overflow-hidden data-[state=open]:animate-accordion-down data-[state=closed]:animate-accordion-up"
+  },
+  "testing_ids": {
+    "tqs_badge": "data-testid='tqs-badge-card'",
+    "drilldown_drawer": "data-testid='tqs-drilldown-drawer'",
+    "pillar_expand": "data-testid='pillar-expand-button-{pillarName}'",
+    "open_position_metrics": "data-testid='open-position-metrics'",
+    "context_widget": "data-testid='context-widget-{widgetName}'"
+  },
+  "instructions_to_main_agent": [
+    "1. Remove all old badges (SMB, edge rank, shadow, why size) from the Ticker Card Face.",
+    "2. Implement the compact TQS Badge as the SINGLE primary action/score indicator on the card face.",
+    "3. Build the DrillDownDrawer using shadcn's Sheet component on the right side.",
+    "4. Implement the 5 Pillars (Setup, Technical, Fundamental, Context, Execution) using shadcn Collapsible and Progress components, mapping the colors exactly to the grade scale provided (Emerald/Sky/Amber/Rose).",
+    "5. Use JetBrains Mono for all numeric data and IBM Plex Sans for UI text.",
+    "6. Ensure extreme density and contrast mapping to the 'Performance Pro' dark terminal aesthetic. Do not add any playful, light, or generic elements."
+  ]
 }
