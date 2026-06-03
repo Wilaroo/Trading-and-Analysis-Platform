@@ -951,6 +951,26 @@ class DailyStats:
     daily_limit_hit: bool = False
 
 
+def _reaper_should_skip_filled(symbol: str, ib_pos_syms: set, bot_open_syms: set) -> bool:
+    """v19.34.234 — Reaper safety guard.
+
+    Return True when a stale `pending` row must NOT be reaped because its
+    symbol still shows a LIVE IB position that the bot is not tracking as an
+    open trade. That combination almost always means the pre-submitted order
+    DID fill at IB but the fill was never attributed back to the bot (the
+    `entry_order_id=None` race seen 2026-06-03 on SOXX/LRCX/ALAB/ASTS): the
+    blind reaper would falsely record the real fill as `rejected` and let the
+    live shares become an orphan that the consolidator then over-sizes.
+
+    Blast radius is intentionally tiny: at worst this leaves a benign
+    `pending` DB row in place (it places no orders). It can never close a
+    position or submit an order.
+    """
+    s = (symbol or "").upper()
+    return bool(s) and s in ib_pos_syms and s not in bot_open_syms
+
+
+
 class TradingBotService:
     """
     Main trading bot service that orchestrates scanning, evaluation,
@@ -3501,9 +3521,49 @@ class TradingBotService:
                         if stale:
                             stamp = datetime.now(timezone.utc).isoformat()
                             updated_ids: List[str] = []
+                            # v19.34.234 — fill-race guard: gather live IB
+                            # positions + the bot's open-trade symbols ONCE so
+                            # we never reap a pending whose order actually
+                            # filled at IB but wasn't attributed back.
+                            ib_pos_syms: set = set()
+                            try:
+                                from services.ib_direct_service import get_ib_direct_service
+                                _ibd = get_ib_direct_service()
+                                if _ibd is not None and await _ibd.ensure_connected():
+                                    for _p in (await _ibd.get_positions()) or []:
+                                        if abs(float(_p.get("position") or 0)) >= 1:
+                                            ib_pos_syms.add((_p.get("symbol") or "").upper())
+                            except Exception as _e:
+                                logger.debug(
+                                    "[v19.34.234 reaper-guard] IB positions check failed: %s", _e
+                                )
+                            bot_open_syms: set = {
+                                (getattr(t, "symbol", "") or "").upper()
+                                for t in (self._open_trades or {}).values()
+                            }
+                            skipped_filled: List[str] = []
                             for row in stale:
                                 tid = row.get("id")
                                 if not tid:
+                                    continue
+                                _sym = (row.get("symbol") or "").upper()
+                                if _reaper_should_skip_filled(_sym, ib_pos_syms, bot_open_syms):
+                                    skipped_filled.append(f"{_sym}:{tid}")
+                                    try:
+                                        db["state_integrity_events"].insert_one({
+                                            "event": "reaper_skip_likely_filled",
+                                            "severity": "high",
+                                            "symbol": _sym,
+                                            "trade_id": tid,
+                                            "detail": (
+                                                "stale pending NOT reaped — IB holds a live "
+                                                "position for this symbol the bot isn't tracking "
+                                                "as open (likely unattributed fill)."
+                                            ),
+                                            "ts": stamp,
+                                        })
+                                    except Exception:
+                                        pass
                                     continue
                                 res = db["bot_trades"].update_one(
                                     {"id": tid, "status": "pending"},
@@ -3524,6 +3584,13 @@ class TradingBotService:
                                 )
                                 for tid in updated_ids:
                                     self._pending_trades.pop(tid, None)
+                            if skipped_filled:
+                                logger.warning(
+                                    "[v19.34.234 reaper-guard] SKIPPED %d stale pending(s) — IB "
+                                    "holds live position(s) the bot isn't tracking (likely "
+                                    "unattributed fill): %s",
+                                    len(skipped_filled), ", ".join(skipped_filled),
+                                )
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:

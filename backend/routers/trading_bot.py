@@ -3322,7 +3322,13 @@ async def positions_truth_diff():
             if not sym:
                 continue
             direction = getattr(getattr(trade, "direction", None), "value", "?")
-            shares = int(getattr(trade, "shares", 0) or 0)
+            # v19.34.234 — report the LIVE size (`remaining_shares`), not the
+            # original/consolidated `.shares`. After a LIFO shrink `.shares`
+            # goes stale (SOXX showed shares=43 / remaining=17 on 2026-06-03),
+            # which made this HUD truth-diff falsely flag a 26-share mismatch
+            # while the bot's tracked position (17) actually matched IB (17).
+            _rem = getattr(trade, "remaining_shares", None)
+            shares = int((_rem if _rem is not None else getattr(trade, "shares", 0)) or 0)
             signed_shares = -shares if direction == "short" else shares
             bot_opens[sym] = {
                 "symbol": sym, "shares": shares,
