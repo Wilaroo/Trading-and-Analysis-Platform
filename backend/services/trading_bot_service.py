@@ -4289,6 +4289,40 @@ class TradingBotService:
             _dedup = get_deduplicator()
 
             for alert in alerts:
+                # v19.34.243 — PER-ENTRY GATE. The pause + max-position checks
+                # at the top of this method run ONCE per cycle. Without
+                # re-checking here, a multi-alert batch (a) keeps firing after
+                # an operator pauses mid-cycle (the 2026-06-03 CEG case), and
+                # (b) overshoots the position cap (open=24, cap=25 → a 3-alert
+                # batch opened 27 on 2026-06-02). Re-check both per entry and
+                # STOP the batch the moment either binds. Counts pending so
+                # in-flight entries count against the cap.
+                try:
+                    from services.safety_guardrails import get_safety_guardrails
+                    _paused_now = get_safety_guardrails().is_scanner_paused()
+                except Exception:
+                    _paused_now = False
+                from services.entry_gate import per_entry_gate_should_stop
+                if per_entry_gate_should_stop(
+                    len(self._open_trades), len(self._pending_trades),
+                    _eff_max_pos, _paused_now,
+                ):
+                    _live_count = len(self._open_trades) + len(self._pending_trades)
+                    self.record_rejection(
+                        symbol=alert.get("symbol", "—"),
+                        setup_type=alert.get("setup_type", "any"),
+                        direction=alert.get("direction", ""),
+                        reason_code=("scanner_paused_mid_cycle" if _paused_now
+                                     else "max_open_positions"),
+                        context={"cap": _eff_max_pos, "live_count": _live_count,
+                                 "per_entry_gate_v19_34_243": True,
+                                 "paused": _paused_now},
+                    )
+                    print(f"🚫 [v19.34.243 per-entry gate] halting batch "
+                          f"(paused={_paused_now}, open+pending={_live_count}, "
+                          f"cap={_eff_max_pos})")
+                    break
+
                 symbol = alert.get('symbol', 'UNKNOWN')
                 setup = alert.get('setup_type', 'unknown')
                 direction = alert.get('direction', 'long')
