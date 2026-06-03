@@ -732,7 +732,7 @@ def get_pusher_setup_info():
     cloud_url = os.environ.get("REACT_APP_BACKEND_URL", "")
     if not cloud_url:
         # Try to infer from request or env
-        cloud_url = os.environ.get("APP_URL", "https://orphan-reconciler-v6.preview.emergentagent.com")
+        cloud_url = os.environ.get("APP_URL", "https://unified-scoring.preview.emergentagent.com")
     
     pusher_connected = False
     last_update = _pushed_ib_data.get("last_update")
@@ -6745,6 +6745,25 @@ def get_l2_router_status():
         return {"success": False, "error": str(exc)[:200]}
 
 
+def _resolve_pusher_dead_threshold(et_minutes: Optional[int]) -> tuple:
+    """v19.34.247 — EOD-aware pusher-dead threshold resolver (pure/testable).
+
+    Returns ``(active_threshold_s, in_eod_window)``. During the EOD
+    wind-down window (default 15:40-16:05 ET) the threshold is relaxed
+    so the natural push-cadence slowdown into the close (thin ticks +
+    the serialized 15:45 flatten loop) doesn't flash a FALSE
+    "IB PUSHER DEAD" banner. ``et_minutes=None`` (clock unavailable /
+    non-weekday) uses the normal threshold. All knobs env-tunable.
+    """
+    normal_s = int(os.environ.get("PUSHER_DEAD_THRESHOLD_S", "30"))
+    eod_s = int(os.environ.get("PUSHER_DEAD_EOD_THRESHOLD_S", "120"))
+    win_start = int(os.environ.get("PUSHER_DEAD_EOD_WINDOW_START_MIN", str(15 * 60 + 40)))
+    win_end = int(os.environ.get("PUSHER_DEAD_EOD_WINDOW_END_MIN", str(16 * 60 + 5)))
+    in_eod_window = et_minutes is not None and win_start <= et_minutes < win_end
+    return (eod_s if in_eod_window else normal_s), in_eod_window
+
+
+
 @router.get("/pusher-health")
 async def get_pusher_health():
     """
@@ -6827,25 +6846,34 @@ async def get_pusher_health():
         # Hard "dead" threshold for bot/scanner auto-pause. During market
         # hours anything >= 30s without an update means we should STOP
         # trading decisions rather than act on stale data.
-        PUSHER_DEAD_S = 30
+        #
+        # v19.34.247 (2026-06-03) — EOD-aware relaxation. During the EOD
+        # wind-down (≈15:40-16:05 ET) the push cadence legitimately slows:
+        # tick volume thins into the bell AND the 15:45 EOD-flatten loop
+        # serializes many cancel/close IB round-trips that briefly lag the
+        # push-data handler past the 30s line — flashing a FALSE
+        # "IB PUSHER DEAD" banner at the exact moment the operator is
+        # watching the close. `_resolve_pusher_dead_threshold` relaxes the
+        # threshold inside that window. The age-None ("never saw a push")
+        # case is unchanged — a truly dead pusher still trips.
+        in_market_hours = True
+        _et_mins = None
+        try:
+            import pytz
+            et = pytz.timezone("America/New_York")
+            n = datetime.now(et)
+            if n.weekday() >= 5:  # Sat/Sun
+                in_market_hours = False
+            else:
+                _et_mins = n.hour * 60 + n.minute
+                in_market_hours = 9 * 60 + 30 <= _et_mins < 16 * 60
+        except Exception:
+            in_market_hours = True  # fail-safe: assume market hours → require freshness
 
-        def _is_market_hours() -> bool:
-            """Simple US equities RTH check (M-F 09:30-16:00 ET, no holidays)."""
-            try:
-                import pytz
-                et = pytz.timezone("America/New_York")
-                n = datetime.now(et)
-                if n.weekday() >= 5:  # Sat/Sun
-                    return False
-                mins = n.hour * 60 + n.minute
-                return 9 * 60 + 30 <= mins < 16 * 60
-            except Exception:
-                return True  # fail-safe: assume market hours → require freshness
-
-        in_market_hours = _is_market_hours()
+        dead_threshold_active, in_eod_window = _resolve_pusher_dead_threshold(_et_mins)
         pusher_dead = (
             age_seconds is None
-            or (age_seconds >= PUSHER_DEAD_S and in_market_hours)
+            or (age_seconds >= dead_threshold_active and in_market_hours)
         )
 
         # Heartbeat metrics — pushes/min over the last 60s + RPC latency
@@ -6881,7 +6909,8 @@ async def get_pusher_health():
             "health": health,
             "connected": health in ("green", "amber"),
             "pusher_dead": pusher_dead,
-            "dead_threshold_s": PUSHER_DEAD_S,
+            "dead_threshold_s": dead_threshold_active,
+            "eod_relaxed": in_eod_window,
             "in_market_hours": in_market_hours,
             "last_update": last_update_iso,
             "age_seconds": age_seconds,

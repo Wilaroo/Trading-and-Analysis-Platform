@@ -20,6 +20,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.247 (2026-06-03) — EOD no-new-entries cut resolver ───────
+# Pure helper so the EOD gate's time math is unit-testable and its
+# operator-facing strings stay in lockstep with the bot's ACTUAL
+# EOD-flatten time (15:45 ET since v19.34.154) instead of a stale
+# hardcoded 15:55.
+def _eod_fmt12(h: int, m: int) -> str:
+    """Format an ET (24h) time as a compact 12h '3:45pm'-style string."""
+    hr = h - 12 if h > 12 else (h if h else 12)
+    return f"{hr}:{m:02d}pm"
+
+
+def _eod_cut_times(eod_hour: int, eod_minute: int, grace_min: int) -> Dict[str, Any]:
+    """Resolve HARD/SOFT no-new-entry cuts from the bot's EOD-flatten time.
+
+    HARD cut == the flatten time (no fresh entry once flatten starts).
+    SOFT cut == HARD − grace (warn-only late-momentum window).
+    """
+    hard_cut = int(eod_hour) * 60 + int(eod_minute)
+    soft_cut = hard_cut - max(0, int(grace_min))
+    soft_h, soft_m = divmod(soft_cut, 60)
+    return {
+        "hard_cut": hard_cut,
+        "soft_cut": soft_cut,
+        "hard_str": _eod_fmt12(int(eod_hour), int(eod_minute)),
+        "soft_str": _eod_fmt12(soft_h, soft_m),
+        "hard_hhmm": f"{int(eod_hour):02d}:{int(eod_minute):02d}",
+        "soft_hhmm": f"{soft_h:02d}:{soft_m:02d}",
+    }
+
+
+
 # ── v19.34.156 (P3-A) — Grade-based position-size multiplier ────────
 # A-grade setups trade full size; lower grades downscale proportionally.
 # Operator choices:
@@ -413,24 +444,52 @@ class OpportunityEvaluator:
             # ── v19.29 (2026-05-01) — EOD no-new-entries gate ────────
             # Operator caught LITE 12sh @ $902.77 entered at 3:59pm
             # 2026-05-01 with OCA bracket auto-cancelled at 4:00pm,
-            # leaving raw long overnight w/ no protection. Soft cut at
-            # 3:45pm ET (warn-only, log + stream notice), HARD cut at
-            # 3:55pm ET (refuse all new entries). EOD flatten window
-            # 3:55-4:00pm exclusively owned by `eod_close_loop`.
+            # leaving raw long overnight w/ no protection.
+            #
+            # v19.34.247 (2026-06-03) — EOD-aware re-pin. The HARD cut
+            # was a stale hardcoded 15:55, but the actual EOD-flatten
+            # loop moved to 15:45 ET in v19.34.154 (12:55 on half-days).
+            # That left a 15:45-15:55 hole where the bot could open a
+            # FRESH entry *while the flatten loop was already running* —
+            # exactly the unprotected-overnight risk this gate exists to
+            # stop. HARD cut is now pinned to the bot's real EOD-flatten
+            # time; SOFT cut = HARD − grace (env EOD_NO_ENTRY_GRACE_MIN,
+            # default 10m), warn-only. All operator-facing text is built
+            # from the resolved times so the banner never goes stale.
             try:
+                import os as _os_eod
                 from datetime import datetime as _dt_eod
                 from zoneinfo import ZoneInfo as _ZI
                 _et_now = _dt_eod.now(_ZI("America/New_York"))
                 if _et_now.weekday() < 5:  # Mon-Fri only
                     _et_minutes = _et_now.hour * 60 + _et_now.minute
-                    HARD_CUT = 15 * 60 + 55   # 3:55pm
-                    SOFT_CUT = 15 * 60 + 45   # 3:45pm
+                    _is_half_day = _os_eod.environ.get(
+                        "EOD_HALF_DAY_TODAY", ""
+                    ).lower() in ("true", "1", "yes")
+                    if _is_half_day:
+                        _eod_h, _eod_m = 12, 55
+                    else:
+                        _eod_h = int(getattr(bot, "_eod_close_hour", 15) or 15)
+                        _eod_m = int(getattr(bot, "_eod_close_minute", 45) or 45)
+                    try:
+                        _grace = int(_os_eod.environ.get("EOD_NO_ENTRY_GRACE_MIN", "10"))
+                    except Exception:
+                        _grace = 10
+                    _cuts = _eod_cut_times(_eod_h, _eod_m, _grace)
+                    HARD_CUT = _cuts["hard_cut"]
+                    SOFT_CUT = _cuts["soft_cut"]
+                    _hard_str = _cuts["hard_str"]
+                    _soft_str = _cuts["soft_str"]
+                    _hard_hhmm = _cuts["hard_hhmm"]
+                    _soft_hhmm = _cuts["soft_hhmm"]
+
                     if _et_minutes >= HARD_CUT:
                         logger.warning(
                             "🛑 [v19.29 EOD-HARD-CUT] %s %s rejected at "
-                            "%02d:%02d ET — past 3:55pm, EOD flatten "
-                            "window owns the last 5 minutes.",
+                            "%02d:%02d ET — past %s, EOD flatten window "
+                            "owns the run into the close.",
                             symbol, setup_type, _et_now.hour, _et_now.minute,
+                            _hard_str,
                         )
                         try:
                             bot.record_rejection(
@@ -439,7 +498,7 @@ class OpportunityEvaluator:
                                 reason_code="eod_no_new_entries",
                                 context={
                                     "et_time": _et_now.isoformat(),
-                                    "policy": "hard cut at 15:55 ET",
+                                    "policy": f"hard cut at {_hard_hhmm} ET",
                                 },
                             )
                         except Exception:
@@ -452,12 +511,12 @@ class OpportunityEvaluator:
                                 "symbol": symbol,
                                 "text": (
                                     f"⏰ Passing on {symbol} {setup_type} — "
-                                    f"past 3:55pm ET, EOD flatten window "
-                                    f"owns the last 5 minutes."
+                                    f"past {_hard_str} ET, EOD flatten window "
+                                    f"owns the run into the close."
                                 ),
                                 "metadata": {
                                     "policy": "v19.29_eod_hard_cut",
-                                    "cutoff_et": "15:55",
+                                    "cutoff_et": _hard_hhmm,
                                 },
                             })
                         except Exception:
@@ -465,13 +524,13 @@ class OpportunityEvaluator:
                         return None
                     elif _et_minutes >= SOFT_CUT:
                         # Soft cut: log + stream warn, but still let the
-                        # trade through. Operator wanted 5min grace for
+                        # trade through. Operator wanted a short grace for
                         # late afternoon momentum.
                         logger.info(
-                            "⚠️ [v19.29 EOD-SOFT-CUT] %s %s after 3:45pm "
-                            "ET — late afternoon momentum window. Allowing "
-                            "but flagging for review.",
-                            symbol, setup_type,
+                            "⚠️ [v19.29 EOD-SOFT-CUT] %s %s after %s ET — "
+                            "late afternoon momentum window. Allowing but "
+                            "flagging for review.",
+                            symbol, setup_type, _soft_str,
                         )
                         try:
                             from services.sentcom_service import emit_stream_event
@@ -481,12 +540,12 @@ class OpportunityEvaluator:
                                 "symbol": symbol,
                                 "text": (
                                     f"⚠️ Late-day {symbol} {setup_type} — "
-                                    f"past 3:45pm ET, in the 10-min grace "
-                                    f"window. Hard cut at 3:55pm."
+                                    f"past {_soft_str} ET, in the {_grace}-min "
+                                    f"grace window. Hard cut at {_hard_str}."
                                 ),
                                 "metadata": {
                                     "policy": "v19.29_eod_soft_cut",
-                                    "cutoff_et": "15:45",
+                                    "cutoff_et": _soft_hhmm,
                                 },
                             })
                         except Exception:

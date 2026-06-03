@@ -4,7 +4,8 @@
  * Sticky banner pinned above the day-rollup that activates 5 min
  * before the EOD close window so the operator has a last-minute
  * chance to flatten manually or extend a winning position before
- * auto-close fires at 3:55 PM ET (12:55 PM on half-days).
+ * auto-close fires at 3:45 PM ET (12:55 PM on half-days). Displayed
+ * time is dynamic — driven by `close_time_et` from the API.
  *
  * Drives off `GET /api/trading-bot/eod-status` (lightweight; only
  * polls when status is non-idle).
