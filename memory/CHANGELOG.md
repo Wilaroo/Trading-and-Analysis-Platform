@@ -1,3 +1,25 @@
+## 2026-06-03 — v19.34.239 DYNAMIC trigger_probability (always-on) (BUILT, paste.rs dGeht)
+
+### What
+Every scanner detector (53 sites) stamps a HARDCODED per-setup `trigger_probability`
+constant — a static label the probability gate had no live weight on. v239 treats
+that constant as a CALIBRATED BASE and lets live signals move it:
+- distance-to-trigger (`current_price` → `trigger_price`, %) and RVOL deltas
+- clamped to [0.15, 0.90]
+
+### How
+The pure helper `compute_live_trigger_probability(base, distance_pct, rvol)` already
+existed (v238) but was DEFINED-NEVER-CALLED. Rather than edit 53 detector sites, it
+is now applied at the single enrichment chokepoint `enhanced_scanner._apply_setup_context`
+(runs on every `_check_setup` hit at L3428). Fail-open: any error leaves the original
+constant untouched. Always-on (operator confirmed). Affects new alerts going forward.
+
+### Verification
+- `tests/test_v19_34_239_dynamic_trigger_prob.py` 8/8 pass (.venv pytest).
+- Hardware-bound: no testing agent. Deploy via paste.rs (idempotent gzip+base64,
+  pytest-gated, git commit+push BEFORE restart, ./start_backend.sh --force).
+
+
 ## 2026-06-03 — v19.34.237 (Phase D follow-up B) DIRECTION-AWARE EDGE BUCKETS + COVERAGE AUDIT (BUILT, paste.rs MQsVr)
 
 ### What

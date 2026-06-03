@@ -5893,6 +5893,31 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.debug(f"_apply_sector_regime({symbol}) failed: {e}")
 
+        # v19.34.239 — DYNAMIC trigger_probability (always-on).
+        # Every detector stamps a hardcoded per-setup `trigger_probability`
+        # constant (53 sites). Treat that constant as a CALIBRATED BASE and
+        # let the live distance-to-trigger + RVOL move it, so the probability
+        # gate gets real-time weight instead of a static label. Runs here
+        # because `_apply_setup_context` is the single chokepoint every
+        # detector hit passes through (called at the `_check_setup` return).
+        # Fail-open: any error leaves the original constant untouched.
+        try:
+            cur = float(getattr(alert, "current_price", 0.0) or 0.0)
+            trig = float(getattr(alert, "trigger_price", 0.0) or 0.0)
+            if cur > 0 and trig > 0:
+                distance_pct = abs((trig - cur) / cur) * 100.0
+            else:
+                distance_pct = 1.0  # neutral (0-delta) when prices unusable
+            rvol = float(getattr(alert, "rvol", 0.0) or 0.0)
+            if rvol <= 0.0:
+                rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+            base = alert.trigger_probability
+            alert.trigger_probability = round(
+                compute_live_trigger_probability(base, distance_pct, rvol), 4
+            )
+        except Exception as e:
+            logger.debug(f"_apply_dynamic_trigger_prob({symbol}) failed: {e}")
+
     # ==================== DAILY/SWING/POSITION SETUPS ====================
     # These run on a slower cadence (every 10th scan cycle) using daily bars from MongoDB
     
