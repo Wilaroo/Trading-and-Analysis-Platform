@@ -185,9 +185,17 @@ async def get_tqs_card_detail(
 
     tqs = get_tqs_engine()
     score = float(rec.get("tqs_score") or 0)
+    # v19.34.257 — derive the overall grade FROM the score (same ladder the
+    # pillars use). The persisted `tqs_grade` is the legacy 3-tier trade_grade
+    # (A/B/C) and contradicts the score (e.g. score 66 → stored "A" but the TQS
+    # ladder says B). A trusted drawer must never show a grade that disagrees
+    # with its score.
+    def _grade(s):
+        return ("A" if s >= 85 else "B+" if s >= 75 else "B" if s >= 65 else
+                "C+" if s >= 55 else "C" if s >= 45 else "D" if s >= 35 else "F")
     detail.update({
         "tqs_score": round(score, 1),
-        "tqs_grade": rec.get("tqs_grade") or "",
+        "tqs_grade": _grade(score),
         "tqs_action": tqs.get_threshold_guidance(score).get("action", "") if score else "",
         "setup_type": rec.get("setup_type") or "",
         "direction": rec.get("direction") or (detail.get("position") or {}).get("direction") or "long",
