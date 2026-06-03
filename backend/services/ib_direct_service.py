@@ -101,6 +101,28 @@ class IBDirectConfig:
 # ─────────────────────────────────────────────────────────────────────
 
 
+def clamp_protective_qty(requested_qty, live_abs):
+    """v19.34.235 (Part B) — clamp a protective/closing-order qty to the live
+    IB position.
+
+    Returns (qty, clamped: bool). It only ever SHRINKS the order to a
+    confirmed, smaller live position (0 < live < requested); it NEVER grows
+    one and NEVER touches the requested value when the live size is unknown
+    (`live_abs=None`) — fail-open. This is the guard that stops a stale
+    `trade.shares` (e.g. SOXX 43) from arming a closing order larger than the
+    position actually holds (17) and flipping it on fill (2026-06-03).
+    """
+    req = int(abs(requested_qty or 0))
+    if live_abs is None:
+        return req, False
+    live = int(abs(live_abs))
+    if 0 < live < req:
+        return live, True
+    return req, False
+
+
+
+
 class IBDirectService:
     """Singleton wrapper around an `ib_async.IB()` connection.
 
@@ -681,17 +703,18 @@ class IBDirectService:
                          action, quantity, symbol, e)
             return {"success": False, "error": str(e)[:200]}
 
-
     # ── v19.34.176 — IB-native industry / category lookup (Stage A) ──
     # Used by `sector_tag_service` to replace the Finnhub-based industry
     # fallback. IB's reqContractDetails returns a `category`/`industry`/
     # `subcategory` triple sourced from Reuters classifications. Free-form
     # strings — same shape as Finnhub — fed back through the existing
     # `_industry_to_etf` resolver, so the GICS→SPDR mapping is unchanged.
-    async def get_contract_industry(self, symbol):
+    async def get_contract_industry(self, symbol: str) -> Optional[Dict[str, str]]:
         """Return ``{'industry': str, 'category': str, 'subcategory': str}``
         for ``symbol`` via IB ``reqContractDetailsAsync``, or ``None`` on
-        miss / error.
+        miss / error. Safe to call frequently — the IB call is async and
+        ungated (sector tagging is a one-time-per-symbol lookup; results
+        are persisted to ``symbol_adv_cache.sector`` by the caller).
         """
         if not self._connected or not self._ib:
             return None
@@ -710,6 +733,8 @@ class IBDirectService:
                 "category":    (getattr(cd, "category", "") or "").strip(),
                 "subcategory": (getattr(cd, "subcategory", "") or "").strip(),
             }
+            # Empty triple → useless; signal None so caller can try
+            # Finnhub fallback instead of caching empty data.
             if not any(out.values()):
                 return None
             return out
@@ -720,21 +745,23 @@ class IBDirectService:
             )
             return None
 
-
     async def get_fundamental_report(
         self,
         symbol: str,
         report_type: str = "ReportSnapshot",
         timeout: float = 20.0,
-    ):
+    ) -> Optional[str]:
         """v19.34.202 — fetch an IB Reuters fundamental XML report for ``symbol``
         via the live clientId-11 socket (``reqFundamentalDataAsync``). Returns
         the raw XML string, or ``None`` on miss / not-subscribed / error.
 
         ``ReportSnapshot`` (~10KB) carries valuation + ``<SharesOut
-        TotalFloat=...>`` (shares-outstanding text + float attribute). The
-        legacy ``ib_service`` ReportSnapshot path is dead on this deploy, so
-        this routes through ``ib_direct`` instead.
+        TotalFloat=...>`` (shares-outstanding text + float attribute) — the
+        cheap report the fundamentals cache uses. ``ReportsOwnership`` is
+        multi-MB (thousands of holders); callers must gate it tightly. The
+        legacy ``ib_service`` ReportSnapshot path is dead on this deploy
+        (worker usually disconnected → all cached fundamentals came from
+        Finnhub), which is why this routes through ``ib_direct`` instead.
         """
         if not self._connected or not self._ib:
             return None
@@ -758,6 +785,8 @@ class IBDirectService:
                 symbol, report_type, exc,
             )
             return None
+
+
 
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──
     # v19.34.42 -- IB minTick resolution + fp-safe price rounding
@@ -2120,6 +2149,28 @@ class IBDirectService:
                     "error": f"ib_direct_stop_error: {str(e)[:200]}",
                     "broker": "ib_direct", "simulated": False}
 
+    async def live_position_abs(self, symbol: str):
+        """v19.34.235 (Part B) — return |live IB position| for `symbol` as an
+        int, or None when it can't be read confidently (get_positions raised,
+        empty snapshot, or the symbol is absent). Returning None on absence is
+        deliberate: the clamp must only ever SHRINK a closing order to a
+        confirmed, present position — never down to 0 on a snapshot gap."""
+        try:
+            positions = await self.get_positions()
+        except Exception as e:
+            logger.debug("[v19.34.235 clamp] get_positions failed for %s: %s", symbol, e)
+            return None
+        if not positions:
+            return None
+        s = (symbol or "").upper()
+        signed = 0.0
+        found = False
+        for p in positions:
+            if (p.get("symbol") or "").upper() == s and p.get("sec_type") in (None, "STK"):
+                signed += float(p.get("position") or 0.0)
+                found = True
+        return int(abs(signed)) if found else None
+
     async def place_oca_stop_target(
         self,
         trade,
@@ -2167,6 +2218,17 @@ class IBDirectService:
             if qty <= 0:
                 return {"success": False, "error": f"bad shares: {qty}",
                         "broker": "ib_direct", "simulated": False}
+            # v19.34.235 (Part B) — clamp the protective qty to the live IB
+            # position so a stale `trade.shares` can never arm a closing order
+            # larger than the position holds (SOXX Sell-43-vs-17 flip hazard).
+            _live_abs = await self.live_position_abs(symbol)
+            qty, _did_clamp = clamp_protective_qty(qty, _live_abs)
+            if _did_clamp:
+                logger.warning(
+                    "[v19.34.235 clamp] %s OCA protective qty %d -> %d (live IB position) "
+                    "— prevented oversized closing order / flip.",
+                    symbol, int(trade.shares), qty,
+                )
             stop_px = float(trade.stop_price)
             targets = getattr(trade, "target_prices", None) or []
             if not targets:
