@@ -2852,14 +2852,16 @@ async def trigger_eod_close_now(payload: Optional[Dict[str, Any]] = Body(default
             "include_swing": include_swing,
         }
 
-    # v19.34.69 — partition trades by `close_at_eod` flag. Default-True
-    # for any legacy trade without the attribute so we never silently
-    # skip a position that the bot couldn't categorize. Mirrors the
-    # auto-path's safety default in `PositionManager.check_eod_close`.
+    # v19.34.69 — partition trades by `close_at_eod` flag.
+    # v19.34.245 — resolve via the trade-style POLICY (authoritative) rather
+    # than the per-trade attribute, which was set at entry with a default-True
+    # fallback and wrongly flagged position/swing setups missing the config key.
+    # `include_swing=true` is still an explicit operator override to flatten all.
+    from services.order_policy_registry import should_close_at_eod
     eod_trades = {}
     swing_held_symbols = []
     for trade_id, trade in _trading_bot._open_trades.items():
-        if include_swing or getattr(trade, "close_at_eod", True):
+        if include_swing or should_close_at_eod(trade):
             eod_trades[trade_id] = trade
         else:
             swing_held_symbols.append(trade.symbol)

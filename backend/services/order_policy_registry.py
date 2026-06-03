@@ -248,6 +248,24 @@ def is_eod_sweep_eligible(trade) -> bool:
     return get_policy_for_trade(trade).eod_sweep_eligible
 
 
+def should_close_at_eod(trade) -> bool:
+    """v19.34.245 — AUTHORITATIVE EOD auto-close decision.
+
+    Resolves close_at_eod from the trade's ORDER POLICY (trade_style →
+    setup_type → intraday default) rather than the per-trade `close_at_eod`
+    attribute. That attribute is set at entry from STRATEGY_CONFIG with a
+    blanket default-True fallback, so position/swing/investment/multi_day
+    setups MISSING that config key were wrongly flagged True and swept at EOD
+    (observed 2026-06-02: accumulation_entry closed via eod_auto_close, which
+    skews the learning loop by flattening multi-day trades before stop/target).
+
+    Policy resolution guarantees long-horizon styles are HELD overnight while
+    scalp/intraday still close. Used by both the auto path
+    (PositionManager.check_eod_close) and the manual /eod-close-now endpoint.
+    """
+    return get_policy_for_trade(trade).close_at_eod
+
+
 def time_in_force_for(trade) -> str:
     """Return the IB time-in-force string ("DAY" or "GTC") for a trade."""
     return get_policy_for_trade(trade).time_in_force

@@ -530,21 +530,11 @@ class PositionManager:
                                         quote_age_s = max(0.0, time.time() - float(pushed_at))
                                     elif isinstance(pushed_at, str):
                                         from datetime import datetime as _dt, timezone as _tz
-                                        try:
-                                            from zoneinfo import ZoneInfo as _ZI
-                                            _NY_TZ = _ZI("America/New_York")
-                                        except Exception:
-                                            _NY_TZ = None
-                                        # v19.34.82 — Pre-A patch Windows pusher
-                                        # emitted naive ET timestamps. After A:
-                                        # pusher emits UTC+Z (aware). This block
-                                        # handles BOTH: aware strings keep their
-                                        # tz; naive strings fall back to ET
-                                        # localization (legacy-safe).
+                                        # ISO fmt → epoch
                                         dt = _dt.fromisoformat(pushed_at.replace("Z", "+00:00"))
                                         if dt.tzinfo is None:
-                                            dt = dt.replace(tzinfo=_NY_TZ) if _NY_TZ is not None else dt.replace(tzinfo=_tz.utc)
-                                        quote_age_s = max(0.0, (_dt.now(_tz.utc) - dt.astimezone(_tz.utc)).total_seconds())
+                                            dt = dt.replace(tzinfo=_tz.utc)
+                                        quote_age_s = max(0.0, (_dt.now(_tz.utc) - dt).total_seconds())
                             except Exception:
                                 quote_age_s = None  # treat as fresh on parse error
 
@@ -575,6 +565,19 @@ class PositionManager:
                     quote = await bot._alpaca_service.get_quote(trade.symbol)
 
                 if not quote:
+                    # v19.34.227 — a held position with NO quote at all (fell
+                    # entirely out of the pusher's quote universe, e.g. CRM
+                    # after a scan-universe rotation) never reached the stale
+                    # branch below, so it was never re-subscribed and went
+                    # mark-less (current_price stuck → fake -$18,897 kill-switch
+                    # trip, v226). Flag it so the held name gets re-pinned into
+                    # the quote feed by the resub drain + quote_resub_watchdog.
+                    try:
+                        if not hasattr(self, "_stale_resub_set"):
+                            self._stale_resub_set = set()
+                        self._stale_resub_set.add(trade.symbol.upper())
+                    except Exception:
+                        pass
                     continue
 
                 # v19.13 — staleness guard. Skip stop checks when quote
@@ -1009,7 +1012,6 @@ class PositionManager:
             )
             return None
 
-
     async def check_scalp_decay(self, bot: 'TradingBotService'):
         """v19.34.171 — Scalp Time Decay.
 
@@ -1053,13 +1055,19 @@ class PositionManager:
         try:
             scalp_candidates = []
             for trade in list(bot._open_trades.values()):
-                # v19.34.171.4 - string compare avoids TradeTimeframe/TradeStatus import
+                # v19.34.171.4 — use string compare to avoid the
+                # import dance (TradeTimeframe / TradeStatus are
+                # str Enums; "scalp" == TradeTimeframe.SCALP holds).
                 _tf = getattr(trade, "timeframe", "")
-                if hasattr(_tf, "value"): _tf = _tf.value
-                if str(_tf).lower() != "scalp": continue
+                if hasattr(_tf, "value"):
+                    _tf = _tf.value
+                if str(_tf).lower() != "scalp":
+                    continue
                 _st = getattr(trade, "status", "")
-                if hasattr(_st, "value"): _st = _st.value
-                if str(_st).lower() != "open": continue
+                if hasattr(_st, "value"):
+                    _st = _st.value
+                if str(_st).lower() != "open":
+                    continue
                 ex = (
                     getattr(trade, "executed_at", None)
                     or getattr(trade, "entry_time", None)
@@ -1136,25 +1144,9 @@ class PositionManager:
         except Exception as e:
             logger.error(f"[v19.34.171 SCALP-DECAY] sweep failed: {e}")
 
+
+
     async def check_eod_close(self, bot: 'TradingBotService'):
-        # v19.34.180 - UNCONDITIONAL entry heartbeat (proof method ran).
-        # Writes BEFORE any guard so we can tell exactly which guard
-        # short-circuits when EOD fails. Diagnostic only - tiny insert.
-        try:
-            from utils.timestamps import now_iso, now_bson
-            from datetime import datetime as _dt
-            from zoneinfo import ZoneInfo as _ZI
-            _et = _dt.now(_ZI("America/New_York"))
-            if bot._db is not None and _et.hour >= 15 and _et.hour < 17:
-                bot._db["sentcom_thoughts"].insert_one({
-                    "kind": "system",
-                    "content": f"check_eod_close entered et={_et.strftime('%H:%M:%S')} enabled={getattr(bot,'_eod_close_enabled','?')}",
-                    "category": "eod_entry_heartbeat",
-                    "timestamp": now_iso(),
-                    "created_at": now_bson(),
-                })
-        except Exception:
-            pass
         """
         Close ALL open positions near market close (default: 3:55 PM ET).
         This is a critical risk management feature to avoid overnight exposure.
@@ -1243,6 +1235,7 @@ class PositionManager:
                 bot._eod_last_heartbeat_stamp = hb_stamp
                 db = (getattr(bot, "_db", None) if getattr(bot, "_db", None) is not None else getattr(bot, "db", None))
                 if db is not None:
+                    # Count open close_at_eod=True positions on the fly
                     eod_eligible_count = db["bot_trades"].count_documents({
                         "closed_at": None,
                         "exit_price": None,
@@ -1397,10 +1390,16 @@ class PositionManager:
             return
 
         # Only close trades marked for EOD close (intraday/scalp/day trades)
-        # Swing and position trades are held overnight
+        # Swing and position trades are held overnight.
+        # v19.34.245 — resolve close_at_eod from the trade-style POLICY
+        # (authoritative) instead of the per-trade attribute, which was set at
+        # entry with a default-True fallback and wrongly flagged position/swing
+        # setups missing the config key (they were swept at EOD, skewing the
+        # learning loop). Policy resolution holds long-horizon styles overnight.
+        from services.order_policy_registry import should_close_at_eod
         eod_trades = {
             tid: t for tid, t in bot._open_trades.items()
-            if getattr(t, 'close_at_eod', True)  # Default True for safety
+            if should_close_at_eod(t)
         }
 
         if not eod_trades:
@@ -2959,9 +2958,6 @@ class PositionManager:
                 logger.warning(f"[v162 EOD] {trade.symbol} save failed: {e}")
             try:
                 if bot._db is not None:
-                    # v19.34.172 — dual-shape timestamps.
-                    from utils.timestamps import stamps as _v172_stamps
-                    _v172 = _v172_stamps()
                     bot._db.bracket_lifecycle_events.insert_one({
                         "phase": "eod_flatten_v162",
                         "success": True,
@@ -2970,9 +2966,7 @@ class PositionManager:
                         "shares_closed": shares_to_close,
                         "exit_price": trade.exit_price,
                         "realized_pnl": trade.realized_pnl,
-                        "created_at": _v172["ts_dt"],
-                        "ts": _v172["ts"],
-                        "ts_dt": _v172["ts_dt"],
+                        "created_at": datetime.now(timezone.utc),
                     })
             except Exception:
                 pass

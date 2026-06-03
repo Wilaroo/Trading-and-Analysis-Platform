@@ -310,6 +310,10 @@ class OpportunityEvaluator:
             # POST_STOP_COOLDOWN_MINUTES (default 30), refuse the new
             # entry. Setup-type normalisation drops _long/_short suffix
             # so the cooldown traps re-entries in either direction.
+            #
+            # Surfaced via record_rejection so the SIGNAL PASS pill
+            # and rejection-analytics dashboard show the count.
+            #
             # Origin: v19.34.87 setup_retro found 21 stops in 25min
             # across ETHU/CHWY/AJG/BALL on 2026-05-14 for -17.68R.
             # Fail-OPEN on any exception so a bug here can't lock the
@@ -320,8 +324,9 @@ class OpportunityEvaluator:
                 if _remaining is not None and _remaining > 0:
                     logger.warning(
                         "🧊 [v19.34.88 post-stop-cooldown] Refusing %s %s — "
-                        "stopped recently (cooldown %.0fs remaining).",
-                        symbol, setup_type, _remaining,
+                        "stopped in last %.0fs (cooldown %.0fs remaining).",
+                        symbol, setup_type,
+                        (1800.0 - _remaining), _remaining,
                     )
                     try:
                         bot.record_rejection(
@@ -1303,7 +1308,15 @@ class OpportunityEvaluator:
             timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
             trail_pct = strategy_cfg.get("trail_pct", 0.02)
             scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
-            close_at_eod = strategy_cfg.get("close_at_eod", True)
+            # v19.34.245 — derive close_at_eod from the trade-style POLICY when
+            # the setup's STRATEGY_CONFIG omits the key, instead of a blanket
+            # True default. Position/swing/investment setups missing the key were
+            # wrongly flagged for EOD close (swept before stop/target, skewing
+            # the learning loop). Policy is the authoritative source of truth.
+            close_at_eod = strategy_cfg.get("close_at_eod")
+            if close_at_eod is None:
+                from services.order_policy_registry import get_policy_for_trade
+                close_at_eod = get_policy_for_trade({"setup_type": setup_type}).close_at_eod
 
             # Get current market regime
             current_regime = bot._current_regime or "UNKNOWN"
