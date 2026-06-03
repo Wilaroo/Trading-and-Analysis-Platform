@@ -970,6 +970,11 @@ async def get_closed_trades(
             "setup_type": t.get("setup_type"),
             "unified_grade": t.get("unified_grade") or t.get("tqs_grade") or t.get("quality_grade") or "",
             "tqs_grade": t.get("tqs_grade") or "",
+            # v19.34.258 — numeric composite TQS (the ultimate score the UI now
+            # shows instead of a letter). Prefer the stored score, else the one
+            # captured in entry_context at fill time.
+            "tqs_score": (lambda v: round(float(v), 1) if v not in (None, "", 0) else None)(
+                t.get("tqs_score") or (t.get("entry_context") or {}).get("tqs", {}).get("score")),
             "direction": t.get("direction"),
             "shares": t.get("shares"),
             "entry_price": entry_p,
