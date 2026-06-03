@@ -1390,10 +1390,16 @@ class PositionManager:
             return
 
         # Only close trades marked for EOD close (intraday/scalp/day trades)
-        # Swing and position trades are held overnight
+        # Swing and position trades are held overnight.
+        # v19.34.245 — resolve close_at_eod from the trade-style POLICY
+        # (authoritative) instead of the per-trade attribute, which was set at
+        # entry with a default-True fallback and wrongly flagged position/swing
+        # setups missing the config key (they were swept at EOD, skewing the
+        # learning loop). Policy resolution holds long-horizon styles overnight.
+        from services.order_policy_registry import should_close_at_eod
         eod_trades = {
             tid: t for tid, t in bot._open_trades.items()
-            if getattr(t, 'close_at_eod', True)  # Default True for safety
+            if should_close_at_eod(t)
         }
 
         if not eod_trades:

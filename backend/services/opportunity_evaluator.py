@@ -1308,7 +1308,15 @@ class OpportunityEvaluator:
             timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
             trail_pct = strategy_cfg.get("trail_pct", 0.02)
             scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
-            close_at_eod = strategy_cfg.get("close_at_eod", True)
+            # v19.34.245 — derive close_at_eod from the trade-style POLICY when
+            # the setup's STRATEGY_CONFIG omits the key, instead of a blanket
+            # True default. Position/swing/investment setups missing the key were
+            # wrongly flagged for EOD close (swept before stop/target, skewing
+            # the learning loop). Policy is the authoritative source of truth.
+            close_at_eod = strategy_cfg.get("close_at_eod")
+            if close_at_eod is None:
+                from services.order_policy_registry import get_policy_for_trade
+                close_at_eod = get_policy_for_trade({"setup_type": setup_type}).close_at_eod
 
             # Get current market regime
             current_regime = bot._current_regime or "UNKNOWN"

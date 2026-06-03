@@ -1,3 +1,26 @@
+## 2026-06-03 — v19.34.245 EOD CLOSE HONOURS TRADE-STYLE (B / #6, BUILT paste.rs 3CEck)
+
+Recurring bug (logged v19.34.63/69): both EOD-close paths trusted a per-trade
+`close_at_eod` attribute set at entry from STRATEGY_CONFIG with a default-True
+fallback, so position/swing/investment setups MISSING the key were swept at EOD
+(observed: accumulation_entry → eod_auto_close), skewing the learning loop by
+flattening multi-day trades before stop/target.
+Fix: `order_policy_registry.should_close_at_eod(trade)` resolves close_at_eod from
+the trade-style POLICY (authoritative), used in BOTH `position_manager.check_eod_close`
+and the manual `/eod-close-now` endpoint. Entry-time source default also fixed
+(opportunity_evaluator) so the stored flag is right going forward. Long-horizon
+styles held overnight; scalp/intraday still close (operator's priority). 8 pytest.
+
+### C-progress (operator batch)
+- #3 scalp-decay persistence — INVESTIGATED, NO BUG. Decay anchors to persisted
+  `trade.executed_at` (restored on startup at bot_persistence:419), recomputed vs
+  now each cycle — survives restarts correctly. No runtime timer.
+- #1 charts stale — LEADING HYPOTHESIS: `chart_response_cache` intraday TTL
+  (`CHART_CACHE_TTL_INTRADAY_S`) set large → full-window served from a frozen
+  snapshot for hours; and/or chart-tail WS not appending fresh bars. Awaiting
+  operator env value + reproduction scoping.
+
+
 ## 2026-06-03 — v19.34.243 PER-ENTRY GATE + v19.34.244 DISABLE vwap_fade_short
 
 ### v19.34.243 — per-entry batch gate (P0, DEPLOYED 4e238d51)
