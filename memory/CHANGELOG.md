@@ -1,3 +1,55 @@
+## 2026-06-04 — v19.34.263: External scalp-exit reclassification + Bot-Edge HUD chip — SHIPPED
+
+### Why
+Task B (scalp exit contamination): the hygiene layer discarded EVERY
+`oca_closed_externally` close held <120s as `instant_external_unwind`, so
+genuine scalp/intraday bracket fills (target/stop/partial) never reached
+the EV scoreboard (`strategy_stats`). 30d probe: ~56% of scalp exits were
+external; the learning loop was blind to whether scalps hit stops or targets.
+Issue 2: Mission Control still blended bot P&L with adopted/reconciled P&L.
+
+### Scope (backend)
+- `services/trade_outcome_hygiene.py`:
+  - NEW `reclassify_external_exit()` — decodes external/OCA closes into
+    `target` / `stop_loss` / `external_partial`, R-banded against the ACTUAL
+    `stop_price`/`target_prices` (not pnl-sign — 45-56% land mid-range as
+    scratches). Reconstructs exit from `realized_pnl/shares` (exit_price absent
+    on 96% of these rows). `RECLASS_MAX_ABS_R=6` rejects corrupt rows.
+  - `classify_close()` gained optional bracket-context kwargs (direction/
+    stop_price/target_prices/realized_pnl/shares). A price-confirmed external
+    bracket fill is now GENUINE (overrides instant-unwind). Legacy no-context
+    callers unchanged (backward compatible).
+- `services/pnl_compute.py`: `_record_alert_outcome_bestEffort` passes the
+  context to `classify_close` and stamps `effective_close_reason` +
+  `reclass_method` onto `alert_outcomes`.
+- `services/learning_reconciler.py`: NEW `reprocess_external_closes()`
+  migration (idempotent, dry-run default) re-decodes historical external
+  closes, flips wrongly-dropped ones back to genuine, recomputes strategy_stats.
+- Tests: `tests/test_v19_34_263_external_exit_reclass.py` (13 cases) + hygiene/
+  pnl/reconciler regression suites pass (mongomock, local).
+
+### Scope (frontend — Bot-Edge vs Adopted chip)
+- NEW `components/sentcom/v5/BotEdgeChip.jsx` — renders `Bot <edge> · Adopted
+  <adopted>` under the HUD P&L tile, with realized-only tooltip. Degrades to
+  null on old backend. testids: bot-edge-chip / bot-edge-value / adopted-pnl-value.
+- Surfaced `bot_edge_pnl_today` / `adopted_pnl_today` / `bot_realized_pnl_today`
+  / `adopted_realized_pnl_today` through `useSentComPositions` → `SentCom.jsx`
+  → `SentComV5View` → `PipelineHUDV5`.
+
+### Deployment (DGX, idempotent appliers)
+- Backend code: `curl -s https://paste.rs/iXKaa | python3 -` (apply_v263.py)
+- Backfill: `curl -s https://paste.rs/EzAZK | python3 -` (dry) / `--commit`
+- Frontend: `curl -s https://paste.rs/GvdZs | python3 -` (apply_v263_ui.py)
+
+### Verification (live, on DGX 2026-06-04)
+Backfill all-time COMMIT: 504 external rows → 441 reclassified genuine
+(5 target / 81 stop / 355 partial), 6 corrupt dropped, 57 unresolved,
+**165 closes flipped back to genuine**, 447 alert_outcomes upserted, 29 setup
+families recomputed. Confirms scalps reach full target only ~1% of external
+closes — the honest signal the learning loop needed. Frontend chip pending
+operator visual confirm after `yarn build`.
+
+
 ## 2026-05-22 — v19.34.79 + v19.34.80 + v19.34.81: First behavioral patches after the docs run
 
 ### Trigger

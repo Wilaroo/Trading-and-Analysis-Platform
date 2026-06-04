@@ -238,6 +238,10 @@ export const SentComV5View = ({
   closedToday,
   winsToday,
   lossesToday,
+  botEdgePnlToday,
+  adoptedPnlToday,
+  botRealizedPnlToday,
+  adoptedRealizedPnlToday,
   positionsLoading,
   setupsLoading,
   contextLoading,
@@ -498,6 +502,10 @@ export const SentComV5View = ({
         closedToday={closedToday}
         winsToday={winsToday}
         lossesToday={lossesToday}
+        botEdgePnlToday={botEdgePnlToday}
+        adoptedPnlToday={adoptedPnlToday}
+        botRealizedPnlToday={botRealizedPnlToday}
+        adoptedRealizedPnlToday={adoptedRealizedPnlToday}
         // v19.31.9 — per-stage drill-down rows + meta
         scanRows={counts.drilldown?.scan}
         evalRows={counts.drilldown?.eval}

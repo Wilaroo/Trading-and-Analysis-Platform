@@ -114,6 +114,10 @@ const SentCom = ({ embedded = false }) => {
     closedToday,
     winsToday,
     lossesToday,
+    botEdgePnlToday,
+    adoptedPnlToday,
+    botRealizedPnlToday,
+    adoptedRealizedPnlToday,
     loading: positionsLoading,
   } = useSentComPositions();
   const { setups, loading: setupsLoading } = useSentComSetups();
@@ -413,6 +417,10 @@ const SentCom = ({ embedded = false }) => {
           closedToday={closedToday}
           winsToday={winsToday}
           lossesToday={lossesToday}
+          botEdgePnlToday={botEdgePnlToday}
+          adoptedPnlToday={adoptedPnlToday}
+          botRealizedPnlToday={botRealizedPnlToday}
+          adoptedRealizedPnlToday={adoptedRealizedPnlToday}
           positionsLoading={positionsLoading}
           setupsLoading={setupsLoading}
           contextLoading={contextLoading}

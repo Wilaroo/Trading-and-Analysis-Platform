@@ -17,6 +17,10 @@ const _empty = {
   closedTodayCount: 0,
   winsToday: 0,
   lossesToday: 0,
+  botEdgePnlToday: 0,
+  adoptedPnlToday: 0,
+  botRealizedPnlToday: 0,
+  adoptedRealizedPnlToday: 0,
 };
 
 export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup only, WS is primary
@@ -51,6 +55,19 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
   const [closedToday, setClosedToday] = useState(cachedPositions?.data?.closedToday || _empty.closedToday);
   const [winsToday, setWinsToday] = useState(cachedPositions?.data?.winsToday ?? _empty.winsToday);
   const [lossesToday, setLossesToday] = useState(cachedPositions?.data?.lossesToday ?? _empty.lossesToday);
+  // v19.34.263 — Bot-Edge vs Adopted P&L split (backend v19.34.262).
+  const [botEdgePnlToday, setBotEdgePnlToday] = useState(
+    cachedPositions?.data?.botEdgePnlToday ?? _empty.botEdgePnlToday
+  );
+  const [adoptedPnlToday, setAdoptedPnlToday] = useState(
+    cachedPositions?.data?.adoptedPnlToday ?? _empty.adoptedPnlToday
+  );
+  const [botRealizedPnlToday, setBotRealizedPnlToday] = useState(
+    cachedPositions?.data?.botRealizedPnlToday ?? _empty.botRealizedPnlToday
+  );
+  const [adoptedRealizedPnlToday, setAdoptedRealizedPnlToday] = useState(
+    cachedPositions?.data?.adoptedRealizedPnlToday ?? _empty.adoptedRealizedPnlToday
+  );
   const [loading, setLoading] = useState(!cachedPositions?.data);
 
   const _applyPayload = useCallback((data) => {
@@ -72,6 +89,11 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     setClosedToday(Array.isArray(data.closed_today) ? data.closed_today : []);
     setWinsToday(data.wins_today ?? 0);
     setLossesToday(data.losses_today ?? 0);
+    // v19.34.263 — Bot-Edge vs Adopted split.
+    setBotEdgePnlToday(data.bot_edge_pnl_today ?? 0);
+    setAdoptedPnlToday(data.adopted_pnl_today ?? 0);
+    setBotRealizedPnlToday(data.bot_realized_pnl_today ?? 0);
+    setAdoptedRealizedPnlToday(data.adopted_realized_pnl_today ?? 0);
     setCached(
       'sentcomPositions',
       {
@@ -86,6 +108,10 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
         closedToday: Array.isArray(data.closed_today) ? data.closed_today : [],
         winsToday: data.wins_today ?? 0,
         lossesToday: data.losses_today ?? 0,
+        botEdgePnlToday: data.bot_edge_pnl_today ?? 0,
+        adoptedPnlToday: data.adopted_pnl_today ?? 0,
+        botRealizedPnlToday: data.bot_realized_pnl_today ?? 0,
+        adoptedRealizedPnlToday: data.adopted_realized_pnl_today ?? 0,
       },
       15000,
     );
@@ -118,6 +144,10 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
       setClosedToday(cached.data.closedToday || []);
       setWinsToday(cached.data.winsToday ?? 0);
       setLossesToday(cached.data.lossesToday ?? 0);
+      setBotEdgePnlToday(cached.data.botEdgePnlToday ?? 0);
+      setAdoptedPnlToday(cached.data.adoptedPnlToday ?? 0);
+      setBotRealizedPnlToday(cached.data.botRealizedPnlToday ?? 0);
+      setAdoptedRealizedPnlToday(cached.data.adoptedRealizedPnlToday ?? 0);
       setLoading(false);
     } else {
       const timer = setTimeout(() => fetchPositions(), 4000);
@@ -152,6 +182,10 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     closedToday,
     winsToday,
     lossesToday,
+    botEdgePnlToday,
+    adoptedPnlToday,
+    botRealizedPnlToday,
+    adoptedRealizedPnlToday,
     loading,
     refresh: fetchPositions,
   };
