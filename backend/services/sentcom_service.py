@@ -600,24 +600,6 @@ class SentComService:
                     ib_pending = queue_status.get("ib_pending", 0)
         except Exception as e:
             logger.error(f"Error getting order queue status: {e}")
-
-        # v19.34.32 (Feb 2026) — Override `filled` and `pending` with fresh
-        # counts from `bot_trades` (today UTC). Under ib-direct, orders
-        # are written DIRECTLY to bot_trades and never touch the legacy
-        # order_queue collection, so the HUD was showing last week's
-        # stale queue counts (677 filled for days on end). bot_trades
-        # is the source of truth for the live ib-direct trading path.
-        try:
-            if trading_bot is not None and getattr(trading_bot, "_db", None) is not None:
-                from datetime import datetime, timezone
-                today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
-                btdb = trading_bot._db.bot_trades
-                # Filled today = trades that successfully executed today
-                # (regardless of whether they're still open or already closed).
-                filled = btdb.count_documents({"executed_at": {"$gte": today_iso}})
-                pending = btdb.count_documents({"status": "pending"})
-        except Exception as e:
-            logger.error(f"[v19.34.32] HUD fresh-count override skipped: {e}")
         
         # Get market regime
         regime = None
