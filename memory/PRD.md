@@ -35,6 +35,21 @@ vs its index QQQ/SPY/IWM via `benchmark_for()`, from daily bars, tanh-mapped,
 short-inverted) + multi-index regime fallback + reweight (day 10%→3%). Live result:
 context stdev 3.54→**5.24**, rel_strength spans 2-98. Drill-down factor wording
 made direction-aware (v255).
+## Status snapshot
+**v19.34.260 — EOD-window orphan FLATTEN-instead-of-ADOPT (2026-06-04, paste.rs 1NhZf, deploy pending).**
+RCA of the 2026-06-03 "EOD didn't close my positions" report: EOD auto-close
+worked (19 closed, 0 failed, verified flat at 15:45:16), but ~30s later the
+orphan reconciler ADOPTED 13 IB positions the bot had REJECT-ed, as fresh
+intraday trades — bracket attach was blocked (`past_regt_soft_edge_cutoff`) so
+they carried UNPROTECTED overnight; the main EOD pass never re-ran (gated by
+`_eod_close_executed_today`). NOT a trade-style bug. Fix: `position_reconciler.
+reconcile_orphan_positions` now checks the bracket-attach governor BEFORE
+adopting; if past the Reg-T cutoff it FLATTENS the orphan (`_flatten_eod_window_
+orphan`: MKT close → `verify_position_flat` → add to `_recently_closed_symbols`
+cooldown + operator-flatten suppression → `bot_events` record) instead of
+adopting (kills the naked-overnight + re-adoption loop). Regression test
+`test_v19_34_260_eod_orphan_flatten.py` (6 tests, all green). Backend-only.
+
 **Part B — TQS as the single trusted UI number + deep drill-down: BUILT (v19.34.258,
 paste.rs iL4GN, deploy pending).** New `TqsBadge.jsx` (single score pill, grade+color
 derived FROM the numeric score — never the legacy 3-tier `tqs_grade` which can
