@@ -101,11 +101,13 @@ reconstruction we built). Only `runner` setups get `INTRADAY_BRACKET_V2`.
 
 ## 7. Migration sequence (safe, incremental, each gated by pytest; reversible)
 
-- **m1** SSOT extend: add `strategy_family()` + `exit_archetype_prior()` to
-  setup_taxonomy; align family↔AI keys (§3). Pure addition + tests.
-- **m2** Delegate: `trade_style_classifier._strip_directional_suffix` →
-  `canonicalize`; smb/market_setup alias maps → SSOT. Tests: existing style tests
-  must still pass + new variant cases.
+- **m1 ✅ DONE (v268)** SSOT extend: `strategy_family()` + `exit_archetype_prior()`
+  + `ai_feature_family()` (aligned to AI extractor keys, §3). Pure addition + tests.
+- **m2 ✅ DONE (v268)** Delegate: `trade_style_classifier._strip_directional_suffix`
+  → `canonicalize()`. Fixes `_confirmed`/`_scalp_long`/alias style misses; raw-first
+  lookup protects explicit entries (breakdown_confirmed stays multi_day). 30 tests green.
+  Applier: paste.rs/FWeV5. (smb/market_setup TRADE_ALIASES intentionally NOT collapsed —
+  they carry matrix-context semantics + the tidal_wave alias is fixed in m8.)
 - **m3** Write-path stamping of `canonical_setup`/`strategy_family`/`exit_archetype`
   (additive fields; nothing reads them destructively yet).
 - **m4** `/api/sentcom/taxonomy` JSON emitter + regenerate `vocabulary.py` +

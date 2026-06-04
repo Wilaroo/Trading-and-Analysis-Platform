@@ -114,3 +114,83 @@ class TestStyleDelegation:
         assert st.style_of("rubber_band_short") == st.style_of("rubber_band")
         # bouncy_ball now mapped to intraday (style-map fix shipped alongside)
         assert st.style_of("bouncy_ball") == "intraday"
+
+
+class TestStrategyFamily:
+    def test_breakout(self):
+        for n in ["orb", "breakout", "squeeze", "range_break_confirmed",
+                  "daily_breakout", "stage_2_breakout", "puppy_dog"]:
+            assert st.strategy_family(n) == "breakout", n
+
+    def test_continuation(self):
+        for n in ["opening_drive", "vwap_continuation", "back_through_open",
+                  "gap_pick_roll", "trend_continuation", "accumulation_entry"]:
+            assert st.strategy_family(n) == "continuation", n
+
+    def test_reversion(self):
+        for n in ["vwap_fade_long", "mean_reversion", "rubber_band", "gap_fade",
+                  "bella_fade", "tidal_wave"]:
+            assert st.strategy_family(n) == "reversion", n
+
+    def test_reversal(self):
+        for n in ["first_move_up", "backside", "off_sides_short",
+                  "volume_capitulation", "bouncy_ball"]:
+            assert st.strategy_family(n) == "reversal", n
+
+    def test_unknown(self):
+        assert st.strategy_family("totally_made_up") == "unknown"
+
+
+class TestExitArchetype:
+    def test_runner_intraday_momentum(self):
+        for n in ["squeeze", "orb", "vwap_continuation", "breakout"]:
+            assert st.exit_archetype_prior(n) == "runner", n
+
+    def test_runner_reversal_exceptions(self):
+        for n in ["backside", "volume_capitulation", "bouncy_ball"]:
+            assert st.exit_archetype_prior(n) == "runner", n
+
+    def test_target_scalps_and_fades(self):
+        # scalps scale out fast → target; reversion fades → target
+        for n in ["gap_give_go", "bella_fade", "vwap_fade_long",
+                  "mean_reversion", "first_move_up"]:
+            assert st.exit_archetype_prior(n) == "target", n
+
+    def test_swing_and_position_holds(self):
+        assert st.exit_archetype_prior("accumulation_entry") == "swing_hold"
+        assert st.exit_archetype_prior("daily_squeeze") == "swing_hold"
+        assert st.exit_archetype_prior("rs_leader_break") == "position_hold"
+        assert st.exit_archetype_prior("stage_2_breakout") == "position_hold"
+
+
+class TestAiFeatureFamily:
+    def test_maps_to_extractor_keys(self):
+        assert st.ai_feature_family("squeeze") == "BREAKOUT"
+        assert st.ai_feature_family("vwap_continuation") == "TREND_CONTINUATION"
+        assert st.ai_feature_family("vwap_fade_long") == "MEAN_REVERSION"
+        assert st.ai_feature_family("first_move_up") == "REVERSAL"
+
+
+class TestM2StyleResolutionFixes:
+    """m2: trade_style_classifier now delegates suffix-strip to canonicalize,
+    so previously-unknown misses resolve, without regressing explicit entries."""
+
+    def setup_method(self):
+        from services import trade_style_classifier as tsc
+        self.tsc = tsc
+
+    def test_confirmed_variants_resolve(self):
+        assert self.tsc.style_bucket_for_setup("breakout_confirmed") == "intraday"
+        assert self.tsc.style_bucket_for_setup("range_break_confirmed") == "intraday"
+
+    def test_scalp_infix_variant_resolves(self):
+        assert self.tsc.style_bucket_for_setup("rubber_band_scalp_long") == "scalp"
+
+    def test_alias_miss_resolves(self):
+        assert self.tsc.style_bucket_for_setup("big_dawg") == "intraday"
+        assert self.tsc.style_bucket_for_setup("opening_range_breakout") == "intraday"
+
+    def test_explicit_confirmed_entry_not_regressed(self):
+        # breakdown_confirmed is an EXPLICIT multi_day entry; raw-first lookup
+        # must keep returning multi_day (NOT intraday via base 'breakdown').
+        assert self.tsc.style_bucket_for_setup("breakdown_confirmed") == "multi_day"

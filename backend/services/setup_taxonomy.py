@@ -119,6 +119,43 @@ _POSITION_CLASS: Set[str] = {
     "death_cross_filtered", "two_hundred_day_reclaim", "two_hundred_day_loss",
 }
 
+# ── strategy_family (the edge thesis) — aligned to the AI feature-extractor
+#    family keys (MOMENTUM/BREAKOUT/REVERSAL/MEAN_REVERSION/RANGE/TREND_CONTINUATION)
+#    so the taxonomy and the model share one vocabulary (consistency-map §3).
+#    This is a finer split of setup_class: momentum→{continuation,breakout},
+#    fade→{reversion,reversal}.
+_BREAKOUT_FAMILY: Set[str] = {
+    "orb", "premarket_high_break", "hod_breakout", "breakout", "range_break",
+    "squeeze", "big_dog", "puppy_dog", "gap_give_go", "chart_pattern",
+    # higher-timeframe breakouts
+    "daily_breakout", "daily_squeeze", "weekly_breakout", "vcp_breakout",
+    "three_week_tight", "pocket_pivot", "bull_flag_break", "bear_flag_break",
+    "ascending_triangle_break", "descending_triangle_break",
+    "cup_with_high_handle", "base_breakout", "stage_2_breakout",
+    "multi_quarter_base_break", "fifty_two_week_high_break",
+}
+_REVERSAL_FAMILY: Set[str] = {
+    "first_move_up", "first_move_down", "backside", "off_sides",
+    "volume_capitulation", "bouncy_ball", "breakdown",
+    "stage_3_to_4_breakdown", "death_cross_filtered", "two_hundred_day_loss",
+}
+_REVERSION_FAMILY: Set[str] = {
+    "vwap_fade", "mean_reversion", "rubber_band", "gap_fade", "bella_fade",
+    "time_of_day_fade", "tidal_wave",
+}
+# Reversal setups that historically RUN (so exit_archetype = runner despite
+# being a reversal): backside-of-parabolic, capitulation snaps, breakdown rides.
+_RUNNER_REVERSALS: Set[str] = {
+    "backside", "volume_capitulation", "bouncy_ball",
+}
+_FAMILY_TO_AI_KEY: Dict[str, str] = {
+    "continuation": "TREND_CONTINUATION",
+    "breakout": "BREAKOUT",
+    "reversion": "MEAN_REVERSION",
+    "reversal": "REVERSAL",
+    "rotation": "RANGE",
+}
+
 
 def _norm(v) -> str:
     return str(v or "").strip().lower()
@@ -179,6 +216,76 @@ def setup_class(raw) -> str:
 def is_momentum_class(raw) -> bool:
     """Intraday momentum/continuation class — the scope for INTRADAY_BRACKET_V2."""
     return setup_class(raw) == "momentum"
+
+
+def strategy_family(raw) -> str:
+    """The trade's edge thesis (descriptive, orthogonal to exit management).
+
+    Returns one of: 'continuation', 'breakout', 'reversion', 'reversal',
+    'rotation', 'swing', 'position', 'unknown'. A momentum stock CAN be a
+    reversal — family describes the thesis, exit_archetype describes management.
+    """
+    base = canonicalize(raw)
+    if not base:
+        return "unknown"
+    if base in _BREAKOUT_FAMILY:
+        return "breakout"
+    if base in _REVERSAL_FAMILY:
+        return "reversal"
+    if base in _REVERSION_FAMILY:
+        return "reversion"
+    cls = setup_class(base)
+    if cls == "momentum":
+        return "continuation"
+    if cls == "fade":
+        return "reversion"
+    if cls in ("swing", "position"):
+        if any(t in base for t in ("break", "squeeze", "pivot", "tight",
+                                   "flag", "triangle", "cup")):
+            return "breakout"
+        return "continuation"
+    return "unknown"
+
+
+def exit_archetype_prior(raw) -> str:
+    """Default exit-management archetype for a setup — the axis brackets read.
+
+    Returns: 'runner' | 'target' | 'swing_hold' | 'position_hold'.
+    This is a PRIOR; the live system later overrides it from the setup's
+    own MFE/MAE distribution once it has enough samples (consistency-map §6).
+      runner       = tight stop, scale partials, trail an EMA, ride extension
+      target       = fixed R targets, scale out at levels, no runner
+      swing_hold   = multi-day, wider stop, HTF partials
+      position_hold= weeks-months, widest stop, stage/fundamental
+    """
+    base = canonicalize(raw)
+    if not base:
+        return "target"
+    cls = setup_class(base)
+    if cls == "swing":
+        return "swing_hold"
+    if cls == "position":
+        return "position_hold"
+    if base in _RUNNER_REVERSALS:
+        return "runner"
+    # scalps scale out fast → target (no big runner) even when continuation
+    try:
+        if style_of(base) == "scalp":
+            return "target"
+    except Exception:  # pragma: no cover
+        pass
+    if strategy_family(base) in ("continuation", "breakout"):
+        return "runner"
+    return "target"
+
+
+def ai_feature_family(raw) -> str:
+    """Map a setup to the AI feature-extractor family key
+    (TREND_CONTINUATION / BREAKOUT / MEAN_REVERSION / REVERSAL / RANGE).
+    Callers prepend 'SHORT_' for short-direction extractors. Lets the
+    feature pipeline be driven by strategy_family instead of an implicit map.
+    """
+    return _FAMILY_TO_AI_KEY.get(strategy_family(raw), "MOMENTUM")
 
 
 def style_of(raw) -> str:
