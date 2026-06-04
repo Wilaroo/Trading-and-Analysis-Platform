@@ -1,3 +1,41 @@
+## 2026-06-04 — v19.34.265: Chart depth bump + transient bad-tick sanitization — SHIPPED
+
+### Why
+Operator pain: charts felt thin (no deep history), slow to populate, and a lone
+corrupt IB print would squash candles into an unreadable band for minutes.
+
+### Measure-first (read-only probe `scripts/diag_chart_perf_depth.py`)
+Ran on DGX for CEG/SPY. Findings rewrote the plan:
+- **Storage is NOT the bottleneck** — `ib_historical_data` holds 86-107d of 1min,
+  600d+ of every coarser TF. No `⚠BACKFILL` anywhere.
+- **Backend is NOT slow** — full-target-depth cold load 130-521ms (warm 3-23ms).
+  No `/chart` optimization needed.
+- **1min live cache healthy** — `rt_gap=0s` (not `no-lbc`); the handoff's "1min
+  lacks a live cache" assumption was stale.
+- **Root cause = frontend hardcoded shallow lookbacks** (1/5/10/30d). They starved
+  depth AND caused the slow-populate feel via repeated scroll-triggered lazy-load
+  doublings instead of one cheap up-front fetch.
+
+### Scope
+1. `frontend/.../panels/ChartPanel.jsx` — `TIMEFRAMES` daysBack
+   1/5/10/30/365 → **7/14/30/60/365** (operator targets). Pure data fix.
+2. `backend/routers/sentcom_chart.py` — new `_sanitize_intraday_bars(tol=0.5,
+   win=5)` clamps each bar's O/H/L/C into a ±50% band around the LOCAL median
+   close (median robust to a lone outlier → genuine trends untouched). Called
+   after the de-dupe pass, **intraday only** (daily is EOD-sourced). Runs before
+   session filter + indicator math + served bars.
+3. `backend/services/smart_levels_service.py` — `_compute_volume_profile` clips
+   lo/hi to a median-anchored band (`ref*0.4`..`ref*2.5`) so one bad tick can't
+   collapse bin_size and produce a garbage POC.
+
+### Verification
+- `tests/test_v19_34_265_chart_depth_sanitize.py` — 4/4 pass on DGX (.venv 3.12):
+  bad $36-on-$260 tick clamped, real trend untouched, <3 bars no-op, VP POC
+  survives. Delivered via idempotent applier `scripts/apply_v19_34_265.py`
+  (paste.rs); applier output byte-identical to fork edits, re-run = no-op.
+- Operator confirmed charts "much better and faster" post `yarn build` + restart.
+
+
 ## 2026-06-04 — v19.34.264: Orphan-vs-pending guard (bot fills mis-adopted as orphans) — SHIPPED
 
 ### Root cause (MRSH/CEG, 2026-06-04)

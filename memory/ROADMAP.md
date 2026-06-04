@@ -3,6 +3,30 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-06-04 (chart depth + bad-tick guard shipped)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.265 | Chart depth bump (1m=7d/5m=14d/15m=30d/1h=60d) + transient bad-tick sanitization (`_sanitize_intraday_bars` + VP lo/hi clip) | shipped + operator-verified |
+
+Measure-first probe (`diag_chart_perf_depth.py`) proved storage (86-107d 1min,
+600d+ coarser) + backend cold-load (130-521ms) already supported deep charts —
+fix was purely the frontend's hardcoded shallow lookbacks. Backend optimization
++ backfill from the original plan DROPPED as unnecessary. Operator confirmed
+charts "much better and faster".
+
+### Next session priorities
+- 🟡 **P1**: EV Leaderboard on Mission Control (now feasible — EV accurate post-v263).
+- 🟡 **P1**: Bot-Vitals header on Mission Control.
+- 🟡 **P1**: Mission Control sticky per-symbol search/filter across all 5 lanes.
+- 🟡 **P1**: EOD close ignores trade-style — toggle vs strictly honoring `close_at_eod=False` for swings.
+- 🟡 **P1**: Surface Gameplan prioritization boost on the position card + Mission Control.
+- 🟡 **P1**: Run the L2 probe (`probe_l2_depth.py`) on the DGX.
+- 🟢 **P2**: Open Adopted Positions unrealized P&L split (`/api/sentcom/positions` `adopted_pnl_today`).
+- 🟢 **P2**: Scanner feed group/display adjustments; EOD close popup modal; regime classifier tolerance patch.
+- 🟢 **P3**: Break up `server.py` monolith.
+
+
 ## Session Summary - 2026-05-22 (3 behavioral patches shipped — last $$ risks closed)
 
 | Version | Topic | Status |
