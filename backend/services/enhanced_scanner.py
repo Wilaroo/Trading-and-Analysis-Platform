@@ -546,6 +546,17 @@ class LiveAlert:
     out_of_context_warning: bool = False
     experimental: bool = False  # Trades not in the operator playbook matrix
 
+    # NEW: Canonical taxonomy tags (v19.34.269 m3) — stamped from the SSOT
+    # `services.setup_taxonomy` on every alert. `canonical_setup` collapses
+    # directional/scalp/confirmed variants to the base name (grading/EV roll up
+    # on this); `strategy_family` is the edge thesis (continuation/breakout/
+    # reversion/reversal/rotation); `exit_archetype` is the management prior
+    # (runner/target/swing_hold/position_hold) that INTRADAY_BRACKET_V2 reads.
+    # Additive — no consumer reads these destructively yet (m3).
+    canonical_setup: str = ""
+    strategy_family: str = ""
+    exit_archetype: str = ""
+
     # NEW: Multi-index regime tag (Feb 2026)
     # Composite label derived from SPY/QQQ/IWM/DIA daily-bar trends so
     # downstream consumers (briefings, ML features, dashboards) see one
@@ -572,6 +583,23 @@ class LiveAlert:
     in_play_reasons: List[str] = field(default_factory=list)
     in_play_disqualifiers: List[str] = field(default_factory=list)
     
+    def __post_init__(self):
+        # v19.34.269 (m3) — stamp canonical taxonomy tags from the SSOT so
+        # every alert carries them regardless of which detector built it.
+        # Additive & best-effort: never raises into alert construction.
+        try:
+            from services.setup_taxonomy import (
+                canonicalize,
+                strategy_family as _family,
+                exit_archetype_prior as _archetype,
+            )
+            raw = getattr(self, "setup_variant", "") or self.setup_type
+            self.canonical_setup = canonicalize(raw)
+            self.strategy_family = _family(raw)
+            self.exit_archetype = _archetype(raw)
+        except Exception:
+            pass
+
     def calculate_r_multiple(self) -> float:
         """Calculate the R-multiple for this alert (target/risk ratio)"""
         risk_per_share = abs(self.current_price - self.stop_loss)
