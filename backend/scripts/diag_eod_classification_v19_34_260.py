@@ -24,9 +24,21 @@ from datetime import datetime, timezone
 # Make backend modules importable when run from backend/.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dotenv import load_dotenv  # type: ignore
+def _load_env(path):
+    """Minimal .env parser — no python-dotenv dependency."""
+    if not os.path.exists(path):
+        return
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            os.environ.setdefault(k, v)
 
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+
+_load_env(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 from pymongo import MongoClient  # type: ignore
 from services.order_policy_registry import should_close_at_eod, get_policy_for_trade  # type: ignore
