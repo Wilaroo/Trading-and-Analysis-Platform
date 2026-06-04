@@ -87,11 +87,22 @@ _MOMENTUM_CLASS: Set[str] = {
     "squeeze", "the_3_30_trade", "bouncy_ball", "second_chance", "hitchhiker",
     "spencer_scalp", "9_ema_scalp", "abc_scalp", "first_vwap_pullback",
     "fashionably_late", "breaking_news", "chart_pattern",
+    # puppy_dog = small-cap "follow the leader" w/ a SHORTER consolidation than
+    #   big_dog → same consolidation-breakout momentum management (operator 2026-06).
+    "puppy_dog",
+    # gap_pick_roll = gap → pullback → ROLL/continue in the gap direction
+    #   (trend-following momentum); distinct from gap_fade (mean-reversion).
+    "gap_pick_roll",
 }
 _FADE_CLASS: Set[str] = {
     "bella_fade", "first_move_up", "first_move_down", "backside", "rubber_band",
     "off_sides", "vwap_fade", "mean_reversion", "gap_fade", "time_of_day_fade",
-    "volume_capitulation", "tidal_wave", "puppy_dog",
+    "volume_capitulation",
+    # tidal_wave: OUR detector implements it as intraday mean-reversion
+    #   (enhanced_scanner regime map = FADE/STRONG_DOWNTREND), so it lives in the
+    #   fade class to match execution. NOTE: standard-usage "tidal wave" is a
+    #   momentum volume-surge — naming conflict flagged for operator decision.
+    "tidal_wave",
 }
 # Higher-timeframe families (swing/position scanner) — never intraday brackets.
 _SWING_CLASS: Set[str] = {

@@ -192,10 +192,21 @@ grading keeps the variant for direction-split edge.
 ### Excluded from edge/grading (not real setups)
 `reconciled_*`, `imported_from_ib`, `carry_forward_watch`, `approaching_*`
 
-### ⚠️ Ambiguous — class pending your confirmation
-- `puppy_dog` — "small-cap follow-the-leader" reads **momentum**, but alias of big_dog.
-- `tidal_wave` — TRADING_TAXONOMY calls it "large-cap mean reversion" (**fade**) yet the matrix aliases it to bouncy_ball (**momentum**). Source docs disagree.
-- `gap_pick_roll` — gap-reversal short; momentum-breakdown or fade?
+### Resolved this round (operator + research)
+- `puppy_dog` → **momentum** (consolidation-breakout, same as big_dog but a
+  *shorter* base; kept SEPARATE from big_dog, not merged).
+- `gap_pick_roll` → **momentum** (gap → pullback → roll/continue in gap
+  direction = trend-following; distinct from `gap_fade` = mean-reversion).
+- `bouncy_ball` → **momentum** (breakdown short).
+- `tidal_wave` ≠ `bouncy_ball` (different trades — never merge). OUR `tidal_wave`
+  detector is implemented as intraday **mean-reversion** (regime map = FADE), so
+  it sits in the fade class to match execution — but standard usage calls a
+  "tidal wave" a momentum volume-surge. ⚠️ **Naming conflict: confirm intent.**
+
+### Still open — class-name vote
+The fade class = "fixed targets / mean-reversion / no runner" management. Better
+name than `fade`? Candidates: `reversion`, `mean_reversion`, `reversal`. (vs the
+`momentum` class = "trail a runner".)
 
 ---
 

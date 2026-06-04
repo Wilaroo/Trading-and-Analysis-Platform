@@ -84,7 +84,8 @@ class TestEdgeExcluded:
 class TestSetupClass:
     def test_momentum_class(self):
         for name in ["squeeze", "vwap_continuation", "orb", "opening_drive",
-                     "bouncy_ball", "gap_give_go", "breakout_confirmed"]:
+                     "bouncy_ball", "gap_give_go", "breakout_confirmed",
+                     "puppy_dog", "gap_pick_roll"]:
             assert st.setup_class(name) == "momentum", name
         assert st.is_momentum_class("vwap_continuation")
         assert st.is_momentum_class("breakout_confirmed")  # variant resolves
