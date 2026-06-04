@@ -1,3 +1,48 @@
+## 2026-06-04 — v19.34.264: Orphan-vs-pending guard (bot fills mis-adopted as orphans) — SHIPPED
+
+### Root cause (MRSH/CEG, 2026-06-04)
+Bot pre-submitted entries (squeeze SHORT 12sh / gap_fade LONG 90sh) that FILLED
+at IB but lost fill attribution (entry_order_id=None race). ~218s later the
+orphan reconciler adopted the live IB positions as synthetic `reconciled_orphan`
+rows with WRONG 2% brackets (entered_by='reconciled_external'), then the
+stale-pending reaper rejected the REAL bot rows. The v236 `_attribute_pending_fills`
+promoter (matcher window 30-3600s) WOULD have reclaimed them with the real
+bracket, but the reconciler won the race: once it adopted, the symbol entered
+`_open_trades` and the promoter (which only considers symbols NOT already open)
+skipped it. The reconciler's own v185 race-guard scanned only `_open_trades`,
+never `_pending_trades` — structurally blind to in-flight pending fills. The CEG
+dedup / `symbol_direction_open_cap_v123` storm (43+12+3 drops) was a downstream
+SYMPTOM of the synthetic orphan.
+
+### Fix (position_reconciler.py)
+- Widened the v185 race-guard to scan `_pending_trades` in addition to
+  `_open_trades` (covers the <60s in-flight window for pending rows).
+- NEW v264 guard: before adopting an IB orphan, build pending_rows from
+  `bot._pending_trades` and call the SAME `match_pending_to_orphan()` the v236
+  promoter uses. On a match → SKIP adoption (`pending_fill_match_v264`),
+  deferring to the promoter to flip it OPEN with the bot's real bracket.
+  Submits NO orders; blast radius identical to v185.
+- Tests: `tests/test_v19_34_264_orphan_pending_guard.py` (reproduces MRSH/CEG
+  exact params); v236 matcher suite still green (16 passed).
+
+### One-time repair (operator choice C — attribution only)
+`scripts/repair_v264_retag.py` re-tags today's two live orphans
+entered_by 'reconciled_external'->'bot_fired' + restores setup_type from the
+matching reaped bot_fired row, so they count toward Bot-Edge (not Adopted).
+Live brackets/orders left UNCHANGED (synthetic 2% levels still in effect).
+
+### Deployment (DGX, idempotent appliers)
+- Code: `curl -s https://paste.rs/Oebdg | python3 -` (apply_v264.py) + restart
+- Repair: `curl -s https://paste.rs/TenGz | python3 -` (dry) / `--commit`
+- Forensic probe (reusable): `curl -s https://paste.rs/RxjRt | python3 - --symbols X,Y --hours 12`
+
+### Status
+Code shipped + unit-tested locally. Pending operator deploy + the next live
+orphan-race to confirm the skip→promote path end-to-end. Note: Issue 3's
+"retry storm" is resolved at its source by this fix (no synthetic orphan → bot
+owns its real trade → no position_exists churn).
+
+
 ## 2026-06-04 — v19.34.263: External scalp-exit reclassification + Bot-Edge HUD chip — SHIPPED
 
 ### Why

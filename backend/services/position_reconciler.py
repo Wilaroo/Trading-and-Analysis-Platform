@@ -1418,9 +1418,15 @@ class PositionReconciler:
                         from datetime import datetime as _dt, timezone as _tz
                         _now = _dt.now(_tz.utc)
                         _race_cutoff_s = 60
+                        # v19.34.264 — also scan _pending_trades. A pre-submitted
+                        # entry lives in _pending_trades (NOT _open_trades) until
+                        # its fill is attributed, so the original v185 net — which
+                        # only looked at _open_trades — missed in-flight pending
+                        # fills entirely (the MRSH/CEG mis-adoption, 2026-06-04).
                         _bot_open = getattr(bot, "_open_trades", {}) or {}
+                        _bot_pending = getattr(bot, "_pending_trades", {}) or {}
                         _race_hit = None
-                        for _t in _bot_open.values():
+                        for _t in list(_bot_open.values()) + list(_bot_pending.values()):
                             if getattr(_t, "symbol", None) != sym:
                                 continue
                             _psa = getattr(_t, "pre_submit_at", None)
@@ -1463,6 +1469,54 @@ class PositionReconciler:
                             "[v19.34.185] race-guard check failed for %s: %s "
                             "(falling through to adopt as before)",
                             sym, _race_err,
+                        )
+
+                    # ── v19.34.264 — Pending-fill match guard ──
+                    # The <60s v185 net (above) covers freshly in-flight entries;
+                    # this covers the wider reaper-gap window. A pre-submitted
+                    # entry can fill at IB yet lose its fill attribution
+                    # (entry_order_id=None race) and surface as an orphan 30s-1h
+                    # later. The v236 `_attribute_pending_fills` promoter reclaims
+                    # it WITH the bot's real bracket — but only if we don't adopt
+                    # it first into _open_trades (which is exactly what beat the
+                    # promoter on MRSH/CEG 2026-06-04). Use the SAME matcher the
+                    # promoter uses; SKIP only — submits nothing.
+                    try:
+                        from services.pending_fill_attribution import (
+                            match_pending_to_orphan as _match_pf,
+                        )
+                        from datetime import datetime as _dt264, timezone as _tz264
+                        _pending264 = getattr(bot, "_pending_trades", {}) or {}
+                        if _pending264:
+                            _prows264 = [{
+                                "id": getattr(_pt, "id", None),
+                                "symbol": (getattr(_pt, "symbol", "") or "").upper(),
+                                "direction": (
+                                    getattr(getattr(_pt, "direction", None), "value", None)
+                                    or str(getattr(_pt, "direction", ""))
+                                ).lower(),
+                                "shares": int(getattr(_pt, "shares", 0) or 0),
+                                "pre_submit_at": getattr(_pt, "pre_submit_at", None),
+                            } for _pt in _pending264.values()]
+                            _match264 = _match_pf(sym, qty, _prows264, _dt264.now(_tz264.utc))
+                            if _match264:
+                                logger.warning(
+                                    "🔗 [v19.34.264 PENDING-FILL-MATCH] %s — IB "
+                                    "orphan matches pending bot trade_id=%s; "
+                                    "refusing synthetic adoption so the v236 "
+                                    "promoter can reclaim it with the real bracket.",
+                                    sym, _match264,
+                                )
+                                report["skipped"].append({
+                                    "symbol": sym,
+                                    "reason": "pending_fill_match_v264",
+                                    "matched_pending_trade_id": _match264,
+                                })
+                                continue
+                    except Exception as _pf_err264:
+                        logger.debug(
+                            "[v19.34.264] pending-fill match check failed for "
+                            "%s: %s (falling through to v260)", sym, _pf_err264,
                         )
 
                     # ── v19.34.260 — EOD-window flatten-instead-of-adopt ──
