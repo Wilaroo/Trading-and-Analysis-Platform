@@ -103,6 +103,52 @@ def canonicalize(raw_setup_type) -> base_name:
 
 Directional variants: **keep split for grading, canonical for config** (operator agreed; backtest justifies it).
 
+## 5b. Operator cheat-sheet uploads located + transcribed (2026-06)
+
+Found the playbook upload set in asset job `job_d6955c15-1754-…` (scanned all
+291 image assets by brightness/white-bg; cheat sheets = tall white pages).
+Confirmed the in-code taxonomy is a faithful transcription of these:
+
+- **Source matrix image** (`c233xv23`/`qtp2fmgt`/`7rcm3v09`, dupes): the exact
+  Trade × Setup grid that `TRADE_SETUP_MATRIX` came from. 20 trades × 7 setups,
+  teal=with-trend, red=countertrend. **Display names end in "Scalp"**
+  (Rubber Band Scalp, Off Sides Scalp, Backside Scalp, Fashionably Late Scalp,
+  Second Chance Scalp, Hitchhiker Scalp, Spencer Scalp) → this is the origin of
+  historical `_scalp_long`/`_scalp_short` variant strings the operator saw.
+- **7 SETUP (daily) definition pages** (750×860 w/ charts): Gap & Go, Range
+  Break, **Day 2** (Day-1 move >1 ATR, close top-20% range → Pullbacks/Trend-
+  Continuation), Gap Down Into Support, Gap Up Into Resistance, Overextension,
+  Volatility In Range — map 1:1 to `MarketSetup` enum.
+- **TRADE (intraday) cheat-sheet pages** transcribed (each: why/entry/stop/exit/
+  prob±/time/avoid). Key class + management detail for BRACKET_V2 scoping:
+  | Trade | class | dir | exit mgmt (from cheat sheet) |
+  |---|---|---|---|
+  | Premarket High Break | momentum | long | hold till 9-EMA(1m) close-below |
+  | Back-Through Open | momentum | long | 9-EMA(1m) close-below / 2-bar break |
+  | VWAP Continuation | momentum/trend | long | ½ into HOD, trail 21-EMA(1m) |
+  | Opening Range Break (ORB) | momentum/trend | both | two legs, ½+½; stop < VWAP |
+  | Bouncy Ball | momentum breakdown | short | new 2-min high / 9-EMA reclaim |
+  | The 3:30 Trade | momentum (power hr) | both | exit into blowoff volume |
+  | First Move Up | fade/reversal (M2M) | short | two legs ½+½; stop 1¢ > HOD; 2 tries |
+  | First Move Down | fade/reversal (M2M) | long | two legs ½+½; stop 1¢ < LOD; 2 tries |
+  | Bella Fade | fade/reversal (M2M) | both | two waves ½+½; stop < LOD; 2 tries |
+
+  **BRACKET_V2 implication confirmed by the operator's own rules:** momentum
+  trades are managed by *trailing an EMA after 1-2 legs* (tight initial, runner),
+  while fades are *fixed two-wave mean-reversion* (1 try ≈ tight, no runner).
+  This is exactly the momentum-vs-fader split — the cheat sheets independently
+  justify scoping INTRADAY_BRACKET_V2 to the momentum class only.
+
+- Non-cheat-sheet brights (the wide ~1900×900 / 5059×1097 white images) are
+  light-theme app UI screenshots, not playbook docs. `IMG_1304` = a Sharpe-ratio
+  article. The three big `.jpeg` photos = monitor photos of the training
+  dashboard.
+
+**Conclusion:** the conceptual taxonomy already matches the operator's cheat
+sheets. No reclassification of *meaning* is needed — only the naming-plumbing
+unification in §4, plus carrying the cheat-sheet `class` (momentum/fade) +
+`category` through to grading and bracket scope.
+
 ## 6. Still needed before writing patches
 - Run hosted `diag_setup_inventory.py` on DGX → exact live variant strings,
   dormant list, orphan list, unmapped list. (paste output back.)
