@@ -169,19 +169,41 @@ def _record_alert_outcome_bestEffort(
     # unwind, operator flatten, corrupt entry==exit pnl). Non-genuine closes are
     # tagged + EXCLUDED from the strategy_stats EV feed so the setup scoreboard
     # isn't polluted by drift/phantom wreckage (see diag_accum_oca_drill).
+    # v19.34.263 — effective (reclassified) close reason for external/OCA bracket
+    # fills. Stamped onto the alert_outcome so scalp/intraday analytics can read
+    # the TRUE exit kind (target / stop_loss / external_partial) instead of the
+    # opaque `oca_closed_externally`. Default = the raw reason (no reclass).
+    _effective_reason = reason
+    _reclass_method = "none"
     try:
-        from services.trade_outcome_hygiene import classify_close, excursion_floor
+        from services.trade_outcome_hygiene import (
+            classify_close, excursion_floor, reclassify_external_exit,
+        )
         _entry_px = float(getattr(trade, "fill_price", 0) or 0)
         _stop_px = float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0)
         _dir_obj = getattr(trade, "direction", None)
         _dir = getattr(_dir_obj, "value", str(_dir_obj) if _dir_obj else "long").lower()
+        _tps = getattr(trade, "target_prices", None)
+        if not _tps:
+            _t1 = getattr(trade, "tp_price", None) or getattr(trade, "target", None)
+            _tps = [_t1] if _t1 else []
+        _shares = pnl.get("shares") or getattr(trade, "shares", None)
         _genuine, _hyg_tag = classify_close(
             close_reason=reason,
             entered_by=str(getattr(trade, "entered_by", "") or ""),
             entry_price=_entry_px, exit_price=exit_price,
             net_pnl=pnl.get("net_pnl", 0.0), hold_seconds=_hold_seconds(trade),
             setup_type=str(getattr(trade, "setup_type", "") or ""),
+            direction=_dir, stop_price=_stop_px, target_prices=_tps,
+            realized_pnl=realized, shares=_shares,
         )
+        _eff, _reclass_method, _, _ = reclassify_external_exit(
+            close_reason=reason, direction=_dir, entry_price=_entry_px,
+            exit_price=exit_price, stop_price=_stop_px, target_prices=_tps,
+            realized_pnl=realized, shares=_shares,
+        )
+        if _eff:
+            _effective_reason = _eff
         _mfe_r_floor, _mae_r_floor = excursion_floor(_dir, _entry_px, exit_price, _stop_px)
     except Exception:
         _genuine, _hyg_tag, _mfe_r_floor, _mae_r_floor = True, "genuine", 0.0, 0.0
@@ -222,6 +244,8 @@ def _record_alert_outcome_bestEffort(
         # v19.34.240 — hygiene classification + excursion floor (audit-preserved)
         "genuine": _genuine,
         "hygiene_tag": _hyg_tag,
+        "effective_close_reason": _effective_reason,
+        "reclass_method": _reclass_method,
         "mfe_r_floor": round(_mfe_r_floor, 3),
         "mae_r_floor": round(_mae_r_floor, 3),
     }
