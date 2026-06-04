@@ -959,6 +959,96 @@ class PositionReconciler:
                 pass
         return 0.0, "unavailable"
 
+    async def _flatten_eod_window_orphan(
+        self, bot, symbol, direction, abs_qty, avg_cost,
+    ) -> Dict[str, Any]:
+        """v19.34.260 — Flatten an IB orphan that appears PAST the Reg-T
+        bracket cutoff instead of adopting it.
+
+        ROOT CAUSE (2026-06-03): the reconciler adopted 13 IB orphans at
+        15:45:47 ET — AFTER the EOD close pass had already run and marked
+        itself done — and bracket attach was blocked
+        (`past_regt_soft_edge_cutoff`), so they were carried UNPROTECTED
+        overnight (no stop) until the operator flattened them by hand. A
+        fresh, bot-rejected orphan that cannot be protected and that the
+        EOD pass will not re-run for must be FLATTENED, never adopted.
+
+        Places a MKT close on the raw IB position, verifies flat, then adds
+        the symbol to the re-adopt cooldown + operator-flatten suppression so
+        the reconciler does NOT re-adopt it next cycle (kills the loop).
+        Records a `bot_events` row for the EOD postmortem.
+        """
+        from types import SimpleNamespace
+        result: Dict[str, Any] = {"flattened": False, "verified_flat": None}
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib_direct = get_ib_direct_service()
+            target = SimpleNamespace(
+                symbol=symbol, direction=direction,
+                shares=int(abs_qty), remaining_shares=int(abs_qty),
+            )
+            close_res = await ib_direct.place_close_market(target, wait_for_fill_s=15.0)
+            result["close"] = close_res
+            result["flattened"] = bool(close_res.get("success"))
+            try:
+                flat_chk = await ib_direct.verify_position_flat(symbol, expected_remaining=0)
+                result["verified_flat"] = flat_chk.get("is_flat")
+                result["ib_position_after"] = flat_chk.get("ib_position")
+            except Exception as _vf_err:
+                result["verify_error"] = str(_vf_err)[:200]
+            logger.critical(
+                "[v19.34.260 EOD-ORPHAN-FLATTEN] %s %s %dsh @ ~$%.2f — flattened "
+                "instead of adopting (past Reg-T cutoff → would be naked "
+                "overnight). close_success=%s verified_flat=%s",
+                symbol, getattr(direction, "value", direction), abs_qty,
+                avg_cost or 0.0, result["flattened"], result.get("verified_flat"),
+            )
+        except Exception as e:
+            result["error"] = str(e)[:200]
+            logger.error(
+                "[v19.34.260 EOD-ORPHAN-FLATTEN] %s flatten FAILED: %s — NOT "
+                "adopting; left for ghost-flatten / operator.", symbol, e,
+            )
+
+        # B — break the re-adoption loop regardless of flatten outcome:
+        # never re-adopt this symbol this session.
+        try:
+            rcs = getattr(bot, "_recently_closed_symbols", None)
+            if rcs is None:
+                rcs = {}
+                bot._recently_closed_symbols = rcs
+            rcs[symbol.upper()] = datetime.now(timezone.utc)
+        except Exception:
+            pass
+        try:
+            from services.operator_flatten_suppression import get_operator_flatten_suppression
+            get_operator_flatten_suppression().add(
+                symbol, reason="eod_window_orphan_flatten_v19_34_260",
+            )
+        except Exception:
+            pass
+
+        # Record for the EOD postmortem.
+        try:
+            _db = getattr(bot, "_db", None) or getattr(self, "db", None)
+            if _db is not None:
+                await asyncio.to_thread(
+                    _db.bot_events.insert_one,
+                    {
+                        "event_type": "eod_window_orphan_flatten",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        "symbol": symbol.upper(),
+                        "direction": getattr(direction, "value", str(direction)),
+                        "shares": int(abs_qty),
+                        "avg_cost": avg_cost,
+                        "result": result,
+                    },
+                )
+        except Exception:
+            pass
+        return result
+
     async def reconcile_orphan_positions(
         self,
         bot: 'TradingBotService',
@@ -1374,6 +1464,41 @@ class PositionReconciler:
                             "(falling through to adopt as before)",
                             sym, _race_err,
                         )
+
+                    # ── v19.34.260 — EOD-window flatten-instead-of-adopt ──
+                    # If we're past the Reg-T bracket cutoff (the bracket
+                    # governor's `past_regt_soft_edge_cutoff` window), a
+                    # newly-detected orphan CANNOT be protected and the EOD
+                    # close pass will not re-run for it (the 2026-06-03
+                    # incident: 13 orphans adopted at 15:45:47 carried naked
+                    # overnight). Flatten it instead of adopting.
+                    try:
+                        from zoneinfo import ZoneInfo as _ZI
+                    except ImportError:
+                        from backports.zoneinfo import ZoneInfo as _ZI
+                    _now_et = datetime.now(_ZI("America/New_York"))
+                    try:
+                        from services.bracket_attach_governor import get_governor as _get_gov
+                        _can_attach, _attach_reason = _get_gov().should_attempt_attach(
+                            sym, now_et=_now_et,
+                        )
+                    except Exception as _gov_err:
+                        _can_attach, _attach_reason = True, f"governor_error:{_gov_err}"
+                    if (not _can_attach) and _attach_reason == "past_regt_soft_edge_cutoff":
+                        _flat_res = await self._flatten_eod_window_orphan(
+                            bot, sym, direction, abs_qty, avg_cost,
+                        )
+                        report["skipped"].append({
+                            "symbol": sym,
+                            "reason": "eod_window_flattened",
+                            "detail": (
+                                "Orphan appeared past the Reg-T bracket cutoff; "
+                                "flattened instead of adopting (would be naked "
+                                "overnight). v19.34.260."
+                            ),
+                            "flatten": _flat_res,
+                        })
+                        continue
 
                     # Current price — prefer live quote, fall back to
                     # marketPrice from position, finally avgCost.
