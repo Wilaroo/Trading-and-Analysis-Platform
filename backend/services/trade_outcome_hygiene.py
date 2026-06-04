@@ -53,6 +53,109 @@ INSTANT_UNWIND_MAX_HOLD_S = 120.0
 CORRUPT_PNL_ABS_FLOOR = 5.0
 PRICE_EPS = 1e-6
 
+# ── v19.34.263 — External-exit reclassification ──────────────────────────────
+# Realized-R magnitude beyond which an external close is corrupt P&L
+# attribution, not a real bracket fill (a 30d audit showed genuine external
+# scalp/intraday closes sit in a sane -1R..+1R band; only drift/phantom-era
+# rows blow past this).
+RECLASS_MAX_ABS_R = 6.0
+# How close (as a fraction of per-share risk) the reconstructed exit must come
+# to a bracket level to count as having "reached" it. 0.05R ≈ tick-level slop.
+RECLASS_LEVEL_TOL_R = 0.05
+
+
+def _is_external_bracket_reason(close_reason: str) -> bool:
+    """True for broker-side/OCA bracket closes we can decode into target/stop.
+
+    Deliberately EXCLUDES operator/manual flattens (`operator_external_flatten`)
+    and reconcile-driven external closes — those are not bracket fills and are
+    already gated as artifacts upstream."""
+    r = str(close_reason or "").lower()
+    if "operator" in r or "manual" in r or "flatten" in r or "reconcil" in r:
+        return False
+    return ("oca_closed_externally" in r) or ("external_close" in r)
+
+
+def reclassify_external_exit(
+    close_reason: Optional[str],
+    direction: Optional[str] = None,
+    entry_price: Optional[float] = None,
+    exit_price: Optional[float] = None,
+    stop_price: Optional[float] = None,
+    target_prices=None,
+    realized_pnl: Optional[float] = None,
+    shares: Optional[float] = None,
+) -> Tuple[Optional[str], str, Optional[float], Optional[float]]:
+    """Decode an external/OCA bracket close into its TRUE exit kind.
+
+    The 30d audit proved `exit_price` is persisted on <5% of external scalp/
+    intraday closes, but `stop_price`+`target_prices` are present on 100% and
+    `realized_pnl`+`shares` reconstruct the exit on ~90%. We therefore
+    reconstruct the implied exit and band it against the ACTUAL bracket levels
+    (NOT pnl-sign — 45-56% of these land mid-range as scratches/partials and a
+    naive sign rule would over-claim targets).
+
+    Returns (effective_reason, method, recon_exit, realized_r):
+      effective_reason ∈ {"target", "stop_loss", "external_partial", None}
+      method           ∈ {"price", "pnl_reconstructed", "not_external",
+                           "unresolved", "corrupt_r"}
+    """
+    if not _is_external_bracket_reason(close_reason):
+        return None, "not_external", None, None
+
+    def _ff(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    entry = _ff(entry_price)
+    stop = _ff(stop_price)
+    tps = target_prices or []
+    if isinstance(tps, (int, float)):
+        tps = [tps]
+    tgt = _ff(tps[0]) if tps else None
+    d = str(getattr(direction, "value", direction) or "long").lower()
+    is_long = d != "short"
+
+    if not (entry and entry > 0) or not (stop and stop > 0) or not (tgt and tgt > 0):
+        return None, "unresolved", None, None
+
+    # Resolve exit: real persisted value first, else reconstruct from pnl/shares.
+    xp = _ff(exit_price)
+    method = "price"
+    if not (xp and xp > 0):
+        realized = _ff(realized_pnl)
+        sh = _ff(shares)
+        if realized is None or not (sh and sh > 0):
+            return None, "unresolved", None, None
+        pps = realized / sh
+        xp = entry + pps if is_long else entry - pps
+        method = "pnl_reconstructed"
+
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None, "unresolved", xp, None
+    move = (xp - entry) if is_long else (entry - xp)
+    realized_r = round(move / risk, 4)
+
+    if abs(realized_r) > RECLASS_MAX_ABS_R:
+        return None, "corrupt_r", xp, realized_r
+
+    tol_px = RECLASS_LEVEL_TOL_R * risk
+    if is_long:
+        reached_target = xp >= (tgt - tol_px)
+        hit_stop = xp <= (stop + tol_px)
+    else:
+        reached_target = xp <= (tgt + tol_px)
+        hit_stop = xp >= (stop - tol_px)
+
+    if reached_target:
+        return "target", method, xp, realized_r
+    if hit_stop:
+        return "stop_loss", method, xp, realized_r
+    return "external_partial", method, xp, realized_r
+
 
 def classify_close(
     close_reason: Optional[str],
@@ -62,12 +165,26 @@ def classify_close(
     net_pnl: Optional[float] = None,
     hold_seconds: Optional[float] = None,
     setup_type: str = "",
+    *,
+    direction: Optional[str] = None,
+    stop_price: Optional[float] = None,
+    target_prices=None,
+    realized_pnl: Optional[float] = None,
+    shares: Optional[float] = None,
 ) -> Tuple[bool, str]:
     """Return (is_genuine, tag).
 
     is_genuine=False means the close is an execution/reconciliation artifact and
     must NOT count toward setup EV / win-rate / edge scoreboards. `tag` records
     WHY (audit breadcrumb), e.g. 'instant_external_unwind'.
+
+    v19.34.263: when the optional bracket context (direction/stop/target/
+    realized_pnl/shares) is supplied, a non-operator external/OCA close that
+    decodes to a confident bracket outcome (target / stop / sane mid-range
+    partial) is treated as GENUINE — these are real scalp bracket fills the
+    learning loop was blind to because the blanket <120s instant-unwind guard
+    discarded them. Corrupt-R external rows stay non-genuine. When the context
+    is absent the legacy behavior is preserved verbatim (backward compatible).
     """
     r = str(close_reason or "").lower()
     eb = str(entered_by or "").lower()
@@ -84,6 +201,20 @@ def classify_close(
     for sub in _ARTIFACT_ENTERED_BY_SUBSTRINGS:
         if sub in eb:
             return False, f"non_bot_entry:{eb[:24]}"
+
+    # v19.34.263 — price-confirmed external bracket reclassification. Only when
+    # the caller supplied enough context to decode the exit; otherwise fall
+    # through to the legacy instant-unwind guard so old call sites are untouched.
+    eff, method, _recon, _rr = reclassify_external_exit(
+        close_reason=r, direction=direction, entry_price=entry_price,
+        exit_price=exit_price, stop_price=stop_price, target_prices=target_prices,
+        realized_pnl=realized_pnl if realized_pnl is not None else net_pnl,
+        shares=shares,
+    )
+    if eff in ("target", "stop_loss", "external_partial"):
+        return True, f"external_{eff}:{method}"
+    if method == "corrupt_r":
+        return False, "external_corrupt_r"
 
     if "oca_closed_externally" in r and hold_seconds is not None and hold_seconds < INSTANT_UNWIND_MAX_HOLD_S:
         return False, "instant_external_unwind"
@@ -113,7 +244,9 @@ def is_genuine_close(close_reason, entered_by="", entry_price=None,
 # Shared definition of an ADOPTED/external position (a reconciled IB holding
 # or operator-managed fill the bot merely attributed) vs the bot's OWN entry.
 # Used by the Mission Control P&L split AND the offline audit so the HUD and
-# the diagnostics agree on one definition.
+# the diagnostics agree on one definition. A 30d audit found 46% of closes
+# were adopted (+$181k) while the bot's own edge was ~break-even — blending
+# the two made the bot look far more profitable than it actually is.
 _ADOPTED_ENTRY_HINTS = (
     "reconcil", "external", "excess", "adopt", "orphan",
     "ib_only", "ib-only", "imported",

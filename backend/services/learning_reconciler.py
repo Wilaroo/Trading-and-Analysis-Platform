@@ -208,6 +208,11 @@ def reconcile(db, *, days: Optional[int] = None, commit: bool = False,
         entry = _f(bt.get("fill_price"))
         direction = _dir_str(bt.get("direction"))
         exit_p = _resolve_exit(bt, entry, direction)
+        _stop = _f(bt.get("stop_price")) or _f(bt.get("stop_loss"))
+        _tps = bt.get("target_prices") or []
+        if not _tps:
+            _t1 = bt.get("tp_price") or bt.get("target")
+            _tps = [_t1] if _t1 else []
         genuine, _tag = classify_close(
             close_reason=bt.get("close_reason"),
             entered_by=str(bt.get("entered_by") or ""),
@@ -215,6 +220,8 @@ def reconcile(db, *, days: Optional[int] = None, commit: bool = False,
             net_pnl=_f(bt.get("net_pnl")) or _f(bt.get("realized_pnl")) or 0.0,
             hold_seconds=None,
             setup_type=str(bt.get("setup_type") or ""),
+            direction=direction, stop_price=_stop, target_prices=_tps,
+            realized_pnl=_f(bt.get("realized_pnl")), shares=_f(bt.get("shares")),
         )
 
         # ── alert_outcomes (every missing close) ──────────────────────
@@ -266,5 +273,119 @@ def reconcile(db, *, days: Optional[int] = None, commit: bool = False,
             "skipped(non-genuine TO)=%d  skipped(no prices)=%d  setups=%d",
             mode, rep["closed_scanned"], rep["ao_written"], rep["to_written"],
             rep["to_skipped_nongenuine"], rep["skipped_no_prices"], len(rep["affected_setups"]),
+        )
+    return rep
+
+
+
+def reprocess_external_closes(db, *, days: Optional[int] = None,
+                              commit: bool = False, verbose: bool = True) -> dict:
+    """v19.34.263 — re-decode historical external/OCA bracket closes.
+
+    The pre-v263 hygiene `classify_close` discarded every `oca_closed_externally`
+    close held <120s as `instant_external_unwind`, so genuine scalp/intraday
+    bracket fills (target/stop/partial) were dropped from the EV scoreboard.
+    This re-runs the now-fixed `_record_alert_outcome_bestEffort` over every
+    closed `bot_trades` row whose `close_reason` is an external bracket close,
+    upserting the corrected `alert_outcomes` row (genuine flag + effective_close_
+    reason + reclass_method) keyed on trade_id, then recomputes `strategy_stats`
+    for the affected setups.
+
+    Idempotent. `commit=False` → dry-run (classify + count, no writes).
+    `days=None` → all-time. Returns a report dict with reclass tallies + the
+    before/after genuine flip count and affected setups.
+    """
+    from services import pnl_compute
+    from services.trade_outcome_hygiene import (
+        reclassify_external_exit, _is_external_bracket_reason,
+    )
+
+    if getattr(pnl_compute, "_AO_DB", None) is None:
+        pnl_compute._AO_DB = db
+
+    q: Dict[str, Any] = {"status": {"$in": ["closed", "CLOSED"]}}
+    if days:
+        from datetime import timedelta
+        q["closed_at"] = {"$gte": (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()}
+
+    rep = {
+        "scanned": 0, "external_rows": 0, "reclassified": 0,
+        "by_kind": {"target": 0, "stop_loss": 0, "external_partial": 0,
+                    "corrupt_r": 0, "unresolved": 0},
+        "flipped_to_genuine": 0, "ao_upserted": 0,
+        "affected_setups": set(),
+    }
+
+    # Pre-image of the genuine flag so we can report the flip count.
+    prior_genuine = {}
+    for d in db["alert_outcomes"].find({}, {"_id": 0, "trade_id": 1, "genuine": 1}):
+        prior_genuine[d.get("trade_id")] = d.get("genuine", True)
+
+    closed = list(db["bot_trades"].find(q))
+    rep["scanned"] = len(closed)
+
+    for bt in closed:
+        if not _is_external_bracket_reason(bt.get("close_reason")):
+            continue
+        rep["external_rows"] += 1
+        tid = bt.get("id") or bt.get("trade_id")
+        if not tid:
+            continue
+        entry = _f(bt.get("fill_price"))
+        direction = _dir_str(bt.get("direction"))
+        exit_p = _resolve_exit(bt, entry, direction)
+        stop = _f(bt.get("stop_price")) or _f(bt.get("stop_loss"))
+        tps = bt.get("target_prices") or []
+        if not tps:
+            _t1 = bt.get("tp_price") or bt.get("target")
+            tps = [_t1] if _t1 else []
+        eff, method, _, _ = reclassify_external_exit(
+            close_reason=bt.get("close_reason"), direction=direction,
+            entry_price=entry, exit_price=exit_p, stop_price=stop,
+            target_prices=tps, realized_pnl=_f(bt.get("realized_pnl")),
+            shares=_f(bt.get("shares")),
+        )
+        kind = eff if eff else method
+        if kind in rep["by_kind"]:
+            rep["by_kind"][kind] += 1
+        if eff in ("target", "stop_loss", "external_partial"):
+            rep["reclassified"] += 1
+            if prior_genuine.get(tid) is False:
+                rep["flipped_to_genuine"] += 1
+        bs = pnl_compute._base_setup(bt.get("setup_type"))
+        if bs:
+            rep["affected_setups"].add(bs)
+
+        if commit and exit_p is not None:
+            try:
+                pnl_compute._record_alert_outcome_bestEffort(
+                    _TradeView(bt), bt.get("close_reason") or "external_reclass_v263",
+                    {"realized_pnl": _f(bt.get("realized_pnl")) or 0.0,
+                     "net_pnl": _f(bt.get("net_pnl")) or _f(bt.get("realized_pnl")) or 0.0,
+                     "shares": bt.get("shares")},
+                    exit_p, "external_reclass_v19_34_263",
+                )
+                rep["ao_upserted"] += 1
+            except Exception as e:
+                logger.debug("[reclass v263] alert_outcomes upsert failed %s: %s", tid, e)
+
+    if commit and rep["affected_setups"]:
+        pnl_compute._get_outcomes_collection()
+        for bs in rep["affected_setups"]:
+            if bs:
+                pnl_compute.recompute_strategy_stats_for_setup(bs, genuine_only=True)
+
+    rep["affected_setups"] = sorted(x for x in rep["affected_setups"] if x)
+    if verbose:
+        mode = "COMMIT" if commit else "DRY-RUN"
+        logger.info(
+            "[reclass v263 %s] scanned=%d external=%d reclassified=%d "
+            "(target=%d stop=%d partial=%d corrupt=%d unresolved=%d) "
+            "flipped_to_genuine=%d ao_upserted=%d setups=%d",
+            mode, rep["scanned"], rep["external_rows"], rep["reclassified"],
+            rep["by_kind"]["target"], rep["by_kind"]["stop_loss"],
+            rep["by_kind"]["external_partial"], rep["by_kind"]["corrupt_r"],
+            rep["by_kind"]["unresolved"], rep["flipped_to_genuine"],
+            rep["ao_upserted"], len(rep["affected_setups"]),
         )
     return rep

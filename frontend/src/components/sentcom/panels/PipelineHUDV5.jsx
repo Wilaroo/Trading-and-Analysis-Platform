@@ -16,6 +16,7 @@
  */
 import React from 'react';
 import { ClosedTodayDrilldown } from '../v5/ClosedTodayDrilldown';
+import { BotEdgeChip } from '../v5/BotEdgeChip';
 import { PipelineStageDrilldown } from '../v5/PipelineStageDrilldown';
 import {
   scanStageConfig,
@@ -129,6 +130,11 @@ export const PipelineHUDV5 = ({
   closedToday,
   winsToday,
   lossesToday,
+  // v19.34.263 — Bot-Edge vs Adopted P&L split.
+  botEdgePnlToday,
+  adoptedPnlToday,
+  botRealizedPnlToday,
+  adoptedRealizedPnlToday,
   // v19.31.9 — additional stages
   scanRows,
   evalRows,
@@ -370,6 +376,16 @@ export const PipelineHUDV5 = ({
                   </span>
                 </div>
               )}
+              {/* v19.34.263 — Bot-Edge vs Adopted split (backend v19.34.262).
+                  Shows the bot's CLEAN edge separate from human-adopted /
+                  reconciled positions so adopted P&L can't inflate the
+                  headline bot performance. */}
+              <BotEdgeChip
+                botEdgePnlToday={botEdgePnlToday}
+                adoptedPnlToday={adoptedPnlToday}
+                botRealizedPnlToday={botRealizedPnlToday}
+                adoptedRealizedPnlToday={adoptedRealizedPnlToday}
+              />
             </div>
           ) : (
             <Metric label="P&L" value={formatMoney(totalPnl)} color={pnlColor} />
