@@ -109,6 +109,28 @@ def is_genuine_close(close_reason, entered_by="", entry_price=None,
     )[0]
 
 
+# v19.34.262 — BOT-EDGE ATTRIBUTION ------------------------------------------
+# Shared definition of an ADOPTED/external position (a reconciled IB holding
+# or operator-managed fill the bot merely attributed) vs the bot's OWN entry.
+# Used by the Mission Control P&L split AND the offline audit so the HUD and
+# the diagnostics agree on one definition.
+_ADOPTED_ENTRY_HINTS = (
+    "reconcil", "external", "excess", "adopt", "orphan",
+    "ib_only", "ib-only", "imported",
+)
+
+
+def is_adopted_entry(entered_by="", source="", close_reason="") -> bool:
+    """True if a trade row represents an ADOPTED/external position rather than
+    the bot's own entry. Bot-originated rows are stamped entered_by='bot_fired';
+    adopted rows carry entered_by='reconciled_*'/'external*' (or a reconciler
+    source / external close_reason)."""
+    blob = (
+        str(entered_by or "") + " " + str(source or "") + " " + str(close_reason or "")
+    ).lower()
+    return any(h in blob for h in _ADOPTED_ENTRY_HINTS)
+
+
 def excursion_floor(direction, entry_price, exit_price, stop_price) -> Tuple[float, float]:
     """v19.34.240 (Part B) — realized entry->exit excursion in R, used as a
     FLOOR for mfe_r / mae_r when the manage loop never populated them (a trade

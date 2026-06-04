@@ -673,6 +673,13 @@ async def get_positions():
         total_realized_pnl_today = 0.0   # excludes synthetic — matches IB
         synthetic_realized_count = 0     # for the tooltip breakdown
         synthetic_realized_sum = 0.0     # historical bookings rolling in
+        # v19.34.262 — BOT-EDGE ATTRIBUTION. Within the IB-matching "today"
+        # bucket, further split realized into the bot's OWN entries vs
+        # ADOPTED/external positions (reconciled IB holdings, operator fills).
+        # Additive: total_realized_pnl_today is unchanged (= bot + adopted).
+        from services.trade_outcome_hygiene import is_adopted_entry as _is_adopted_entry
+        bot_realized_pnl_today = 0.0
+        adopted_realized_pnl_today = 0.0
         # 2026-02-13 (v19.34.141) — Dedup closed trades before summing.
         # The orphan reconciler, consolidator merge, and OCA-ext race
         # paths can each produce a SECOND `closed` row for the same
@@ -731,6 +738,11 @@ async def get_positions():
                 synthetic_realized_sum += realized
             else:
                 total_realized_pnl_today += realized
+                # v19.34.262 — bot-edge vs adopted split within "today".
+                if _is_adopted_entry(t.get("entered_by"), t.get("source"), _cr):
+                    adopted_realized_pnl_today += realized
+                else:
+                    bot_realized_pnl_today += realized
             row_trade_type = t.get("trade_type")
             if not row_trade_type or row_trade_type == "unknown":
                 row_trade_type = _legacy_trade_type or "unknown"
@@ -755,6 +767,9 @@ async def get_positions():
             })
 
         total_unrealized_pnl = sum(p.get("pnl", 0) for p in positions)
+        # v19.34.262 — bot-edge vs adopted split on the OPEN book (by source).
+        bot_unrealized_pnl = sum(p.get("pnl", 0) for p in positions if p.get("source") == "bot")
+        adopted_unrealized_pnl = total_unrealized_pnl - bot_unrealized_pnl
         total_market_value = sum(p.get("market_value", 0) for p in positions)
         total_cost_basis = sum(p.get("cost_basis", 0) for p in positions)
         total_today_change = sum(p.get("today_change", 0) for p in positions)
@@ -790,6 +805,15 @@ async def get_positions():
             "total_today_change": round(total_today_change, 2),
             "bot_positions": bot_count,
             "ib_positions": ib_count,
+            # v19.34.262 — BOT-EDGE ATTRIBUTION (additive; existing fields
+            # unchanged). bot_* = the bot's OWN trades; adopted_* =
+            # reconciled/external/operator-managed IB positions.
+            "bot_realized_pnl_today": round(bot_realized_pnl_today, 2),
+            "adopted_realized_pnl_today": round(adopted_realized_pnl_today, 2),
+            "bot_unrealized_pnl": round(bot_unrealized_pnl, 2),
+            "adopted_unrealized_pnl": round(adopted_unrealized_pnl, 2),
+            "bot_edge_pnl_today": round(bot_realized_pnl_today + bot_unrealized_pnl, 2),
+            "adopted_pnl_today": round(adopted_realized_pnl_today + adopted_unrealized_pnl, 2),
             "positions_at_risk": positions_at_risk,
             # v19.31.7 — closed trades for today (drives HUD CLOSE TODAY tile).
             "closed_today": closed_today,
@@ -815,6 +839,12 @@ async def get_positions():
             "realized_pnl_synthetic_count": 0,
             "realized_pnl_synthetic_sum": 0,
             "total_pnl_today": 0,
+            "bot_realized_pnl_today": 0,
+            "adopted_realized_pnl_today": 0,
+            "bot_unrealized_pnl": 0,
+            "adopted_unrealized_pnl": 0,
+            "bot_edge_pnl_today": 0,
+            "adopted_pnl_today": 0,
             "closed_today": [],
             "closed_today_count": 0,
             "wins_today": 0,
