@@ -110,6 +110,11 @@ reconstruction we built). Only `runner` setups get `INTRADAY_BRACKET_V2`.
   they carry matrix-context semantics + the tidal_wave alias is fixed in m8.)
 - **m3** Write-path stamping of `canonical_setup`/`strategy_family`/`exit_archetype`
   (additive fields; nothing reads them destructively yet).
+- **m3 ✅ DONE (v269)** Write-path stamping: `LiveAlert.__post_init__` stamps
+  `canonical_setup`/`strategy_family`/`exit_archetype` on every alert; `to_dict()`
+  serializes them → feed/NIA/Command Center/alert_outcomes. Additive; trades derive
+  on-read in m5 (no backfill). Applier paste.rs/YJAP1; 5 tests green; patch verified
+  byte-identical on unpatched copy.
 - **m4** `/api/sentcom/taxonomy` JSON emitter + regenerate `vocabulary.py` +
   point `tradeStyleMeta.js` at it. NIA/Command Center/journals now SSOT-fed.
 - **m5** Diagnostics/grading/EV roll-up by `canonical_setup` + artifact exclusion.
