@@ -303,3 +303,69 @@ def style_of(raw) -> str:
 ALL_CANONICAL_SETUPS: Set[str] = (
     _MOMENTUM_CLASS | _FADE_CLASS | _SWING_CLASS | _POSITION_CLASS
 )
+
+
+def export_taxonomy() -> dict:
+    """Machine-readable snapshot of the canonical taxonomy — the SINGLE feed
+    for the `/api/sentcom/taxonomy` endpoint, `agents/vocabulary.py` (NIA), and
+    (via that endpoint) the frontend. Built entirely from this SSOT so every
+    consumer stays in lock-step and cannot drift."""
+    setups: Dict[str, Dict[str, str]] = {}
+    for base in sorted(ALL_CANONICAL_SETUPS):
+        try:
+            style = style_of(base)
+        except Exception:
+            style = "unknown"
+        setups[base] = {
+            "strategy_family": strategy_family(base),
+            "exit_archetype": exit_archetype_prior(base),
+            "style": style,
+            "class": setup_class(base),
+            "ai_feature_family": ai_feature_family(base),
+        }
+    return {
+        "version": "v19.34.270",
+        "strategy_families": ["continuation", "breakout", "reversion",
+                              "reversal", "rotation"],
+        "exit_archetypes": ["runner", "target", "swing_hold", "position_hold"],
+        "family_to_ai_key": dict(_FAMILY_TO_AI_KEY),
+        "edge_excluded_exact": sorted(_EDGE_EXCLUDED_EXACT),
+        "edge_excluded_prefixes": list(_EDGE_EXCLUDED_PREFIXES),
+        "setups": setups,
+    }
+
+
+def vocabulary_section() -> str:
+    """Human-readable taxonomy block for `agents/vocabulary.py` — generated from
+    `export_taxonomy()` so the NIA/agent prompt stays in lock-step with the SSOT."""
+    t = export_taxonomy()
+    by_family: Dict[str, list] = {f: [] for f in t["strategy_families"]}
+    for base, meta in t["setups"].items():
+        by_family.setdefault(meta["strategy_family"], []).append(base)
+    lines = [
+        "=== STRATEGY FAMILY x EXIT ARCHETYPE (SSOT — services/setup_taxonomy.py) ===",
+        "",
+        "Every setup carries TWO orthogonal tags (plus the trade_style horizon):",
+        "  strategy_family (edge thesis): continuation · breakout · reversion · reversal · rotation",
+        "  exit_archetype  (management):  runner (tight stop + trail a runner) ·",
+        "    target (fixed R targets, no runner) · swing_hold · position_hold",
+        "",
+        "canonical_setup collapses directional variants for grouping",
+        "  (e.g. vwap_fade_long / vwap_fade_short -> vwap_fade).",
+        "",
+        "SETUPS BY STRATEGY FAMILY:",
+    ]
+    for fam in t["strategy_families"]:
+        names = sorted(by_family.get(fam, []))
+        if names:
+            lines.append(f"  {fam}: " + ", ".join(names))
+    lines += [
+        "",
+        "EXIT ARCHETYPE NOTE (a reversal CAN run; a continuation scalp can be a target):",
+        "  runner examples:  squeeze, orb, vwap_continuation, backside, bouncy_ball",
+        "  target examples:  vwap_fade, mean_reversion, bella_fade, gap_give_go (scalp)",
+        "",
+        "Artifacts EXCLUDED from edge/grading: reconciled_*, approaching_*, imported_from_ib.",
+        "GET /api/sentcom/taxonomy returns the full machine-readable taxonomy.",
+    ]
+    return "\n".join(lines)

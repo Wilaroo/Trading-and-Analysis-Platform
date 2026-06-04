@@ -115,8 +115,13 @@ reconstruction we built). Only `runner` setups get `INTRADAY_BRACKET_V2`.
   serializes them → feed/NIA/Command Center/alert_outcomes. Additive; trades derive
   on-read in m5 (no backfill). Applier paste.rs/YJAP1; 5 tests green; patch verified
   byte-identical on unpatched copy.
-- **m4** `/api/sentcom/taxonomy` JSON emitter + regenerate `vocabulary.py` +
-  point `tradeStyleMeta.js` at it. NIA/Command Center/journals now SSOT-fed.
+- **m4 ✅ DONE-backend (v270)** `export_taxonomy()` + `vocabulary_section()` in SSOT;
+  NEW `GET /api/sentcom/taxonomy` (single machine-readable feed, 67 setups);
+  `agents/vocabulary.py` now appends the SSOT-generated strategy_family ×
+  exit_archetype section (static block preserved → vocab tests still pass).
+  Applier paste.rs/fW7ca; 52 tests green; patch paths compile-verified.
+  ↳ **m4-frontend (TODO, separate):** point `tradeStyleMeta.js` at the endpoint
+    (needs yarn build + visual check; deferred to keep risk isolated).
 - **m5** Diagnostics/grading/EV roll-up by `canonical_setup` + artifact exclusion.
 - **m6** AI-feature audit (§4) — map or defer-to-retrain; NO silent change.
 - **m7** Horizon-aware Market-Setup lookback (30→252→504 by style).

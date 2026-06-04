@@ -16,7 +16,7 @@ Keep this in lock-step with:
   - frontend/src/utils/tradeStyleMeta.js   (UI side)
 """
 
-VOCABULARY_BLOCK = """
+_STATIC_VOCABULARY_BLOCK = """
 === SENTCOM SHARED VOCABULARY (v19.34.95+) ===
 
 5 TRADE STYLES (hold horizons):
@@ -78,6 +78,17 @@ spec.
 When verified data shows `trade_style` / `setup_type`, USE those words verbatim
 in your response. When unclear, ask which horizon the operator is asking about.
 """.strip()
+
+
+# v19.34.270 (m4) — append the SSOT-generated strategy_family × exit_archetype
+# section so the NIA/agent vocabulary stays in lock-step with
+# services/setup_taxonomy.py and can never drift. Best-effort: if the SSOT is
+# unavailable, fall back to the static block only.
+try:
+    from services.setup_taxonomy import vocabulary_section as _vocab_section
+    VOCABULARY_BLOCK = _STATIC_VOCABULARY_BLOCK + "\n\n" + _vocab_section()
+except Exception:
+    VOCABULARY_BLOCK = _STATIC_VOCABULARY_BLOCK
 
 
 def inject_vocabulary(base_prompt: str) -> str:
