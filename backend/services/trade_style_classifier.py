@@ -70,7 +70,7 @@ SETUP_TO_STYLE: Dict[str, str] = {
     "relative_weakness": "intraday", "squeeze": "intraday",
     "up_through_open": "intraday", "vwap_bounce": "intraday",
     "vwap_continuation": "intraday", "premarket_high_break": "intraday",
-    "the_3_30_trade": "intraday",
+    "the_3_30_trade": "intraday", "bouncy_ball": "intraday",
     # ── SWING / MULTI-DAY ─────────────────────────────────────────────
     "base_breakout": "swing", "breakdown_confirmed": "multi_day",
     "daily_breakout": "multi_day", "daily_squeeze": "multi_day",
@@ -116,10 +116,24 @@ def _norm(v: Any) -> str:
 
 
 def _strip_directional_suffix(key: str) -> str:
-    for suf in DIRECTIONAL_SUFFIXES:
-        if key.endswith(suf):
-            return key[: -len(suf)]
-    return key
+    """Reduce a raw setup key toward its canonical base via the SSOT
+    (`services.setup_taxonomy.canonicalize`) — strips directional/scalp/
+    confirmed suffixes AND applies the canonical alias table, so misses like
+    `rubber_band_scalp_long`, `breakout_confirmed`, or `big_dawg` now resolve.
+
+    Note: `_setup_lookup` checks the RAW key in SETUP_TO_STYLE *first*, so
+    explicit entries (e.g. `breakdown_confirmed`->multi_day) are unaffected —
+    delegation only improves the fall-through case. Falls back to the legacy
+    local strip if the SSOT import is unavailable.
+    """
+    try:
+        from services.setup_taxonomy import canonicalize
+        return canonicalize(key)
+    except Exception:
+        for suf in DIRECTIONAL_SUFFIXES:
+            if key.endswith(suf):
+                return key[: -len(suf)]
+        return key
 
 
 def _setup_lookup(raw: Any) -> Optional[str]:

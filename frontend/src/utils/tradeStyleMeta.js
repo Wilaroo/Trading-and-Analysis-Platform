@@ -92,7 +92,7 @@ const SETUP_TO_STYLE = {
   opening_drive: 'intraday', orb: 'intraday', range_break: 'intraday',
   relative_strength: 'intraday', relative_weakness: 'intraday', squeeze: 'intraday',
   up_through_open: 'intraday', vwap_bounce: 'intraday', vwap_continuation: 'intraday',
-  premarket_high_break: 'intraday', the_3_30_trade: 'intraday',
+  premarket_high_break: 'intraday', the_3_30_trade: 'intraday', bouncy_ball: 'intraday',
   // ── SWING — pre-existing daily setups (multi_day) + v19.34.95 new (swing)
   base_breakout: 'swing',                            // v19.34.32 — re-mapped from 'position' (1-3 weeks is the realistic hold horizon)
   breakdown_confirmed: 'multi_day',
