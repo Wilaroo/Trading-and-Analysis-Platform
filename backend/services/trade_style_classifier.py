@@ -70,7 +70,7 @@ SETUP_TO_STYLE: Dict[str, str] = {
     "relative_weakness": "intraday", "squeeze": "intraday",
     "up_through_open": "intraday", "vwap_bounce": "intraday",
     "vwap_continuation": "intraday", "premarket_high_break": "intraday",
-    "the_3_30_trade": "intraday",
+    "the_3_30_trade": "intraday", "bouncy_ball": "intraday",
     # ── SWING / MULTI-DAY ─────────────────────────────────────────────
     "base_breakout": "swing", "breakdown_confirmed": "multi_day",
     "daily_breakout": "multi_day", "daily_squeeze": "multi_day",

@@ -150,8 +150,52 @@ unification in §4, plus carrying the cheat-sheet `class` (momentum/fade) +
 `category` through to grading and bracket scope.
 
 ## 6. Still needed before writing patches
-- Run hosted `diag_setup_inventory.py` on DGX → exact live variant strings,
-  dormant list, orphan list, unmapped list. (paste output back.)
-- Operator to point at the specific cheat-sheet / gameplan-template image
-  uploads (292 generic `image.png` assets — can't be auto-identified) so any
-  setup detail not already in the 3 transcribed docs can be folded in.
+**[RESOLVED 2026-06]** — live audit ran on DGX. Results in §7.
+
+## 7. Live DB audit results (diag_setup_inventory.py, 2026-06)
+
+38 enabled detectors; 72 style-map entries.
+
+**Variant splits (config-identical, graded as 2):**
+- `vwap_fade_long` (177t) + `vwap_fade_short` (190t) = **367 trades** fragmented
+- `mean_reversion_long/_short` (30t), `rubber_band_long/_short` (9t), `breakout`/`breakout_confirmed` (13t)
+- Base names `vwap_fade`, `mean_reversion`, `rubber_band`, `off_sides`, `range_break` show "dormant" in [A] ONLY because the detector stamps the variant — they ARE active.
+
+**bouncy_ball → UNMAPPED→unknown** (359a/33t) — FIXED (style maps + canonical).
+
+**Edge-polluting artifacts (exclude from grading/EV):** `reconciled_excess_slice` (123t),
+`reconciled_orphan` (123t), `imported_from_ib` (2t), `carry_forward_watch`, `approaching_*`.
+
+**A whole second scanner universe fires (NOT in `_enabled_setups`)** — swing/position/investment:
+`accumulation_entry` (533t), `rs_leader_break` (183t), `daily_squeeze` (132t),
+`pocket_pivot` (65t), `power_trend_stack` (49t), `daily_breakout` (46t),
+`stage_2_breakout` (44t), `three_week_tight` (43t), + flags/triangles/stages. Mostly
+style-mapped OK; now also class-mapped (swing/position) in setup_taxonomy.
+
+**Genuinely dormant intraday detectors (no base AND no variant firing):**
+`back_through_open`, `breaking_news`, `first_move_up`, `first_vwap_pullback`,
+`hitchhiker`, `spencer_scalp`, `time_of_day_fade`, `up_through_open`, plus near-dead
+`9_ema_scalp` (1a/0t), `abc_scalp` (23a/0t), `the_3_30_trade` (4a/0t),
+`premarket_high_break` (7a/2t), `first_move_down` (4a/0t).
+→ Note most are OPENING-AUCTION (9:33-9:45) trades → hypothesis: opening-window
+data/gating issue suppressing the whole opening cohort. TRIAGE (repair vs retire)
+pending operator sign-off + proximity probe, NOT a blind cull.
+
+**Top live volume (trades 90d):** squeeze 507, vwap_fade(long+short) 367,
+accumulation_entry 533, rs_leader_break 183, daily_squeeze 132, gap_fade 113,
+vwap_bounce 77, vwap_continuation 82, pocket_pivot 65.
+
+## 8. Shipped — v19.34.267 step a1 (canonical taxonomy foundation)
+- `services/setup_taxonomy.py` — `canonicalize()` / `is_edge_excluded()` /
+  `setup_class()` / `is_momentum_class()` / `style_of()`. Pure addition.
+- `tests/test_setup_taxonomy.py` — 16 tests (green).
+- bouncy_ball → intraday in backend `SETUP_TO_STYLE` + frontend `tradeStyleMeta.js`.
+- Applier: paste.rs/GuAUW.
+- Distinct-firing setups (puppy_dog/tidal_wave/vwap_bounce) deliberately NOT merged
+  (pending decision). Artifacts excluded via `is_edge_excluded`.
+
+### Next (after sign-off)
+- a2: grading/EV roll-up — stamp `canonical_setup` + `class`, exclude artifacts, dedupe variant splits.
+- a3: route `trade_style_classifier` + scanner `_enabled_setups` through `canonicalize()`.
+- Dormant-detector triage (esp. opening-auction cohort).
+- INTRADAY_BRACKET_V2 scoped to `is_momentum_class`.
