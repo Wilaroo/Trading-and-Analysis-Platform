@@ -187,6 +187,38 @@ def _walk(bars, entry, stop, target, is_long, entry_ts):
     return mfe_r, mae_r, outcome, managed_r, min_to_peak
 
 
+def _q(vals, p):
+    if not vals:
+        return float("nan")
+    s = sorted(vals)
+    return s[min(len(s) - 1, max(0, int(p * len(s))))]
+
+
+_ATR_CACHE = {}
+
+
+def _daily_atr_pct(db, symbol, ref_price):
+    """Median daily ATR(14) as % of price (cached per symbol). Confirms the
+    'stops sized off DAILY vol' hypothesis vs intraday reality."""
+    if symbol in _ATR_CACHE:
+        atr = _ATR_CACHE[symbol]
+    else:
+        bars = list(db["ib_historical_data"].find(
+            {"symbol": symbol.upper(), "bar_size": "1 day"},
+            {"_id": 0, "high": 1, "low": 1, "close": 1}).sort("date", -1).limit(20))
+        trs = []
+        for i in range(len(bars) - 1):
+            h, l = _num(bars[i].get("high")), _num(bars[i].get("low"))
+            pc = _num(bars[i + 1].get("close"))
+            if h is not None and l is not None and pc is not None:
+                trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        atr = statistics.fmean(trs[:14]) if trs else None
+        _ATR_CACHE[symbol] = atr
+    if atr and ref_price and ref_price > 0:
+        return 100.0 * atr / ref_price
+    return float("nan")
+
+
 def _verdict(n, min_n, med_mfe, med_mae, tgt_r, tgt_hit, stop_hit, timeout,
              med_managed_r, med_mfe_minus_managed):
     if n < min_n:
@@ -292,6 +324,14 @@ def main():
         a["peak_min"].append(peak_min)
         a["rz_mfe"].append(rz[0] if rz else 0.0)
         a["gap"].append(mfe_r - managed_r)
+        # calibration metrics (price-% terms + daily ATR comparison)
+        a["risk_pct"].append(100.0 * abs(entry - stop) / entry)
+        a["tgt_pct"].append(100.0 * abs(tgt - entry) / entry)
+        a["mfe_pct"].append(100.0 * mfe_r * abs(entry - stop) / entry)
+        a["mae_pct"].append(100.0 * mae_r * abs(entry - stop) / entry)
+        ap = _daily_atr_pct(db, t["symbol"], entry)
+        if ap == ap:
+            a["atr_pct"].append(ap)
         done += 1
     print(f"reconstructed: {done}   (no bars available: {no_bars})\n")
 
@@ -326,6 +366,44 @@ def main():
     print("         your manual/EOD/phantom early closes).")
     print("• peakM = median minutes to MFE peak → informs time-decay / max-hold tuning.")
     print("• GIVES_BACK verdict = price peaks well above where a managed exit lands → trail/cut sooner.")
+
+    # ── BRACKET CALIBRATION PRESCRIPTION ────────────────────────────────
+    print(f"\n{'='*128}\nBRACKET CALIBRATION PRESCRIPTION (intraday/scalp focus — exact numbers)\n{'='*128}")
+    print(f"{'style/setup':<30}{'n':>4}{'stop%':>7}{'dATR%':>7}{'s/ATR':>6}"
+          f"{'MAEp75':>7}{'MFEp50':>7}{'MFEp75':>7}{'tgtR':>6}  {'→ RECOMMEND'}")
+    print("-" * 128)
+    pres = []
+    for (style, setup), a in agg.items():
+        n = len(a["mfe"])
+        if n < args.min_n or style not in INTRADAY_STYLES:
+            continue
+        stop_pct = statistics.median(a["risk_pct"])
+        atrp = statistics.median(a["atr_pct"]) if a["atr_pct"] else float("nan")
+        s_over_atr = (stop_pct / atrp) if atrp == atrp and atrp > 0 else float("nan")
+        mae_p75 = abs(_q(a["mae"], 0.75))   # 75th-pct adverse move (R)
+        mfe_p50 = _q(a["mfe"], 0.50)
+        mfe_p75 = _q(a["mfe"], 0.75)
+        tgt_r = statistics.median(a["tgt_r"])
+        peak = statistics.median(a["peak_min"])
+        # recommendation: stop just beyond p75 adverse (min 0.3R floor),
+        # T1 near p60 MFE, time-stop ~peak minutes.
+        rec_stop_R = round(max(0.3, mae_p75 + 0.15), 2)
+        rec_stop_pct = round(stop_pct * rec_stop_R, 2)  # current stop% scales with R
+        rec_t1_R = round(max(0.3, _q(a["mfe"], 0.55)), 2)
+        rec_tstop = int(round(peak)) if peak == peak else 0
+        pres.append((n, style, setup, stop_pct, atrp, s_over_atr, mae_p75, mfe_p50,
+                     mfe_p75, tgt_r, rec_stop_pct, rec_stop_R, rec_t1_R, rec_tstop))
+    for (n, style, setup, sp, atrp, soa, maep, mfe50, mfe75, tgtr,
+         rsp, rsR, rt1, rts) in sorted(pres, key=lambda x: -x[0]):
+        atrs = f"{atrp:5.1f}" if atrp == atrp else "  n/a"
+        soas = f"{soa:4.1f}" if soa == soa else " n/a"
+        rec = f"stop {sp:.1f}%→{rsp:.1f}% ({rsR}R)  T1 {tgtr:.1f}R→{rt1}R  tstop {rts}m"
+        print(f"{(style+'/'+setup)[:29]:<30}{n:>4}{sp:>6.1f}%{atrs:>7}{soas:>6}"
+              f"{maep:>7.2f}{mfe50:>7.2f}{mfe75:>7.2f}{tgtr:>6.2f}  {rec}")
+    print(f"\n  stop% = median current stop distance | dATR% = median DAILY ATR(14) % |")
+    print(f"  s/ATR = stop% ÷ dATR%  (≈1.5 confirms stops are sized off DAILY ATR — the bug)")
+    print(f"  MAEp75 = 75th-pctile adverse move (R) → tighter stop should sit just beyond this")
+    print(f"  MFEp50/p75 = realistic favorable reach (R) → T1 belongs here, not at tgtR")
     print("\nDone (read-only).")
 
 
