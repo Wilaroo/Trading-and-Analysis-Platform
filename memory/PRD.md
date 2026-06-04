@@ -146,6 +146,23 @@ python -m backend.scripts.verify_v19_29 --watch
 - `POST /api/ai-modules/shadow/track-outcomes?drain=true&batch_size=50` — drain shadow-decision backlog (added 2026-04-29). Yields to event loop between batches.
 
 
+## Canonical setup taxonomy (SSOT — v268→v271)
+
+`services/setup_taxonomy.py` is the single source of truth for setup naming:
+`canonicalize` (collapse `_long`/`_short`/`_scalp`/`_confirmed` + aliases),
+`is_edge_excluded` (reconciled_*/imported_from_ib/approaching_*/watchlist),
+`strategy_family`, `exit_archetype_prior`, `style_of`. Stamped on every alert via
+`LiveAlert.__post_init__` (m3); exposed at `GET /api/sentcom/taxonomy` (m4) which
+feeds `agents/vocabulary.py` (NIA) and `frontend/utils/tradeStyleMeta.js` (m4-fe).
+**m5 (v271):** grading (`setup_grading_service`), EV (`ev_tracking_service`),
+the corrected learning store (`learning_loop_service.rebuild_*` → read by
+`tqs/setup_quality`) all roll up by canonical bucket + exclude artifacts; grades
+compute off MEDIAN R with a sub-$1 `risk_amount` clamp. Flags (default ON,
+reversible): `GRADING_CANONICAL_ROLLUP`, `GRADING_USE_MEDIAN`,
+`GRADING_MIN_RISK_AMOUNT`, `EV_CANONICAL_ROLLUP`, `LEARNING_CANONICAL_BASE`.
+Model feature input (`get_setup_features`) is intentionally UNCHANGED (m6 audit
+pending) — never feed canonical/family names to trained models without a retrain.
+
 ## Pipeline architecture (Bellafiore + ML hybrid)
 
 ### Conceptual hierarchy (operator mental model + UI)

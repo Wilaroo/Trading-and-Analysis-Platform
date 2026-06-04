@@ -122,7 +122,18 @@ reconstruction we built). Only `runner` setups get `INTRADAY_BRACKET_V2`.
   Applier paste.rs/fW7ca; 52 tests green; patch paths compile-verified.
   ↳ **m4-frontend (TODO, separate):** point `tradeStyleMeta.js` at the endpoint
     (needs yarn build + visual check; deferred to keep risk isolated).
-- **m5** Diagnostics/grading/EV roll-up by `canonical_setup` + artifact exclusion.
+- **m5 ✅ DONE (v271)** Grading/EV/corrected-store roll-up by `canonical_setup`
+  + artifact exclusion (`is_edge_excluded`) + **Issue 3** (grade off MEDIAN R, not
+  mean; sub-$1 `risk_amount` clamp). `setup_grading_service` (canonical bucket,
+  median grade, risk clamp, canonical read-lookup + F-gate), `ev_tracking_service`
+  (`_canon_for_ev` collapse/exclude in record/calc/report), `learning_loop_service`
+  rebuild base → SSOT `canonicalize` + artifact-skip (the corrected store),
+  `tqs/setup_quality._canonical_base_setup` (lockstep read). All env-flagged
+  default-ON + reversible: `GRADING_CANONICAL_ROLLUP`, `GRADING_USE_MEDIAN`,
+  `GRADING_MIN_RISK_AMOUNT`, `EV_CANONICAL_ROLLUP`, `LEARNING_CANONICAL_BASE`.
+  Applier paste.rs/z2Aky; pre-sha guarded. 10 new + 88 regression tests green.
+  ↳ **m4-frontend ✅ (v271):** `tradeStyleMeta.js` hydrates `_dynamicStyleMap`
+    from `/api/sentcom/taxonomy` (static table = fallback). Needs DGX yarn build.
 - **m6** AI-feature audit (§4) — map or defer-to-retrain; NO silent change.
 - **m7** Horizon-aware Market-Setup lookback (30→252→504 by style).
 - **m8** tidal_wave: rename detector→`fading_bounce`; build new momentum

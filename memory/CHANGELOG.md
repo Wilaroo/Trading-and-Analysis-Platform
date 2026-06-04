@@ -1,3 +1,41 @@
+## 2026-06-?? — v19.34.271: Taxonomy m5 + Issue 3 — canonical roll-up + robust grade math — SHIPPED (pending DGX apply/verify)
+
+### Why
+Fragmented variants (`vwap_fade_long` + `vwap_fade_short`) graded as separate
+buckets; reconciliation/import artifacts polluted per-setup edge; a single
+micro-risk ($0.20) trade's absurd R dominated the mean and ranked noise as a
+"best" setup. The grade/EV stores fed the F-gate (blocks trades) and TQS sizing,
+so the corruption had real money impact.
+
+### Scope (all env-flagged, default ON, instantly reversible)
+- `services/setup_grading_service.py` — group closed trades by
+  `canonicalize(setup_type)`, exclude `is_edge_excluded` artifacts, grade off
+  MEDIAN R (daily) / trade-count-weighted median (rolling), drop sub-$1
+  `risk_amount` rows. `get_rolling_grade`/`get_grade_warning` (F-gate) resolve to
+  the canonical bucket. New `canonical_setup` field on `SetupDailyStats`.
+- `services/ev_tracking_service.py` — `_canon_for_ev()` collapses variants +
+  excludes artifacts in `record_trade_outcome` / `calculate_ev` / `get_ev_report`.
+- `services/learning_loop_service.py` — `rebuild_learning_stats_from_all_outcomes`
+  groups by SSOT `canonicalize` + skips artifacts (THE corrected store the TQS
+  setup pillar reads).
+- `services/tqs/setup_quality.py` — `_canonical_base_setup()` reads the corrected
+  store in lockstep (`get_contextual_win_rate` base key).
+- `frontend/src/utils/tradeStyleMeta.js` (m4-frontend) — hydrates style map from
+  `GET /api/sentcom/taxonomy`; static table is fallback only.
+
+### Flags
+`GRADING_CANONICAL_ROLLUP`, `GRADING_USE_MEDIAN`, `GRADING_MIN_RISK_AMOUNT` (1.0),
+`EV_CANONICAL_ROLLUP`, `LEARNING_CANONICAL_BASE` — all default ON.
+
+### Verification
+10 new pytest (`test_setup_grading_canonical_v19_34_271.py`) + 88 regression
+(taxonomy/grading/learning-rebuild) green in container. Import smoke + applier
+pre-sha round-trip verified. Applier: paste.rs/z2Aky (idempotent, sha-guarded).
+NOTE: requires DGX `git pull`-equivalent apply + backend restart; frontend needs
+`yarn build`. Grade/EV math is behavior-changing for the F-gate + sizing — watch
+first session; flip any flag to `0` to revert instantly.
+
+
 ## 2026-06-04 — v19.34.265: Chart depth bump + transient bad-tick sanitization — SHIPPED
 
 ### Why

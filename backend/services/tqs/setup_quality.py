@@ -26,6 +26,22 @@ def _env_on(key: str, default: bool = True) -> bool:
     return str(v).strip().lower() not in ("0", "false", "no", "off")
 
 
+def _canonical_base_setup(setup_type: str) -> str:
+    """v19.34.271 (Issue 3) — resolve the canonical base key the
+    learning_stats 'corrected store' is keyed on, so the win_rate/EV pillar
+    reads the artifact-free, direction-collapsed bucket. MUST stay in lockstep
+    with learning_loop_service.rebuild_learning_stats_from_all_outcomes.
+    Reversible via LEARNING_CANONICAL_BASE (default ON)."""
+    raw = setup_type or ""
+    if _env_on("LEARNING_CANONICAL_BASE", True):
+        try:
+            from services.setup_taxonomy import canonicalize
+            return canonicalize(raw) or raw.lower()
+        except Exception:
+            pass
+    return raw.lower().replace("_long", "").replace("_short", "")
+
+
 @dataclass
 class SetupQualityScore:
     """Result of setup quality evaluation"""
@@ -151,7 +167,7 @@ class SetupQualityService:
         result.smb_grade = smb_grade
         
         # 1. Pattern Base Score (20% weight)
-        base_setup = setup_type.lower().replace("_long", "").replace("_short", "")
+        base_setup = _canonical_base_setup(setup_type)
         pattern_base = self.SETUP_BASE_SCORES.get(base_setup, 50)
         result.pattern_score = pattern_base
         
