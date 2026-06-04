@@ -132,14 +132,17 @@ async def backfill_universe_reset(symbol: str):
 
 @router.get("/pusher-l1-recommendations")
 async def backfill_pusher_l1_recommendations(
-    top_n: int = Query(60, ge=1, le=100,
+    top_n: int = Query(60, ge=1, le=600,
                        description="Top-N symbols by avg_dollar_volume "
-                                   "to pin into the L1 list."),
-    max_total: int = Query(80, ge=1, le=100,
-                           description="Hard cap on the returned list "
-                                       "(IB Gateway paper has a 100-line "
-                                       "ceiling — keep ≤80 to leave "
-                                       "headroom for dynamic L2 routing)."),
+                                   "to pin into the L1 list. v19.34.52 "
+                                   "ceiling raised 100→600 to match IB "
+                                   "Pro line allowance (Quote Booster Packs)."),
+    max_total: int = Query(80, ge=1, le=600,
+                           description="Hard cap on the returned list. "
+                                       "v19.34.52 ceiling raised 100→600 "
+                                       "(IB Pro: 100 base + 100/booster pack, "
+                                       "5 packs ≈ 600 lines). Pusher's own "
+                                       "L1_HARD_CAP=500 is the active ceiling."),
 ):
     """Recommended Level-1 subscription list for the IB pusher.
 

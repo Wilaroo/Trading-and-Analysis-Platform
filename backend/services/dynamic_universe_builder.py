@@ -162,14 +162,9 @@ class DynamicUniverseBuilder:
                 return
             sym = symbol.upper()
             ent = scores.setdefault(sym, {"score": 0, "sources": []})
-            # v19.34.211b — count each distinct source ONCE. Catalyst feeds
-            # (earnings/news) can list the same ticker multiple times; without
-            # this guard the points double-count while the source tag dedupes,
-            # inflating scores (e.g. VSCO reading 68 instead of 30).
-            if source in ent["sources"]:
-                return
             ent["score"] += pts
-            ent["sources"].append(source)
+            if source not in ent["sources"]:
+                ent["sources"].append(source)
 
         # 1. liquid core
         core = self._liquid_core(CORE_LIMIT)

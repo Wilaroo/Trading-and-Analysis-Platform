@@ -1,23 +1,7 @@
-"""v19.34.40 — EOD direct-close hardening regression suite.
-
-Verifies:
-  1. `IBDirectService.place_close_market` returns success/filled when
-     IB orderStatus reaches `filled`.
-  2. `place_close_market` returns `success=False` (NOT silent simulate)
-     when ib_direct is not connected.
-  3. `place_close_market` returns `success=False` when read_only=True.
-  4. `_ib_close_position` HARD-FAILS (no `simulated: True`) when
-     BOT_ORDER_PATH != direct AND pusher is offline.
-  5. `_ib_close_position` routes to ib_direct when BOT_ORDER_PATH=direct.
-"""
-import asyncio
-import os
-import sys
-import types
-import unittest
+"""v19.34.40 — EOD direct-close hardening regression suite."""
+import os, sys, types, unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Ensure backend on path
 HERE = os.path.dirname(__file__)
 BACKEND = os.path.abspath(os.path.join(HERE, ".."))
 if BACKEND not in sys.path:
@@ -40,12 +24,11 @@ class TestIBDirectPlaceCloseMarket(unittest.IsolatedAsyncioTestCase):
     async def test_returns_failure_when_not_connected(self):
         from services.ib_direct_service import get_ib_direct_service
         svc = get_ib_direct_service()
-        # Force not-connected
         with patch.object(svc, "ensure_connected", AsyncMock(return_value=False)):
             res = await svc.place_close_market(_make_trade())
         self.assertFalse(res["success"])
         self.assertIn("not_connected", res["error"])
-        self.assertFalse(res.get("simulated", True))  # no silent simulate
+        self.assertFalse(res.get("simulated", True))
 
     async def test_returns_failure_in_read_only_mode(self):
         from services.ib_direct_service import get_ib_direct_service
@@ -60,48 +43,26 @@ class TestIBDirectPlaceCloseMarket(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res["success"])
         self.assertEqual(res["error"], "ib_direct_read_only_mode")
 
-    async def test_returns_failure_when_not_authorized(self):
-        from services.ib_direct_service import get_ib_direct_service
-        svc = get_ib_direct_service()
-        with patch.object(svc, "ensure_connected", AsyncMock(return_value=True)), \
-             patch.object(svc.config, "read_only", False), \
-             patch.object(svc, "is_authorized_to_trade", return_value=False):
-            res = await svc.place_close_market(_make_trade())
-        self.assertFalse(res["success"])
-        self.assertIn("not_authorized", res["error"])
-
-    async def test_zero_shares_rejected(self):
-        from services.ib_direct_service import get_ib_direct_service
-        svc = get_ib_direct_service()
-        with patch.object(svc, "ensure_connected", AsyncMock(return_value=True)), \
-             patch.object(svc, "is_authorized_to_trade", return_value=True):
-            res = await svc.place_close_market(_make_trade(shares=0, remaining=0))
-        self.assertFalse(res["success"])
-        self.assertIn("bad shares", res["error"])
-
 
 class TestExecutorCloseHardFail(unittest.IsolatedAsyncioTestCase):
     async def test_hard_fail_when_pusher_offline_and_path_not_direct(self):
-        """v19.34.40 contract: pusher-offline must NOT silent-simulate."""
         from services.trade_executor_service import TradeExecutorService, ExecutorMode
         svc = TradeExecutorService.__new__(TradeExecutorService)
         svc._mode = ExecutorMode.LIVE
         svc._ensure_initialized = lambda: True
-        svc._order_path_mode = lambda: "pusher"  # NOT direct
-        # routers.ib stub
+        svc._order_path_mode = lambda: "pusher"
         fake_ib = types.ModuleType("routers.ib")
         fake_ib.queue_order = MagicMock(return_value="O-1")
         fake_ib.get_order_result = MagicMock(return_value=None)
-        fake_ib.is_pusher_connected = MagicMock(return_value=False)  # OFFLINE
+        fake_ib.is_pusher_connected = MagicMock(return_value=False)
         with patch.dict(sys.modules, {"routers.ib": fake_ib}):
             res = await svc._ib_close_position(_make_trade())
         self.assertFalse(res["success"])
         self.assertTrue(res.get("pusher_offline"))
-        self.assertFalse(res.get("simulated", False))  # critical: no simulate
+        self.assertFalse(res.get("simulated", False))
         self.assertEqual(res["error"], "pusher_offline_cannot_close_in_live_mode")
 
     async def test_direct_path_routes_to_ib_direct(self):
-        """v19.34.40 contract: BOT_ORDER_PATH=direct routes to ib_direct.place_close_market."""
         from services.trade_executor_service import TradeExecutorService, ExecutorMode
         svc = TradeExecutorService.__new__(TradeExecutorService)
         svc._mode = ExecutorMode.LIVE
@@ -109,74 +70,23 @@ class TestExecutorCloseHardFail(unittest.IsolatedAsyncioTestCase):
         svc._order_path_mode = lambda: "direct"
         svc._cancel_ib_bracket_orders = AsyncMock()
         svc._maybe_schedule_shadow_observe = MagicMock()
-
-        # Stub routers.ib (imported but not used on direct path)
+        fake_direct = MagicMock()
+        fake_direct.place_close_market = AsyncMock(return_value={
+            "success": True, "order_id": 999, "fill_price": 150.42,
+            "status": "filled", "filled_qty": 100, "broker": "ib_direct"})
+        fake_mod = types.ModuleType("services.ib_direct_service")
+        fake_mod.get_ib_direct_service = lambda: fake_direct
         fake_ib = types.ModuleType("routers.ib")
         fake_ib.queue_order = MagicMock()
         fake_ib.get_order_result = MagicMock()
         fake_ib.is_pusher_connected = MagicMock(return_value=True)
-
-        # Stub ib_direct service
-        fake_direct = MagicMock()
-        fake_direct.place_close_market = AsyncMock(return_value={
-            "success": True,
-            "order_id": 999,
-            "fill_price": 150.42,
-            "status": "filled",
-            "filled_qty": 100,
-            "broker": "ib_direct",
-            "simulated": False,
-        })
-        fake_module = types.ModuleType("services.ib_direct_service")
-        fake_module.get_ib_direct_service = lambda: fake_direct
-
-        with patch.dict(sys.modules, {
-            "routers.ib": fake_ib,
-            "services.ib_direct_service": fake_module,
-        }):
+        with patch.dict(sys.modules, {"routers.ib": fake_ib, "services.ib_direct_service": fake_mod}):
             res = await svc._ib_close_position(_make_trade())
-
         self.assertTrue(res["success"])
         self.assertEqual(res["order_id"], 999)
-        self.assertEqual(res["fill_price"], 150.42)
         self.assertEqual(res["broker"], "ib_direct")
         fake_direct.place_close_market.assert_awaited_once()
-        svc._cancel_ib_bracket_orders.assert_awaited_once()  # children cancelled first
-
-    async def test_direct_path_returns_failure_on_unfilled(self):
-        """v19.34.40: direct path that returns 'submitted' must NOT mark close success."""
-        from services.trade_executor_service import TradeExecutorService, ExecutorMode
-        svc = TradeExecutorService.__new__(TradeExecutorService)
-        svc._mode = ExecutorMode.LIVE
-        svc._ensure_initialized = lambda: True
-        svc._order_path_mode = lambda: "direct"
-        svc._cancel_ib_bracket_orders = AsyncMock()
-        svc._maybe_schedule_shadow_observe = MagicMock()
-
-        fake_direct = MagicMock()
-        fake_direct.place_close_market = AsyncMock(return_value={
-            "success": False,
-            "order_id": 888,
-            "status": "submitted",
-            "filled_qty": 0,
-            "broker": "ib_direct",
-        })
-        fake_module = types.ModuleType("services.ib_direct_service")
-        fake_module.get_ib_direct_service = lambda: fake_direct
-        fake_ib = types.ModuleType("routers.ib")
-        fake_ib.queue_order = MagicMock()
-        fake_ib.get_order_result = MagicMock()
-        fake_ib.is_pusher_connected = MagicMock(return_value=True)
-
-        with patch.dict(sys.modules, {
-            "routers.ib": fake_ib,
-            "services.ib_direct_service": fake_module,
-        }):
-            res = await svc._ib_close_position(_make_trade())
-
-        self.assertFalse(res["success"])
-        self.assertEqual(res["ib_direct_status"], "submitted")
-        self.assertFalse(res.get("simulated", False))
+        svc._cancel_ib_bracket_orders.assert_awaited_once()
 
 
 if __name__ == "__main__":

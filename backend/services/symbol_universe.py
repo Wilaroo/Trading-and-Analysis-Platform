@@ -171,6 +171,7 @@ def get_universe(
     return {d["symbol"] for d in cursor if d.get("symbol")}
 
 
+
 def get_universe_ranked(
     db,
     tier: str = "intraday",
@@ -206,7 +207,6 @@ def get_universe_ranked(
     if limit:
         cursor = cursor.limit(int(limit))
     return [d["symbol"] for d in cursor if d.get("symbol")]
-
 
 def get_universe_for_bar_size(
     db,

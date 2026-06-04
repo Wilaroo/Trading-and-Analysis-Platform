@@ -443,10 +443,6 @@ class SectorTagService:
             if ib_direct is not None:
                 triple = await ib_direct.get_contract_industry(sym)
                 if triple:
-                    # Try in order of specificity — `category` is usually
-                    # the most precise label (e.g. "Computer Services"),
-                    # falling back to `industry` (e.g. "Technology") and
-                    # `subcategory` if nothing else matches.
                     for key in ("category", "industry", "subcategory"):
                         ib_label = triple.get(key)
                         if not ib_label:

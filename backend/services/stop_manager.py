@@ -461,6 +461,7 @@ class StopManager:
         except Exception:
             pass
 
+
     def forget_trade(self, trade_id: str) -> None:
         """v19.13 — release internal per-trade state when a trade closes.
 

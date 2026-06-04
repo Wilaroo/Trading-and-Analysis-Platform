@@ -1,12 +1,10 @@
-"""Unified fundamentals cache (v19.34.202).
+"""Unified fundamentals cache (v19.34.177).
 
 Cache hierarchy:
   1. ``symbol_fundamentals_cache`` Mongo collection (TTL-indexed)
-  2. IB ReportSnapshot via ib_direct (live clientId-11 socket) — carries
-     valuation + float + shares-outstanding (``<SharesOut TotalFloat=...>``).
-     Falls back to the legacy ib_service worker only if ib_direct is down.
-  3. Finnhub via fundamental_data_service (valuation cross-check / fallback)
-  4. FINRA short-interest shares ÷ IB shares-outstanding → ``short_interest_percent``
+  2. IB ReportSnapshot via ib_service (parsed via ib_fundamentals_parser)
+  3. Finnhub via fundamental_data_service (last resort for fields IB
+     doesn't expose: short_interest, float, institutional ownership)
 
 Smart TTL:
   * 24h normally
@@ -57,7 +55,7 @@ def _get_db():
     return _db
 
 
-def compute_short_interest_pct(si_shares, shares_out) -> Optional[float]:
+def compute_short_interest_pct(si_shares, shares_out):
     """Short interest as a % of shares outstanding (rounded), or None if the
     inputs are missing/invalid. Pure — unit-testable without IB/Mongo."""
     try:
@@ -121,9 +119,9 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
 
     # 2. IB ReportSnapshot — prefer the LIVE ib_direct socket (clientId 11).
     # The legacy ib_service worker is usually disconnected on this deploy
-    # (which is why every cached doc historically came from Finnhub), so
-    # ib_direct is the real IB path. ReportSnapshot is ~10KB and carries
-    # float + shares-outstanding via <SharesOut TotalFloat=...>. (v19.34.202)
+    # (every cached doc historically came from Finnhub). ReportSnapshot is
+    # ~10KB and carries float + shares-out via <SharesOut TotalFloat=...>.
+    # (v19.34.202)
     try:
         from services.ib_direct_service import get_ib_direct_service
         from services.ib_fundamentals_parser import parse_report_snapshot
@@ -188,9 +186,7 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
 
     # 3.5 Short-interest % — FINRA short-interest shares ÷ shares-outstanding.
     # Float/shares come from IB ReportSnapshot above; FINRA gives raw short
-    # shares (no %). This is the only place we can compute a real SI%. The
-    # FINRA feed is bi-monthly (that IS the accurate cadence — there is no
-    # realtime short interest). (v19.34.202)
+    # shares (no %). FINRA is bi-monthly (the accurate cadence). (v19.34.202)
     shares_out = merged.get("shares_outstanding") or merged.get("float_shares")
     if shares_out and float(shares_out) > 0 and db is not None:
         try:
@@ -243,17 +239,11 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
     return merged
 
 
-
 async def refresh_institutional_ownership(symbol: str, db=None) -> Optional[float]:
     """v19.34.204 — fetch IB ReportsOwnership (multi-MB) for ``symbol`` via the
     live ib_direct socket, compute institutional ownership %, and upsert it into
-    ``institutional_ownership_cache``. Returns the % or None.
-
-    MUST run inside the backend process (where the clientId-11 socket lives).
-    Heavy (3–6 MB/symbol) → intended for a weekly off-hours job, NOT the hot
-    path. shares-outstanding is read from the existing fundamentals cache
-    (populated by ReportSnapshot) so we express ownership as % of shares-out.
-    """
+    ``institutional_ownership_cache``. Returns the % or None. MUST run inside the
+    backend process. Heavy → weekly off-hours job, NOT the hot path."""
     if db is None:
         db = _get_db()
     if db is None:

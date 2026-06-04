@@ -5,10 +5,10 @@ Canonical timestamp helpers — v19.34.170
 The SentCom codebase grew up writing timestamps in two incompatible
 shapes across collections:
 
-  * `bot_trades`, `alert_outcomes`, `shadow_decisions`  → ISO 8601 strings
-  * `bracket_lifecycle_events`, `sentcom_thoughts.created_at` → BSON datetime
-  * `sentcom_thoughts.timestamp`                       → ISO 8601 string
-  * `trade_drops` (new in v164)                        → BOTH ts (ISO) + ts_dt (BSON)
+  * `bot_trades`, `alert_outcomes`, `shadow_decisions`  -> ISO 8601 strings
+  * `bracket_lifecycle_events`, `sentcom_thoughts.created_at` -> BSON datetime
+  * `sentcom_thoughts.timestamp`                       -> ISO 8601 string
+  * `trade_drops` (new in v164)                        -> BOTH ts (ISO) + ts_dt (BSON)
 
 When a query mixed types ($gte: iso_string against a BSON-datetime field)
 Mongo silently returned 0 rows, which masked real bugs (e.g. the EOD
@@ -57,7 +57,7 @@ def parse_to_bson(value: ISO_OR_BSON) -> Optional[datetime]:
         s = value.strip()
         if not s:
             return None
-        # Tolerate trailing "Z" — fromisoformat in <3.11 rejects it.
+        # Tolerate trailing "Z" -- fromisoformat in <3.11 rejects it.
         if s.endswith("Z"):
             s = s[:-1] + "+00:00"
         try:

@@ -128,14 +128,11 @@ async def get_status():
         status_dict = status.to_dict()
 
         # v19.34.61 (2026-05-20) — Surface IB-authoritative account
-        # fields (RealizedPnL/UnrealizedPnL/BuyingPower/Equity) on the
-        # /api/sentcom/status response. Pre-v19.34.61 only
-        # /api/trading-bot/status carried these fields, but the V5 HUD
-        # reads from `useSentComStatus.js` which hits /api/sentcom/status —
-        # so v19.34.59 patches were silently ineffective: HUD kept
-        # showing R=$0.00° / BP=$— even though /api/trading-bot/status
-        # had the correct values. This block mirrors the v19.34.141 +
-        # v19.34.59 logic so both endpoints expose the same IB truth.
+        # fields on /api/sentcom/status. Pre-fix only
+        # /api/trading-bot/status carried these (v19.34.59), but the V5
+        # HUD reads from useSentComStatus -> /api/sentcom/status, so the
+        # earlier patch was silently ineffective: HUD kept showing
+        # R=$0.00 / BP=$- even though the other endpoint was correct.
         try:
             from routers.ib import _pushed_ib_data, _extract_account_value, is_pusher_connected
             ib_account = (_pushed_ib_data or {}).get("account") or {}
@@ -205,7 +202,7 @@ async def get_status():
 
 
 @router.get("/stream")
-async def get_stream(limit: int = Query(20, ge=1, le=100)):
+async def get_stream(limit: int = Query(20, ge=1, le=500)):  # v19.34.60: lifted from 100 → 500 to fit FE useSentComStream/BracketReaperPill limit=200 calls
     """
     Get unified SentCom message stream.
     
@@ -598,8 +595,8 @@ async def get_positions():
             # triggered the wedge watchdog and stalled EVERYTHING — including
             # the trading bot's scan loop — for the duration of the block.
             # Forensic capture 2026-05-18: the watchdog dump pinned the main
-            # thread inside `sentcom.py:485 list(cursor)` → `pymongo/network.py:
-            # _receive_data_on_socket` → blocking `recv_into`. The frontend
+            # thread inside `sentcom.py:485 list(cursor)` -> `pymongo/network.py:
+            # _receive_data_on_socket` -> blocking `recv_into`. The frontend
             # polls `/api/sentcom/positions` on every dashboard tick so this
             # bug fired N times per minute under any Mongo latency.
             import asyncio as _asyncio_l3h2
@@ -665,6 +662,9 @@ async def get_positions():
             "consolidated_in_flatten_v19_34_44",
             "stale_pending_v19_34_78",
             "stale_pending_cleared_v19_34_78",
+            # v19.34.33 — reconciler-stamped phantom sweeps. Without this,
+            # $12,764 of yesterday-IB-fills bled into today's R chip.
+            "wrong_direction_phantom_swept_v19_29",
         }
         # Some reconciler paths stamp the reason with a "phantom_close:" prefix
         # (see position_reconciler._close_phantom_trade L665). Match by prefix

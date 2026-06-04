@@ -1346,6 +1346,125 @@ class PositionReconciler:
                         })
                         continue
 
+                    # ── v19.34.187 — Recent Executor Activity Cooldown ──
+                    # Belt-and-suspenders for v185. If a NEW code path
+                    # forgets to stamp `pre_submit_at`, this OUTER net
+                    # still saves you: any open BotTrade for `sym` with
+                    # created_at within the last 5 min blocks adoption.
+                    # Catches both pre-submit and post-fill races.
+                    try:
+                        from datetime import datetime as _dt187, timezone as _tz187
+                        _now187 = _dt187.now(_tz187.utc)
+                        _recent_cutoff_s = 300  # 5 minutes
+                        _bot_open_187 = getattr(bot, "_open_trades", {}) or {}
+                        _recent_hit_187 = None
+                        for _t187 in _bot_open_187.values():
+                            if getattr(_t187, "symbol", None) != sym:
+                                continue
+                            _ca187 = getattr(_t187, "created_at", None)
+                            if not _ca187:
+                                continue
+                            try:
+                                _ca_dt187 = _dt187.fromisoformat(
+                                    str(_ca187).replace("Z", "+00:00")
+                                )
+                                if _ca_dt187.tzinfo is None:
+                                    _ca_dt187 = _ca_dt187.replace(tzinfo=_tz187.utc)
+                                _age187 = (_now187 - _ca_dt187).total_seconds()
+                                if 0 <= _age187 <= _recent_cutoff_s:
+                                    _recent_hit_187 = {
+                                        "trade_id": getattr(_t187, "id", "?"),
+                                        "created_at": str(_ca187),
+                                        "age_s": round(_age187, 1),
+                                        "setup_type": getattr(_t187, "setup_type", "?"),
+                                    }
+                                    break
+                            except Exception:
+                                continue
+                        if _recent_hit_187:
+                            logger.warning(
+                                "🛡️  [v19.34.187 RECENT-ACTIVITY] %s — bot "
+                                "created trade_id=%s setup=%s %.1fs ago; "
+                                "refusing to adopt as orphan (5-min cooldown).",
+                                sym, _recent_hit_187["trade_id"],
+                                _recent_hit_187["setup_type"],
+                                _recent_hit_187["age_s"],
+                            )
+                            report["skipped"].append({
+                                "symbol": sym,
+                                "reason": "recent_executor_activity_v19_34_187",
+                                "cooldown_window_s": _recent_cutoff_s,
+                                "recent_trade": _recent_hit_187,
+                            })
+                            continue
+                    except Exception as _r187_err:
+                        logger.debug(
+                            "[v19.34.187] recent-activity cooldown check "
+                            "failed for %s: %s (falling through to v185)",
+                            sym, _r187_err,
+                        )
+
+                    # ── v19.34.185 — Submit-Race Guard ──
+                    # If the bot itself just submitted an order for this
+                    # symbol (within the last 60s), DO NOT spawn an
+                    # orphan — the IB position is likely the fill of
+                    # the bot's own pending submission. The bot's
+                    # executor stamps `pre_submit_at` on its BotTrade
+                    # BEFORE handing to IB (since v19.34.6); we honor
+                    # that here to prevent the BBAI whiplash where the
+                    # reconciler races the executor and adopts the
+                    # bot's own trade as `reconciled_external`.
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        _now = _dt.now(_tz.utc)
+                        _race_cutoff_s = 60
+                        _bot_open = getattr(bot, "_open_trades", {}) or {}
+                        _race_hit = None
+                        for _t in _bot_open.values():
+                            if getattr(_t, "symbol", None) != sym:
+                                continue
+                            _psa = getattr(_t, "pre_submit_at", None)
+                            if not _psa:
+                                continue
+                            try:
+                                _psa_dt = _dt.fromisoformat(
+                                    str(_psa).replace("Z", "+00:00")
+                                )
+                                if _psa_dt.tzinfo is None:
+                                    _psa_dt = _psa_dt.replace(tzinfo=_tz.utc)
+                                _age_s = (_now - _psa_dt).total_seconds()
+                                if 0 <= _age_s <= _race_cutoff_s:
+                                    _race_hit = {
+                                        "trade_id": getattr(_t, "id", "?"),
+                                        "pre_submit_at": str(_psa),
+                                        "age_s": round(_age_s, 1),
+                                        "setup_type": getattr(_t, "setup_type", "?"),
+                                    }
+                                    break
+                            except Exception:
+                                continue
+                        if _race_hit:
+                            logger.warning(
+                                "🏁 [v19.34.185 RACE-GUARD] %s — bot submitted "
+                                "trade_id=%s setup=%s %.1fs ago; refusing to "
+                                "adopt as orphan. Will retry next reconcile cycle.",
+                                sym, _race_hit["trade_id"],
+                                _race_hit["setup_type"], _race_hit["age_s"],
+                            )
+                            report["skipped"].append({
+                                "symbol": sym,
+                                "reason": "submit_race_v19_34_185",
+                                "race_window_s": _race_cutoff_s,
+                                "in_flight": _race_hit,
+                            })
+                            continue
+                    except Exception as _race_err:
+                        logger.debug(
+                            "[v19.34.185] race-guard check failed for %s: %s "
+                            "(falling through to adopt as before)",
+                            sym, _race_err,
+                        )
+
                     # ── v19.34.260 — EOD-window flatten-instead-of-adopt ──
                     # If we're past the Reg-T bracket cutoff (the bracket
                     # governor's `past_regt_soft_edge_cutoff` window), a
@@ -1437,6 +1556,25 @@ class PositionReconciler:
                     else:
                         stop_price = avg_cost + stop_distance
                         target_1 = avg_cost - target_distance
+
+                    # ── v19.34.186 — Variable-tick rounding ──
+                    # IB rejects with Error 110 if the stop/target price
+                    # doesn't conform to the symbol's tick grid. Float
+                    # arithmetic above produces values like $4.7477 for
+                    # a sub-$5 stock, which IB then permanently blocks
+                    # via bracket_attach_governor. Round to the correct
+                    # grid BEFORE stamping the BotTrade.
+                    def _v186_tick_round(_p: float, _ref_price: float) -> float:
+                        try:
+                            from decimal import Decimal, ROUND_HALF_UP
+                            tick = "0.0001" if float(_ref_price) < 1.00 else "0.01"
+                            return float(Decimal(str(_p)).quantize(
+                                Decimal(tick), rounding=ROUND_HALF_UP
+                            ))
+                        except Exception:
+                            return round(_p, 4 if _ref_price < 1.00 else 2)
+                    stop_price = _v186_tick_round(stop_price, avg_cost)
+                    target_1 = _v186_tick_round(target_1, avg_cost)
 
                     # Safety guard: stop already breached at current price.
                     breached = (

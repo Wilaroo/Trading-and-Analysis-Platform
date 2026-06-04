@@ -1436,9 +1436,7 @@ export const ChartPanel = ({
             className="absolute inset-0 z-20 pointer-events-none flex items-center justify-center"
             title={`Historical collector hasn't written fresh bars. Reason: ${staleInfo.reason || 'unknown'}`}
           >
-            {/* Translucent amber tint over the whole chart */}
             <div className="absolute inset-0 bg-amber-950/35 backdrop-blur-[1px]" />
-            {/* Diagonal warning stripes across the chart */}
             <div
               className="absolute inset-0 opacity-30"
               style={{
@@ -1446,9 +1444,7 @@ export const ChartPanel = ({
                   'repeating-linear-gradient(45deg, rgba(245,158,11,0.35) 0 14px, transparent 14px 36px)',
               }}
             />
-            {/* Bold border around the chart frame */}
             <div className="absolute inset-0 ring-2 ring-amber-500/70 ring-inset rounded" />
-            {/* Center alert card */}
             <div
               data-testid="chart-stale-banner-card"
               className="relative z-10 pointer-events-auto flex flex-col items-center gap-2 px-6 py-4 rounded-lg border-2 border-amber-400 bg-amber-950/90 shadow-xl shadow-amber-900/60 max-w-[80%]"

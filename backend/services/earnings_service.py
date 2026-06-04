@@ -178,14 +178,10 @@ class EarningsService:
         fallback_symbols: Optional[List[str]] = None,
     ) -> int:
         """v19.34.203 — persist upcoming earnings into the ``earnings_calendar``
-        collection the TQS fundamental pillar reads.
-
-        Approach (a): one market-wide date-range call. If that returns nothing
-        (e.g. plan restriction), falls back to (b) per-symbol over the active
-        universe (symbols already in ``symbol_fundamentals_cache``), throttled
-        for the Finnhub free tier. Upserts by (symbol, date) and prunes rows
-        older than 2 days. Returns the number of rows written.
-        """
+        collection the TQS fundamental pillar reads. Approach (a): one
+        market-wide date-range call; falls back to (b) per-symbol over the
+        active universe (symbol_fundamentals_cache), throttled for free tier.
+        Upserts by (symbol, date), prunes rows older than 2 days."""
         if db is None:
             db = _earnings_db()
         if db is None:
@@ -199,7 +195,6 @@ class EarningsService:
                 if doc:
                     docs.append(doc)
         else:
-            # fallback (b): per-symbol over the active universe
             syms = fallback_symbols or [
                 d["symbol"] for d in
                 db["symbol_fundamentals_cache"].find({}, {"symbol": 1, "_id": 0})
@@ -215,7 +210,7 @@ class EarningsService:
                             docs.append(doc)
                 except Exception:
                     pass
-                await asyncio.sleep(1.1)  # free-tier rate limit
+                await asyncio.sleep(1.1)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         written = 0
@@ -439,13 +434,9 @@ def _earnings_db():
 
 
 def _normalize_earnings_row(e: Dict) -> Optional[Dict]:
-    """Finnhub earnings row → ``earnings_calendar`` doc, or None if unusable.
-
-    Stores ``date`` as an ISO *datetime* string (Finnhub gives a 'YYYY-MM-DD'
-    date) so the pillar's string-range query (``$gte`` now.isoformat()) and
-    ``datetime.fromisoformat`` both work. Noon UTC avoids the same-day edge
-    where a date-only string sorts BEFORE a full now-datetime string.
-    """
+    """Finnhub earnings row -> earnings_calendar doc, or None if unusable.
+    Stores date as ISO datetime (noon UTC) so the pillar's string-range query
+    and datetime.fromisoformat both work."""
     sym = (e.get("symbol") or "").upper().strip()
     d = (e.get("date") or "").strip()
     if not sym or len(d) < 10:
@@ -454,7 +445,7 @@ def _normalize_earnings_row(e: Dict) -> Optional[Dict]:
         "symbol": sym,
         "date": f"{d[:10]}T12:00:00+00:00",
         "date_only": d[:10],
-        "hour": e.get("hour"),  # bmo / amc / dmh
+        "hour": e.get("hour"),
         "eps_estimate": e.get("epsEstimate"),
         "revenue_estimate": e.get("revenueEstimate"),
         "quarter": e.get("quarter"),

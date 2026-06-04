@@ -1,48 +1,36 @@
 """
-v19.34.80 — Quote-Resubscribe Watchdog.
+v19.34.82 — Quote-Resubscribe Watchdog (REDESIGNED).
 
-Background loop that VERIFIES every pusher re-subscribe RPC actually
-landed in the pusher's live subscription set. The pusher's existing
-`/rpc/subscribe` endpoint returns 200 OK whether or not the underlying
-`reqMktData` succeeded at IB, so quotes can stay stale for hours
-(operator-observed 4.9hr incident) while the bot keeps thinking it
-already issued a fix.
+Independent verifier: every symbol in bot._open_trades MUST be present
+in /rpc/subscriptions AND /rpc/quote-snapshot must return success:true.
+Pre-v82 read position_manager._stale_resub_set which was cleared every
+60s → race → blind. v82 removes that dependency.
 
-Algorithm (runs every 60s):
-  1. Read `position_manager._stale_resub_set` (the symbols position_manager
-     flagged as stale during the last manage loop).
-  2. For each tracked symbol, ask the pusher RPC what's actually
-     subscribed via `subscriptions(force_refresh=True)`.
-  3. If a symbol that was supposed to be subscribed is MISSING from the
-     live set:
-        - Log a loud WARN
-        - Fire `unsubscribe_symbols` + `subscribe_symbols` to force a
-          fresh `reqMktData` at IB
-        - Bump that symbol's `_attempts` counter
-  4. After 3 failed cycles for the same symbol → write a
-     `state_integrity_events` row with `severity="high"` and
-     `event="quote_resub_watchdog_escalated"`. UI pills can pick it up.
-  5. When a symbol's quote is fresh again (no longer in
-     `_stale_resub_set`), clear its watchdog state.
+Divergence kinds:
+  missing_from_subs : tracked symbol absent from /rpc/subscriptions
+  snapshot_failed   : in subs registry, but /rpc/quote-snapshot says
+                      success:false (pusher split-brain; observed live
+                      with UAL on 2026-05-22)
 
-Env gates:
-  QUOTE_RESUB_WATCHDOG_ENABLED   true|false       default true
-  QUOTE_RESUB_WATCHDOG_INTERVAL  seconds (float)  default 60
-  QUOTE_RESUB_WATCHDOG_ESCALATE_AFTER  int        default 3
+Both → unsub+resub force a fresh reqMktData. After N attempts → write
+quote_resub_watchdog_events row severity=high.
+
+Env:
+  QUOTE_RESUB_WATCHDOG_ENABLED         true|false  default true
+  QUOTE_RESUB_WATCHDOG_INTERVAL        seconds     default 60
+  QUOTE_RESUB_WATCHDOG_ESCALATE_AFTER  int         default 3
 """
 import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 def _enabled() -> bool:
-    return os.environ.get(
-        "QUOTE_RESUB_WATCHDOG_ENABLED", "true"
-    ).lower() == "true"
+    return os.environ.get("QUOTE_RESUB_WATCHDOG_ENABLED", "true").lower() == "true"
 
 
 def _interval() -> float:
@@ -60,10 +48,7 @@ def _escalate_after() -> int:
 
 
 class _State:
-    """Per-symbol watchdog state — mutable across loop ticks."""
-
     def __init__(self) -> None:
-        # symbol -> {"attempts": int, "first_seen_ms": int, "last_action_ms": int}
         self._attempts: Dict[str, Dict[str, Any]] = {}
 
     def note_missing(self, symbol: str) -> Dict[str, Any]:
@@ -84,12 +69,29 @@ class _State:
         return dict(self._attempts)
 
 
+def _open_trade_symbols(bot: Any) -> Set[str]:
+    out: Set[str] = set()
+    open_trades = getattr(bot, "_open_trades", None)
+    if not open_trades:
+        return out
+    try:
+        for _tid, trade in list(open_trades.items()):
+            sym = getattr(trade, "symbol", None)
+            if sym:
+                out.add(str(sym).upper().strip())
+    except Exception as e:
+        logger.debug(
+            "[v19.34.82] _open_trade_symbols err: %s: %s",
+            type(e).__name__, e,
+        )
+    return out
+
+
 async def _record_escalation_event(
     db: Any, symbol: str, attempts: int, *,
     pusher_subs_count: Optional[int] = None,
+    divergence_kind: str = "missing_from_subs",
 ) -> None:
-    """Write a state_integrity_events row so the V5 UI / DriftGuardPill
-    can surface the escalation."""
     if db is None:
         return
     try:
@@ -100,53 +102,52 @@ async def _record_escalation_event(
                 "attempts": attempts,
                 "severity": "high",
                 "pusher_subs_count": pusher_subs_count,
+                "divergence_kind": divergence_kind,
+                "version": "v19.34.82",
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         )
     except Exception as e:
         logger.debug(
-            "[v19.34.80 quote-resub-watchdog] failed to write event "
-            "for %s: %s: %s",
+            "[v19.34.82] event write failed %s: %s: %s",
             symbol, type(e).__name__, e,
         )
 
 
-async def _tick(state: _State, position_manager: Any, db: Any,
-                open_position_symbols: Optional[set] = None) -> Dict[str, Any]:
-    """One watchdog tick. Returns a summary dict for tests + telemetry."""
+async def _force_resub(rpc: Any, sym: str) -> bool:
+    try:
+        await asyncio.to_thread(rpc.unsubscribe_symbols, {sym})
+        await asyncio.sleep(0.5)
+        await asyncio.to_thread(rpc.subscribe_symbols, {sym})
+        return True
+    except Exception as e:
+        logger.warning(
+            "[v19.34.82] unsub+resub %s failed: %s: %s",
+            sym, type(e).__name__, e,
+        )
+        return False
+
+
+async def _tick(state: _State, bot: Any, db: Any) -> Dict[str, Any]:
     summary: Dict[str, Any] = {
-        "checked": 0,
-        "missing": 0,
-        "resubscribed": 0,
-        "escalated": 0,
-        "cleared": 0,
-        "pinned": 0,
+        "checked": 0, "missing_from_subs": 0, "snapshot_failed": 0,
+        "resubscribed": 0, "escalated": 0, "cleared": 0,
     }
+    tracked = _open_trade_symbols(bot)
+    summary["checked"] = len(tracked)
 
-    # v19.34.227 — held positions to PIN into the pusher quote universe so an
-    # open name can never go mark-less (separate from the stale set, which only
-    # catches names that still have a — stale — quote).
-    open_syms = {str(s).upper().strip() for s in (open_position_symbols or set()) if s}
-
-    # Pull the current stale set from position_manager.
-    stale_set = getattr(position_manager, "_stale_resub_set", None)
-    tracked = sorted({str(s).upper().strip() for s in (stale_set or set()) if s})
-
-    # Nothing to verify AND nothing to pin → clear recovered attempts + exit.
-    if not tracked and not open_syms:
+    if not tracked:
         for sym in list(state.snapshot().keys()):
             state.clear(sym)
             summary["cleared"] += 1
         return summary
-
-    summary["checked"] = len(tracked)
 
     try:
         from services.ib_pusher_rpc import get_pusher_rpc_client
         rpc = get_pusher_rpc_client()
     except Exception as e:
         logger.debug(
-            "[v19.34.80 quote-resub-watchdog] pusher RPC unavailable: %s: %s",
+            "[v19.34.82] rpc unavailable: %s: %s",
             type(e).__name__, e,
         )
         return summary
@@ -154,138 +155,75 @@ async def _tick(state: _State, position_manager: Any, db: Any,
     if not rpc.is_configured():
         return summary
 
-    # Force-refresh so we don't read a 30s-stale subscription cache.
     pusher_subs = await asyncio.to_thread(rpc.subscriptions, True)
     if pusher_subs is None:
-        # Pusher unreachable — don't penalize symbols, just skip tick.
         return summary
 
     pusher_subs_count = len(pusher_subs)
-    missing = [sym for sym in tracked if sym not in pusher_subs]
+    missing_from_subs = [s for s in tracked if s not in pusher_subs]
 
-    for sym in missing:
-        summary["missing"] += 1
+    snapshot_failed = []
+    for sym in tracked:
+        if sym in missing_from_subs:
+            continue
+        try:
+            snap = await asyncio.to_thread(rpc.quote_snapshot, sym)
+        except Exception:
+            snap = None
+        if isinstance(snap, dict) and snap.get("success") is False:
+            snapshot_failed.append(sym)
+
+    to_force = list({*missing_from_subs, *snapshot_failed})
+    summary["missing_from_subs"] = len(missing_from_subs)
+    summary["snapshot_failed"] = len(snapshot_failed)
+
+    for sym in to_force:
         rec = state.note_missing(sym)
         attempts = rec["attempts"]
-
+        kind = "missing_from_subs" if sym in missing_from_subs else "snapshot_failed"
         logger.warning(
-            "[v19.34.80 quote-resub-watchdog] %s NOT subscribed at "
-            "pusher despite manage-loop request (attempt %d). "
+            "[v19.34.82] %s divergence=%s (attempt %d). "
             "pusher_subs_count=%d. Forcing unsub+resub.",
-            sym, attempts, pusher_subs_count,
+            sym, kind, attempts, pusher_subs_count,
         )
-
-        # Force a fresh reqMktData cycle: unsubscribe (clears any
-        # half-registered IB ticker handle) then subscribe again.
-        try:
-            await asyncio.to_thread(rpc.unsubscribe_symbols, {sym})
-            await asyncio.sleep(0.5)  # let pusher process the unsub
-            await asyncio.to_thread(rpc.subscribe_symbols, {sym})
+        if await _force_resub(rpc, sym):
             summary["resubscribed"] += 1
-        except Exception as e:
-            logger.warning(
-                "[v19.34.80 quote-resub-watchdog] unsub+resub for %s "
-                "failed: %s: %s",
-                sym, type(e).__name__, e,
-            )
-
         if attempts >= _escalate_after():
             summary["escalated"] += 1
             await _record_escalation_event(
                 db, sym, attempts,
                 pusher_subs_count=pusher_subs_count,
+                divergence_kind=kind,
             )
 
-    # ── v19.34.227 — proactive PIN of held positions ──────────────────
-    # Any open-position symbol missing from the pusher's live quote set is
-    # subscribed NOW so the position always has a live mark (also needed for
-    # local stop checks). This catches names that fell entirely out of the
-    # quote universe — which the stale set above can't, since a mark-less
-    # position has no (stale) quote to flag.
-    held_missing = [s for s in sorted(open_syms) if s not in pusher_subs]
-    if held_missing:
-        logger.warning(
-            "[v19.34.227 quote-resub-watchdog] PINNING %d held position(s) "
-            "missing from the pusher quote universe: %s%s",
-            len(held_missing), held_missing[:8],
-            "…" if len(held_missing) > 8 else "",
-        )
-        try:
-            await asyncio.to_thread(rpc.subscribe_symbols, set(held_missing))
-            summary["pinned"] = len(held_missing)
-        except Exception as e:
-            logger.warning(
-                "[v19.34.227 quote-resub-watchdog] pin subscribe failed: "
-                "%s: %s", type(e).__name__, e,
-            )
-
-    # Any symbol that was missing-tracked but is now confirmed in the
-    # live subscription set has effectively recovered — clear its state
-    # so future drops start the attempt counter from 0.
+    recovered = {s for s in tracked if s in pusher_subs and s not in snapshot_failed}
     for sym in list(state.snapshot().keys()):
-        if sym in pusher_subs and sym in tracked:
+        if sym in recovered:
             state.clear(sym)
             summary["cleared"] += 1
-
     return summary
 
 
 async def quote_resub_watchdog_loop(
     bot: Any, *, _state: Optional[_State] = None,
 ) -> None:
-    """Main loop. Spawned from TradingBotService.start()."""
     if not _enabled():
-        logger.warning(
-            "[v19.34.80 quote-resub-watchdog] DISABLED via env "
-            "(QUOTE_RESUB_WATCHDOG_ENABLED=false)"
-        )
+        logger.warning("[v19.34.82] DISABLED via env")
         return
-
     interval = _interval()
     logger.warning(
-        "[v19.34.80 quote-resub-watchdog] ENABLED (interval=%.0fs, "
-        "escalate_after=%d failed cycles)",
+        "[v19.34.82] ENABLED (interval=%.0fs, escalate_after=%d). "
+        "Source: bot._open_trades vs /rpc/subscriptions + /rpc/quote-snapshot.",
         interval, _escalate_after(),
     )
-
     state = _state if _state is not None else _State()
-
-    # Wait one full interval before first sweep — let the bot's startup
-    # restore + first manage-loop tick complete so the stale set is
-    # meaningful.
     await asyncio.sleep(interval)
-
     while getattr(bot, "_running", True):
         try:
-            # v19.34.227 — the bot stores these as `_position_manager` / `_db`
-            # (the non-underscore lookups returned None, so `_tick` NEVER ran
-            # and the stale-mark watchdog was a silent no-op in production).
-            position_manager = (
-                getattr(bot, "_position_manager", None)
-                or getattr(bot, "position_manager", None)
-            )
-            db = getattr(bot, "_db", None)
-            if db is None:
-                db = getattr(bot, "db", None)
-            # v19.34.227 — proactively PIN every held position into the pusher
-            # quote universe so an open name never goes mark-less (root cause of
-            # the CRM current_price=0 → fake kill-switch trip).
-            open_syms = set()
-            try:
-                for _t in (getattr(bot, "_open_trades", {}) or {}).values():
-                    _s = (getattr(_t, "symbol", "") or "").upper().strip()
-                    _rs = abs(float(getattr(_t, "remaining_shares", 0) or 0))
-                    if _s and _rs > 0:
-                        open_syms.add(_s)
-            except Exception:
-                open_syms = set()
-            if position_manager is not None:
-                await _tick(state, position_manager, db,
-                            open_position_symbols=open_syms)
+            db = getattr(bot, "db", None)
+            await _tick(state, bot, db)
         except Exception as e:
-            logger.debug(
-                "[v19.34.80 quote-resub-watchdog] tick error "
-                "(non-fatal): %s: %s",
-                type(e).__name__, e,
-            )
+            logger.debug("[v19.34.82] tick err: %s: %s", type(e).__name__, e)
         await asyncio.sleep(interval)
+
+

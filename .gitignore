@@ -3538,21 +3538,10 @@ credentials.json
 *.pem
 *.key
 .credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
+*.bak.v19_34_28_*
+v19_34_*_chunk*.py
+v19_*_chunk*.py
+__pycache__/
+scripts/watch_*.sh
+*.bak.v*
+*.bak_*

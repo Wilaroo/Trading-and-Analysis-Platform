@@ -35,6 +35,23 @@ import argparse
 import os
 import sys
 from collections import Counter
+from pathlib import Path as _Path
+
+# v19.34.89 — manual .env loader (mirrors setup_retro.py; no python-dotenv dep)
+def _load_env_into_os():
+    env_file = _Path(__file__).resolve().parent.parent / '.env'
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        k, _, v = line.partition('=')
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k and k not in os.environ:
+            os.environ[k] = v
+_load_env_into_os()
 
 try:
     from pymongo import MongoClient

@@ -1,4 +1,4 @@
-"""v19.34.41 — Rejection Analytics + Scanner Quality Score test suite."""
+"""v19.34.41 -- Rejection Analytics + Scanner Quality Score test suite."""
 import os
 import sys
 import unittest
@@ -105,7 +105,7 @@ class TestAggregation(unittest.TestCase):
         self.assertEqual(out["by_reason"], [])
 
     def test_mixed_scores_correctly(self):
-        """8 filled + 2 stale_alert (scanner_quality) = 8/(8+2) = 0.80 → good"""
+        """8 filled + 2 stale_alert (scanner_quality) = 8/(8+2) = 0.80 -> good"""
         from routers.rejection_analytics_router import _aggregate_bot_trades, _aggregate_trade_drops, _compose_response
         rows = []
         for i in range(8):
@@ -126,7 +126,6 @@ class TestAggregation(unittest.TestCase):
         self.assertAlmostEqual(out["scanner_quality_score"], 0.80, places=2)
         self.assertEqual(out["score_bucket"], "good")
         self.assertEqual(out["by_category"]["scanner_quality"], 2)
-        # Reason breakdown
         reasons = {r["reason_key"]: r["count"] for r in out["by_reason"]}
         self.assertEqual(reasons.get("stale_alert"), 2)
 
@@ -146,10 +145,8 @@ class TestAggregation(unittest.TestCase):
         bot = _aggregate_bot_trades(db, start, end)
         drops = _aggregate_trade_drops(db, start, end)
         out = _compose_response("2026-02-17", bot, drops)
-        # 10 filled, 0 scanner-quality rejections → score = 10/(10+0) = 1.0
         self.assertEqual(out["scanner_quality_score"], 1.0)
         self.assertEqual(out["score_bucket"], "excellent")
-        # But broker rejections ARE counted in totals
         self.assertEqual(out["totals"]["rejected"], 2)
         self.assertEqual(out["by_category"]["broker"], 2)
 
@@ -164,7 +161,6 @@ class TestAggregation(unittest.TestCase):
         start = datetime(2026, 2, 17, tzinfo=timezone.utc)
         end = start + timedelta(days=1)
         bot = _aggregate_bot_trades(db, start, end)
-        # bot_trades aggregator caps at 20 internally
         self.assertEqual(len(bot["recent_rejections"]), 20)
 
     def test_by_setup_breakdown(self):
@@ -191,7 +187,6 @@ class TestEndpointShape(unittest.TestCase):
     def test_endpoint_returns_complete_shape_with_no_db(self):
         """When db is None, endpoint returns a degraded-but-complete payload."""
         from routers import rejection_analytics_router as mod
-        # Patch _get_db to return None
         orig = mod._get_db
         try:
             mod._get_db = lambda: None
@@ -200,7 +195,6 @@ class TestEndpointShape(unittest.TestCase):
             mod._get_db = orig
         self.assertFalse(out["success"])
         self.assertEqual(out["error"], "db_unavailable")
-        # Shape contract preserved
         for key in ("trading_date_et", "scanner_quality_score",
                     "scanner_quality_score_pct", "score_bucket",
                     "totals", "by_category", "by_reason",

@@ -29,9 +29,9 @@ We parse only the fields actually consumed downstream:
   eps_growth, roe, high_52w, low_52w, employees, country,
   industry, sector.
 
-Short interest and institutional ownership are NOT in ReportSnapshot — they
-come from `ReportsOwnership` (separate, multi-MB report) or FINRA. Float +
-shares-outstanding ARE here, in `<CoGeneralInfo><SharesOut TotalFloat=...>`.
+Short interest, float shares, and institutional ownership are NOT in
+ReportSnapshot — they come from `ReportsOwnership` (separate report)
+or Finnhub fallback.
 """
 from __future__ import annotations
 
@@ -101,10 +101,8 @@ def parse_report_snapshot(xml_str: Optional[str]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             pass
 
-    # CoGeneralInfo/SharesOut → shares outstanding (element text) + float
-    # (TotalFloat attribute). v19.34.202 — these ARE in ReportSnapshot
-    # (the module-header note below is now outdated for float). Example:
-    #   <SharesOut Date="2026-04-29" TotalFloat="1623871179.0">1630600639.0</SharesOut>
+    # CoGeneralInfo/SharesOut → shares outstanding (text) + float (TotalFloat
+    # attr). v19.34.202 — e.g. <SharesOut TotalFloat="1623871179.0">1630600639.0</SharesOut>
     shares_out = root.find(".//CoGeneralInfo/SharesOut")
     if shares_out is not None:
         txt = (shares_out.text or "").strip()

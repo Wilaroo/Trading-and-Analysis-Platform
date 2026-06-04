@@ -168,9 +168,6 @@ def test_get_recent_drops_filters_by_gate():
 ROOT = Path(__file__).resolve().parents[1]
 TRADING_BOT = (ROOT / "services" / "trading_bot_service.py").read_text()
 TRADE_EXEC = (ROOT / "services" / "trade_execution.py").read_text()
-# v19.34.44 — Stale Alert TTL lives in the evaluator (upstream of the
-# bot/executor), so it has its own breadcrumb site we must scan too.
-OPP_EVAL = (ROOT / "services" / "opportunity_evaluator.py").read_text()
 
 
 def _src_has(haystack: str, snippet: str) -> bool:

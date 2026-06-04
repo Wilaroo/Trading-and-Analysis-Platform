@@ -1,4 +1,4 @@
-"""v19.34.206 — IB ReportsOwnership -> institutional ownership %.
+"""v19.34.206 -- IB ReportsOwnership -> institutional ownership %.
 
 Sums type-2 (13F investment-advisor) holdings, EXCLUDING any single holder
 whose quantity exceeds 50% of shares-outstanding (control-stake / stale

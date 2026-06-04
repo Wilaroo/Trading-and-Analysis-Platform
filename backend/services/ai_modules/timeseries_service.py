@@ -3069,13 +3069,7 @@ class TimeSeriesAIService:
                     ]])
                     
                     # Predict using the setup model directly
-                    # v19.34.X (Feb 2026) — Bug B fix. Raw `xgb.Booster` objects
-                    # (e.g., TREND_CONTINUATION) require a DMatrix; sklearn-style
-                    # wrappers (XGBClassifier, RandomForestClassifier) accept
-                    # ndarray. Before this, every TREND_CONTINUATION inference
-                    # crashed with "Expecting data to be a DMatrix object,
-                    # got: <class 'numpy.ndarray'>" and the setup was silently
-                    # downgraded to the generic fallback.
+                    # v19.34.30 Bug B fix - xgb.Booster requires DMatrix.
                     try:
                         import xgboost as _xgb
                         _is_booster = isinstance(model._model, _xgb.Booster)

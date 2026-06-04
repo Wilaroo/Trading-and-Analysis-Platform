@@ -1550,8 +1550,7 @@ from routers.diagnostics import (  # noqa: E402
     set_db as _set_diagnostics_db,
 )
 app.include_router(diagnostics_router)
-# v19.34.41 (Feb 2026) — Rejection Analytics + Scanner Quality Score panel.
-# Operator visibility into stale-alert/live-price-gate/broker rejection mix.
+# v19.34.41 - Rejection Analytics + Scanner Quality Score panel.
 from routers.rejection_analytics_router import router as rejection_analytics_router  # noqa: E402
 app.include_router(rejection_analytics_router)
 app.include_router(dynamic_risk_router)
@@ -4114,19 +4113,23 @@ async def startup_event():
             await asyncio.sleep(0.5)  # bump heartbeat 2× per second
     asyncio.create_task(_event_loop_monitor(), name="_event_loop_monitor")
 
-    # v19.34.46 — Memory watchdog. Tonight's session caught the backend
-    # SIGKILL'd twice (exit 137 = kernel OOM). The watchdog logs RSS
-    # every 60s, warns at 80%, criticals at 90%, and arms tracemalloc
-    # on first critical to dump top-10 allocators on the second.
+    # v19.34.46 — Memory watchdog (RSS/sys-mem heartbeat, 60s, tracemalloc on critical)
+    # NOTE: Motor/PyMongo Database objects reject bool() — must use `is None`.
     try:
         from services.memory_watchdog import memory_watchdog_loop
-        _wd_db = globals().get("db") or globals().get("_db")
+        _wd_db = globals().get("db")
+        if _wd_db is None:
+            _wd_db = globals().get("_db")
         asyncio.create_task(
             memory_watchdog_loop(db=_wd_db),
             name="_memory_watchdog",
         )
     except Exception as _wd_err:
         print(f"[memory-watchdog] failed to start: {_wd_err}")
+
+    # v19.34.35 — ADV cache health guard (auto-rebuild if corrupted)
+    from services.ib_historical_collector import _adv_cache_startup_guard
+    asyncio.create_task(_adv_cache_startup_guard(), name="_adv_cache_startup_guard")
     
     # Master cache refresh — ONE thread replaces 26+ per cycle
     asyncio.create_task(_streaming_cache_loop())
@@ -5033,10 +5036,10 @@ async def get_script(script_name: str):
 
 @app.get("/api/market-regime/composite")
 async def get_market_regime_composite():
-    """v19.34.167.1 — Surface the SPY/QQQ/IWM composite regime computed
-    by the scanner. Returns the current MarketRegime label plus the
-    per-index breakdown (`agreement`, `divergence_flag`, votes, etc.)
-    that the gating logic uses internally."""
+    """v19.34.167.1 — Surface SPY/QQQ/IWM composite regime computed
+    by the scanner. Returns current MarketRegime label plus per-index
+    breakdown (agreement, divergence_flag, votes, etc.) used internally
+    for setup gating."""
     from services.enhanced_scanner import get_enhanced_scanner
     try:
         scanner = get_enhanced_scanner()

@@ -455,11 +455,6 @@ def get_strategy_mix(n: int = 100):
         from datetime import datetime, timedelta, timezone
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         cutoff_iso = cutoff.isoformat()
-        # v19.34.86 — alert_outcomes writers (enhanced_scanner.py +
-        # pnl_compute.py) stamp `closed_at`, not `timestamp`. Pre-fix
-        # this aggregate matched on a field that never exists, so EVERY
-        # bucket's win-rate/avg-R columns rendered as "—" even with 180+
-        # outcome docs in the collection. Match `closed_at` instead.
         pipeline = [
             {"$match": {"closed_at": {"$gte": cutoff_iso}, "r_multiple": {"$ne": None}}},
             {"$group": {

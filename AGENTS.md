@@ -569,33 +569,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.256 (2026-06-04, Part B backend — `GET /api/tqs/
-  card-detail/{symbol}` serves the PERSISTED TQS breakdown that drove a card +
-  folded context (setup perf, catalyst, position metrics); the drill-down drawer's
-  data contract. paste.rs HW0GQ, deploy pending). Prior chain: v254 TQS context
-  de-compression (per-symbol RS QQQ/SPY/IWM via benchmark_for() + multi-index
-  regime + reweight day 10%→3%; LIVE-VERIFIED context stdev 3.54→5.24), v255
-  direction-aware RS factor wording, v253 context diag + benchmark_for().
-- **Prior**: v19.34.252 (2026-06-04, F2 — catalyst_tag + gap_pct
-  populated at entry: catalyst now stamped on ALL alerts via local
-  news_articles/earnings_calendar Mongo caches (mongo_only, no live-API hang),
-  gap_pct+catalyst persisted through entry_context→trade_outcomes; unblocks the
-  Phase-D edge ranker. paste.rs d7Vfo, deploy pending).
-- **Prior**: v19.34.251 (2026-06-04, Shadow Tracker measurement fix —
-  capture direction/stop/target at log time, direction-aware would_have_pnl, real
-  would_have_r from the stored stop, and was_executed linked to a REAL IB fill via
-  `ShadowTracker.mark_executed()` (trade_execution pre-submit hook). Fixes the fake
-  "18pt gap" / 4,407 `would_have_r==0.00`. +backfill script. BUILT, paste.rs CujQu,
-  deploy+backfill pending operator). Prior chain below.
-- **Prior**: v19.34.233 (2026-06-03, Phase D — Game Plan ranked by
-  realized open-session edge: `gameplan_edge_ranker.py` buckets `trade_outcomes`
-  by setup+catalyst+gap+regime (shrinkage walk) → EV-R blended with TQS, TQS
-  cold-start fallback; +catalyst_tag/gap_pct on TradeOutcome; #edge_rank badge.
-  BUILT, paste.rs deploy pending operator).
-- **Prior**: v19.34.232 (catalyst tags) + v231 (premarket repair+TQS) + v230
-  (TQS pillar de-compress) + v229 (risk-neutral sizing).
-- **Pre-232 pointer**: v19.34.209 (2026-06-01, "Offload synchronous `requests.get` (Finnhub news/earnings/fundamentals, FMP quality) off the asyncio event loop via `asyncio.to_thread` — sync HTTP on the loop was freezing it (wedge watchdog 'EVENT LOOP BLOCKED'), which hung the manual close-all and stalled the pusher/ib_direct heartbeats. 11 call sites across 4 services.")
-- **Prior**: v19.34.208 (apply SMB score without registry config) + v207 (SMB 5-var wired) + v205/v206 (institutional ownership R4).
+- **Current version**: v19.34.80 (2026-05-22, "Bracket-stacking auto-cancel + quote-resub watchdog — first real backend features after the docs-only run")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
