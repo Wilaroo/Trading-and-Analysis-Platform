@@ -35,8 +35,13 @@ TF_TO_BARSIZE = {"1min": "1 min", "5min": "5 mins", "15min": "15 mins",
 
 
 def _load_env():
-    for cand in (Path.cwd() / "backend" / ".env",
-                 Path(__file__).resolve().parents[1] / ".env"):
+    cands = [Path.cwd() / "backend" / ".env", Path.cwd() / ".env"]
+    try:
+        cands.append(Path(__file__).resolve().parents[1] / ".env")
+    except NameError:
+        # Running via `curl ... | python3 -` — __file__ is undefined.
+        pass
+    for cand in cands:
         if cand.exists():
             for line in cand.read_text().splitlines():
                 line = line.strip()
