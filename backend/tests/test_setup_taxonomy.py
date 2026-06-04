@@ -171,6 +171,30 @@ class TestAiFeatureFamily:
         assert st.ai_feature_family("first_move_up") == "REVERSAL"
 
 
+class TestExportTaxonomy:
+    def test_structure(self):
+        t = st.export_taxonomy()
+        assert t["version"]
+        assert set(t["strategy_families"]) >= {"continuation", "breakout",
+                                               "reversion", "reversal"}
+        assert "runner" in t["exit_archetypes"] and "target" in t["exit_archetypes"]
+        assert t["setups"], "should enumerate canonical setups"
+
+    def test_per_setup_fields(self):
+        t = st.export_taxonomy()
+        sq = t["setups"]["squeeze"]
+        assert sq["strategy_family"] == "breakout"
+        assert sq["exit_archetype"] == "runner"
+        assert sq["style"] == "intraday"
+        assert sq["ai_feature_family"] == "BREAKOUT"
+
+    def test_vocabulary_section_text(self):
+        text = st.vocabulary_section()
+        assert "STRATEGY FAMILY" in text
+        assert "exit_archetype" in text
+        assert "squeeze" in text
+
+
 class TestM2StyleResolutionFixes:
     """m2: trade_style_classifier now delegates suffix-strip to canonicalize,
     so previously-unknown misses resolve, without regressing explicit entries."""

@@ -1079,6 +1079,17 @@ async def get_setups():
         }
 
 
+@router.get("/taxonomy")
+async def get_taxonomy():
+    """Canonical setup taxonomy — the single machine-readable feed for the
+    frontend (Command Center / journals / tradeStyleMeta) and any client that
+    needs strategy_family / exit_archetype / style / canonical mappings.
+    Sourced entirely from services/setup_taxonomy.py (SSOT) so it can't drift.
+    """
+    from services.setup_taxonomy import export_taxonomy
+    return {"success": True, **export_taxonomy()}
+
+
 @router.get("/alerts")
 async def get_alerts(limit: int = Query(200, ge=1, le=500)):
     """
