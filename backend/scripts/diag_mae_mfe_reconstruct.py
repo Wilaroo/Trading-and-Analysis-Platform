@@ -121,26 +121,30 @@ def _discover_intraday_barsize(db):
     return chosen, tfield
 
 
-def _fetch_bars(db, symbol, bar_size, tfield, start, end):
-    """Bars for symbol in [start, end]. Handles datetime or ISO-string time."""
-    q = {"symbol": symbol.upper(), "bar_size": bar_size}
-    sample = db["ib_historical_data"].find_one({"symbol": symbol.upper(), "bar_size": bar_size})
-    if not sample:
-        return []
-    is_str = isinstance(sample.get(tfield), str)
-    if is_str:
-        q[tfield] = {"$gte": start.isoformat(), "$lte": end.isoformat()}
-    else:
-        q[tfield] = {"$gte": start, "$lte": end}
+def _fetch_bars(db, symbol, bar_size, tfield, start, end, daily=False):
+    """Bars for symbol in absolute-time [start, end].
+
+    The `date` field is an ISO string with INCONSISTENT timezones across
+    rows (some `-04:00` ET, some `+00:00` UTC), so a string range query is
+    invalid. We bound volume with a tz-agnostic YYYY-MM-DD prefix range,
+    then parse each bar to absolute UTC and filter precisely in Python.
+    """
+    pad_lo = (start.date() - timedelta(days=1)).isoformat()
+    pad_hi = (end.date() + timedelta(days=1)).isoformat()
+    q = {"symbol": symbol.upper(), "bar_size": bar_size,
+         tfield: {"$gte": pad_lo, "$lte": pad_hi + "T99"}}
     cur = db["ib_historical_data"].find(
         q, {"_id": 0, tfield: 1, "high": 1, "low": 1, "close": 1, "open": 1}
     ).sort(tfield, 1)
+    # for daily bars, include the entry-day bar (its timestamp is midnight,
+    # which is < the intraday entry time) → floor the lower bound to the day.
+    lo = datetime(start.year, start.month, start.day, tzinfo=timezone.utc) if daily else start
     out = []
     for b in cur:
-        hi, lo = _num(b.get("high")), _num(b.get("low"))
         bt = _dt(b.get(tfield))
-        if hi is not None and lo is not None and bt is not None:
-            out.append((bt, hi, lo))
+        hi, low = _num(b.get("high")), _num(b.get("low"))
+        if bt is not None and hi is not None and low is not None and lo <= bt <= end:
+            out.append((bt, hi, low))
     return out
 
 
@@ -265,13 +269,13 @@ def main():
         # managed-window end + bar source by style
         if style in INTRADAY_STYLES or style == "unknown":
             hz_end = min(ets + timedelta(minutes=STYLE_HORIZON_MIN.get(style, 390)),
-                         ets.replace(hour=21, minute=0, second=0, microsecond=0))  # ~EOD UTC
-            bs, tf = bar_size, tfield
+                         ets.replace(hour=20, minute=0, second=0, microsecond=0))  # RTH close (EDT)
+            bs, tf, daily = bar_size, tfield, False
         else:
             hz_end = ets + timedelta(days=STYLE_HORIZON_DAYS.get(style, 15))
-            bs, tf = "1 day", "date"
+            bs, tf, daily = "1 day", "date", True
         win_end = max(cts, hz_end)
-        bars = _fetch_bars(db, t["symbol"], bs, tf, ets, win_end)
+        bars = _fetch_bars(db, t["symbol"], bs, tf, ets, win_end, daily=daily)
         if not bars:
             no_bars += 1; continue
         realized_bars = [b for b in bars if b[0] <= cts]
