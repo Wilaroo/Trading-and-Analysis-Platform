@@ -26,11 +26,19 @@ import { ChartFloatingPriceLabel } from './ChartFloatingPriceLabel';
 import { useChartTailWs } from '../../../hooks/useChartTailWs';
 
 // Supported timeframes. Key = label shown in UI, Value = what the backend API expects.
+// v19.34.265 (2026-06-04) — deepened default lookbacks. The
+// diag_chart_perf_depth probe confirmed ib_historical_data stores
+// 86-107d of 1min and 600d+ of every coarser TF, and the backend
+// serves the full target depth cold in 130-521ms. The old shallow
+// values (1/5/10/30d) were the sole reason charts felt thin AND slow
+// to populate — they forced repeated scroll-triggered lazy-load
+// doublings instead of one cheap up-front fetch. Operator targets:
+// 1min=7d, 5min=14d, 15min=30d, 1hour=60d, daily=1y.
 const TIMEFRAMES = [
-  { label: '1m',  value: '1min',  daysBack: 1 },
-  { label: '5m',  value: '5min',  daysBack: 5 },
-  { label: '15m', value: '15min', daysBack: 10 },
-  { label: '1h',  value: '1hour', daysBack: 30 },
+  { label: '1m',  value: '1min',  daysBack: 7 },
+  { label: '5m',  value: '5min',  daysBack: 14 },
+  { label: '15m', value: '15min', daysBack: 30 },
+  { label: '1h',  value: '1hour', daysBack: 60 },
   { label: '1d',  value: '1day',  daysBack: 365 },
 ];
 

@@ -141,8 +141,22 @@ def _compute_volume_profile(bars: List[Dict[str, Any]], num_bins: int) -> Dict[s
     bars are insufficient or all-zero-volume."""
     if not bars:
         return {"poc_price": None, "hvn_prices": []}
-    lo = min(float(b["low"])  for b in bars if b.get("low")  is not None)
-    hi = max(float(b["high"]) for b in bars if b.get("high") is not None)
+    # v19.34.265 — transient bad-tick guard. A single corrupt IB print
+    # (e.g. a $36 tick on a $260 stock) blows raw min(low)/max(high) out,
+    # collapsing bin_size so every real bar's volume lands in one or two
+    # bins → a garbage POC for minutes. Clip lo/hi to a band around the
+    # MEDIAN close (robust to one outlier) before binning. Each bar's
+    # contribution is already clamped to [lo, hi] by the max/min below, so
+    # one bad bar's volume just spreads thinly and never moves the POC.
+    _closes = sorted(float(b["close"]) for b in bars if b.get("close") is not None)
+    _ref = _closes[len(_closes) // 2] if _closes else None
+    raw_lo = min(float(b["low"])  for b in bars if b.get("low")  is not None)
+    raw_hi = max(float(b["high"]) for b in bars if b.get("high") is not None)
+    if _ref and _ref > 0:
+        lo = max(raw_lo, _ref * 0.4)
+        hi = min(raw_hi, _ref * 2.5)
+    else:
+        lo, hi = raw_lo, raw_hi
     if not (hi > lo):
         return {"poc_price": None, "hvn_prices": []}
 
