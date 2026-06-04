@@ -30,6 +30,7 @@ import { DeepFeedV5 } from './v5/DeepFeedV5';
 import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
 import { EodCountdownBannerV5 } from './v5/EodCountdownBannerV5';
 import { HealthChip } from './v5/HealthChip';
+import { BracketsPathPill } from './v5/BracketsPathPill';  // v19.34.28 L4b
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
@@ -335,17 +336,10 @@ export const SentComV5View = ({
   const buyingPower = status?.account_buying_power ?? status?.buying_power ?? context?.account_buying_power;
   const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
-  // v19.34.59 (2026-05-20) — Prefer IB's authoritative session
+  // v19.34.59 (2026-05-20) — Prefer IB\'s authoritative session
   // RealizedPnL / UnrealizedPnL when /api/trading-bot/status surfaces
-  // them (it now does, post v19.34.59 backend patch). Pre-fix the
-  // bot's `totalRealizedPnl` was computed only from `bot_trades`
-  // closes the bot itself fired/reconciled — which on 2026-05-20
-  // showed +$0 on the HUD while IB had realized -$8,392 (the bot's
-  // exit-tracker missed OCA/scale-out/manual-TWS closes). IB's
-  // RealizedPnL is the single source of truth and matches what the
-  // operator sees in TWS. Falls back to the bot-derived number when
-  // the field is absent (pre-patch backend, or pusher account snapshot
-  // not seeded yet).
+  // them. Pre-fix the bot\'s `totalRealizedPnl` was bot_trades-only
+  // and undercounted by ~$7k. Falls back to bot-derived when absent.
   const totalRealizedPnlEff =
     (status?.account_realized_pnl != null) ? Number(status.account_realized_pnl) : totalRealizedPnl;
   const totalUnrealizedPnlEff =
@@ -540,6 +534,7 @@ export const SentComV5View = ({
               <span className="opacity-60">search</span>
             </button>
             <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
+            <BracketsPathPill />
             <ConnectivityCheck />
             <ScannerCoverageAuditPanel />
             {/* v19.34.13 (2026-05-06) — `<PusherHealthChip />` removed
