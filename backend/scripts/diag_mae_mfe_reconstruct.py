@@ -99,7 +99,8 @@ def _dt(v):
     if isinstance(v, datetime):
         return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
     try:
-        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        d = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
     except Exception:
         return None
 
