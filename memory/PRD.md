@@ -36,7 +36,22 @@ short-inverted) + multi-index regime fallback + reweight (day 10%→3%). Live re
 context stdev 3.54→**5.24**, rel_strength spans 2-98. Drill-down factor wording
 made direction-aware (v255).
 ## Status snapshot
-**v19.34.260 — EOD-window orphan FLATTEN-instead-of-ADOPT (2026-06-04, paste.rs 1NhZf, deploy pending).**
+**v19.34.261 — two EOD safety hardenings (2026-06-04, applier paste.rs cp1aV, deploy pending).**
+(#2) EOD RE-SWEEP safety net in `position_manager.check_eod_close`: the
+`_eod_close_executed_today` gate no longer permanently short-circuits the main
+close pass — if residual `close_at_eod` positions are still open before the bell
+(late orphan adoption / late parent fill), it falls through and re-runs the close
+pass (throttled 30s). (#3) `orphan_gtc_reconciler.classify_intraday_entries_for_
+eod_sweep` now decides eligibility from the trade-style POLICY (`is_eod_sweep_
+eligible`) instead of the stale stored `close_at_eod` attribute (79 mismatches
+found). VERIFIED: bracket TIF is ALREADY policy-derived (held→GTC protected,
+intraday→DAY), and the GTC orphan sweep only cancels UNMATCHED legs — so the
+mismatch was NOT a naked-overnight risk at entry; only the pending-entry sweep
+read the stale flag (now fixed). Diag `diag_close_at_eod_mismatch_v19_34_261.py`
+(report-only; --apply backfills open trades). Tests `test_v19_34_261_*` (5) +
+`test_v19_34_260_*` (6) all green. Backend-only.
+
+**v19.34.260 — EOD-window orphan FLATTEN-instead-of-ADOPT (2026-06-04, DEPLOYED & VALIDATED, commit e366c489).**
 RCA of the 2026-06-03 "EOD didn't close my positions" report: EOD auto-close
 worked (19 closed, 0 failed, verified flat at 15:45:16), but ~30s later the
 orphan reconciler ADOPTED 13 IB positions the bot had REJECT-ed, as fresh

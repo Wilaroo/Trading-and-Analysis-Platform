@@ -374,7 +374,13 @@ def classify_intraday_entries_for_eod_sweep(
 
         # Skip if the matched trade is NOT flagged for EOD close
         # (swing / position trades stay alive overnight).
-        if matched.get("close_at_eod") is not True:
+        # v19.34.261 — resolve eligibility from the trade-style POLICY
+        # (single source of truth), NOT the per-trade `close_at_eod`
+        # attribute, which can be stale vs policy (79 stored-vs-policy
+        # mismatches found 2026-06-03). is_eod_sweep_eligible(False) ⇒
+        # swing/position/investment — leave its pending orders alive.
+        from services.order_policy_registry import is_eod_sweep_eligible
+        if not is_eod_sweep_eligible(matched):
             continue
 
         # Also skip if the matched trade has already filled (status

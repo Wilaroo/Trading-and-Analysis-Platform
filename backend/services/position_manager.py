@@ -1341,7 +1341,38 @@ class PositionManager:
         # circuit late-arriving-ghost recovery (operator choice 2B).
         # Skip the main intraday close pass if already executed today.
         if bot._eod_close_executed_today:
-            return
+            # ── v19.34.261 — EOD re-sweep safety net ──────────────────
+            # The main close pass already ran today, but a `close_at_eod`
+            # position can ARRIVE AFTER it (late orphan adoption, a bracket
+            # parent that fills post-pass, a manual add). Without this, the
+            # flag permanently short-circuits the close pass and the new
+            # position carries overnight (the 2026-06-03 class of bug).
+            # If residual close_at_eod trades are still open and we're still
+            # before the bell, fall THROUGH to re-run the close pass on them
+            # (throttled so in-flight closes aren't double-fired).
+            try:
+                from services.order_policy_registry import should_close_at_eod as _scae
+                _residual = [t for t in bot._open_trades.values() if _scae(t)]
+            except Exception:
+                _residual = []
+            _last_rs = getattr(bot, "_eod_resweep_last_ts", 0.0)
+            _now_ts = time.time()
+            if (
+                _residual
+                and now_et.hour < market_close_hour
+                and (_now_ts - _last_rs) >= 30.0
+            ):
+                bot._eod_resweep_last_ts = _now_ts
+                logger.critical(
+                    "[v19.34.261 EOD-RESWEEP] %d close_at_eod position(s) still "
+                    "OPEN after the main EOD pass already ran today (%s) — "
+                    "re-running close pass on: %s",
+                    len(_residual), today_str,
+                    [getattr(t, "symbol", "?") for t in _residual],
+                )
+                # fall through (do NOT return) to the main close pass below.
+            else:
+                return
 
         # P0 #4 — past market close with positions still open is an EMERGENCY.
         # Surface loudly via log + WS notify; do NOT silently skip.
