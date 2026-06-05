@@ -23738,3 +23738,21 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     vs HEAD+v288..v291. Verified live (preview): registered_setup_count=39, serves clean.
   - PURPOSE: confirm per-setup whether 0% win-rate is "no data" (fixable -> grace/neutral)
     vs "genuinely weak" (correctly filtered), to scope the v292 win-rate trust FIX.
+
+### v19.34.292 Part 1 — win-rate/EV DATA-HONESTY stamp (zero execution change)
+  - enhanced_scanner.py: new _stamp_strategy_metrics(alert) — stamps strategy_win_rate /
+    strategy_ev_r / strategy_profit_factor from _strategy_stats using the intraday grace
+    logic (registered + <grace_min -> floor baseline; >= -> real rate), lazy-registering
+    unseen setups so "no data" reads as GRACE not a false 0%. Called at the TOP of
+    _process_new_alert, guarded by `strategy_win_rate <= 0` so it ONLY fills alerts the
+    daily/positional/premarket paths left at 0.0. Runs AFTER auto_execute_eligible is
+    already decided upstream (intraday path computes it at L3579 before _process_new_alert)
+    => what auto-trades is UNCHANGED; only the persisted signal + ML features become honest.
+    Guard skips already-stamped intraday alerts incl. trend_continuation_short's floor grant.
+  - test_stamp_strategy_metrics_v292.py (6 cases incl. real LiveAlert to_dict persistence).
+  - Applier stacks on v287: paste.rs DAwxe (sha 105bdd75), idempotent, py_compile OK,
+    byte-identical vs HEAD(v287)+v292. Backend hot-reload healthy.
+  - WHY: audit showed daily-path setups (daily_squeeze, accumulation_entry, power_trend_stack)
+    persist 0.0 despite having real stats — the persisted signal was lying. Part 1 fixes the
+    honesty leak. Parts 2 (EV-aware eligibility) + 3 (quarantine capital-destroyers like
+    vwap_fade EV -3.98) DEFERRED pending operator decision after reviewing post-Part-1 data.

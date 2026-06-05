@@ -7919,9 +7919,40 @@ class EnhancedBackgroundScanner:
                 f"SMB 5-var compute failed for {getattr(alert, 'symbol', '?')}: {e}")
             return None
 
+    def _stamp_strategy_metrics(self, alert):
+        """v19.34.292 Part 1 — DATA-HONESTY. Stamp strategy_win_rate / EV(R) /
+        profit_factor from _strategy_stats onto an alert, mirroring the intraday
+        path's grace logic (registered + <grace_min graded outcomes -> floor
+        baseline; >= -> real rate). Lazy-registers unseen setups so 'no data' reads
+        as the cold-start GRACE baseline instead of a misleading 0%. Pure data
+        honesty — never touches auto_execute_eligible. Never raises."""
+        try:
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            if not base:
+                return
+            stats = self._strategy_stats.get(base)
+            if stats is None:
+                stats = self._strategy_stats[base] = StrategyStats(setup_type=base)
+            if int(getattr(stats, "alerts_triggered", 0) or 0) < self._win_rate_grace_min_trades:
+                alert.strategy_win_rate = self._auto_execute_min_win_rate
+            else:
+                alert.strategy_win_rate = float(getattr(stats, "win_rate", 0.0) or 0.0)
+            alert.strategy_profit_factor = float(getattr(stats, "profit_factor", 0.0) or 0.0)
+            alert.strategy_ev_r = float(getattr(stats, "expected_value_r", 0.0) or 0.0)
+        except Exception:
+            pass
+
     async def _process_new_alert(self, alert: LiveAlert):
         """Process a new alert — enforces per-symbol dedup (max 1 active per symbol)"""
-        # Check for duplicate: same symbol + same setup_type
+        # v19.34.292 Part 1 — fill strategy_win_rate / EV / profit_factor for alerts
+        # that arrived with 0.0 (the daily/positional + premarket paths never stamped
+        # them, persisting a misleading 0%). This runs AFTER auto_execute_eligible is
+        # already decided upstream, so what auto-trades is UNCHANGED — it only makes the
+        # persisted signal + ML features honest. The <=0 guard skips already-stamped
+        # intraday alerts (incl. trend_continuation_short's floor grant).
+        if float(getattr(alert, "strategy_win_rate", 0.0) or 0.0) <= 0.0:
+            self._stamp_strategy_metrics(alert)
         for existing in self._live_alerts.values():
             if (existing.symbol == alert.symbol and 
                 existing.setup_type == alert.setup_type and
