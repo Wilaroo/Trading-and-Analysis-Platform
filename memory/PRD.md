@@ -447,3 +447,33 @@ Console's "Tighten all wide-stop scalps" batch action.
 - Open (m9 validation only): live market-hours run of `probe_bracket_reconcile.py --base http://localhost:8001` against open positions to confirm bracket attach+reconcile on the real IB path.
 - Deferred cosmetic (fold into next deploy): probe CLI "no live DB" note (already fixed in container, not yet shipped).
 - Next P1 UI: EV Leaderboard on Mission Control; Bot-Vitals header; MC sticky per-symbol search/filter across 5 lanes; Gameplan prioritization boost.
+
+---
+## ML Roadmap — decision logged 2026-06-05 (per-setup / realized-data models)
+
+DECISION: Do NOT build per-raw-setup PRIMARY models. Family-keyed price-window
+primaries (triple-barrier on ib_historical_data) pool statistical power and
+generalize better; raw setups don't add samples to them. Setup nuance already
+lives in per-family feature extractors + meta-labeler + m5 grade/EV pillars.
+
+PLANNED (sample-gated, P1 when data allows): realized-outcome META-LABELING layer
+— one model trained on bot_trades (entry-context features → realized win/R), with
+`canonical_setup` as a FEATURE (not per-setup heads), gating/sizing the primary
+signals. López de Prado meta-labeling; codebase already scaffolded (triple_barrier_
+labeler, purged_cpcv). Validate with purged CPCV vs the current confidence gate
+before it sizes anything.
+
+GATE: needs ~hundreds of closed trades total, ~50–100 per canonical setup. Probe
+shows tidal_wave=0, fading_bounce=2 (May→) — NOT trainable yet. Interim = the
+statistical layer (learning-loop win-rate/EV, m5 grade, m9 override) — correct for
+small N. Per-setup split only if a high-volume setup shows systematic calibration
+error vs its family head (evidence-gated, one at a time).
+
+NEXT ML STEPS:
+1. (now) plain freshness retrain of family primaries (probe = GO; models ~39d stale).
+2. (todo) extend retrain_readiness.py with a "realized-outcome trainability" budget
+   (total + per-canonical closed-trade counts, label-field completeness, GO/WAIT for
+   meta-labeling).
+3. (later, gated) build the meta-labeling layer when the budget says GO.
+4. (watch) confirm hold_seconds is stamped on bot_trades at close (net_pnl/mfe_r/
+   mae_r already present) — needed as a clean label/feature for the meta-model.
