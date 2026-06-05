@@ -1041,6 +1041,11 @@ class EnhancedBackgroundScanner:
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0  # Skipped due to low volume
         self._symbols_skipped_in_play = 0  # Skipped due to strict in-play gate
+        # v19.34.281 — per-symbol scan-trace + no-data counter. `no_data` was a
+        # SILENT drop pre-v281 (snapshot None -> bare return); now counted +
+        # traced + narrated so missing-bars symbols are visible in symbol-trace.
+        self._symbols_skipped_no_data = 0
+        self._symbol_last_eval = {}
         # Per-detector firing telemetry — counts evaluations vs hits per setup_type
         # so the operator can answer "why is the scanner only emitting RS hits?"
         # without grep-walking logs. Surfaced via /api/scanner/detector-stats.
@@ -1291,6 +1296,21 @@ class EnhancedBackgroundScanner:
             "adv_cache_ttl_seconds": self._adv_cache_ttl,
         }
 
+    def _record_symbol_eval(self, symbol, stage, **fields):
+        """v19.34.281 — record the last scan outcome for one symbol so
+        `/api/scanner/symbol-trace` can answer why a symbol did/didn't alert.
+        One entry per symbol (bounded by universe size). Never raises."""
+        try:
+            entry = {
+                "symbol": str(symbol).upper(),
+                "stage": stage,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            entry.update(fields)
+            self._symbol_last_eval[str(symbol).upper()] = entry
+        except Exception:
+            pass
+
     def get_in_play_health(self, sample: int = 8) -> Dict:
         """Read-only in-play health snapshot (2026-06).
 
@@ -1371,6 +1391,7 @@ class EnhancedBackgroundScanner:
             "scan_count": int(getattr(self, "_scan_count", 0) or 0),
             "symbols_scanned_last": int(getattr(self, "_symbols_scanned_last", 0) or 0),
             "symbols_skipped_rvol": int(getattr(self, "_symbols_skipped_rvol", 0) or 0),
+            "symbols_skipped_no_data": int(getattr(self, "_symbols_skipped_no_data", 0) or 0),  # v19.34.281
             "symbols_skipped_adv": int(getattr(self, "_symbols_skipped_adv", 0) or 0),
             "symbols_skipped_in_play": int(getattr(self, "_symbols_skipped_in_play", 0) or 0),
             "cumulative_evals": int(cum_evals),
@@ -2793,6 +2814,7 @@ class EnhancedBackgroundScanner:
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0
         self._symbols_skipped_in_play = 0
+        self._symbols_skipped_no_data = 0  # v19.34.281
         # Per-cycle detector telemetry resets so the operator sees the latest
         # "why is this scan tick quiet?" signal in /api/scanner/detector-stats.
         # Cumulative totals (`_detector_*_total`) persist across cycles.
@@ -3297,11 +3319,30 @@ class EnhancedBackgroundScanner:
                 symbol, mongo_only=True,
             )
             if not snapshot:
+                # v19.34.281 — was a SILENT drop. Now counted + traced + narrated
+                # so "no intraday bars" symbols stop vanishing without a trace.
+                self._symbols_skipped_no_data += 1
+                self._record_symbol_eval(
+                    symbol, "no_data",
+                    reason="get_technical_snapshot returned None (no/insufficient mongo bars)",
+                )
+                try:
+                    await self._emit_scanner_thought(
+                        symbol=symbol, kind="skip",
+                        text=f"⚪ {symbol} skipped — no intraday bars (snapshot unavailable)",
+                        filter="no_data",
+                    )
+                except Exception:
+                    pass
                 return
             
             # Skip low RVOL stocks (second filter after ADV)
             if snapshot.rvol < self._min_rvol_filter:
                 self._symbols_skipped_rvol += 1
+                self._record_symbol_eval(
+                    symbol, "rvol_skip",
+                    rvol=round(float(snapshot.rvol), 3), min_rvol=self._min_rvol_filter,
+                )
                 # v19.34.26 — surface RVOL gating so the operator sees
                 # which symbols are being filtered out as illiquid (and
                 # can adjust `_min_rvol_filter` if the threshold is
@@ -3316,6 +3357,9 @@ class EnhancedBackgroundScanner:
             # Update caches with fresh data
             now = datetime.now(timezone.utc)
             self._rvol_cache[symbol] = (snapshot.rvol, now)
+            self._record_symbol_eval(  # v19.34.281 — passed ADV+RVOL pre-filters
+                symbol, "scanned", rvol=round(float(snapshot.rvol), 3),
+            )
             # Only update ADV cache from snapshot if we don't already have IB-sourced data
             if symbol not in self._adv_cache:
                 self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
@@ -3336,6 +3380,10 @@ class EnhancedBackgroundScanner:
                 )
                 if ipsvc.is_strict_gate() and not in_play_qual.is_in_play:
                     self._symbols_skipped_in_play += 1
+                    self._record_symbol_eval(  # v19.34.281
+                        symbol, "in_play_skip",
+                        score=getattr(in_play_qual, "score", None),
+                    )
                     # v19.34.26 — narrate the strict-gate rejection so
                     # the operator knows it's the in-play scorer (not
                     # RVOL/ADV) blocking this row.

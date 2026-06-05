@@ -644,6 +644,124 @@ def get_in_play_health(sample: int = 8):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/symbol-trace")
+def get_symbol_trace(symbol: str):
+    """v19.34.281 — per-symbol scan forensics. Answers "did the live scanner
+    see/scan/skip SYMBOL today, and why didn't it alert" in ONE call.
+
+    Joins the live scanner's in-memory state (universe membership, tier,
+    last wave, RVOL cache, last-eval trace) with today's mongo alert/trade
+    counts, then emits a plain-language verdict. Read-only — never mutates.
+    """
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol required")
+
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "symbol": sym, "running": False,
+                "verdict": "scanner not initialized",
+                "message": "Enhanced scanner not initialized"}
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    # 1) Universe membership (ADV intraday floor) + tier.
+    in_universe = None
+    tier = None
+    try:
+        from services.symbol_universe import get_universe
+        in_universe = sym in get_universe(sc.db, tier="intraday")
+    except Exception:
+        pass
+    try:
+        tier = (getattr(sc, "_tier_cache", {}) or {}).get(sym)
+    except Exception:
+        pass
+
+    # 2) Last wave membership (was it dispatched this cycle?).
+    in_last_wave = None
+    try:
+        batch = getattr(sc, "_last_wave_batch", None) or {}
+        wave_syms = set()
+        for k in ("tier1_watchlist", "tier2_high_rvol", "tier3_wave"):
+            wave_syms.update(batch.get(k, []) or [])
+        in_last_wave = sym in wave_syms
+    except Exception:
+        pass
+
+    # 3) RVOL cache state.
+    rvol_val = rvol_age = rvol_fresh = None
+    try:
+        rc = (getattr(sc, "_rvol_cache", {}) or {}).get(sym)
+        if rc:
+            rv, ts = rc
+            rvol_val = round(float(rv), 3)
+            rvol_age = round((now - ts).total_seconds(), 1)
+            rvol_fresh = rvol_age <= float(getattr(sc, "_rvol_cache_ttl", 300) or 300)
+    except Exception:
+        pass
+
+    # 4) Last per-symbol eval trace (v19.34.281).
+    last_eval = None
+    try:
+        last_eval = (getattr(sc, "_symbol_last_eval", {}) or {}).get(sym)
+    except Exception:
+        pass
+
+    # 5) Today's alert/trade counts (created_at is ISO string → lexical >= works).
+    today = now.strftime("%Y-%m-%d")
+    counts = {}
+    try:
+        db = sc.db
+        for c in ("live_alerts", "alerts", "shadow_decisions", "rejection_events", "bot_trades"):
+            counts[c] = int(db[c].count_documents(
+                {"symbol": sym, "created_at": {"$gte": today}}))
+    except Exception:
+        pass
+
+    # 6) Plain-language verdict.
+    verdict = "unknown"
+    if in_universe is False:
+        verdict = (f"NOT IN UNIVERSE — {sym} is below the intraday ADV floor "
+                   f"($50M/day) in symbol_adv_cache")
+    elif last_eval is None:
+        verdict = (f"NOT SCANNED — {sym} is in the universe but the wave never "
+                   f"dispatched it this session (tier rotation / not in wave)")
+    else:
+        st = last_eval.get("stage")
+        if st == "no_data":
+            verdict = (f"DROPPED @ no_data — no intraday mongo bars for {sym} "
+                       f"(turbo-collector gap / cold cache). Setup was invisible.")
+        elif st == "rvol_skip":
+            verdict = (f"DROPPED @ rvol_skip — RVOL {last_eval.get('rvol')} < floor "
+                       f"{last_eval.get('min_rvol')} (liquid by ADV, just not 'in play' today)")
+        elif st == "in_play_skip":
+            verdict = f"DROPPED @ in_play_strict_gate — score {last_eval.get('score')}"
+        elif st == "scanned":
+            if counts.get("live_alerts", 0) > 0:
+                verdict = (f"SCANNED & ALERTED — {counts.get('live_alerts')} alert(s) today; "
+                           "if no trade, check priority/tape/TQS gate or rejection-events")
+            else:
+                verdict = ("SCANNED, NO ALERT — passed ADV+RVOL pre-filters but no detector "
+                           "fired (the setup pattern wasn't present per the bot's read)")
+
+    return {
+        "success": True, "symbol": sym, "running": True,
+        "verdict": verdict,
+        "in_universe": in_universe, "tier": tier, "in_last_wave": in_last_wave,
+        "rvol": {"value": rvol_val, "age_seconds": rvol_age, "fresh": rvol_fresh,
+                 "min_filter": float(getattr(sc, "_min_rvol_filter", 0) or 0)},
+        "last_eval": last_eval,
+        "today_counts": counts,
+        "timestamp": now.isoformat(),
+    }
+
+
 @router.get("/ev-leaderboard")
 def get_ev_leaderboard(days: int = 30):
     """v19.34.274 — Expected-Value leaderboard for Mission Control.

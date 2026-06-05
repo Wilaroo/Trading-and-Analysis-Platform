@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""
+probe_symbol_day.py — one-shot per-symbol scan forensics (v19.34.281).
+
+Answers "did our bot see / scan / skip SYMBOL today, and why didn't it
+trade it" in a single command by reading the live scanner's
+`/api/scanner/symbol-trace` endpoint (in-memory scanner state joined with
+today's mongo alert/trade counts) and printing a verdict chain.
+
+Usage (on the DGX, backend running):
+    .venv/bin/python backend/scripts/probe_symbol_day.py TSLA
+    .venv/bin/python backend/scripts/probe_symbol_day.py NVDA --base http://localhost:8001
+
+Read-only. Touches no order logic and no open positions.
+"""
+import argparse
+import json
+import sys
+import urllib.request
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("symbol", help="ticker, e.g. TSLA")
+    ap.add_argument("--base", default="http://localhost:8001",
+                    help="backend base URL (default http://localhost:8001)")
+    args = ap.parse_args()
+
+    sym = args.symbol.upper()
+    url = f"{args.base}/api/scanner/symbol-trace?symbol={sym}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            data = json.load(r)
+    except Exception as e:
+        print(f"[ERROR] GET {url} failed: {e}")
+        sys.exit(1)
+
+    if not data.get("running", False):
+        print(f"\n{sym}: scanner not running / not initialized — "
+              f"{data.get('message', 'no detail')}\n")
+        return
+
+    rv = data.get("rvol", {}) or {}
+    le = data.get("last_eval")
+    tc = data.get("today_counts", {}) or {}
+
+    print(f"\n=== symbol-trace: {sym} ===")
+    print(f"VERDICT : {data.get('verdict')}")
+    print("-" * 60)
+    print(f"universe: in_universe={data.get('in_universe')}  "
+          f"tier={data.get('tier')}  in_last_wave={data.get('in_last_wave')}")
+    print(f"rvol    : value={rv.get('value')}  age={rv.get('age_seconds')}s  "
+          f"fresh={rv.get('fresh')}  floor={rv.get('min_filter')}")
+    if le:
+        extra = {k: v for k, v in le.items() if k not in ("symbol", "stage", "ts")}
+        print(f"last_eval: stage={le.get('stage')}  at={le.get('ts')}  {extra}")
+    else:
+        print("last_eval: <none> — symbol never entered _scan_symbol_all_setups this session")
+    print(f"today   : live_alerts={tc.get('live_alerts', 0)}  "
+          f"alerts={tc.get('alerts', 0)}  shadow={tc.get('shadow_decisions', 0)}  "
+          f"rejections={tc.get('rejection_events', 0)}  bot_trades={tc.get('bot_trades', 0)}")
+    print()
+
+
+if __name__ == "__main__":
+    main()
