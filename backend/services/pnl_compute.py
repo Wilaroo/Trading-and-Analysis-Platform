@@ -320,6 +320,42 @@ def _base_setup(setup_type: Any) -> str:
     return str(setup_type or "").split("_long")[0].split("_short")[0]
 
 
+# ── v19.34.284 — legacy-row artifact guard ──────────────────────────────────
+# `recompute_strategy_stats_for_setup` filters on the `genuine` flag, but
+# alert_outcomes rows written BEFORE the v240 hygiene tagging predate that field
+# entirely. `d.get("genuine", True)` therefore defaults legacy artifact rows
+# (reconciled_orphan / reconciled_excess_slice / phantom sweeps) to genuine=True,
+# so they leaked back into the EV/win-rate feed and dragged the Smart Filter into
+# over-gating. This re-derives genuineness from setup_type/close_reason using the
+# SAME substrings as trade_outcome_hygiene.classify_close, regardless of whether
+# the row carries a `genuine` flag.
+_ARTIFACT_SETUP_SUBSTR_FALLBACK = ("reconciled", "imported", "phantom")
+_ARTIFACT_REASON_SUBSTR_FALLBACK = (
+    "phantom", "sweep", "purge", "reconcile", "external_flatten", "operator_external",
+)
+
+
+def _is_reconciliation_artifact(setup_type: Any, close_reason: Any) -> bool:
+    """True when a row is an execution/reconciliation artifact (NOT a genuine
+    strategy close) judged purely from its setup_type / close_reason — used to
+    exclude legacy rows that have no `genuine` field. Mirrors the hygiene
+    module's substrings; imports them when available, else uses the fallback."""
+    try:
+        from services.trade_outcome_hygiene import (
+            _ARTIFACT_SETUP_SUBSTRINGS as _ss,
+            _ARTIFACT_REASON_SUBSTRINGS as _rs,
+        )
+    except Exception:
+        _ss, _rs = _ARTIFACT_SETUP_SUBSTR_FALLBACK, _ARTIFACT_REASON_SUBSTR_FALLBACK
+    st = str(setup_type or "").lower()
+    rr = str(close_reason or "").lower()
+    if any(sub in st for sub in _ss):
+        return True
+    if any(sub in rr for sub in _rs):
+        return True
+    return False
+
+
 _WIN_TOK = {"won", "win", "winner", "target", "target_hit", "profit", "tp",
             "take_profit", "profit_target"}
 _LOSS_TOK = {"lost", "loss", "loser", "stopped", "stop", "stop_hit",
@@ -360,11 +396,19 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
         rows = [
             d for d in ao.find(
                 {}, {"_id": 1, "setup_type": 1, "outcome": 1, "r_multiple": 1,
-                     "net_pnl": 1, "pnl": 1, "closed_at": 1, "genuine": 1})
+                     "net_pnl": 1, "pnl": 1, "closed_at": 1, "genuine": 1,
+                     "close_reason": 1})
             if _base_setup(d.get("setup_type")) == base
         ]
         if genuine_only:
-            rows = [d for d in rows if d.get("genuine", True) is not False]
+            # Exclude both flagged artifacts AND legacy rows (no `genuine` field)
+            # that decode to reconciliation/phantom artifacts by setup/reason.
+            rows = [
+                d for d in rows
+                if d.get("genuine", True) is not False
+                and not _is_reconciliation_artifact(
+                    d.get("setup_type"), d.get("close_reason"))
+            ]
         rows.sort(key=lambda d: (str(d.get("closed_at", "")), str(d.get("_id", ""))))
 
         trig = won = lost = 0
