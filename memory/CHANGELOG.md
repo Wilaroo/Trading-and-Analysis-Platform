@@ -1,3 +1,57 @@
+## 2026-06-05 — v19.34.283 / 284 / 285: P0 trifecta (alert→trade leak, stat hygiene, naked-flip guard)
+
+Forked session. Cleared all three open P0s. Per DGX-hardware mandate: NO
+testing_agent — validated via pytest + idempotent-applier round-trip; delivered
+as base64-embedded idempotent appliers on paste.rs (byte-exact, no-op on re-run).
+
+### v19.34.283 — Alert-to-Trade Conversion Leak — SHIPPED + CONFIRMED LIVE on DGX
+- `services/ib_direct_service.py::_place_bracket_two_step`: marketable-limit entry
+  anchored to LIVE price ± `IB_ENTRY_MARKETABLE_SLIP_PCT` (default 0.25%) THROUGH
+  the market instead of the passive alert trigger, so fast/breakout setups fill.
+  Stop + ALL targets translated by (avg_fill − trigger) to preserve original R.
+  Falls back to trigger if live unavailable; staleness band still guards.
+- Applier paste.rs/54BoC. DGX dry-run already showed markers present → confirmed
+  live (all 3 hunks: marketable log + R-preserve log + `_round_to_tick(_entry_px)`).
+
+### v19.34.284 — Stat Hygiene / Win-rate Pollution — SHIPPED + COMMITTED on DGX
+- Root cause: artifacts (reconciled_orphan / reconciled_excess_slice / phantom)
+  ARE tagged genuine=False since v240, but LEGACY alert_outcomes rows pre-v240 lack
+  the field → `recompute` defaulted them to genuine=True → leaked into EV/win-rate.
+- `services/pnl_compute.py`: NEW `_is_reconciliation_artifact()` + hardened
+  `recompute_strategy_stats_for_setup` to exclude legacy artifacts by
+  setup_type/close_reason (same substrings as trade_outcome_hygiene), independent
+  of the genuine flag. 0-PnL scratches stay excluded (neither win nor loss).
+- NEW `scripts/rebuild_strategy_stats_v284.py` (DRY-RUN default; backfill
+  genuine=False on legacy artifacts + recompute all setup families).
+- `tests/test_stat_hygiene_v284.py` — 13 green. Applier paste.rs/TqSH5.
+- DGX --commit run: legacy_artifacts_to_fix=0 (546 already flagged), 38/38 families
+  recomputed, before==after → pollution already contained; v284 is durable defense.
+
+### v19.34.285 — CRM overnight-naked-flip reconciler guard — SHIPPED (pending DGX apply)
+- Root cause: `_naked_position_sweep` reissues a full-size EXIT bracket sized to the
+  bot's `remaining_shares` but only checked IB OPEN ORDERS, never IB POSITION qty.
+  The existing v235 clamp uses `live_position_abs` (magnitude only, DIRECTION-BLIND),
+  so an overnight desync to flat/opposite let the SELL/BUY exit oversell past zero →
+  naked flip.
+- `services/trading_bot_service.py`: NEW module-level `_naked_sweep_flip_decision()`
+  (direction-aware) + signed IB-position fetch (via `_fetch_ib_positions_async`) +
+  per-trade guard in `_naked_position_sweep`. Behavior (operator a/a/a):
+  1a same-side partial → proceed (v235 magnitude clamp shrinks it);
+  2a IB flat/opposite → HARD-HALT, flag `desync_flagged`, emit
+     `naked_sweep_halt_no_ib_position` lifecycle event;
+  3a positions unverifiable this cycle → SKIP reissue, emit
+     `naked_sweep_flip_guard_skip`. Result dict gains flip_guard_* counters.
+- `tests/test_naked_sweep_flip_guard_v285.py` — 12 green. Applier paste.rs/Nweyg.
+
+### Still queued (P1, next)
+- Detector near-miss observability in probe_symbol_day.py / symbol-trace.
+- Bot-Vitals header + EV Leaderboard + sticky per-symbol search on Mission Control.
+- Squeeze intraday-vs-swing split; EV-tracking population.
+- Optional follow-up: wire v285 `desync_flagged` trades into the morning reconciler's
+  flatten path so a halted desync auto-resolves.
+
+---
+
 ## 2026-05-22 — v19.34.79 + v19.34.80 + v19.34.81: First behavioral patches after the docs run
 
 ### Trigger
