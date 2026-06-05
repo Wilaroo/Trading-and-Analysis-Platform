@@ -1470,6 +1470,60 @@ class EnhancedBackgroundScanner:
         """Check if a symbol is blacklisted"""
         return symbol.upper() in self._blacklisted_symbols
     
+    @staticmethod
+    def _auto_exec_fail_reasons(priority_value, tape_confirmation, win_rate, min_win_rate):
+        """v19.34.287 — which auto-execute eligibility conditions an alert FAILED.
+        Pure + unit-testable; mirrors the gate stamped in _scan_symbol_all_setups
+        (priority in {critical,high} AND tape_confirmation AND win_rate >= floor)."""
+        failed = []
+        if str(priority_value).lower() not in ("critical", "high"):
+            failed.append(f"priority={priority_value}<high")
+        if not tape_confirmation:
+            failed.append("tape_unconfirmed")
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+        wr, mn = _num(win_rate), _num(min_win_rate)
+        if wr < mn:
+            failed.append(f"win-rate {wr * 100:.0f}%<{mn * 100:.0f}%")
+        return failed
+
+    def _record_auto_exec_ineligible(self, alert):
+        """v19.34.287 — intake visibility: record WHY a surfaced alert failed the
+        auto-execute eligibility gate, so symbol-trace's gate funnel stops showing
+        'NO gate-drop logged' for alerts that never auto-trade. Deduped per
+        (symbol, setup) / 5 min so it can't flood `trade_drops`. Never raises."""
+        try:
+            import time as _t
+            seen = getattr(self, "_auto_exec_drop_seen", None)
+            if seen is None:
+                seen = self._auto_exec_drop_seen = {}
+            key = (getattr(alert, "symbol", "?"), getattr(alert, "setup_type", "?"))
+            now_t = _t.time()
+            if now_t - seen.get(key, 0.0) < 300:
+                return
+            seen[key] = now_t
+            pr = alert.priority.value if getattr(alert, "priority", None) else "?"
+            wr = float(getattr(alert, "strategy_win_rate", 0.0) or 0.0)
+            mn = float(self._auto_execute_min_win_rate)
+            tape_ok = bool(getattr(alert, "tape_confirmation", False))
+            failed = self._auto_exec_fail_reasons(pr, tape_ok, wr, mn)
+            from services.trade_drop_recorder import record_trade_drop
+            record_trade_drop(
+                getattr(self, "db", None),
+                gate="auto_exec_ineligible",
+                symbol=getattr(alert, "symbol", None),
+                setup_type=getattr(alert, "setup_type", None),
+                direction=getattr(alert, "direction", "long") or "long",
+                reason="auto-exec ineligible: " + (", ".join(failed) or "unknown"),
+                context={"priority": pr, "tape_confirmation": tape_ok,
+                         "win_rate": wr, "min_win_rate": mn, "failed": failed},
+            )
+        except Exception:
+            pass
+
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
         if not self._trading_bot or not self._auto_execute_enabled:
@@ -3578,6 +3632,10 @@ class EnhancedBackgroundScanner:
                 # Auto-execute if eligible
                 if alert.auto_execute_eligible:
                     await self._auto_execute_alert(alert)
+                # v19.34.287 — record WHY an otherwise-surfaced alert won't
+                # auto-trade (intake visibility for symbol-trace's gate funnel).
+                elif self._auto_execute_enabled:
+                    self._record_auto_exec_ineligible(alert)
                 
         except Exception as e:
             logger.warning(f"Error scanning {symbol}: {e}")

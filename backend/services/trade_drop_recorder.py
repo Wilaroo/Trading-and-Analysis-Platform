@@ -99,6 +99,7 @@ KNOWN_GATES = {
     "setup_disabled",           # alert's setup_type not in _enabled_setups
     "watchlist_only_skip",      # alert from a watchlist-only setup (silent)
     "scanner_paused",           # scanner globally paused via guardrails
+    "auto_exec_ineligible",     # v19.34.287 scanner auto-execute eligibility gate (priority/tape/win-rate)
 }
 
 
