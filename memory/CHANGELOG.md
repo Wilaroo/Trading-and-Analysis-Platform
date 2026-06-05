@@ -23695,3 +23695,16 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     eligible_no_drop=0 → gate working as designed, NO silent leak. Blind spot CLOSED.
   - OPEN OBSERVATION: NVDA win-rates 17% / 0% are suspiciously low — likely thin/empty
     alert_outcomes samples defaulting to 0%. Ties to Issue 3 (EV/win-rate trust). Worth a probe.
+
+### v19.34.289 — Universe-wide intake-summary rollup (one-glance bottleneck health)
+  - routers/scanner.py: GET /api/scanner/intake-summary?days=N (default 30, clamp 1..365).
+    Recomputes auto-exec eligibility from PERSISTED live_alerts over the window and returns:
+    totals (eligible/ineligible/pct), `condition_tally` (how many INELIGIBLE alerts tripped
+    EACH condition — win_rate_below / tape_unconfirmed / priority_low / auto_execute_disabled;
+    conditions overlap), `by_reason` (combined-key, symbol counts, top setups), and `by_setup`
+    (worst setups by ineligible count + pct). Read-only.
+  - backend/scripts/intake_summary.py — CLI: prints totals + BOTTLENECK tally + top reasons
+    + worst setups. Usage: .venv/bin/python backend/scripts/intake_summary.py --days 30
+  - test_intake_summary_v289.py (6 cases). Verified live (preview): route serves, set
+    serialization clean. Applier stacks on v288: paste.rs Q9yP8 (sha 9854b17d), idempotent,
+    py_compile OK, byte-identical vs HEAD+v288+v289.

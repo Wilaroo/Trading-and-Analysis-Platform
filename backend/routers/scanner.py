@@ -947,6 +947,103 @@ def get_symbol_trace(symbol: str):
     }
 
 
+@router.get("/intake-summary")
+def get_intake_summary(days: int = 30):
+    """v19.34.289 — universe-wide auto-exec INELIGIBILITY rollup over a window
+    (default 30 days). Recomputes eligibility from PERSISTED `live_alerts` so the
+    operator sees, in one glance, what's bottlenecking the bot market-wide:
+    win-rate floors vs tape confirmation vs priority. Read-only — never writes.
+
+    The `condition_tally` is the headline: how many INELIGIBLE alerts tripped EACH
+    individual condition (an alert can trip several), which directly answers
+    "is the bot mostly blocked on win-rate vs tape vs priority?".
+    """
+    try:
+        from services.enhanced_scanner import (
+            get_enhanced_scanner, EnhancedBackgroundScanner,
+        )
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "running": False,
+                "message": "Enhanced scanner not initialized"}
+
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    days = max(1, min(int(days or 30), 365))
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
+    min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+
+    total = eligible = ineligible = 0
+    by_reason: dict = {}   # combined-reason key -> {count, symbols:set, setups:set}
+    by_setup: dict = {}    # setup -> {total, ineligible}
+    cond = {"win_rate_below": 0, "tape_unconfirmed": 0, "priority_low": 0,
+            "auto_execute_disabled": 0}
+    try:
+        cursor = sc.db["live_alerts"].find(
+            {"created_at": {"$gte": cutoff}},
+            {"_id": 0, "symbol": 1, "priority": 1, "tape_confirmation": 1,
+             "strategy_win_rate": 1, "auto_execute_eligible": 1, "setup_type": 1},
+        )
+        for d in cursor:
+            total += 1
+            setup = d.get("setup_type") or "?"
+            bs = by_setup.setdefault(setup, {"total": 0, "ineligible": 0})
+            bs["total"] += 1
+            if d.get("auto_execute_eligible"):
+                eligible += 1
+                continue
+            ineligible += 1
+            bs["ineligible"] += 1
+            if not auto_enabled:
+                reasons = ["auto_execute_disabled"]
+            else:
+                reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons(
+                    d.get("priority"), d.get("tape_confirmation"),
+                    d.get("strategy_win_rate"), min_wr) or ["unknown"]
+            for r in reasons:
+                if r.startswith("priority="):
+                    cond["priority_low"] += 1
+                elif r == "tape_unconfirmed":
+                    cond["tape_unconfirmed"] += 1
+                elif r.startswith("win-rate"):
+                    cond["win_rate_below"] += 1
+                elif r == "auto_execute_disabled":
+                    cond["auto_execute_disabled"] += 1
+            key = " + ".join(reasons)
+            slot = by_reason.setdefault(
+                key, {"count": 0, "symbols": set(), "setups": set()})
+            slot["count"] += 1
+            if d.get("symbol"):
+                slot["symbols"].add(d["symbol"])
+            slot["setups"].add(setup)
+    except Exception as exc:
+        return {"success": False, "running": True, "error": str(exc)}
+
+    by_reason_out = sorted(
+        [{"reason": k, "count": v["count"], "symbols": len(v["symbols"]),
+          "top_setups": sorted(v["setups"])[:5]} for k, v in by_reason.items()],
+        key=lambda x: x["count"], reverse=True)
+    by_setup_out = sorted(
+        [{"setup": k, "total": v["total"], "ineligible": v["ineligible"],
+          "ineligible_pct": round(v["ineligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_setup.items()],
+        key=lambda x: x["ineligible"], reverse=True)[:25]
+
+    return {
+        "success": True, "running": True, "days": days, "since": cutoff,
+        "auto_exec_enabled": auto_enabled, "min_win_rate": min_wr,
+        "totals": {"alerts": total, "eligible": eligible, "ineligible": ineligible,
+                   "eligible_pct": round(eligible / total * 100, 1) if total else 0.0},
+        "condition_tally": cond,
+        "by_reason": by_reason_out,
+        "by_setup": by_setup_out,
+        "timestamp": now.isoformat(),
+    }
+
+
 @router.get("/ev-leaderboard")
 def get_ev_leaderboard(days: int = 30):
     """v19.34.274 — Expected-Value leaderboard for Mission Control.
