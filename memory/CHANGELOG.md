@@ -23675,3 +23675,23 @@ shorts he saw on TC2000 (TSLA, NVDA on 2026-06-05). Investigation chain:
     Appliers validated HEAD->v281->v282->v282b: clean apply, py_compile, idempotent.
 
 NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 trades;
+
+### v19.34.287 / v288 — Pre-eval intake drop observability (CLOSED the "PRE-eval blind spot")
+  - v287 (applied DGX, paste.rs XdxyH): forward-logger — enhanced_scanner.py
+    _auto_exec_fail_reasons() + _record_auto_exec_ineligible() record an
+    `auto_exec_ineligible` trade_drop when a surfaced alert fails the snapshot-path
+    auto-execute eligibility gate (priority<high / tape unconfirmed / win-rate<floor).
+    trade_drop_recorder.py KNOWN_GATES += auto_exec_ineligible. test_auto_exec_ineligible_v287.py.
+    LIMITATION found: only logs NEW alerts on the _scan_symbol_all_setups path AFTER
+    the patch; pre-existing/other-path alerts still showed "0 trade_drops".
+  - v288 (applied DGX 2026-06-05, paste.rs kflZi): READ-SIDE backfill — routers/scanner.py
+    GET /api/scanner/symbol-trace now RECOMPUTES auto-exec eligibility from today's
+    PERSISTED live_alerts (priority/tape_confirmation/strategy_win_rate/auto_execute_eligible
+    via to_dict) when 0 trade_drops were logged. Returns `intake_eligibility` block +
+    3-way verdict (auto-exec OFF / intake-ineligible / eligible-but-no-drop=downstream leak).
+    probe_symbol_day.py prints the new `intake:` section. test_intake_backfill_v288.py (5 cases).
+    VERIFIED LIVE on DGX: NVDA 9 alerts → 5× vwap_fade_long (priority=low + WR 17%),
+    3× power_trend_stack (tape_unconfirmed + WR 0%), 1× trend_continuation_short (tape_unconfirmed),
+    eligible_no_drop=0 → gate working as designed, NO silent leak. Blind spot CLOSED.
+  - OPEN OBSERVATION: NVDA win-rates 17% / 0% are suspiciously low — likely thin/empty
+    alert_outcomes samples defaulting to 0%. Ties to Issue 3 (EV/win-rate trust). Worth a probe.
