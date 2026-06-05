@@ -1116,6 +1116,109 @@ def get_intake_summary(days: int = 30):
     }
 
 
+def _canon_setup_base(setup_type) -> str:
+    """v19.34.291 — canonicalize a setup_type to its base, mirroring the scanner's
+    win-rate lookup (`setup_type.split("_long")[0].split("_short")[0]`). The audit
+    MUST fold the same way or it will mis-report which setups are registered."""
+    s = str(setup_type or "")
+    return s.split("_long")[0].split("_short")[0]
+
+
+@router.get("/strategy-stats-audit")
+def get_strategy_stats_audit(days: int = 30):
+    """v19.34.291 — win-rate / EV TRUST audit. For every setup seen in the window,
+    reveals whether its strategy_win_rate is REAL data, a cold-start GRACE baseline,
+    or a misleading NO-DATA→0% default (setup not registered in `_strategy_stats`,
+    or only emitted on a path that never computes win-rate). Read-only.
+
+    The scanner uses (enhanced_scanner.py:3500-3519): if base_setup in _strategy_stats
+    AND alerts_triggered >= grace_min -> real win_rate; elif registered -> floor;
+    else -> the LiveAlert default 0.0. This audit replays that decision per setup so
+    we can separate 'genuinely weak' (e.g. vwap_fade 17%) from 'no data mislabeled 0%'.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "running": False,
+                "message": "Enhanced scanner not initialized"}
+
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    days = max(1, min(int(days or 30), 365))
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
+    min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+    stats_map = getattr(sc, "_strategy_stats", {}) or {}
+
+    # 1) Fold window alerts to base setup with raw-type examples + counts.
+    bases: dict = {}
+    try:
+        cursor = sc.db["live_alerts"].find(
+            {"created_at": {"$gte": cutoff}}, {"_id": 0, "setup_type": 1})
+        for d in cursor:
+            raw = d.get("setup_type") or "?"
+            base = _canon_setup_base(raw)
+            b = bases.setdefault(base, {"alerts": 0, "raw": set()})
+            b["alerts"] += 1
+            b["raw"].add(raw)
+    except Exception as exc:
+        return {"success": False, "running": True, "error": str(exc)}
+
+    # 2) Replay the gate's win-rate decision per base setup.
+    def _classify(base):
+        st = stats_map.get(base)
+        registered = st is not None
+        triggered = int(getattr(st, "alerts_triggered", 0) or 0) if st else 0
+        won = int(getattr(st, "alerts_won", 0) or 0) if st else 0
+        lost = int(getattr(st, "alerts_lost", 0) or 0) if st else 0
+        win_rate = float(getattr(st, "win_rate", 0.0) or 0.0) if st else 0.0
+        ev_r = float(getattr(st, "expected_value_r", 0.0) or 0.0) if st else 0.0
+        pf = float(getattr(st, "profit_factor", 0.0) or 0.0) if st else 0.0
+        if not registered:
+            eff, verdict = 0.0, "NO-DATA->0% (unregistered)"
+        elif triggered < grace_min:
+            eff, verdict = min_wr, "GRACE (floor baseline)"
+        elif win_rate >= min_wr:
+            eff, verdict = win_rate, "REAL-OK (>=floor)"
+        else:
+            eff, verdict = win_rate, "REAL-LOW (<floor)"
+        return {
+            "registered": registered, "alerts_triggered": triggered,
+            "alerts_won": won, "alerts_lost": lost,
+            "win_rate": round(win_rate, 4), "effective_win_rate": round(eff, 4),
+            "expected_value_r": round(ev_r, 4), "profit_factor": round(pf, 4),
+            "verdict": verdict,
+        }
+
+    setups_out = []
+    summary: dict = {}
+    for base, b in bases.items():
+        c = _classify(base)
+        setups_out.append({
+            "setup_base": base,
+            "alerts_in_window": b["alerts"],
+            "example_setup_types": sorted(b["raw"])[:5],
+            **c,
+        })
+        tag = c["verdict"].split(" ")[0]
+        s = summary.setdefault(tag, {"setups": 0, "alerts": 0})
+        s["setups"] += 1
+        s["alerts"] += b["alerts"]
+    setups_out.sort(key=lambda x: x["alerts_in_window"], reverse=True)
+
+    return {
+        "success": True, "running": True, "days": days, "since": cutoff,
+        "grace_min_trades": grace_min, "min_win_rate": min_wr,
+        "registered_setup_count": len(stats_map),
+        "summary_by_verdict": summary,
+        "setups": setups_out,
+        "timestamp": now.isoformat(),
+    }
+
+
 @router.get("/ev-leaderboard")
 def get_ev_leaderboard(days: int = 30):
     """v19.34.274 — Expected-Value leaderboard for Mission Control.

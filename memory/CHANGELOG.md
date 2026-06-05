@@ -23723,3 +23723,18 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     All 27 intake tests pass (v287+v288+v289+v290). Applier stacks on v289:
     paste.rs BnvYh (sha 2fb1f2fa), idempotent, py_compile OK, byte-identical vs
     HEAD+v288+v289+v290. Verified live (preview): segmented payload serializes.
+
+### v19.34.291 — win-rate / EV TRUST audit (diagnostic for Issue 3)
+  - routers/scanner.py: _canon_setup_base() + GET /api/scanner/strategy-stats-audit?days=N.
+    Replays the scanner's win-rate decision (enhanced_scanner.py:3500-3519) per setup
+    seen in window and tags each: NO-DATA->0% (unregistered / daily-path only -> defaults
+    0.0), GRACE (registered but <grace_min outcomes -> floor baseline), REAL-LOW (>=grace,
+    win_rate<floor = genuinely weak), REAL-OK. Returns per-setup alerts_in_window,
+    registered?, alerts_triggered/won/lost, win_rate, effective_win_rate, EV_R, profit_factor
+    + summary_by_verdict. Read-only.
+  - backend/scripts/strategy_stats_audit.py CLI (table + verdict summary).
+  - test_strategy_stats_audit_v291.py (8 cases). 34 intake/audit tests pass total.
+  - Applier stacks on v290: paste.rs nbTEL (sha 47f35d7a), idempotent, byte-identical
+    vs HEAD+v288..v291. Verified live (preview): registered_setup_count=39, serves clean.
+  - PURPOSE: confirm per-setup whether 0% win-rate is "no data" (fixable -> grace/neutral)
+    vs "genuinely weak" (correctly filtered), to scope the v292 win-rate trust FIX.
