@@ -440,3 +440,10 @@ Console's "Tighten all wide-stop scalps" batch action.
 ### Deploy/test constraints (unchanged)
 - DO NOT use testing_agent (DGX hardware-bound). Validate via pytest + curl + probes in container, ship idempotent appliers via paste.rs.
 - DGX restart: `./start_backend.sh --force`.
+
+---
+## m-series COMPLETE — 2026-06-05
+- ✅ m1–m9 all shipped & verified on DGX (m9 = exit_archetype MFE/MAE data-override, paste.rs/vOlNF, 16/16 pytest).
+- Open (m9 validation only): live market-hours run of `probe_bracket_reconcile.py --base http://localhost:8001` against open positions to confirm bracket attach+reconcile on the real IB path.
+- Deferred cosmetic (fold into next deploy): probe CLI "no live DB" note (already fixed in container, not yet shipped).
+- Next P1 UI: EV Leaderboard on Mission Control; Bot-Vitals header; MC sticky per-symbol search/filter across 5 lanes; Gameplan prioritization boost.
