@@ -23796,3 +23796,16 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     enhanced_scanner _stamp_strategy_metrics). v294 is INDEPENDENT of the v293 gate
     (gate reads live _strategy_stats, not the alert field). v294 applier NOT yet packaged —
     pending operator go-ahead.
+
+### v293 + v294 — COMBINED applier packaged & verified (fork 2026-06-05)
+  - One idempotent applier covers v293 (EV gate) + v294 (persist strategy_outcomes;
+    realign intake-summary/symbol-trace diagnostics to EV lens). 6 files / 26 anchored
+    regions auto-derived via difflib from v292 baseline -> current; build-time replay
+    proves byte-identical. Sandbox apply on clean v292 tree == dev byte-for-byte; re-run
+    fully idempotent (all SKIP); per-file py_compile gate; aborts w/o writing on anchor
+    divergence.
+  - FIXED stale v294 test: test_intake_backfill_v288.test_multi_reason_key still asserted
+    the dropped win-rate reason; rewrote to exercise the EV reason (proven setup, EV-0.50R,
+    30 outcomes -> "EV -0.50R<=+0.10R"). _alert() now carries strategy_ev_r/strategy_outcomes.
+    31 related tests pass; lint clean.
+  - paste.rs: https://paste.rs/Z0D2K (sha256 f7aecef0...). curl roundtrip verified.

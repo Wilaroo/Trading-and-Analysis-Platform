@@ -83,10 +83,12 @@ def _run(scanner, monkeypatch):
     return scanner_router.get_symbol_trace("NVDA")
 
 
-def _alert(priority="medium", tape=False, wr=0.50, eligible=False, setup="9_ema_scalp"):
+def _alert(priority="medium", tape=False, wr=0.50, eligible=False, setup="9_ema_scalp",
+           ev=0.0, outcomes=0):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return {"symbol": "NVDA", "priority": priority, "tape_confirmation": tape,
-            "strategy_win_rate": wr, "auto_execute_eligible": eligible,
+            "strategy_win_rate": wr, "strategy_ev_r": ev, "strategy_outcomes": outcomes,
+            "auto_execute_eligible": eligible,
             "setup_type": setup, "created_at": today + "T18:00:00+00:00"}
 
 
@@ -121,11 +123,14 @@ class TestIntakeBackfill:
         assert "DOWNSTREAM" in out["verdict"]
 
     def test_multi_reason_key(self, monkeypatch):
-        db = _FakeDB({"live_alerts": [_alert(priority="medium", tape=False, wr=0.40)] * 4,
+        # v294: proven setup (>= grace_min outcomes) with negative EV trips the EV
+        # condition alongside priority + tape (win-rate floor dropped in v293).
+        db = _FakeDB({"live_alerts": [_alert(priority="medium", tape=False,
+                                             ev=-0.50, outcomes=30)] * 4,
                       "trade_drops": []})
         out = _run(_FakeScanner(db), monkeypatch)
         ie = out["intake_eligibility"]
-        key = "priority=medium<high + tape_unconfirmed + win-rate 40%<55%"
+        key = "priority=medium<high + tape_unconfirmed + EV -0.50R<=+0.10R"
         assert ie["by_reason"][key]["count"] == 4
 
     def test_backfill_skipped_when_drops_exist(self, monkeypatch):
