@@ -219,6 +219,25 @@ class MarketSetupClassifier:
     MIN_CONFIDENCE    = 0.5
     DAILY_HISTORY_DAYS = 30
 
+    # ── Horizon-aware daily-bar lookback (2026-06) ──────────────────────
+    # A swing/position SETUP can only be read off a deep daily window
+    # (multi-month bases, 52-week structure, stage analysis). Loading only
+    # 30 bars for those styles silently truncated the very history the
+    # base/range/overextension detectors need. The lookback depth now
+    # follows the trade-style horizon: shorter for intraday, deeper as the
+    # hold lengthens. Intraday/scalp keep the cheap 30-bar read.
+    #   intraday/scalp → 30d · multi_day → ~120d · swing → 252d (~1y)
+    #   investment/position → 504d (~2y)
+    # Anything unknown falls back to DAILY_HISTORY_DAYS.
+    HORIZON_HISTORY_DAYS: Dict[str, int] = {
+        "scalp":      30,
+        "intraday":   30,
+        "multi_day":  120,
+        "swing":      252,
+        "investment": 504,
+        "position":   504,
+    }
+
     def __init__(self, db=None):
         self.db = db
         self._cache: Dict[str, Tuple[ClassificationResult, datetime]] = {}
@@ -229,7 +248,7 @@ class MarketSetupClassifier:
     # ───────── Public API ─────────
 
     async def classify(self, symbol: str, daily_bars: Optional[List[Dict]] = None,
-                       intraday_snapshot=None) -> ClassificationResult:
+                       intraday_snapshot=None, trade_style: Optional[str] = None) -> ClassificationResult:
         """Classify the symbol's current daily Setup. Caches for 5 min.
 
         ``daily_bars`` is an optional pre-loaded list of dicts, each
@@ -240,14 +259,27 @@ class MarketSetupClassifier:
         ``intraday_snapshot`` (TechnicalSnapshot) is optional but lets
         the classifier sharpen Gap & Go vs Day 2 calls when intraday
         gap data is fresher than the latest daily bar.
+
+        ``trade_style`` (scalp/intraday/multi_day/swing/investment/
+        position) drives the horizon-aware daily-bar lookback via
+        ``HORIZON_HISTORY_DAYS`` — deeper history for swing/position so
+        the base/structure detectors actually see the multi-month window.
+        Defaults to the 30-bar intraday read.
         """
+        history_days = self._history_days_for_style(trade_style)
         cached = self._cache.get(symbol)
+        # Reuse a cached result only when it was computed from AT LEAST as
+        # deep a window as this request needs (a deeper window is a strict
+        # superset). A shallower cached entry must recompute so swing/
+        # position calls never get short-changed on history.
         if cached and (datetime.now(timezone.utc) - cached[1]).total_seconds() < self.CACHE_TTL_SECONDS:
-            self._cache_hits += 1
-            return cached[0]
+            cached_days = cached[2] if len(cached) > 2 else self.DAILY_HISTORY_DAYS
+            if cached_days >= history_days:
+                self._cache_hits += 1
+                return cached[0]
         self._cache_misses += 1
 
-        bars = daily_bars or await self._load_daily_bars(symbol)
+        bars = daily_bars or await self._load_daily_bars(symbol, history_days=history_days)
         if not bars or len(bars) < 5:
             return self._make_result(MarketSetup.NEUTRAL, 0.0, ["Insufficient daily bars"])
 
@@ -271,7 +303,7 @@ class MarketSetupClassifier:
             runner_ups = [(s, c) for s, c, _ in scores[1:4] if c >= 0.3]
             result = self._make_result(best_setup, best_conf, best_reason, runner_ups)
 
-        self._cache[symbol] = (result, datetime.now(timezone.utc))
+        self._cache[symbol] = (result, datetime.now(timezone.utc), history_days)
         self._daily_count[result.setup] = self._daily_count.get(result.setup, 0) + 1
         return result
 
@@ -593,8 +625,31 @@ class MarketSetupClassifier:
 
     # ───────── Helpers ─────────
 
-    async def _load_daily_bars(self, symbol: str) -> List[Dict]:
+    def _history_days_for_style(self, trade_style: Optional[str]) -> int:
+        """Resolve the daily-bar lookback depth for a trade-style horizon.
+
+        Delegates style canonicalisation to the trade_style_classifier
+        SSOT (so aliases like `move_2_move`/`a_plus`/`longterm` resolve)
+        then maps the canonical bucket via HORIZON_HISTORY_DAYS. Unknown
+        / missing styles fall back to the cheap DAILY_HISTORY_DAYS read.
+        """
+        if not trade_style:
+            return self.DAILY_HISTORY_DAYS
+        key = str(trade_style).strip().lower()
+        if key not in self.HORIZON_HISTORY_DAYS:
+            try:
+                from services.trade_style_classifier import resolve_trade_style
+                key = resolve_trade_style({"trade_style": trade_style})
+            except Exception:
+                return self.DAILY_HISTORY_DAYS
+        return self.HORIZON_HISTORY_DAYS.get(key, self.DAILY_HISTORY_DAYS)
+
+    async def _load_daily_bars(self, symbol: str, history_days: Optional[int] = None) -> List[Dict]:
         """Load up to N daily bars from MongoDB for the given symbol.
+
+        ``history_days`` (horizon-aware, 2026-06) overrides the default
+        DAILY_HISTORY_DAYS so swing/position classifications can read a
+        deeper window. Falls back to DAILY_HISTORY_DAYS when unset.
 
         2026-04-29 (operator-flagged mid-RTH, third hit of the same
         async-cursor bug): pre-fix used `await cursor.to_list(...)`
@@ -608,18 +663,19 @@ class MarketSetupClassifier:
         """
         if self.db is None:
             return []
+        depth = int(history_days or self.DAILY_HISTORY_DAYS)
         try:
             import asyncio as _asyncio
             cursor = self.db["ib_historical_data"].find(
                 {"symbol": symbol.upper(), "bar_size": "1 day"},
                 {"_id": 0, "symbol": 1, "date": 1, "open": 1, "high": 1,
                  "low": 1, "close": 1, "volume": 1},
-            ).sort("date", -1).limit(self.DAILY_HISTORY_DAYS + 5)
+            ).sort("date", -1).limit(depth + 5)
 
             bars: List[Dict] = []
             to_list = getattr(cursor, "to_list", None)
             if to_list is not None and _asyncio.iscoroutinefunction(to_list):
-                bars = await cursor.to_list(length=self.DAILY_HISTORY_DAYS + 5)
+                bars = await cursor.to_list(length=depth + 5)
             else:
                 bars = list(cursor)
 

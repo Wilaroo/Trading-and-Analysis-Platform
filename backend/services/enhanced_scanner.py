@@ -1290,6 +1290,107 @@ class EnhancedBackgroundScanner:
             "known_liquid_symbols_count": len(self._known_liquid_symbols),
             "adv_cache_ttl_seconds": self._adv_cache_ttl,
         }
+
+    def get_in_play_health(self, sample: int = 8) -> Dict:
+        """Read-only in-play health snapshot (2026-06).
+
+        Surfaces the three signals the operator watches per scan cycle:
+          1. WAVE COMPOSITION — sizes (and a small sample) of the live
+             tier1/tier2/tier3 wave from the most recent scan batch, plus
+             the wave-rotation progress through the universe.
+          2. RVOL FRESHNESS — how stale the per-symbol RVOL cache is
+             (oldest/newest entry age, % fresh within TTL, fraction
+             passing the min-RVOL gate) so the operator can tell whether
+             the bot is sizing off live or stale RVOL.
+          3. QUALIFY-RATE — cumulative detector evaluations vs hits
+             (qualify_rate_pct) plus the symbols scanned / skipped counts
+             from the last cycle. The probe diffs successive polls to get
+             a true PER-CYCLE qualify-rate.
+
+        Pure observability — never mutates scanner state.
+        """
+        now = datetime.now(timezone.utc)
+
+        # 1) Wave composition.
+        batch = getattr(self, "_last_wave_batch", None) or {}
+        batch_at = getattr(self, "_last_wave_batch_at", None)
+        t1 = batch.get("tier1_watchlist", []) or []
+        t2 = batch.get("tier2_high_rvol", []) or []
+        t3 = batch.get("tier3_wave", []) or []
+        unique = list(dict.fromkeys([*t1, *t2, *t3]))
+        wave = {
+            "tier1_count": len(t1),
+            "tier2_count": len(t2),
+            "tier3_count": len(t3),
+            "unique_count": len(unique),
+            "tier1_sample": t1[:sample],
+            "tier2_sample": t2[:sample],
+            "tier3_sample": t3[:sample],
+            "universe_progress": batch.get("universe_progress", {}),
+            "batch_age_seconds": (
+                round((now - batch_at).total_seconds(), 1) if batch_at else None
+            ),
+        }
+
+        # 2) RVOL freshness.
+        rvol_cache = getattr(self, "_rvol_cache", {}) or {}
+        ttl = float(getattr(self, "_rvol_cache_ttl", 300) or 300)
+        min_rvol = float(getattr(self, "_min_rvol_filter", 0.0) or 0.0)
+        ages, fresh, passing = [], 0, 0
+        for _sym, val in rvol_cache.items():
+            try:
+                rv, ts = val
+                age = (now - ts).total_seconds()
+                ages.append(age)
+                if age <= ttl:
+                    fresh += 1
+                if float(rv) >= min_rvol:
+                    passing += 1
+            except Exception:
+                continue
+        n = len(ages)
+        rvol = {
+            "cache_size": n,
+            "min_rvol_filter": min_rvol,
+            "cache_ttl_seconds": ttl,
+            "fresh_count": fresh,
+            "fresh_pct": round((fresh / n) * 100, 1) if n else 0.0,
+            "passing_gate_count": passing,
+            "passing_gate_pct": round((passing / n) * 100, 1) if n else 0.0,
+            "oldest_age_seconds": round(max(ages), 1) if ages else None,
+            "newest_age_seconds": round(min(ages), 1) if ages else None,
+        }
+
+        # 3) Qualify-rate (cumulative + last-cycle counters).
+        cum_evals = sum((getattr(self, "_detector_evals_total", {}) or {}).values())
+        cum_hits = sum((getattr(self, "_detector_hits_total", {}) or {}).values())
+        last_evals = sum((getattr(self, "_detector_evals", {}) or {}).values())
+        last_hits = sum((getattr(self, "_detector_hits", {}) or {}).values())
+        last_scan = getattr(self, "_last_scan_time", None)
+        qualify = {
+            "scan_count": int(getattr(self, "_scan_count", 0) or 0),
+            "symbols_scanned_last": int(getattr(self, "_symbols_scanned_last", 0) or 0),
+            "symbols_skipped_rvol": int(getattr(self, "_symbols_skipped_rvol", 0) or 0),
+            "symbols_skipped_adv": int(getattr(self, "_symbols_skipped_adv", 0) or 0),
+            "symbols_skipped_in_play": int(getattr(self, "_symbols_skipped_in_play", 0) or 0),
+            "cumulative_evals": int(cum_evals),
+            "cumulative_hits": int(cum_hits),
+            "cumulative_qualify_rate_pct": round((cum_hits / cum_evals) * 100, 2) if cum_evals else 0.0,
+            "last_cycle_evals": int(last_evals),
+            "last_cycle_hits": int(last_hits),
+            "last_cycle_qualify_rate_pct": round((last_hits / last_evals) * 100, 2) if last_evals else 0.0,
+            "last_scan_age_seconds": (
+                round((now - last_scan).total_seconds(), 1) if last_scan else None
+            ),
+        }
+
+        return {
+            "running": bool(getattr(self, "_running", False)),
+            "wave": wave,
+            "rvol": rvol,
+            "qualify": qualify,
+            "timestamp": now.isoformat(),
+        }
     
     def add_to_blacklist(self, symbols: List[str]) -> Dict:
         """
@@ -1640,8 +1741,22 @@ class EnhancedBackgroundScanner:
             wave_scanner = get_wave_scanner()
             
             batch = await wave_scanner.get_scan_batch()
-            
-            # Combine all tiers
+
+            # ── In-play health telemetry (2026-06) ───────────────────────
+            # Stash the live wave composition for the read-only
+            # /api/scanner/in-play-health probe (per-cycle wave sizes +
+            # RVOL freshness + qualify-rate). Pure observability; never
+            # affects the scan path.
+            try:
+                self._last_wave_batch = {
+                    "tier1_watchlist": list(batch.get("tier1_watchlist", []) or []),
+                    "tier2_high_rvol": list(batch.get("tier2_high_rvol", []) or []),
+                    "tier3_wave": list(batch.get("tier3_wave", []) or []),
+                    "universe_progress": dict(batch.get("universe_progress", {}) or {}),
+                }
+                self._last_wave_batch_at = datetime.now(timezone.utc)
+            except Exception:
+                pass
             all_symbols = []
             all_symbols.extend(batch.get("tier1_watchlist", []))
             all_symbols.extend(batch.get("tier2_high_rvol", []))
@@ -5907,7 +6022,10 @@ class EnhancedBackgroundScanner:
             return
         try:
             classifier = get_market_setup_classifier(db=self.db)
-            result = await classifier.classify(symbol, intraday_snapshot=snapshot)
+            result = await classifier.classify(
+                symbol, intraday_snapshot=snapshot,
+                trade_style=getattr(alert, "trade_style", None),
+            )
             alert.market_setup = result.setup.value
             ctx = lookup_trade_context(alert.setup_type, result.setup)
             if alert.setup_type in EXPERIMENTAL_TRADES:
