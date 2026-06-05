@@ -150,10 +150,15 @@ STRATEGY_PATTERN_SYNERGY = {
         "synergy_bonus": 10,
         "pattern_description": "Retest entry aligned with continuation patterns"
     },
-    "tidal_wave": {
+    "fading_bounce": {
         "best_patterns": ["head_shoulders", "double_top", "rising_wedge"],
         "synergy_bonus": 15,
         "pattern_description": "Exhaustion fade confirmed by reversal patterns"
+    },
+    "tidal_wave": {
+        "best_patterns": ["bull_flag", "ascending_triangle", "breakout"],
+        "synergy_bonus": 15,
+        "pattern_description": "Momentum volume-surge breaking the day's range"
     },
     "breaking_news": {
         "best_patterns": ["breakout", "gap_and_go"],
@@ -176,7 +181,8 @@ VOLUME_REQUIREMENTS = {
     "breaking_news": {"min_rvol": 3.0, "ideal_rvol": 5.0, "spike_required": True},
     "off_sides": {"min_rvol": 1.5, "ideal_rvol": 2.0, "range_vol": "equal_bars"},
     "backside": {"min_rvol": 1.5, "ideal_rvol": 2.0, "reversal_vol": "increasing"},
-    "tidal_wave": {"min_rvol": 2.0, "ideal_rvol": 3.0, "exhaustion_vol": "climactic"},
+    "fading_bounce": {"min_rvol": 2.0, "ideal_rvol": 3.0, "exhaustion_vol": "climactic"},
+    "tidal_wave": {"min_rvol": 2.5, "ideal_rvol": 4.0, "surge_vol": "expanding"},
     "volume_capitulation": {"min_rvol": 3.0, "ideal_rvol": 5.0, "spike_2x_second": True}
 }
 
@@ -221,10 +227,10 @@ REGIME_STRATEGY_SCORES = {
     MarketCondition.TRENDING_UP: {
         "spencer_scalp": 95, "hitchhiker": 100, "gap_give_and_go": 95,
         "trend_momentum": 100, "9_ema_scalp": 90, "second_chance": 85,
-        "backside": 80, "off_sides": 30, "rubber_band": 40, "tidal_wave": 20
+        "backside": 80, "off_sides": 30, "rubber_band": 40, "fading_bounce": 20, "tidal_wave": 95
     },
     MarketCondition.TRENDING_DOWN: {
-        "tidal_wave": 95, "backside_inverse": 90, "off_sides_short": 85,
+        "fading_bounce": 95, "tidal_wave": 20, "backside_inverse": 90, "off_sides_short": 85,
         "short_scalps": 90, "spencer_scalp": 30, "hitchhiker": 20,
         "gap_give_and_go": 25, "rubber_band": 40
     },
@@ -428,7 +434,7 @@ class TradingIntelligenceSystem:
         risk = abs(entry_price - stop_price)
         if risk > 0:
             # Estimate target based on strategy
-            estimated_target = entry_price + (risk * 2) if direction == "long" else entry_price - (risk * 2)
+            estimated_target = entry_price + (risk * 2) if direction == "long" else entry_price - (risk * 2)  # noqa: F841
             rr_ratio = 2.0  # Minimum acceptable
             
             if rr_ratio >= 3:
@@ -444,7 +450,7 @@ class TradingIntelligenceSystem:
                 warnings.append(f"Poor R:R ratio {rr_ratio:.1f}")
         
         # 8. AVOIDANCE RULE DEDUCTIONS
-        avoidance_rules = self.trading_rules.avoidance_rules.get("strategy_specific", {}).get(strategy_key, [])
+        avoidance_rules = self.trading_rules.avoidance_rules.get("strategy_specific", {}).get(strategy_key, [])  # noqa: F841
         # This would be checked against actual conditions - placeholder for now
         
         # CALCULATE FINAL SCORE
@@ -617,7 +623,9 @@ class TradingIntelligenceSystem:
                 if strategy_key in ["spencer_scalp", "hitchhiker", "gap_give_and_go"]:
                     strategy_direction = "long"  # Primarily long strategies
                 elif strategy_key in ["tidal_wave"]:
-                    strategy_direction = "both"  # Works both ways
+                    strategy_direction = "long"  # m8: momentum surge, long bias
+                elif strategy_key in ["fading_bounce"]:
+                    strategy_direction = "both"  # reversion fade (was tidal_wave)
                 
                 if strategy_direction == "both" or strategy_direction == direction:
                     recommendations.append({
@@ -665,10 +673,10 @@ class TradingIntelligenceSystem:
             blockers.append("BLOCKER: Stock not In Play (RVOL < 1.0)")
         
         # 2. Check strategy-specific avoidance
-        avoidance = self.trading_rules.avoidance_rules.get("strategy_specific", {}).get(strategy_key, [])
+        avoidance = self.trading_rules.avoidance_rules.get("strategy_specific", {}).get(strategy_key, [])  # noqa: F841
         
         # 3. Check time restrictions
-        time_restrictions = self.trading_rules.time_rules.get("strategy_time_restrictions", {}).get(strategy, {})
+        time_restrictions = self.trading_rules.time_rules.get("strategy_time_restrictions", {}).get(strategy, {})  # noqa: F841
         
         if strategy_key == "hitchhiker" and time_of_day not in [TimeOfDay.OPENING_AUCTION, TimeOfDay.OPENING_DRIVE]:
             blockers.append("BLOCKER: HitchHiker must setup before 9:59 AM")

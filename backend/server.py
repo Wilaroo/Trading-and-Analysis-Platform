@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Any, Set
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import os
+import logging
 import httpx
 import asyncio
 import random
@@ -27,6 +28,10 @@ _has_uvloop = False
 
 # Load environment variables
 load_dotenv()
+
+# Module logger — v19.34.272 (m8): server.py referenced `logger` in 6 error
+# paths without ever defining it (latent NameError). Define it once here.
+logger = logging.getLogger("server")
 
 # Import services and routers
 from services.stock_data import get_stock_service
@@ -365,7 +370,7 @@ def _init_all_services():
     # cron is wired separately in eod_generation_service so we can reuse the
     # already-running BackgroundScheduler.
     from services.weekend_briefing_service import get_weekend_briefing_service
-    weekend_briefing_service = get_weekend_briefing_service(db)
+    weekend_briefing_service = get_weekend_briefing_service(db)  # noqa: F841
 
     # Phase 4 — Alpaca retirement. Gated by ENABLE_ALPACA_FALLBACK env var
     # (default "false"). When disabled we skip all Alpaca service init and
@@ -513,7 +518,7 @@ def _init_all_services():
     try:
         from services.order_queue_service import get_order_queue_service
         _order_queue = get_order_queue_service()
-    except:
+    except Exception:
         _order_queue = None
 
     # Initialize Historical Data Queue Service (for IB Data Pusher)
@@ -1230,7 +1235,7 @@ def _init_all_services():
             "9_ema_scalp", "abc_scalp", "backside", "fashionably_late",
             "first_vwap_pullback", "gap_give_go", "hitchhiker", "off_sides_short",
             "opening_drive", "puppy_dog", "rubber_band_long", "rubber_band_short",
-            "second_chance", "spencer_scalp", "tidal_wave", "volume_capitulation",
+            "second_chance", "spencer_scalp", "fading_bounce", "tidal_wave", "volume_capitulation",
             "vwap_bounce", "vwap_fade_long", "vwap_fade_short", "gap_fade",
             "short_squeeze_fade",
             # Intraday
@@ -1872,12 +1877,12 @@ async def calculate_relative_value(fundamentals: Dict, quote_data: Dict = None) 
     """
     # Extract metrics
     pe_ratio = fundamentals.get("pe_ratio") or 20
-    forward_pe = fundamentals.get("forward_pe") or pe_ratio
+    forward_pe = fundamentals.get("forward_pe") or pe_ratio  # noqa: F841
     peg_ratio = fundamentals.get("peg_ratio") or 1.5
     eps_growth = fundamentals.get("earnings_growth") or 0.1
-    revenue_growth = fundamentals.get("revenue_growth") or 0.05
+    revenue_growth = fundamentals.get("revenue_growth") or 0.05  # noqa: F841
     dividend_yield = fundamentals.get("dividend_yield") or 0
-    price_to_book = fundamentals.get("price_to_book") or 3
+    price_to_book = fundamentals.get("price_to_book") or 3  # noqa: F841
     roe = fundamentals.get("roe") or 0.15
     
     # Constants
@@ -2104,8 +2109,8 @@ async def calculate_vst_composite(rv: Dict, rs: Dict, rt: Dict, weights: Dict = 
     vst_score = round(vst_0_2 * 5, 2)
     
     # Determine recommendation
-    rv_s = rv.get("score", 5)
-    rs_s = rs.get("score", 5)
+    rv_s = rv.get("score", 5)  # noqa: F841
+    rs_s = rs.get("score", 5)  # noqa: F841
     rt_s = rt.get("score", 5)
     
     if vst_score >= 6.0 and rt_s >= 5.5:
@@ -4639,7 +4644,7 @@ async def websocket_quotes(websocket: WebSocket):
                 if websocket in manager.active_connections:
                     try:
                         await websocket.send_json({"type": "server_ping", "ts": datetime.now(timezone.utc).isoformat()})
-                    except:
+                    except Exception:
                         break
         except asyncio.CancelledError:
             pass
@@ -4838,7 +4843,7 @@ async def websocket_quotes(websocket: WebSocket):
             elif data.get("action") == "start_pipeline":
                 # Start the full 5-phase training pipeline via WebSocket
                 # (bypasses HTTP connection pool limitation entirely)
-                print(f"[WS] Received start_pipeline action")
+                print("[WS] Received start_pipeline action")
                 try:
                     from routers.ai_training import start_training as _start_training_endpoint, TrainingRequest
                     # Build request from WebSocket data (or use defaults)
@@ -4850,7 +4855,7 @@ async def websocket_quotes(websocket: WebSocket):
                         bar_sizes=ws_bar_sizes,
                         max_symbols=ws_max_symbols
                     )
-                    print(f"[WS] Calling start_training endpoint...")
+                    print("[WS] Calling start_training endpoint...")
                     result = await _start_training_endpoint(training_request)
                     print(f"[WS] start_training returned: {result}")
                     await manager.send_personal_message({

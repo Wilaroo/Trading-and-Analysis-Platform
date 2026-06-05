@@ -390,7 +390,7 @@ class EVTrackingService:
         "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
         # Mean reversion
         "rubber_band", "rubber_band_long", "rubber_band_short",
-        "vwap_bounce", "vwap_fade", "tidal_wave", "mean_reversion",
+        "vwap_bounce", "vwap_fade", "fading_bounce", "tidal_wave", "mean_reversion",
         # Consolidation
         "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp", "squeeze",
         # Afternoon

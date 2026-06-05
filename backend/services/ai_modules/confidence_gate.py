@@ -704,7 +704,7 @@ class ConfidenceGate:
         if cnn_lstm_signal.get("has_prediction"):
             lstm_direction = cnn_lstm_signal["direction"]
             lstm_win_prob = cnn_lstm_signal["win_probability"]
-            lstm_confidence = cnn_lstm_signal["confidence"]
+            lstm_confidence = cnn_lstm_signal["confidence"]  # noqa: F841
             lstm_model_acc = cnn_lstm_signal.get("model_accuracy", 0.5)
 
             # GATE: same DL-accuracy floor as TFT. Models below 52% are likely
@@ -1033,6 +1033,7 @@ class ConfidenceGate:
                 "SPENCER_SCALP": ["SCALP"], "PUPPY_DOG": ["SCALP"],
                 "BIG_DOG": ["MOMENTUM", "TREND_CONTINUATION"],
                 "TIDAL_WAVE": ["MOMENTUM", "BREAKOUT"],
+                "FADING_BOUNCE": ["MEAN_REVERSION", "REVERSAL"],
                 "HITCHHIKER": ["TREND_CONTINUATION"],
                 "VOLUME_CAPITULATION": ["REVERSAL", "MEAN_REVERSION"],
                 "BACKSIDE": ["REVERSAL", "SHORT_REVERSAL"],

@@ -357,15 +357,26 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
         valid_regimes=["range_bound", "fade"]
     ),
     
-    "tidal_wave": SetupConfig(
-        name="tidal_wave",
-        display_name="Tidal Wave / Bouncy Ball",
+    "fading_bounce": SetupConfig(
+        name="fading_bounce",
+        display_name="Fading Bounce",
         category=SetupCategory.REVERSAL,
         default_style=TradeStyle.SCALP,
-        direction=SetupDirection.SHORT,  # Short after weaker bounces
+        direction=SetupDirection.SHORT,  # Short weaker bounces (m8: was tidal_wave)
         typical_r_target=2.5,
         valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
         valid_regimes=["strong_downtrend", "fade"]
+    ),
+
+    "tidal_wave": SetupConfig(
+        name="tidal_wave",
+        display_name="Tidal Wave (Momentum Surge)",
+        category=SetupCategory.TREND_MOMENTUM,
+        default_style=TradeStyle.INTRADAY,
+        direction=SetupDirection.LONG,  # m8: momentum volume-surge, long bias
+        typical_r_target=3.0,
+        valid_time_windows=["morning_session", "late_morning", "midday", "afternoon"],
+        valid_regimes=["strong_uptrend", "momentum"]
     ),
     
     "mean_reversion": SetupConfig(

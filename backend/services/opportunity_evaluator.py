@@ -1652,10 +1652,10 @@ class OpportunityEvaluator:
                     getattr(bot, "_db", None),
                     trade,
                     gate_result=confidence_gate_result,
-                    model_prediction=ai_prediction if "ai_prediction" in locals() else None,
+                    model_prediction=ai_prediction if "ai_prediction" in locals() else None,  # noqa: F821
                     regime=str(current_regime) if current_regime else None,
                     multipliers={
-                        "smart_filter": smart_multiplier if "smart_multiplier" in locals() else None,
+                        "smart_filter": smart_multiplier if "smart_multiplier" in locals() else None,  # noqa: F821
                         "confidence_gate": confidence_multiplier,
                         "regime": regime_multiplier if "regime_multiplier" in locals() else None,
                         "strategy_tilt": tilt_mult if "tilt_mult" in locals() else None,
@@ -1849,8 +1849,10 @@ class OpportunityEvaluator:
             import os as _os
             def _envf(k, d):
                 v = _os.environ.get(k)
-                try: return float(v) if v not in (None, "") else d
-                except: return d
+                try:
+                    return float(v) if v not in (None, "") else d
+                except Exception:
+                    return d
             _gp = _envf("EXECUTION_GUARDRAIL_MAX_NOTIONAL_PCT", 0.40)
             _gt = _envf("EXECUTION_GUARDRAIL_NOTIONAL_CAP_TOLERANCE", 0.005)
             _eq = float(getattr(bot.risk_params, "starting_capital", 0) or 0)
@@ -2046,13 +2048,14 @@ class OpportunityEvaluator:
         'first_move_up':          0.5,
         'first_move_down':        0.5,
         'bella_fade':             0.5,
-        'tidal_wave':             0.5,
+        'fading_bounce':          0.5,
         'volume_capitulation':    0.5,
         'time_of_day_fade':       0.5,
         'big_dog':                0.5,
         'puppy_dog':              0.5,
         'bouncy_ball':            0.5,
         # ── INTRADAY MOMENTUM (1.0-1.5× ATR) ───────────────────────────
+        'tidal_wave':             1.25,
         'rubber_band':            1.0,
         'rubber_band_long':       1.0,
         'rubber_band_short':      1.0,
@@ -2172,7 +2175,7 @@ class OpportunityEvaluator:
         'rubber_band_scalp_long', 'rubber_band_scalp_short', 'breakout_scalp',
         'hitchhiker', 'gap_give_go', 'gap_pick_roll', 'second_chance',
         'backside', 'off_sides', 'fashionably_late', 'first_move_up',
-        'first_move_down', 'bella_fade', 'tidal_wave', 'volume_capitulation',
+        'first_move_down', 'bella_fade', 'fading_bounce', 'volume_capitulation',
         'time_of_day_fade', 'big_dog', 'puppy_dog', 'bouncy_ball',
     })
 
@@ -2251,11 +2254,16 @@ class OpportunityEvaluator:
     @staticmethod
     def score_to_grade(score: int) -> str:
         """Convert score to letter grade"""
-        if score >= 90: return "A+"
-        if score >= 80: return "A"
-        if score >= 70: return "B+"
-        if score >= 60: return "B"
-        if score >= 50: return "C"
+        if score >= 90:
+            return "A+"
+        if score >= 80:
+            return "A"
+        if score >= 70:
+            return "B+"
+        if score >= 60:
+            return "B"
+        if score >= 50:
+            return "C"
         return "F"
 
     @staticmethod
@@ -2594,7 +2602,7 @@ class OpportunityEvaluator:
 
         risk_per_share = abs(entry - stop)
         total_risk = shares * risk_per_share
-        target_1_profit = abs(targets[0] - entry) * shares if targets else 0
+        target_1_profit = abs(targets[0] - entry) * shares if targets else 0  # noqa: F841
 
         # Build technical reasons from alert + intelligence
         technical_reasons = alert.get('technical_reasons', [

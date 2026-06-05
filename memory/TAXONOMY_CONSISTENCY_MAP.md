@@ -122,6 +122,28 @@ reconstruction we built). Only `runner` setups get `INTRADAY_BRACKET_V2`.
   Applier paste.rs/fW7ca; 52 tests green; patch paths compile-verified.
   ↳ **m4-frontend (TODO, separate):** point `tradeStyleMeta.js` at the endpoint
     (needs yarn build + visual check; deferred to keep risk isolated).
+## m8 — tidal_wave split (v19.34.272)
+
+- **m8 ✅ SHIPPED (v272, pending DGX apply):** Split the misnamed `tidal_wave`.
+  The old detector was a downtrend SHORT-into-support fade → renamed
+  `_check_fading_bounce` / `setup_type "fading_bounce"`. A NEW true-momentum
+  `_check_tidal_wave` (extended +move, RVOL≥2.5 spike, volume expanding into the
+  move, range/HOD break, long-biased runner; thresholds env-tunable
+  `TIDAL_WAVE_MIN_RVOL/_MIN_EXT_PCT/_MIN_VOL_MOM/_HOD_TOL_PCT`) now owns the name —
+  which makes the pre-existing `SCANNER_TO_ENSEMBLE_KEY["TIDAL_WAVE"]="MOMENTUM"`
+  routing CORRECT. SSOT: tidal_wave→momentum/breakout/runner, fading_bounce→
+  fade/reversion/target. Routing added `FADING_BOUNCE→MEAN_REVERSION` (ensemble +
+  confidence gate). Updated 12 source files + 2 tests; new m8 test (6) + migration
+  script. 295 regression tests green. Applier paste.c-net.org/AlvarezGrowth
+  (1.87MB, sha-guarded; paste.rs too small). **Data migration**
+  (`scripts/migrate_v19_34_272_tidal_wave.py`): renames historical `tidal_wave`→
+  `fading_bounce` in bot_trades/trade_outcomes/alert_outcomes/ev_tracking, drops
+  derived tidal_wave grade/learning rows, recomputes grades + rebuilds learning.
+
+- **m6 ✅ DONE:** AI feature-input audit (`memory/M6_AI_FEATURE_INPUT_AUDIT_2026-06.md`).
+  setup_type reaches trained models ONLY via coarse family routing (not per-setup
+  one-hot) → renames degrade gracefully; retrain flagged (non-blocking).
+
 - **m5 ✅ DONE (v271)** Grading/EV/corrected-store roll-up by `canonical_setup`
   + artifact exclusion (`is_edge_excluded`) + **Issue 3** (grade off MEDIAN R, not
   mean; sub-$1 `risk_amount` clamp). `setup_grading_service` (canonical bucket,

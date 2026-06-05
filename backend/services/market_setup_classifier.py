@@ -173,7 +173,7 @@ EXPERIMENTAL_TRADES: frozenset = frozenset({
 # treats them as the canonical name.
 TRADE_ALIASES: Dict[str, str] = {
     "puppy_dog":   "big_dog",
-    "tidal_wave":  "bouncy_ball",
+    "fading_bounce":  "bouncy_ball",  # m8: reversion (was tidal_wave). tidal_wave is now its own momentum setup.
     "vwap_bounce": "first_vwap_pullback",  # also covers vwap_continuation context
 }
 

@@ -149,7 +149,10 @@ STRATEGY_TIME_WINDOWS = {
     "rubber_band":         _RTH_ALL_DAY,
     "vwap_bounce":         _RTH_ALL_DAY,
     "vwap_fade":           _RTH_ALL_DAY,
-    "tidal_wave":          _RTH_ALL_DAY,
+    "fading_bounce":       _RTH_ALL_DAY,  # m8: reversion (was tidal_wave)
+
+    # ─── Momentum volume-surge (all day RTH) ─────────────────────────
+    "tidal_wave":          _RTH_ALL_DAY,  # m8: true momentum tidal wave
 
     # ─── Afternoon-skewed but operator may want broader coverage ────
     "hod_breakout":  [TimeWindow.AFTERNOON, TimeWindow.CLOSE],
@@ -213,7 +216,8 @@ STRATEGY_REGIME_PREFERENCES = {
     "rubber_band": [MarketRegime.RANGE_BOUND, MarketRegime.FADE, MarketRegime.VOLATILE],
     "vwap_bounce": [MarketRegime.RANGE_BOUND, MarketRegime.STRONG_UPTREND],
     "vwap_fade": [MarketRegime.RANGE_BOUND, MarketRegime.FADE],
-    "tidal_wave": [MarketRegime.STRONG_DOWNTREND, MarketRegime.FADE],
+    "fading_bounce": [MarketRegime.STRONG_DOWNTREND, MarketRegime.FADE],  # m8 reversion (was tidal_wave)
+    "tidal_wave": [MarketRegime.STRONG_UPTREND, MarketRegime.MOMENTUM],   # m8 momentum surge
     "time_of_day_fade": [MarketRegime.RANGE_BOUND, MarketRegime.FADE],
     
     # Works in most conditions
@@ -959,8 +963,8 @@ class EnhancedBackgroundScanner:
             "the_3_30_trade",            # 3:30 PM specific
             # Gap plays — only meaningful in the first 30-90 min
             "gap_fade", "gap_give_go", "gap_pick_roll",
-            # Intraday mean-reversion (rubber band / tidal wave)
-            "rubber_band", "tidal_wave",
+            # Intraday mean-reversion (rubber band / fading bounce) + momentum surge
+            "rubber_band", "fading_bounce", "tidal_wave",
             # Intraday momentum / position
             "hod_breakout",
             "fashionably_late", "off_sides", "backside",
@@ -984,7 +988,7 @@ class EnhancedBackgroundScanner:
             # Core session
             "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
             # Mean reversion
-            "rubber_band", "vwap_bounce", "vwap_fade", "tidal_wave",
+            "rubber_band", "vwap_bounce", "vwap_fade", "fading_bounce", "tidal_wave",
             "mean_reversion",  # NEW: RSI extreme + S/R snapback
             # Consolidation & Squeeze
             "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp",
@@ -3231,7 +3235,7 @@ class EnhancedBackgroundScanner:
                 logger.debug(f"in_play scoring failed for {symbol}: {e}")
 
             alerts = []
-            current_window = self._get_current_time_window()
+            current_window = self._get_current_time_window()  # noqa: F841
 
             # 2026-04-30 v19.16 — tier-aware detector dispatch.
             # Look up the symbol's ADV-classified tier ONCE per symbol
@@ -3396,6 +3400,7 @@ class EnhancedBackgroundScanner:
             "rubber_band": self._check_rubber_band,
             "vwap_bounce": self._check_vwap_bounce,
             "vwap_fade": self._check_vwap_fade,
+            "fading_bounce": self._check_fading_bounce,
             "tidal_wave": self._check_tidal_wave,
             
             # Consolidation
@@ -3473,7 +3478,7 @@ class EnhancedBackgroundScanner:
         # Core session
         "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
         # Mean reversion
-        "rubber_band", "vwap_bounce", "vwap_fade", "tidal_wave",
+        "rubber_band", "vwap_bounce", "vwap_fade", "fading_bounce", "tidal_wave",
         # Consolidation
         "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp",
         # Afternoon
@@ -3515,7 +3520,8 @@ class EnhancedBackgroundScanner:
         "rubber_band":         [("abs_dist_from_ema9", "dist_from_ema9", 2.5, "abs_gt"),
                                 ("rsi_14",              "rsi_14",          38,  "lt"),
                                 ("rvol",                "rvol",            1.5, "gt")],
-        "tidal_wave":          [("rvol",                "rvol",            2.0, "gt")],
+        "fading_bounce":       [("rvol",                "rvol",            1.5, "gt")],
+        "tidal_wave":          [("rvol",                "rvol",            2.5, "gt")],
         "mean_reversion":      [("rsi_14_oversold",     "rsi_14",          30,  "lt"),
                                 ("abs_dist_from_ema20", "dist_from_ema20", 3.0, "abs_gt")],
         "squeeze":             [("rvol",                "rvol",            1.0, "gt")],
@@ -3720,7 +3726,7 @@ class EnhancedBackgroundScanner:
             # Calculate proper levels using S/R and ATR
             stop_loss = round(max(snapshot.high_of_day + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
             target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
-            target_2 = round(snapshot.vwap, 2) if snapshot.vwap < snapshot.ema_9 else round(snapshot.ema_9 - snapshot.atr, 2)
+            target_2 = round(snapshot.vwap, 2) if snapshot.vwap < snapshot.ema_9 else round(snapshot.ema_9 - snapshot.atr, 2)  # noqa: F841
             
             # Calculate R-multiple
             risk = stop_loss - snapshot.current_price
@@ -4370,8 +4376,10 @@ class EnhancedBackgroundScanner:
             )
         return None
     
-    async def _check_tidal_wave(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Tidal Wave - Weaker bounces into support"""
+    async def _check_fading_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Fading Bounce (m8 — was 'tidal_wave') — short a WEAK bounce into
+        support while price stays under VWAP in a downtrend. Intraday
+        mean-reversion-to-trend continuation (a fade, NOT momentum)."""
         if (snapshot.trend == "downtrend" and
             not snapshot.above_vwap and
             snapshot.dist_from_vwap < -1.5 and
@@ -4381,10 +4389,10 @@ class EnhancedBackgroundScanner:
             
             if dist_to_support < 2.0:
                 return LiveAlert(
-                    id=f"tidal_wave_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    id=f"fading_bounce_{symbol}_{datetime.now().strftime('%H%M%S')}",
                     symbol=symbol,
-                    setup_type="tidal_wave",
-                    strategy_name="Tidal Wave (INT-23)",
+                    setup_type="fading_bounce",
+                    strategy_name="Fading Bounce (INT-23)",
                     direction="short",
                     priority=AlertPriority.MEDIUM,
                     current_price=snapshot.current_price,
@@ -4395,7 +4403,7 @@ class EnhancedBackgroundScanner:
                     trigger_probability=0.50,
                     win_probability=0.55,
                     minutes_to_trigger=20,
-                    headline=f"🌊 {symbol} Tidal Wave - Weaker bounces",
+                    headline=f"🪂 {symbol} Fading Bounce - short weak bounce",
                     reasoning=[
                         "Extended below VWAP",
                         f"Approaching support ${snapshot.support:.2f}",
@@ -4405,6 +4413,56 @@ class EnhancedBackgroundScanner:
                     market_regime=self._market_regime.value,
                     expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
                 )
+        return None
+
+    async def _check_tidal_wave(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
+        """Tidal Wave (m8) — a TRUE MOMENTUM volume-surge: an extended up-move on
+        an RVOL spike with volume expanding INTO the move that breaks the day's
+        range. Long-biased continuation, managed as a runner. Thresholds are
+        env-tunable (TIDAL_WAVE_MIN_RVOL / _MIN_EXT_PCT / _MIN_VOL_MOM / _HOD_TOL_PCT)."""
+        import os
+        min_rvol = float(os.environ.get("TIDAL_WAVE_MIN_RVOL", "2.5"))
+        min_ext_pct = float(os.environ.get("TIDAL_WAVE_MIN_EXT_PCT", "1.5"))
+        min_vol_mom = float(os.environ.get("TIDAL_WAVE_MIN_VOL_MOM", "1.2"))
+        hod_break_tol = float(os.environ.get("TIDAL_WAVE_HOD_TOL_PCT", "0.15"))
+
+        # Range break: price at/above the day's high (dist_from_hod <= tol%).
+        dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
+
+        if (snapshot.above_vwap and snapshot.above_ema9 and
+                snapshot.trend == "uptrend" and
+                snapshot.rvol >= min_rvol and                  # RVOL spike
+                tape.volume_momentum >= min_vol_mom and        # volume expanding INTO the move
+                snapshot.dist_from_vwap >= min_ext_pct and     # extended move
+                dist_from_hod <= hod_break_tol and             # range break (new HOD)
+                tape.confirmation_for_long):
+            entry = snapshot.current_price
+            return LiveAlert(
+                id=f"tidal_wave_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                symbol=symbol,
+                setup_type="tidal_wave",
+                strategy_name="Tidal Wave (momentum surge)",
+                direction="long",
+                priority=AlertPriority.HIGH,
+                current_price=entry,
+                trigger_price=snapshot.high_of_day,
+                stop_loss=round(snapshot.ema_9, 2),            # tight runner stop under EMA9
+                target=round(entry + (snapshot.atr * 3), 2),   # runner target
+                risk_reward=3.0,
+                trigger_probability=0.62,
+                win_probability=0.58,
+                minutes_to_trigger=0,
+                headline=f"🌊 {symbol} TIDAL WAVE - momentum surge {snapshot.rvol:.1f}× RVOL",
+                reasoning=[
+                    f"Extended +{snapshot.dist_from_vwap:.1f}% above VWAP",
+                    f"RVOL spike {snapshot.rvol:.1f}× with volume expanding into move",
+                    f"Breaking day high ${snapshot.high_of_day:.2f}",
+                    f"Tape: {tape.overall_signal.value}"
+                ],
+                time_window=self._get_current_time_window().value,
+                market_regime=self._market_regime.value,
+                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+            )
         return None
     
     async def _check_hod_breakout(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
@@ -4738,7 +4796,7 @@ class EnhancedBackgroundScanner:
             )
         
         if is_overbought and near_resistance:
-            direction = "short"
+            direction = "short"  # noqa: F841
             stop = snapshot.resistance + (snapshot.atr * 0.5)
             target = snapshot.ema_20
             priority = AlertPriority.HIGH if snapshot.rsi_14 > 75 else AlertPriority.MEDIUM
@@ -4902,7 +4960,7 @@ class EnhancedBackgroundScanner:
         
         # Gap down but recovering (above VWAP, holding)
         if snapshot.gap_pct < 0 and snapshot.holding_gap and snapshot.above_vwap:
-            direction = "long"
+            direction = "long"  # noqa: F841
             stop = snapshot.low_of_day - (snapshot.atr * 0.3)
             target = snapshot.prev_close
             priority = AlertPriority.HIGH if abs(snapshot.gap_pct) >= 4.0 else AlertPriority.MEDIUM
@@ -6753,7 +6811,7 @@ class EnhancedBackgroundScanner:
                     prev_close = bars[-1].get("close", 0)
                     prev_high = bars[-1].get("high", 0)
                     prev_low = bars[-1].get("low", 0)
-                    prev_volume = bars[-1].get("volume", 0)
+                    prev_volume = bars[-1].get("volume", 0)  # noqa: F841
                     
                     if prev_close <= 0:
                         continue
@@ -8117,7 +8175,7 @@ class EnhancedBackgroundScanner:
             from services.wave_scanner import get_wave_scanner
             wave_scanner = get_wave_scanner()
             wave_info = wave_scanner.get_stats()
-        except:
+        except Exception:
             pass
         
         return {

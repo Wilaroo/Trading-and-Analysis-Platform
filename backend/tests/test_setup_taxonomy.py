@@ -85,7 +85,7 @@ class TestSetupClass:
     def test_momentum_class(self):
         for name in ["squeeze", "vwap_continuation", "orb", "opening_drive",
                      "bouncy_ball", "gap_give_go", "breakout_confirmed",
-                     "puppy_dog", "gap_pick_roll"]:
+                     "puppy_dog", "gap_pick_roll", "tidal_wave"]:
             assert st.setup_class(name) == "momentum", name
         assert st.is_momentum_class("vwap_continuation")
         assert st.is_momentum_class("breakout_confirmed")  # variant resolves
@@ -119,7 +119,7 @@ class TestStyleDelegation:
 class TestStrategyFamily:
     def test_breakout(self):
         for n in ["orb", "breakout", "squeeze", "range_break_confirmed",
-                  "daily_breakout", "stage_2_breakout", "puppy_dog"]:
+                  "daily_breakout", "stage_2_breakout", "puppy_dog", "tidal_wave"]:
             assert st.strategy_family(n) == "breakout", n
 
     def test_continuation(self):
@@ -129,7 +129,7 @@ class TestStrategyFamily:
 
     def test_reversion(self):
         for n in ["vwap_fade_long", "mean_reversion", "rubber_band", "gap_fade",
-                  "bella_fade", "tidal_wave"]:
+                  "bella_fade", "fading_bounce"]:
             assert st.strategy_family(n) == "reversion", n
 
     def test_reversal(self):

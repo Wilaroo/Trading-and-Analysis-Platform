@@ -161,7 +161,14 @@ compute off MEDIAN R with a sub-$1 `risk_amount` clamp. Flags (default ON,
 reversible): `GRADING_CANONICAL_ROLLUP`, `GRADING_USE_MEDIAN`,
 `GRADING_MIN_RISK_AMOUNT`, `EV_CANONICAL_ROLLUP`, `LEARNING_CANONICAL_BASE`.
 Model feature input (`get_setup_features`) is intentionally UNCHANGED (m6 audit
-pending) — never feed canonical/family names to trained models without a retrain.
+done — `memory/M6_AI_FEATURE_INPUT_AUDIT_2026-06.md`; setup_type reaches models
+only via coarse family routing, never a per-setup one-hot) — never feed
+canonical/family names to trained models without a retrain.
+**m8 (v272):** `tidal_wave` split — the old reversion detector → `fading_bounce`
+(fade/reversion/target); a NEW true-momentum `tidal_wave` (RVOL surge + range
+break, long runner; env-tunable TIDAL_WAVE_MIN_*) owns the name. Historical
+`tidal_wave` rows migrate to `fading_bounce` via
+`scripts/migrate_v19_34_272_tidal_wave.py`.
 
 ## Pipeline architecture (Bellafiore + ML hybrid)
 

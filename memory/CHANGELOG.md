@@ -1,3 +1,44 @@
+## 2026-06-?? — v19.34.272: Taxonomy m8 — tidal_wave split + m6 audit — SHIPPED (pending DGX apply)
+
+### Why
+The `tidal_wave` detector fired downtrend SHORT-into-support FADES, yet was routed
+to the MOMENTUM ensemble head and bucketed as momentum in grades/EV/learning —
+mislabeling every tidal_wave trade. m6 audit confirmed setup_type reaches trained
+models only via coarse family routing (not a per-setup one-hot), so a rename is safe.
+
+### m8 scope
+- **enhanced_scanner.py**: `_check_tidal_wave`(reversion) → `_check_fading_bounce`
+  (setup_type `fading_bounce`); NEW `_check_tidal_wave` = true momentum surge
+  (extended +move, RVOL≥2.5, volume expanding into move, HOD/range break, long
+  runner; env-tunable TIDAL_WAVE_MIN_RVOL/_MIN_EXT_PCT/_MIN_VOL_MOM/_HOD_TOL_PCT).
+  Updated time-window/regime/enabled/intraday/REGISTERED/proximity registries.
+- **setup_taxonomy.py**: tidal_wave→momentum/_BREAKOUT_FAMILY/runner;
+  fading_bounce→fade/_REVERSION_FAMILY/target.
+- **ensemble_live_inference.py / confidence_gate.py**: add FADING_BOUNCE→MEAN_REVERSION
+  routing (TIDAL_WAVE→MOMENTUM now correct).
+- **smb_integration / trading_bot_service / opportunity_evaluator / trade_style_classifier
+  / trading_intelligence / market_setup_classifier / ev_tracking / server.py**:
+  split configs (fading_bounce = SHORT/scalp/reversion 0.5–1.5×; tidal_wave =
+  LONG/intraday/momentum runner 1.25–2.0×, seeded to LIVE).
+- Also fixed pre-existing latent bug: server.py used `logger` in 6 error paths
+  without ever defining it → added module logger + import.
+
+### Data migration (must, after deploy)
+`scripts/migrate_v19_34_272_tidal_wave.py` — renames historical tidal_wave→
+fading_bounce (bot_trades/trade_outcomes/alert_outcomes/ev_tracking), drops derived
+tidal_wave grade+learning rows, recomputes grades + rebuilds learning. Dry-run first.
+
+### Verification
+6 new pytest (`test_tidal_wave_split_v19_34_272.py`) + 295 regression green
+(taxonomy/scanner-coverage/multipliers/matrix/grading). All 12 changed files lint
+clean. Applier: paste.c-net.org/AlvarezGrowth (1.87MB, pre-sha-guarded, idempotent;
+16/16 byte-identical round-trip verified). Apply AFTER m5 (v271).
+
+### m6 deliverable
+`memory/M6_AI_FEATURE_INPUT_AUDIT_2026-06.md` — full setup_type → trained-model
+surface map + guardrail rule. Retrain flagged (non-blocking) once new-label samples accrue.
+
+
 ## 2026-06-?? — v19.34.271: Taxonomy m5 + Issue 3 — canonical roll-up + robust grade math — SHIPPED (pending DGX apply/verify)
 
 ### Why
