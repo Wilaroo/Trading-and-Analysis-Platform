@@ -3471,6 +3471,25 @@ class EnhancedBackgroundScanner:
                         # Grade the trade based on EV and context
                         alert.grade_trade(strategy_ev=stats.expected_value_r, market_context_score=0.5)
                     
+                    # v19.34.282 — user-approved immediate auto-execute for the newly
+                    # added trend_continuation_short. Canonicalizes to
+                    # `trend_continuation` for stats; force the win-rate floor as its
+                    # cold-start baseline so it auto-executes on priority+tape from its
+                    # first signal (operator choice, 2026-06-05).
+                    if setup_type == "trend_continuation_short":
+                        alert.strategy_win_rate = max(
+                            float(getattr(alert, "strategy_win_rate", 0.0) or 0.0),
+                            self._auto_execute_min_win_rate,
+                        )
+                        alert.calculate_r_multiple()
+                        try:
+                            alert.grade_trade(
+                                strategy_ev=float(getattr(alert, "strategy_ev_r", 0.0) or 0.0),
+                                market_context_score=0.5,
+                            )
+                        except Exception:
+                            pass
+
                     # Add tape reading to alert
                     # v19.34.213 — normalize tape_score from the producer's raw
                     # -1..+1 scale to the canonical 0..10 scale that ALL consumers
@@ -6339,6 +6358,7 @@ class EnhancedBackgroundScanner:
                     for check in [
                         self._check_daily_squeeze,
                         self._check_trend_continuation,
+                        self._check_trend_continuation_short,  # v19.34.282
                         self._check_daily_breakout,
                         self._check_base_breakout,
                         self._check_accumulation_entry,
@@ -7349,6 +7369,95 @@ class EnhancedBackgroundScanner:
             setup_category="trend_momentum",
             scan_tier="swing",
             direction_bias="long",
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
+    async def _check_trend_continuation_short(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """v19.34.282 — SHORT mirror of _check_trend_continuation.
+
+        Lower highs + lower lows, pulling back UP to a FALLING 20 EMA, then
+        resuming down (trend-continuation short). Added because the bot had no
+        way to express 'stay short with the trend' on clean downtrend days
+        (e.g. NVDA / TSLA 2026-06-05, which produced only counter-trend longs).
+        Emits HIGH priority + is granted the win-rate floor downstream so it is
+        auto-execute-eligible from its first signal (operator choice)."""
+        if len(bars) < 25:
+            return None
+
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+
+        # 20 EMA (current)
+        ema20 = closes[-20]
+        multiplier = 2 / 21
+        for c in closes[-19:]:
+            ema20 = c * multiplier + ema20 * (1 - multiplier)
+
+        # 20 EMA as of 5 bars ago (for slope)
+        ema20_5ago = closes[-25]
+        for c in closes[-24:-5]:
+            ema20_5ago = c * multiplier + ema20_5ago * (1 - multiplier)
+
+        if ema20 >= ema20_5ago:
+            return None  # EMA not falling
+
+        # Lower highs and lower lows (last 3 swings) — mirror of the long's HH/HL
+        recent_highs = [max(highs[-15:-10]), max(highs[-10:-5]), max(highs[-5:])]
+        recent_lows = [min(lows[-15:-10]), min(lows[-10:-5]), min(lows[-5:])]
+
+        lh = all(recent_highs[i] < recent_highs[i - 1] for i in range(1, len(recent_highs)))
+        ll = all(recent_lows[i] < recent_lows[i - 1] for i in range(1, len(recent_lows)))
+
+        if not (lh and ll):
+            return None  # No downtrend structure
+
+        # Price pulling back UP near the falling 20 EMA (within band).
+        # Long zone is (-0.5%..+2.0%); the short mirror is (-2.0%..+0.5%).
+        current = closes[-1]
+        dist_from_ema = (current - ema20) / ema20 * 100
+        if dist_from_ema > 0.5 or dist_from_ema < -2.0:
+            return None  # Not in the pullback-to-EMA short zone
+
+        # ATR for stop
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i + 1)]), abs(lows[-(i)] - closes[-(i + 1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+
+        stop = round(ema20 + atr * 1.5, 2)
+        target = round(current - atr * 3, 2)
+        rr = abs(current - target) / abs(stop - current) if abs(stop - current) > 0 else 0
+
+        return LiveAlert(
+            id=f"trend_continuation_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="trend_continuation_short",
+            strategy_name="trend_continuation_short",
+            direction="short",
+            priority=AlertPriority.HIGH,
+            current_price=current,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} Trend Continuation SHORT - Pullback to falling 20 EMA",
+            reasoning=[
+                "Daily downtrend: Lower highs + lower lows confirmed",
+                f"Price {dist_from_ema:.1f}% from falling 20 EMA (pullback-to-resistance short)",
+                f"EMA slope: falling (current ${ema20:.2f} < 5-bar-ago ${ema20_5ago:.2f})",
+                f"ATR: ${atr:.2f} | R:R {rr:.1f}:1 | Swing hold",
+            ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="trend_momentum",
+            scan_tier="swing",
+            direction_bias="short",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 

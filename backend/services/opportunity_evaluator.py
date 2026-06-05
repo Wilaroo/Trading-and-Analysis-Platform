@@ -2120,6 +2120,7 @@ class OpportunityEvaluator:
         'day_2_continuation':     1.75,
         'carry_forward_watch':    1.75,
         'trend_continuation':     1.75,
+        'trend_continuation_short': 1.75,  # v19.34.282
         # ── SWING (1.75-2.0× ATR, daily-bar driven) ───────────────────
         'daily_squeeze':          2.0,
         'daily_breakout':         2.0,
