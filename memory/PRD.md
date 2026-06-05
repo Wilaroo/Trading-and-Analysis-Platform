@@ -477,3 +477,8 @@ NEXT ML STEPS:
 3. (later, gated) build the meta-labeling layer when the budget says GO.
 4. (watch) confirm hold_seconds is stamped on bot_trades at close (net_pnl/mfe_r/
    mae_r already present) — needed as a clean label/feature for the meta-model.
+
+---
+## Action item added 2026-06-05: GPU-torch swap (P2, own task)
+- torch is CPU build (2.10.0+cpu) while GPU works for XGBoost (CUDA enabled). CNN/deep-learning heads (P9 chart-pattern, P11 CNN-LSTM) train on CPU = slow.
+- TODO: swap to a CUDA-enabled torch + matching torchvision (aarch64/Spark GB10) so P9/P11 train on GPU (~5–10× faster). Careful stack change, do as isolated task with a backup of the working CPU torch+torchvision (0.25.0). Verify `torch.cuda.is_available()` + re-run tensor probe after.
