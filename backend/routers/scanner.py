@@ -644,6 +644,92 @@ def get_in_play_health(sample: int = 8):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── v19.34.286 — gate near-miss funnel ──────────────────────────────────────
+# symbol-trace historically counted the legacy `rejection_events` collection
+# (effectively always 0) and stopped at "SCANNED & ALERTED — N alerts; check the
+# gates". The actual alert→trade kill reasons all land in `trade_drops` (BOTH
+# record_trade_drop AND record_rejection persist there, with margin context).
+# These helpers join that per-symbol so the trace answers *which* gate ate the
+# alerts and *by how much* (e.g. "tqs_too_low: TQS 52 < min 60, missed by 8").
+def _drop_margin(gate, ctx):
+    """Compact 'by how much' string for a gate's margin from its drop context.
+    Returns None when no numeric margin is available for the gate. Never raises."""
+    ctx = ctx or {}
+
+    def _f(*keys):
+        for k in keys:
+            v = ctx.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    try:
+        if gate == "tqs_too_low":
+            tqs, mn = _f("tqs", "tqs_score"), _f("min_tqs")
+            if tqs is not None and mn is not None:
+                return f"TQS {tqs:.0f} < min {mn:.0f} (missed by {mn - tqs:.0f})"
+        if gate in ("rr_below_min", "rr_below_min_v19_34_88"):
+            rr, mn = _f("rr_ratio", "risk_reward"), _f("min_required", "global_min")
+            if rr is not None and mn is not None:
+                return f"R:R {rr:.2f} < min {mn:.2f}"
+        if gate == "smart_filter_skip":
+            wr = _f("win_rate", "strategy_win_rate")
+            if wr is not None:
+                return f"win-rate {wr * 100:.0f}%" if wr <= 1 else f"win-rate {wr:.0f}%"
+        if gate in ("symbol_direction_open_cap_v123", "symbol_exposure_saturated",
+                    "max_open_positions"):
+            cur = _f("current", "open_count", "current_exposure")
+            cap = _f("cap", "max", "limit", "max_open_positions")
+            if cur is not None and cap is not None:
+                return f"{cur:.0f}/{cap:.0f} cap"
+        if gate == "post_stop_cooldown":
+            left = _f("cooldown_seconds_left", "seconds_left")
+            if left is not None:
+                return f"{left:.0f}s cooldown left"
+    except Exception:
+        return None
+    return None
+
+
+def _summarize_symbol_drops(drops):
+    """Aggregate a symbol's `trade_drops` rows into a per-gate funnel.
+    Pure + unit-testable. `drops` in any order; each is a dict with keys
+    gate / setup_type / reason / context / ts."""
+    by_gate = {}
+    for d in drops:
+        g = d.get("gate") or "unknown"
+        e = by_gate.get(g)
+        if e is None:
+            e = {"count": 0, "last_ts": None, "last_reason": None,
+                 "margin": None, "setups": set()}
+            by_gate[g] = e
+        e["count"] += 1
+        ts = d.get("ts")
+        if e["last_ts"] is None or (ts and ts > e["last_ts"]):
+            e["last_ts"] = ts
+            e["last_reason"] = ((d.get("reason") or "")[:160]) or None
+            m = _drop_margin(g, d.get("context"))
+            if m:
+                e["margin"] = m
+        st = d.get("setup_type")
+        if st:
+            e["setups"].add(st)
+    out = {}
+    for g, e in by_gate.items():
+        e["setups"] = sorted(e["setups"])
+        out[g] = e
+    first_killing = (max(out.items(), key=lambda kv: kv[1]["count"])[0]
+                     if out else None)
+    return {
+        "total": sum(e["count"] for e in out.values()),
+        "first_killing_gate": first_killing,
+        "by_gate": out,
+    }
+
+
 @router.get("/symbol-trace")
 def get_symbol_trace(symbol: str):
     """v19.34.281 — per-symbol scan forensics. Answers "did the live scanner
@@ -724,6 +810,22 @@ def get_symbol_trace(symbol: str):
     except Exception:
         pass
 
+    # 5b) v19.34.286 — alert→trade GATE funnel from `trade_drops` (the unified
+    # sink where every gate's kill lands). This is where alerts actually die;
+    # `rejection_events` above is the legacy/near-empty collection kept only for
+    # back-compat counts. `ts` is a full ISO string → lexical >= on the day works.
+    gate_funnel = {"total": 0, "first_killing_gate": None, "by_gate": {}}
+    try:
+        drops = list(sc.db["trade_drops"].find(
+            {"symbol": sym, "ts": {"$gte": today}},
+            {"_id": 0, "gate": 1, "setup_type": 1, "reason": 1,
+             "context": 1, "ts": 1},
+        ).sort("ts", -1).limit(200))
+        gate_funnel = _summarize_symbol_drops(drops)
+        counts["trade_drops"] = gate_funnel["total"]
+    except Exception:
+        pass
+
     # 6) Plain-language verdict.
     verdict = "unknown"
     if in_universe is False:
@@ -744,8 +846,20 @@ def get_symbol_trace(symbol: str):
             verdict = f"DROPPED @ in_play_strict_gate — score {last_eval.get('score')}"
         elif st == "scanned":
             if counts.get("live_alerts", 0) > 0:
-                verdict = (f"SCANNED & ALERTED — {counts.get('live_alerts')} alert(s) today; "
-                           "if no trade, check priority/tape/TQS gate or rejection-events")
+                if counts.get("bot_trades", 0) > 0:
+                    verdict = (f"SCANNED & ALERTED & TRADED — {counts.get('live_alerts')} "
+                               f"alert(s) → {counts.get('bot_trades')} trade(s) today ✓")
+                elif gate_funnel["total"] > 0:
+                    g = gate_funnel["first_killing_gate"]
+                    ge = gate_funnel["by_gate"].get(g, {})
+                    margin_str = f" — {ge.get('margin')}" if ge.get("margin") else ""
+                    verdict = (f"SCANNED & ALERTED but 0 TRADES — {counts.get('live_alerts')} "
+                               f"alert(s) killed at gate '{g}' ({ge.get('count')}×){margin_str}")
+                else:
+                    verdict = (f"SCANNED & ALERTED, 0 trades, NO gate-drop logged — "
+                               f"{counts.get('live_alerts')} alert(s) filtered PRE-eval "
+                               f"(priority / auto_execute_eligible / tape intake). "
+                               f"Drop is happening before any instrumented gate.")
             else:
                 verdict = ("SCANNED, NO ALERT — passed ADV+RVOL pre-filters but no detector "
                            "fired (the setup pattern wasn't present per the bot's read)")
@@ -758,6 +872,7 @@ def get_symbol_trace(symbol: str):
                  "min_filter": float(getattr(sc, "_min_rvol_filter", 0) or 0)},
         "last_eval": last_eval,
         "today_counts": counts,
+        "gate_funnel": gate_funnel,
         "timestamp": now.isoformat(),
     }
 

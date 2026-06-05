@@ -1,3 +1,35 @@
+## 2026-06-05 — v19.34.286: alert→trade GATE near-miss funnel (symbol-trace)
+
+Observability (pure-additive, no trading-logic change). Validated via pytest +
+git-HEAD-vs-worktree byte-exact applier round-trip (no testing_agent per DGX mandate).
+
+PROBLEM
+  symbol-trace counted the legacy `rejection_events` collection (~always 0), so
+  "NVDA 8 alerts -> 0 trades, 0 rejection_events" looked like alerts vanished. The
+  real alert->trade kill reasons all land in `trade_drops` (BOTH record_rejection
+  AND record_trade_drop persist there with margin context: tqs/min_tqs, rr/min, ...).
+
+FIX (backend/routers/scanner.py :: /symbol-trace)
+  - NEW _drop_margin(gate, ctx): compact "by how much" per gate (e.g.
+    "TQS 52 < min 60 (missed by 8)", "R:R 1.19 < min 1.50", "win-rate 17%").
+  - NEW _summarize_symbol_drops(drops): per-gate funnel (count, latest reason,
+    margin, setups, first_killing_gate) from today's trade_drops for the symbol.
+  - Verdict upgraded: "SCANNED & ALERTED but 0 TRADES — N alert(s) killed at gate
+    'X' (k×) — <margin>"; or "...NO gate-drop logged — filtered PRE-eval
+    (priority/auto_execute_eligible/tape intake)" when nothing was recorded
+    (points at the un-instrumented intake gap).
+  - Response gains `gate_funnel`; today_counts gains `trade_drops`.
+  - probe_symbol_day.py prints the funnel; tests/test_gate_funnel_v286.py (12).
+  Applier paste.rs/LwbUX.
+
+FOLLOW-UPS surfaced
+  - If NVDA shows "NO gate-drop logged", instrument the pre-eval intake
+    (priority / auto_execute_eligible) so those drops are recorded too.
+  - Detector-level near-miss (why a detector didn't fire) still pending — bigger,
+    needs per-detector instrumentation.
+
+---
+
 ## 2026-06-05 — v19.34.283 / 284 / 285: P0 trifecta (alert→trade leak, stat hygiene, naked-flip guard)
 
 Forked session. Cleared all three open P0s. Per DGX-hardware mandate: NO
