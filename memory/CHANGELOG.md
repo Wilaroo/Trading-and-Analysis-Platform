@@ -23554,3 +23554,39 @@ TTL-cached, fail-open to the prior.
 
 m9 remaining: a live market-hours run of probe_bracket_reconcile.py --base ...
 against open positions to confirm bracket attach+reconcile on the real IB path.
+
+================================================================================
+## 2026-06-05 — Signal directional-bias fix + per-symbol scan observability
+================================================================================
+Context: Operator (ERIK) asked why the bot never traded clean intraday DOWNTREND
+shorts he saw on TC2000 (TSLA, NVDA on 2026-06-05). Investigation chain:
+  - symbol-trace probes proved TSLA/NVDA WERE scanned (no plumbing/RVOL bug).
+  - live_alerts dump: NVDA threw 7 alerts, ALL dir=long (power_trend_stack +
+    vwap_fade_long) on a textbook short day. System-wide 1799 long vs 619 short.
+  - ROOT CAUSE: `trend_continuation` is hardcoded LONG-ONLY (rising EMA + HH/HL);
+    `vwap_fade` is trend-blind mean-reversion (fires counter-trend longs below
+    VWAP). Bot had NO "stay short with the trend" setup.
+
+### v19.34.281 — per-symbol scan observability (paste.rs: uomOh, *.bak.symtrace0605)
+  - enhanced_scanner: made the SILENT `if not snapshot: return` drop loud
+    (_symbols_skipped_no_data counter + scanner thought + _record_symbol_eval).
+    Added _symbol_last_eval trace (no_data/rvol_skip/in_play_skip/scanned).
+  - routers/scanner.py: GET /api/scanner/symbol-trace?symbol=XXX (verdict chain).
+  - backend/scripts/probe_symbol_day.py — one-command "why no trade on X".
+
+### v19.34.282 / v282b — trend_continuation_short detector (operator-approved)
+  - v282 (paste.rs: mp36h, *.bak.tcshort0605): added _check_trend_continuation_short
+    (falling EMA + lower-highs/lower-lows + pullback up to declining 20-EMA -> short).
+    Registered daily; auto-execute-eligible immediately (HIGH prio + win-rate floor
+    grant). opportunity_evaluator: trend_continuation_short -> 1.75x ATR.
+  - v282b (paste.rs: BQrmo, *.bak.tcshort0605b): moved to 5-min INTRADAY path inside
+    _scan_symbol_all_setups (gated every 10th cycle) so it auto-executes on intraday
+    staircase days; removed daily registration (didn't auto-exec, dedup-blocked).
+    Tightened entry: dist -0.5%..+0.5% + reject R:R<1.5.
+  - backend/scripts/backtest_trend_continuation_short.py — read-only replay probe.
+  - VALIDATION (no testing_agent — hardware bound): backtest on real bars =
+    NVDA 5-min 3 fires / TSLA 5 fires, all R:R 1.5-3.7:1, clean dist~0 entries.
+    Appliers validated HEAD->v281->v282->v282b: clean apply, py_compile, idempotent.
+
+NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 trades;
+AAPL 1 -> 0). Then optional: (b) core-liquid RVOL relax; vwap_fade trend filter.
