@@ -87,6 +87,9 @@ _MOMENTUM_CLASS: Set[str] = {
     "squeeze", "the_3_30_trade", "bouncy_ball", "second_chance", "hitchhiker",
     "spencer_scalp", "9_ema_scalp", "abc_scalp", "first_vwap_pullback",
     "fashionably_late", "breaking_news", "chart_pattern",
+    # tidal_wave (m8): true MOMENTUM volume-surge that breaks the day's range —
+    #   reassigned from the old intraday-reversion detector (now fading_bounce).
+    "tidal_wave",
     # puppy_dog = small-cap "follow the leader" w/ a SHORTER consolidation than
     #   big_dog → same consolidation-breakout momentum management (operator 2026-06).
     "puppy_dog",
@@ -98,11 +101,11 @@ _FADE_CLASS: Set[str] = {
     "bella_fade", "first_move_up", "first_move_down", "backside", "rubber_band",
     "off_sides", "vwap_fade", "mean_reversion", "gap_fade", "time_of_day_fade",
     "volume_capitulation",
-    # tidal_wave: OUR detector implements it as intraday mean-reversion
-    #   (enhanced_scanner regime map = FADE/STRONG_DOWNTREND), so it lives in the
-    #   fade class to match execution. NOTE: standard-usage "tidal wave" is a
-    #   momentum volume-surge — naming conflict flagged for operator decision.
-    "tidal_wave",
+    # fading_bounce (m8, was "tidal_wave"): downtrend SHORT into support on a
+    #   weak bounce — intraday mean-reversion (enhanced_scanner regime map =
+    #   FADE/STRONG_DOWNTREND). The "tidal_wave" name was reassigned to the true
+    #   momentum volume-surge detector (see _MOMENTUM_CLASS / _BREAKOUT_FAMILY).
+    "fading_bounce",
 }
 # Higher-timeframe families (swing/position scanner) — never intraday brackets.
 _SWING_CLASS: Set[str] = {
@@ -126,7 +129,7 @@ _POSITION_CLASS: Set[str] = {
 #    fade→{reversion,reversal}.
 _BREAKOUT_FAMILY: Set[str] = {
     "orb", "premarket_high_break", "hod_breakout", "breakout", "range_break",
-    "squeeze", "big_dog", "puppy_dog", "gap_give_go", "chart_pattern",
+    "squeeze", "big_dog", "puppy_dog", "gap_give_go", "chart_pattern", "tidal_wave",
     # higher-timeframe breakouts
     "daily_breakout", "daily_squeeze", "weekly_breakout", "vcp_breakout",
     "three_week_tight", "pocket_pivot", "bull_flag_break", "bear_flag_break",
@@ -141,7 +144,7 @@ _REVERSAL_FAMILY: Set[str] = {
 }
 _REVERSION_FAMILY: Set[str] = {
     "vwap_fade", "mean_reversion", "rubber_band", "gap_fade", "bella_fade",
-    "time_of_day_fade", "tidal_wave",
+    "time_of_day_fade", "fading_bounce",
 }
 # Reversal setups that historically RUN (so exit_archetype = runner despite
 # being a reversal): backside-of-parabolic, capitulation snaps, breakdown rides.

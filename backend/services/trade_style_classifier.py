@@ -59,7 +59,7 @@ SETUP_TO_STYLE: Dict[str, str] = {
     "hitchhiker": "scalp", "mean_reversion": "scalp", "off_sides": "scalp",
     "off_sides_short": "scalp", "puppy_dog": "scalp", "rubber_band": "scalp",
     "rubber_band_long": "scalp", "rubber_band_short": "scalp",
-    "second_chance": "scalp", "spencer_scalp": "scalp", "tidal_wave": "scalp",
+    "second_chance": "scalp", "spencer_scalp": "scalp", "fading_bounce": "scalp",
     "time_of_day_fade": "scalp", "volume_capitulation": "scalp", "vwap_fade": "scalp",
     # ── INTRADAY (20) ─────────────────────────────────────────────────
     "back_through_open": "intraday", "big_dog": "intraday", "breakdown": "intraday",
@@ -70,7 +70,7 @@ SETUP_TO_STYLE: Dict[str, str] = {
     "relative_weakness": "intraday", "squeeze": "intraday",
     "up_through_open": "intraday", "vwap_bounce": "intraday",
     "vwap_continuation": "intraday", "premarket_high_break": "intraday",
-    "the_3_30_trade": "intraday", "bouncy_ball": "intraday",
+    "the_3_30_trade": "intraday", "bouncy_ball": "intraday", "tidal_wave": "intraday",
     # ── SWING / MULTI-DAY ─────────────────────────────────────────────
     "base_breakout": "swing", "breakdown_confirmed": "multi_day",
     "daily_breakout": "multi_day", "daily_squeeze": "multi_day",

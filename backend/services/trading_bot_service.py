@@ -213,10 +213,16 @@ STRATEGY_CONFIG = {
         "scale_out_pcts": [0.5, 0.3, 0.2],
         "close_at_eod": True
     },
-    "tidal_wave": {
+    "fading_bounce": {
         "timeframe": TradeTimeframe.SCALP,
         "trail_pct": 0.01,
         "scale_out_pcts": [0.5, 0.3, 0.2],
+        "close_at_eod": True
+    },
+    "tidal_wave": {
+        "timeframe": TradeTimeframe.INTRADAY,
+        "trail_pct": 0.015,
+        "scale_out_pcts": [0.4, 0.3, 0.3],
         "close_at_eod": True
     },
     
@@ -559,7 +565,8 @@ class RiskParameters:
         "rubber_band_scalp":   1.5,
         "bouncy_ball":         1.5,
         "squeeze":             1.5,
-        "tidal_wave":          1.5,
+        "fading_bounce":       1.5,
+        "tidal_wave":          2.0,
         # Trend / breakout (unbounded targets) — keep tighter.
         "breakout":            2.0,
         "base_breakout":       2.0,
@@ -1018,7 +1025,7 @@ class TradingBotService:
             # Core session
             "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
             # Mean reversion
-            "rubber_band", "rubber_band_scalp", "vwap_bounce", "vwap_fade", "tidal_wave",
+            "rubber_band", "rubber_band_scalp", "vwap_bounce", "vwap_fade", "fading_bounce", "tidal_wave",
             # Consolidation
             "big_dog", "puppy_dog", "nine_ema_scalp", "abc_scalp", "9_ema_scalp",
             # Afternoon
@@ -5695,11 +5702,11 @@ class TradingBotService:
                 result["source_tier"] = "pusher_orders_snapshot"
                 result["order_path"] = _order_path
                 print(
-                    f"[v19.34.163 naked-sweep] SKIP — BOT_ORDER_PATH=direct "
-                    f"but resolver fell through to pusher_orders_snapshot "
-                    f"(ib_direct disconnected). Pusher snapshot cannot see "
-                    f"ib_direct's orders → would trigger false-naked cascade. "
-                    f"Re-arm ib_direct connection to restore detection.",
+                    "[v19.34.163 naked-sweep] SKIP — BOT_ORDER_PATH=direct "
+                    "but resolver fell through to pusher_orders_snapshot "
+                    "(ib_direct disconnected). Pusher snapshot cannot see "
+                    "ib_direct's orders → would trigger false-naked cascade. "
+                    "Re-arm ib_direct connection to restore detection.",
                     flush=True,
                 )
                 return result

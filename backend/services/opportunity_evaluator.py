@@ -2023,13 +2023,14 @@ class OpportunityEvaluator:
         'first_move_up':          0.5,
         'first_move_down':        0.5,
         'bella_fade':             0.5,
-        'tidal_wave':             0.5,
+        'fading_bounce':          0.5,
         'volume_capitulation':    0.5,
         'time_of_day_fade':       0.5,
         'big_dog':                0.5,
         'puppy_dog':              0.5,
         'bouncy_ball':            0.5,
         # ── INTRADAY MOMENTUM (1.0-1.5× ATR) ───────────────────────────
+        'tidal_wave':             1.25,
         'rubber_band':            1.0,
         'rubber_band_long':       1.0,
         'rubber_band_short':      1.0,
@@ -2149,7 +2150,7 @@ class OpportunityEvaluator:
         'rubber_band_scalp_long', 'rubber_band_scalp_short', 'breakout_scalp',
         'hitchhiker', 'gap_give_go', 'gap_pick_roll', 'second_chance',
         'backside', 'off_sides', 'fashionably_late', 'first_move_up',
-        'first_move_down', 'bella_fade', 'tidal_wave', 'volume_capitulation',
+        'first_move_down', 'bella_fade', 'fading_bounce', 'volume_capitulation',
         'time_of_day_fade', 'big_dog', 'puppy_dog', 'bouncy_ball',
     })
 

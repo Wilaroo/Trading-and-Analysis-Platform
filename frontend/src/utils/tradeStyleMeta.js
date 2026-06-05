@@ -127,6 +127,44 @@ const SETUP_TO_STYLE = {
 };
 
 /**
+ * v19.34.271 (m4-frontend) — Live SSOT bridge.
+ * `_dynamicStyleMap` is hydrated once from GET /api/sentcom/taxonomy so the
+ * UI cannot drift from the backend canonical taxonomy (services/setup_taxonomy.py).
+ * It maps canonical setup name → style bucket and takes precedence over the
+ * static SETUP_TO_STYLE fallback. If the fetch fails (offline / cold start),
+ * the static table keeps everything working — zero hard dependency.
+ */
+let _dynamicStyleMap = {};
+let _taxonomyLoaded = false;
+
+export const initTaxonomyStyles = async () => {
+  if (_taxonomyLoaded) return _dynamicStyleMap;
+  try {
+    const base = process.env.REACT_APP_BACKEND_URL || '';
+    const res = await fetch(`${base}/api/sentcom/taxonomy`);
+    if (!res.ok) return _dynamicStyleMap;
+    const data = await res.json();
+    const setups = (data && data.setups) || {};
+    const next = {};
+    Object.keys(setups).forEach((name) => {
+      const style = setups[name] && setups[name].style;
+      if (style && TRADE_STYLE_META[style]) next[name] = style;
+    });
+    _dynamicStyleMap = next;
+    _taxonomyLoaded = true;
+  } catch {
+    // Network/parse failure — silently keep the static fallback.
+  }
+  return _dynamicStyleMap;
+};
+
+// Fire-and-forget hydrate on module load (browser only).
+if (typeof window !== 'undefined') {
+  // Defer so it never blocks first paint.
+  setTimeout(() => { initTaxonomyStyles(); }, 0);
+}
+
+/**
  * Canonicalise any raw style/tier string. Handles backend variants
  * (e.g. "TRADE_2_HOLD" → "intraday", "A_PLUS" → "multi_day") and
  * un-lowercased values.
@@ -182,9 +220,14 @@ const setupLookup = (raw) => {
   if (!raw) return null;
   const k = String(raw).trim().toLowerCase();
   if (!k) return null;
+  // v19.34.271 — live SSOT map wins over the static fallback when hydrated.
+  if (_dynamicStyleMap[k]) return _dynamicStyleMap[k];
   if (SETUP_TO_STYLE[k]) return SETUP_TO_STYLE[k];
   const stripped = stripDirectionalSuffix(k);
-  return stripped !== k ? (SETUP_TO_STYLE[stripped] || null) : null;
+  if (stripped !== k) {
+    return _dynamicStyleMap[stripped] || SETUP_TO_STYLE[stripped] || null;
+  }
+  return null;
 };
 
 export const resolveTradeStyle = (row = {}) => {
@@ -273,4 +316,5 @@ export default {
   getTradeStyleMeta,
   humanizeSetupName,
   isScalpStyle,
+  initTaxonomyStyles,
 };

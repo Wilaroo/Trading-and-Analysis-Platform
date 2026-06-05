@@ -131,8 +131,9 @@ class TestComputeDailyStats:
         assert stats.total_r == 2.0
         assert stats.worst_r == -1.0
         assert stats.best_r == 2.0
-        # 60% WR + 0.4 avg_r → B grade
-        assert stats.grade == "B"
+        # v19.34.271 — grade now MEDIAN-driven. median([-1,-1,0.5,1.5,2]) = 0.5
+        # 60% WR + 0.5 median_r → B+
+        assert stats.grade == "B+"
 
     def test_breakeven_trades_counted_separately(self):
         trades = [self._trade(0.0)] * 5
@@ -220,13 +221,17 @@ class TestRollingRollup:
         from services.setup_grading_service import SetupGradingService
         self.svc = SetupGradingService(db=MagicMock())
 
-    def _day(self, date, n_trades, wins, total_r, mfe=1.0, mae=-0.5, hold=180.0, pnl=0.0):
+    def _day(self, date, n_trades, wins, total_r, mfe=1.0, mae=-0.5, hold=180.0, pnl=0.0, median_r=None):
         return {
             "trading_date": date,
             "trades_count": n_trades,
             "wins": wins,
             "losses": n_trades - wins,
             "total_r": total_r,
+            # v19.34.271 — real daily records always store median_r; the
+            # rolling grade is now median-weighted. Default to the per-day
+            # mean when not explicitly provided by a test.
+            "median_r": (total_r / n_trades if n_trades else 0.0) if median_r is None else median_r,
             "worst_r": -2.0,
             "best_r": 3.0,
             "avg_mfe_r": mfe,
@@ -341,10 +346,10 @@ class TestComputeEodGrades:
         result = self.svc.compute_eod_grades(trading_date="2026-02-12")
         assert result["trading_date"] == "2026-02-12"
         # We have 2 distinct setup_types in fixture: scalp, breakout.
-        # BUT each has < min sample (5), so they grade INSUFFICIENT_DATA
-        # but still get included in summaries.
+        # v19.34.271 — canonical rollup aliases `scalp` → `spencer_scalp`
+        # per the SSOT (services/setup_taxonomy._ALIASES).
         setups = [s["setup_type"] for s in result["summaries"]]
-        assert "scalp" in setups
+        assert "spencer_scalp" in setups
         assert "breakout" in setups
         assert result["setups_graded"] == 2
 

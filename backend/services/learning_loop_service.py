@@ -650,10 +650,29 @@ class LearningLoopService:
             docs = list(self._trade_outcomes_col.find({}))
             if not docs:
                 return 0
+            # v19.34.271 (Issue 3 — corrected store) — group by the SSOT
+            # canonical base (collapses _scalp/_confirmed/aliases the crude
+            # _long/_short strip misses) and EXCLUDE reconciliation/import
+            # artifacts so the win_rate/EV the TQS setup pillar reads is the
+            # artifact-free, direction-collapsed bucket. Reversible via
+            # LEARNING_CANONICAL_BASE (default ON).
+            import os as _os_ll
+            _use_canon = _os_ll.environ.get(
+                "LEARNING_CANONICAL_BASE", "1"
+            ).strip().lower() not in ("0", "false", "no", "off", "")
             groups: Dict[str, list] = {}
             for d in docs:
-                base = (d.get("setup_type") or "").lower().replace(
-                    "_long", "").replace("_short", "")
+                raw = d.get("setup_type") or ""
+                if _use_canon:
+                    try:
+                        from services.setup_taxonomy import canonicalize, is_edge_excluded
+                        if is_edge_excluded(raw):
+                            continue
+                        base = canonicalize(raw)
+                    except Exception:
+                        base = raw.lower().replace("_long", "").replace("_short", "")
+                else:
+                    base = raw.lower().replace("_long", "").replace("_short", "")
                 if not base:
                     continue
                 groups.setdefault(base, []).append(d)

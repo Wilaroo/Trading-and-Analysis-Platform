@@ -390,7 +390,7 @@ class EVTrackingService:
         "spencer_scalp", "second_chance", "backside", "off_sides", "fashionably_late",
         # Mean reversion
         "rubber_band", "rubber_band_long", "rubber_band_short",
-        "vwap_bounce", "vwap_fade", "tidal_wave", "mean_reversion",
+        "vwap_bounce", "vwap_fade", "fading_bounce", "tidal_wave", "mean_reversion",
         # Consolidation
         "big_dog", "puppy_dog", "9_ema_scalp", "abc_scalp", "squeeze",
         # Afternoon
@@ -409,6 +409,27 @@ class EVTrackingService:
             return resolve_setup_name(name)
         except ImportError:
             return name.lower()
+
+    @staticmethod
+    def _canon_for_ev(setup_type):
+        """v19.34.271 (m5) — resolve a raw setup_type to its canonical EV
+        bucket and flag edge-excluded artifacts. Returns None for artifacts
+        (reconciled_*/imported_from_ib/watchlist) so the caller skips them.
+        Honors EV_CANONICAL_ROLLUP (default ON; reversible)."""
+        import os
+        if not setup_type:
+            return None
+        try:
+            from services.setup_taxonomy import canonicalize, is_edge_excluded
+            if is_edge_excluded(setup_type):
+                return None
+            if os.environ.get("EV_CANONICAL_ROLLUP", "1").strip().lower() not in (
+                "0", "false", "no", "off",
+            ):
+                return canonicalize(setup_type) or setup_type
+        except Exception:  # pragma: no cover - fail-open to raw
+            pass
+        return setup_type
     
     def __init__(self, db=None):
         self.db = db
@@ -488,6 +509,9 @@ class EVTrackingService:
         Calculate Expected Value using SMB's formula:
         EV = (win_rate × avg_win_R) – (loss_rate × avg_loss_R)
         """
+        _canon = self._canon_for_ev(setup_type)
+        if _canon is not None:
+            setup_type = _canon
         if setup_type not in self._ev_records:
             return 0.0
         
@@ -594,6 +618,14 @@ class EVTrackingService:
             grade: Trade grade (A/B/C)
             outcome: "won", "lost", or "scratched"
         """
+        # v19.34.271 (m5) — canonical roll-up + artifact exclusion. Collapses
+        # directional variants into one EV bucket; drops reconciliation/import
+        # artifacts so they never pollute per-setup EV.
+        _canon = self._canon_for_ev(setup_type)
+        if _canon is None:
+            logger.debug("EV record skipped — edge-excluded artifact: %s", setup_type)
+            return
+        setup_type = _canon
         if setup_type not in self._ev_records:
             self._ev_records[setup_type] = EVTrackingRecord(setup_type=setup_type)
         
@@ -881,6 +913,9 @@ class EVTrackingService:
     def get_ev_report(self, setup_type: str = None) -> Dict:
         """Get EV report for one or all setups"""
         if setup_type:
+            _canon = self._canon_for_ev(setup_type)
+            if _canon is not None:
+                setup_type = _canon
             if setup_type in self._ev_records:
                 record = self._ev_records[setup_type]
                 return {

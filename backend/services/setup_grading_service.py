@@ -60,6 +60,53 @@ logger = logging.getLogger(__name__)
 # Collection name — single source of truth for the grade snapshots.
 GRADE_COLLECTION = "setup_grade_records"
 
+
+# ── v19.34.271 (m5 + Issue 3) — canonical roll-up + robust grade math ──
+# All three flags default ON but are instantly reversible via env so the
+# operator can A/B the new behaviour against the legacy avg_R / raw-variant
+# grading without a code change.
+#
+#   GRADING_CANONICAL_ROLLUP — group closed trades by canonicalize(setup_type)
+#     (collapses vwap_fade_long + vwap_fade_short → vwap_fade) and EXCLUDE
+#     reconciliation/import/watchlist artifacts (is_edge_excluded).
+#   GRADING_USE_MEDIAN — grade off MEDIAN R instead of mean R (outlier-robust).
+#   GRADING_MIN_RISK_AMOUNT — drop sub-$1 risk-basis rows from grade math; a
+#     $0.20 dollar-risk trade produces an absurd R that dominates the mean.
+def _grading_flag(key: str, default: bool = True) -> bool:
+    import os
+    v = os.environ.get(key)
+    if v in (None, ""):
+        return default
+    return str(v).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _grading_min_risk() -> float:
+    import os
+    v = os.environ.get("GRADING_MIN_RISK_AMOUNT")
+    if v in (None, ""):
+        return 1.0
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _canonical_grade_key(setup_type):
+    """Resolve the grade-bucket key for a raw setup_type, honoring the
+    GRADING_CANONICAL_ROLLUP flag. Returns None for edge-excluded artifacts
+    (caller must skip)."""
+    if not setup_type:
+        return None
+    if not _grading_flag("GRADING_CANONICAL_ROLLUP"):
+        return setup_type
+    try:
+        from services.setup_taxonomy import canonicalize, is_edge_excluded
+        if is_edge_excluded(setup_type):
+            return None
+        return canonicalize(setup_type) or setup_type
+    except Exception:  # pragma: no cover - fail-open to raw key
+        return setup_type
+
 # Minimum sample size below which we refuse to assign a letter grade.
 # Tunable via env to let the operator inspect low-sample setups
 # during early-shakedown if desired.
@@ -108,6 +155,7 @@ class SetupDailyStats:
     (setup_type, trading_date) — unique per upsert.
     """
     setup_type: str
+    canonical_setup: str  # v19.34.271 — canonical bucket name (== setup_type when canonical rollup on)
     trading_date: str  # "YYYY-MM-DD" (US/Eastern session date)
     trades_count: int
     wins: int
@@ -220,6 +268,13 @@ class SetupGradingService:
             st = trade.get("setup_type")
             if not st:
                 continue
+            # v19.34.271 (m5) — canonical roll-up + artifact exclusion.
+            # Collapse directional/style variants into one bucket and drop
+            # reconciliation/import/watchlist artifacts so they never skew
+            # per-setup edge or grade math.
+            grade_key = _canonical_grade_key(st)
+            if grade_key is None:
+                continue
             # v19.34.173 — exclude learning_only micro trades from
             # grade aggregation. These are 0.1x-sized F-graded trades
             # whose realized R is dominated by fixed commission costs
@@ -234,7 +289,7 @@ class SetupGradingService:
             _ec = trade.get("entry_context") or {}
             if trade.get("learning_only") is True or _ec.get("learning_only") is True:
                 continue
-            by_setup.setdefault(st, []).append(trade)
+            by_setup.setdefault(grade_key, []).append(trade)
 
         summaries: List[Dict[str, Any]] = []
         for setup_type, trades in by_setup.items():
@@ -274,11 +329,21 @@ class SetupGradingService:
         # realized_pnl / risk_amount (best-effort).
         clean: List[Dict[str, Any]] = []
         for t in trades:
+            # v19.34.271 (Issue 3) — risk clamp. A sub-$1 dollar-risk basis
+            # yields an absurd R-multiple (e.g. $0.20 risk on a $10 move = 50R)
+            # that dominates the mean and ranks noise as a "best" setup. Drop
+            # these micro-risk rows from grade math entirely.
+            _risk = t.get("risk_amount")
+            try:
+                if _risk is not None and float(_risk) < _grading_min_risk():
+                    continue
+            except (TypeError, ValueError):
+                pass
             r = t.get("r_multiple")
             if r is None:
                 pnl = t.get("realized_pnl")
                 risk = t.get("risk_amount")
-                if pnl is not None and risk and risk > 0:
+                if pnl is not None and risk and float(risk) >= _grading_min_risk():
                     r = float(pnl) / float(risk)
             if r is None:
                 continue
@@ -322,10 +387,14 @@ class SetupGradingService:
 
         total_realized_pnl = sum(float(t.get("realized_pnl") or 0.0) for t in clean)
 
-        grade = compute_letter_grade(trades_count, win_rate, avg_r)
+        # v19.34.271 (Issue 3) — grade off MEDIAN R (outlier-robust) when the
+        # flag is on; legacy mean-R path preserved for instant reversibility.
+        _grade_r = median_r if _grading_flag("GRADING_USE_MEDIAN") else avg_r
+        grade = compute_letter_grade(trades_count, win_rate, _grade_r)
 
         return SetupDailyStats(
             setup_type=setup_type,
+            canonical_setup=setup_type,
             trading_date=trading_date,
             trades_count=trades_count,
             wins=wins,
@@ -365,6 +434,12 @@ class SetupGradingService:
         records in the window."""
         from zoneinfo import ZoneInfo
 
+        # v19.34.271 (m5) — resolve to the canonical bucket the records are
+        # keyed on so a raw variant lookup (vwap_fade_long) finds the
+        # collapsed bucket (vwap_fade). No-op when canonical rollup is off.
+        _ck = _canonical_grade_key(setup_type)
+        if _ck is not None:
+            setup_type = _ck
         et = ZoneInfo("US/Eastern")
         today = datetime.now(et).date()
         from_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -460,7 +535,16 @@ class SetupGradingService:
         avg_r = total_r / trades_count
         win_rate = wins / trades_count if trades_count else 0.0
         last_trade_date = max((r.get("trading_date") for r in rows if r.get("trading_date")), default=None)
-        grade = compute_letter_grade(trades_count, win_rate, avg_r)
+        # v19.34.271 (Issue 3) — robust rolling grade off a trade-count-weighted
+        # blend of each day's MEDIAN R (each daily median is already
+        # outlier-resistant) instead of the raw window mean R.
+        weighted_median = sum(
+            float(r.get("median_r") or 0.0) * int(r.get("trades_count") or 0)
+            for r in rows
+        )
+        median_weighted_r = weighted_median / trades_count if trades_count else 0.0
+        _grade_r = median_weighted_r if _grading_flag("GRADING_USE_MEDIAN") else avg_r
+        grade = compute_letter_grade(trades_count, win_rate, _grade_r)
         return SetupRollingGrade(
             setup_type=setup_type,
             window_days=days,

@@ -72,9 +72,9 @@ def test_matrix_directionality_invariants():
 
 
 def test_lookup_trade_context_aliases_resolve():
-    """puppy_dog / tidal_wave / vwap_bounce should resolve to canonical."""
+    """puppy_dog / fading_bounce / vwap_bounce should resolve to canonical."""
     assert lookup_trade_context("puppy_dog", MarketSetup.GAP_AND_GO) == TradeContext.WITH_TREND
-    assert lookup_trade_context("tidal_wave", MarketSetup.OVEREXTENSION) == TradeContext.COUNTERTREND
+    assert lookup_trade_context("fading_bounce", MarketSetup.OVEREXTENSION) == TradeContext.COUNTERTREND
     assert lookup_trade_context("vwap_bounce", MarketSetup.GAP_AND_GO) == TradeContext.WITH_TREND
 
 
