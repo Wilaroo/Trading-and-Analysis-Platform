@@ -24,6 +24,37 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.285 — naked-sweep flip guard (direction-aware) ────────────────────
+# The v235 protective-qty clamp (clamp_protective_qty + live_position_abs) only
+# compares MAGNITUDES — it discards the SIGN of the live IB position. So when a
+# tracked position desyncs overnight and IB ends up FLAT or on the OPPOSITE side
+# (CRM overnight-naked-flip incident), the naked-sweep reissues a full-size EXIT
+# (SELL for a long / BUY for a short) that, on trigger, oversells/overbuys past
+# zero and creates a NAKED flipped position. This decides, per naked trade,
+# whether reissuing the protective bracket is safe given the SIGNED live IB
+# position. (A same-side partial — 0 < held < rs — still 'proceed's; the v235
+# magnitude clamp inside attach_oca_stop_target shrinks the order correctly.)
+def _naked_sweep_flip_decision(direction_value, bot_remaining_shares,
+                               ib_signed_qty, positions_available):
+    """Return 'skip_unverifiable' | 'halt_flat_or_opposite' | 'proceed'.
+
+    - direction_value: 'long' | 'short' (the bot trade's side)
+    - bot_remaining_shares: shares the bot thinks it holds (> 0)
+    - ib_signed_qty: live IB net position for the symbol (signed; + long / -
+      short), or None when the symbol is absent from an otherwise-present snapshot
+    - positions_available: False when IB position data couldn't be read this cycle
+    """
+    if not positions_available:
+        return "skip_unverifiable"
+    is_long = str(direction_value or "long").lower() != "short"
+    signed = 0.0 if ib_signed_qty is None else float(ib_signed_qty)
+    same_side_qty = signed if is_long else -signed
+    if same_side_qty <= 0:
+        # IB is flat OR on the opposite side — any exit reissue would flip naked.
+        return "halt_flat_or_opposite"
+    return "proceed"
+
+
 class BotMode(str, Enum):
     """Bot operating mode"""
     AUTONOMOUS = "autonomous"      # Execute trades without confirmation
@@ -5788,6 +5819,39 @@ class TradingBotService:
                 if v is not None:
                     live_order_ids.add(str(v))
 
+        # ── v19.34.285 — flip-guard: signed live IB positions ──────────────
+        # Build a SIGNED per-symbol IB net-position map so a naked reissue can
+        # be refused when IB is flat/opposite for the symbol (would flip the
+        # position naked). An empty/unreadable snapshot => unverifiable, and the
+        # per-trade guard then SKIPS reissue for that cycle (never reissues an
+        # exit it can't confirm). Same source the reconciler uses.
+        ib_signed_by_sym: Dict[str, float] = {}
+        ib_positions_available = False
+        try:
+            from services.orphan_gtc_reconciler import _fetch_ib_positions_async
+            _ibpos, _ibpos_src = await _fetch_ib_positions_async()
+            if (_ibpos_src or {}).get("ok") and _ibpos:
+                ib_positions_available = True
+                for _p in _ibpos:
+                    _psym = (_p.get("symbol") or "").upper()
+                    if not _psym:
+                        continue
+                    try:
+                        ib_signed_by_sym[_psym] = (
+                            ib_signed_by_sym.get(_psym, 0.0)
+                            + float(_p.get("position") or 0)
+                        )
+                    except (TypeError, ValueError):
+                        pass
+            result["flip_guard_positions_available"] = ib_positions_available
+            result["flip_guard_positions_source"] = (_ibpos_src or {}).get("tier")
+        except Exception as _fgerr:
+            result["flip_guard_positions_available"] = False
+            print(
+                f"[v19.34.285 flip-guard] IB position fetch failed (continuing "
+                f"as unverifiable): {_fgerr}", flush=True,
+            )
+
         # 2) Walk every open trade with shares > 0.
         from services.bracket_reissue_service import _persist_lifecycle_event
         # 2026-02-13 (v19.34.143) — emergency hard %-stop fallback for
@@ -5923,6 +5987,75 @@ class TradingBotService:
                     f"Emergency re-issue.",
                     flush=True,
                 )
+
+                # ── v19.34.285 — flip-guard (direction-aware) ──────────────
+                # Before reissuing the protective EXIT bracket, verify IB's
+                # SIGNED position. If IB is flat/opposite (or unverifiable),
+                # reissuing would oversell/overbuy and flip the position naked.
+                _dir_obj285 = getattr(trade, "direction", None)
+                _dir_v285 = getattr(
+                    _dir_obj285, "value",
+                    str(_dir_obj285) if _dir_obj285 else "long",
+                ).lower()
+                _ib_signed285 = (
+                    ib_signed_by_sym.get(sym.upper())
+                    if ib_positions_available else None
+                )
+                _decision285 = _naked_sweep_flip_decision(
+                    _dir_v285, rs, _ib_signed285, ib_positions_available,
+                )
+                if _decision285 != "proceed":
+                    if _decision285 == "skip_unverifiable":
+                        result.setdefault("flip_guard_skipped_unverifiable", 0)
+                        result["flip_guard_skipped_unverifiable"] += 1
+                        _phase285 = "naked_sweep_flip_guard_skip"
+                        _reason285 = "ib_position_unverifiable"
+                        print(
+                            f"[v19.34.285 flip-guard] {sym} {tid} SKIP reissue — "
+                            f"IB position data unavailable this cycle; refusing "
+                            f"unverifiable exit reissue.", flush=True,
+                        )
+                    else:  # halt_flat_or_opposite
+                        result.setdefault("flip_guard_halts", 0)
+                        result["flip_guard_halts"] += 1
+                        _phase285 = "naked_sweep_halt_no_ib_position"
+                        _reason285 = "ib_flat_or_opposite"
+                        try:
+                            trade.desync_flagged = True
+                            trade.desync_reason = "ib_flat_or_opposite_v285"
+                            trade.desync_detected_at = (
+                                datetime.now(timezone.utc).isoformat()
+                            )
+                        except Exception:
+                            pass
+                        print(
+                            f"[v19.34.285 flip-guard] {sym} {tid} HARD-HALT "
+                            f"reissue — bot thinks {_dir_v285} {rs}sh but IB net="
+                            f"{(_ib_signed285 if _ib_signed285 is not None else 0):+.0f}. "
+                            f"Reissue would flip naked. Flagged desync for "
+                            f"reconciler.", flush=True,
+                        )
+                    try:
+                        await _persist_lifecycle_event(
+                            bot=self,
+                            event={
+                                "phase": _phase285,
+                                "success": False,
+                                "trade_id": tid,
+                                "symbol": sym,
+                                "reason": _reason285,
+                                "bot_remaining_shares": rs,
+                                "ib_position_qty": _ib_signed285,
+                                "direction": _dir_v285,
+                            },
+                        )
+                    except Exception as _ple285:
+                        print(
+                            f"[v19.34.285 flip-guard] lifecycle persist failed: "
+                            f"{_ple285}", flush=True,
+                        )
+                    continue
+                # ───────────────────────────────────────────────────────────
 
                 # v19.34.143 — emergency hard %-stop fallback. Before
                 # delegating to attach_oca_stop_target, make sure
