@@ -23763,3 +23763,22 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     setups lazy-register to 0.55 grace (trend_continuation, bouncy_ball). strategy_ev_r now
     persisted honestly. Part 1 SUCCESS — persisted signal + ML features no longer lie.
     Part 2 (EV-aware eligibility) + Part 3 (quarantine) still pending operator decision.
+
+### v19.34.293 Part 2 — EV-AWARE auto-exec gate (operator-approved execution change)
+  - enhanced_scanner.py: config _auto_execute_min_ev_r = 0.10. New _passes_ev_quality_gate(alert):
+    unregistered -> block; cold-start (<grace_min outcomes) -> grace pass (earn data on
+    priority+tape); proven (>=grace_min) -> require EV_R > +0.10R. REPLACES the bare
+    win-rate floor at BOTH eligibility call sites (snapshot path L3645 + trend_continuation_short
+    L3677). Win-rate floor DROPPED entirely (operator decision 2026-06-05). New static
+    _auto_exec_fail_reasons_ev(...) + _record_auto_exec_ineligible rewritten to log the EV
+    verdict (ev_r/min_ev_r/outcomes in context) instead of win-rate. NO quarantine (Part 3
+    declined).
+  - Effect: blocks proven losers (vwap_fade EV-3.98, squeeze -0.12, accumulation_entry -0.44,
+    gap_fade +0.088<+0.10) and UNBLOCKS proven high-EV/low-win setups (vwap_continuation +0.17,
+    daily_breakout +2.73 when it has data). Cold-start setups unchanged.
+  - test_ev_quality_gate_v293.py (13 cases). 27 enhanced_scanner tests pass.
+  - Applier stacks on v292 (4 hunks): paste.rs 9vLAc (sha 4ce608b9), idempotent, py_compile OK,
+    byte-identical vs HEAD+v292+v293. Backend hot-reload healthy.
+  - NOTE: router diagnostics (intake-summary/symbol-trace, v288-v290) still recompute on a
+    WIN-RATE lens (legacy proxy) — they don't yet reflect the EV gate. Offer v294 to realign
+    them to EV (needs persisting strategy_outcomes on the alert).

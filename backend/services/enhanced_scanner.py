@@ -1097,6 +1097,15 @@ class EnhancedBackgroundScanner:
         self._auto_execute_min_win_rate = 0.55
         self._auto_execute_min_priority = AlertPriority.HIGH
 
+        # v19.34.293 Part 2 — EV-AWARE auto-exec quality gate (operator-approved
+        # 2026-06-05). Once a setup has >= _win_rate_grace_min_trades graded
+        # outcomes, it must show a PROVEN positive expectancy (EV_R > this) to
+        # auto-execute — REPLACING the old bare win-rate floor. EV rewards
+        # expectancy over hit-rate: a 40%-win/+2.7R setup (daily_breakout) passes;
+        # a 17%-win/-4R one (vwap_fade) does not. Cold-start setups (< grace) keep
+        # the grace pass so they can earn data on priority+tape.
+        self._auto_execute_min_ev_r = 0.10
+
         # 2026-04-30 — grace period for cold-start strategies. Until a
         # strategy has accumulated this many graded outcomes (closed bot
         # trades with R-multiples), use `_auto_execute_min_win_rate` as
@@ -1490,6 +1499,55 @@ class EnhancedBackgroundScanner:
             failed.append(f"win-rate {wr * 100:.0f}%<{mn * 100:.0f}%")
         return failed
 
+    def _passes_ev_quality_gate(self, alert) -> bool:
+        """v19.34.293 Part 2 — EV-aware auto-exec quality gate (replaces the bare
+        win-rate floor). A setup with >= grace_min graded outcomes must show a
+        PROVEN positive expectancy (EV_R > _auto_execute_min_ev_r). Cold-start
+        setups (< grace_min) keep the grace pass so they can earn data on
+        priority+tape. Unregistered setups have no basis to auto-trade (mirrors the
+        legacy 0.0-win-rate block). Never raises."""
+        try:
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            stats = self._strategy_stats.get(base)
+            if stats is None:
+                return False
+            outcomes = int(getattr(stats, "alerts_triggered", 0) or 0)
+            if outcomes < self._win_rate_grace_min_trades:
+                return True
+            ev_r = float(getattr(stats, "expected_value_r", 0.0) or 0.0)
+            return ev_r > float(self._auto_execute_min_ev_r)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _auto_exec_fail_reasons_ev(priority_value, tape_confirmation, ev_r,
+                                   min_ev_r, outcomes, grace_min, registered=True):
+        """v19.34.293 — which auto-execute conditions an alert FAILED under the EV
+        gate. Mirrors _passes_ev_quality_gate exactly (proven setups need
+        EV_R > min_ev_r; cold-start passes; unregistered fails). Pure + testable."""
+        failed = []
+        if str(priority_value).lower() not in ("critical", "high"):
+            failed.append(f"priority={priority_value}<high")
+        if not tape_confirmation:
+            failed.append("tape_unconfirmed")
+        if not registered:
+            failed.append("no_strategy_stats")
+            return failed
+        try:
+            o = int(outcomes or 0)
+        except (TypeError, ValueError):
+            o = 0
+        if o >= int(grace_min):
+            try:
+                ev = float(ev_r)
+            except (TypeError, ValueError):
+                ev = 0.0
+            mn = float(min_ev_r)
+            if not (ev > mn):
+                failed.append(f"EV {ev:+.2f}R<=+{mn:.2f}R")
+        return failed
+
     def _record_auto_exec_ineligible(self, alert):
         """v19.34.287 — intake visibility: record WHY a surfaced alert failed the
         auto-execute eligibility gate, so symbol-trace's gate funnel stops showing
@@ -1506,10 +1564,17 @@ class EnhancedBackgroundScanner:
                 return
             seen[key] = now_t
             pr = alert.priority.value if getattr(alert, "priority", None) else "?"
-            wr = float(getattr(alert, "strategy_win_rate", 0.0) or 0.0)
-            mn = float(self._auto_execute_min_win_rate)
             tape_ok = bool(getattr(alert, "tape_confirmation", False))
-            failed = self._auto_exec_fail_reasons(pr, tape_ok, wr, mn)
+            # v19.34.293 Part 2 — report the EV-gate verdict (win-rate floor dropped).
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            st = self._strategy_stats.get(base)
+            ev_r = float(getattr(st, "expected_value_r", 0.0) or 0.0) if st else 0.0
+            outcomes = int(getattr(st, "alerts_triggered", 0) or 0) if st else 0
+            mn = float(self._auto_execute_min_ev_r)
+            failed = self._auto_exec_fail_reasons_ev(
+                pr, tape_ok, ev_r, mn, outcomes,
+                self._win_rate_grace_min_trades, registered=st is not None)
             from services.trade_drop_recorder import record_trade_drop
             record_trade_drop(
                 getattr(self, "db", None),
@@ -1519,7 +1584,8 @@ class EnhancedBackgroundScanner:
                 direction=getattr(alert, "direction", "long") or "long",
                 reason="auto-exec ineligible: " + (", ".join(failed) or "unknown"),
                 context={"priority": pr, "tape_confirmation": tape_ok,
-                         "win_rate": wr, "min_win_rate": mn, "failed": failed},
+                         "ev_r": ev_r, "min_ev_r": mn, "outcomes": outcomes,
+                         "failed": failed},
             )
         except Exception:
             pass
@@ -3580,7 +3646,7 @@ class EnhancedBackgroundScanner:
                         self._auto_execute_enabled and
                         alert.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
                         alert.tape_confirmation and
-                        alert.strategy_win_rate >= self._auto_execute_min_win_rate
+                        self._passes_ev_quality_gate(alert)
                     )
                     
                     alerts.append(alert)
@@ -3612,7 +3678,7 @@ class EnhancedBackgroundScanner:
                                 self._auto_execute_enabled and
                                 _tcs.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
                                 _tcs.tape_confirmation and
-                                _tcs.strategy_win_rate >= self._auto_execute_min_win_rate
+                                self._passes_ev_quality_gate(_tcs)
                             )
                             alerts.append(_tcs)
                 except Exception:
