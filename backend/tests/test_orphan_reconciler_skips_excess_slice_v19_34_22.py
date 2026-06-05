@@ -75,6 +75,10 @@ def _mock_bot(open_trades_map=None):
     bot._open_trades = open_trades_map if open_trades_map is not None else {}
     bot._persist_trade = MagicMock()
     bot._db = MagicMock()
+    # v19.34.22 test fix: provide a real dict so the recently-closed-cooldown
+    # guard (position_reconciler.py ~L1287) reads None, not an auto-MagicMock
+    # (which made `0 <= age_s` raise TypeError and swallowed the spawn path).
+    bot._recently_closed_symbols = {}
     return bot
 
 
@@ -297,6 +301,9 @@ def test_orphan_reconciler_still_spawns_for_true_orphan():
     with patch("routers.ib._pushed_ib_data",
                {"positions": ib_positions, "quotes": ib_quotes}), \
          patch("routers.ib.is_pusher_connected", return_value=True), \
+         patch("services.bracket_attach_governor.get_governor",
+               return_value=MagicMock(
+                   should_attempt_attach=MagicMock(return_value=(True, "ok")))), \
          patch("services.sentcom_service.emit_stream_event",
                new=AsyncMock(return_value=True)):
         result = _run(pr.reconcile_orphan_positions(bot, symbols=["AAPL"]))
@@ -345,6 +352,9 @@ def test_orphan_reconciler_all_orphans_excludes_db_tracked():
     with patch("routers.ib._pushed_ib_data",
                {"positions": ib_positions, "quotes": ib_quotes}), \
          patch("routers.ib.is_pusher_connected", return_value=True), \
+         patch("services.bracket_attach_governor.get_governor",
+               return_value=MagicMock(
+                   should_attempt_attach=MagicMock(return_value=(True, "ok")))), \
          patch("services.sentcom_service.emit_stream_event",
                new=AsyncMock(return_value=True)):
         result = _run(pr.reconcile_orphan_positions(bot, all_orphans=True))
