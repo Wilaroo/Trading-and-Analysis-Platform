@@ -23782,3 +23782,17 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
   - NOTE: router diagnostics (intake-summary/symbol-trace, v288-v290) still recompute on a
     WIN-RATE lens (legacy proxy) — they don't yet reflect the EV gate. Offer v294 to realign
     them to EV (needs persisting strategy_outcomes on the alert).
+
+### v19.34.293 — applier REBUILT & RE-VERIFIED (fork continuation 2026-06-05)
+  - Rebuilt the v293 EV-gate applier from first principles (5 regions: EV-floor cfg,
+    _passes_ev_quality_gate + _auto_exec_fail_reasons_ev methods, _record_auto_exec_ineligible
+    body, both eligibility call sites). Each region machine-verified against pre-v293 (5740c549~1)
+    and committed source before base64-embedding.
+  - Tested: PRE(v292) -> applier == committed v293 BYTE-IDENTICAL (scanner + test). Idempotent
+    no-op on current HEAD (all 5 regions SKIP). py_compile OK. 13/13 v293 unit tests pass; lint clean.
+  - paste.rs: https://paste.rs/54Jhf (sha256 e408cc12...). curl roundtrip verified.
+  - NOTE: working tree already carries v294 (persist strategy_outcomes + realign router
+    intake-summary/symbol-trace diagnostics to the EV lens; routers/scanner.py L844/L999,
+    enhanced_scanner _stamp_strategy_metrics). v294 is INDEPENDENT of the v293 gate
+    (gate reads live _strategy_stats, not the alert field). v294 applier NOT yet packaged —
+    pending operator go-ahead.
