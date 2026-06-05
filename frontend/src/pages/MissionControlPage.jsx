@@ -11,12 +11,13 @@
  * we backfill recent history, then tail live.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Radio, Activity } from 'lucide-react';
+import { Radio, Activity, Trophy } from 'lucide-react';
 import useStreamSocket from '../hooks/useStreamSocket';
 import { classifyLane, severityOf, SEVERITIES } from '../lib/laneClassify';
 import LaneColumn from '../components/missioncontrol/LaneColumn';
 import SafetyRow from '../components/missioncontrol/SafetyRow';
 import TrailDrawer from '../components/missioncontrol/TrailDrawer';
+import EVLeaderboard from '../components/sentcom/v5/EVLeaderboard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const COLUMN_LANES = ['scanner', 'gates', 'execution', 'position', 'reconciler'];
@@ -41,6 +42,8 @@ const MissionControlPage = () => {
   const [lastEventTs, setLastEventTs] = useState(null);
   // v19.34.188 — locally-dismissed System/Safety rows (keyed by id|timestamp).
   const [dismissedSafety, setDismissedSafety] = useState(() => new Set());
+  // v19.34.274 — EV Leaderboard slide-over panel toggle.
+  const [showEvBoard, setShowEvBoard] = useState(false);
 
   const dismissSafety = useCallback((ev) => {
     const key = ev.id || ev.timestamp;
@@ -129,8 +132,22 @@ const MissionControlPage = () => {
           {ageS != null && <span className="text-[11px] text-zinc-600">· last {ageS}s ago</span>}
         </div>
 
+        {/* EV Leaderboard toggle */}
+        <button
+          type="button"
+          data-testid="mc-ev-board-toggle"
+          onClick={() => setShowEvBoard((x) => !x)}
+          className={`flex items-center gap-1.5 px-2 py-0.5 ml-auto text-[11px] uppercase tracking-wider rounded border transition-colors ${
+            showEvBoard ? 'bg-amber-900/40 text-amber-200 border-amber-700' : 'border-zinc-800 text-zinc-500 hover:text-amber-300 hover:border-amber-800'
+          }`}
+          title="Expected-Value leaderboard per setup"
+        >
+          <Trophy size={12} />
+          EV Board
+        </button>
+
         {/* Scanner mode toggle */}
-        <div className="flex items-center gap-1 ml-auto">
+        <div className="flex items-center gap-1">
           <Activity size={12} className="text-zinc-500" />
           {['aggregate', 'raw'].map((m) => (
             <button
@@ -198,6 +215,23 @@ const MissionControlPage = () => {
           )}
         </div>
       </div>
+
+      {/* EV Leaderboard slide-over */}
+      {showEvBoard && (
+        <>
+          <div
+            data-testid="mc-ev-board-backdrop"
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowEvBoard(false)}
+          />
+          <div
+            data-testid="mc-ev-board-panel"
+            className="fixed top-0 right-0 h-full w-full sm:w-[460px] z-50 border-l border-zinc-800 shadow-2xl"
+          >
+            <EVLeaderboard days={30} />
+          </div>
+        </>
+      )}
 
       <TrailDrawer symbol={drawerSymbol} onClose={() => setDrawerSymbol(null)} />
     </div>

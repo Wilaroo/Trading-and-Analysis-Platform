@@ -648,6 +648,40 @@ class TradeExplanation:
     ai_verdict: str = ""
 
 
+def _compute_hold_seconds(entry_ts, close_ts) -> Optional[float]:
+    """v19.34.274 — realized hold-duration label (seconds).
+
+    Returns `closed_at − entry_ts` in seconds, where `entry_ts` is the
+    fill time (executed_at) falling back to created_at. Returns None when
+    either timestamp is missing/unparseable so OPEN trades stay None and
+    bad rows never poison the meta-model feature. Robust to naive ISO
+    strings (assumed UTC), trailing 'Z', and datetime objects.
+    """
+    def _parse(ts):
+        if ts is None:
+            return None
+        if isinstance(ts, datetime):
+            dt = ts
+        else:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    a = _parse(entry_ts)
+    b = _parse(close_ts)
+    if a is None or b is None:
+        return None
+    secs = (b - a).total_seconds()
+    # Guard against clock-skew / bad data producing negatives.
+    if secs < 0:
+        return None
+    return round(secs, 1)
+
+
 @dataclass
 class BotTrade:
     """Complete bot trade record"""
@@ -734,6 +768,9 @@ class BotTrade:
     created_at: str = ""
     executed_at: Optional[str] = None
     closed_at: Optional[str] = None
+    # v19.34.274 — realized hold-duration label (seconds), stamped at close
+    # via to_dict for the future realized-outcome meta-model.
+    hold_seconds: Optional[float] = None
     estimated_duration: str = ""  # e.g., "30min-2hr" for scalp
     
     # Close reason (manual, stop_loss, target_hit, target_1, target_2, target_3, eod_close, etc.)
@@ -940,6 +977,14 @@ class BotTrade:
         ):
             if hasattr(self, _runtime_field):
                 d[_runtime_field] = getattr(self, _runtime_field, None)
+        # v19.34.274 — hold_seconds: realized trade duration (seconds).
+        # Computed centrally here so EVERY close path (operator-flatten,
+        # EOD-close, stop, scale-out final, reconciler) persists it for
+        # free via save_trade → to_dict. None while the trade is open.
+        d['hold_seconds'] = _compute_hold_seconds(
+            self.executed_at or self.created_at,
+            self.closed_at,
+        )
         return d
 
 

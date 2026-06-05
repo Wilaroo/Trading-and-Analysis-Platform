@@ -476,6 +476,64 @@ the backup-swap so a rollback is one Mongo op away.
 
 ---
 
+## 6.6 The m1–m9 setup taxonomy & exit-archetype override (SSOT)
+
+> **Status: COMPLETE & VERIFIED (2026-06).** The m-series refactor put a
+> single canonical taxonomy under the grading / EV / training stack so a
+> setup means the same thing everywhere. Read this before touching any
+> `setup_type` / `canonical_setup` / `exit_archetype` logic.
+
+### What the m-phases did
+| Phase | What it shipped | Canonical owner |
+|---|---|---|
+| m1–m4 | Canonical setup registry + alias resolution (`SMB_SETUP_ALIASES`); every raw `setup_type` resolves to ONE canonical bucket. | `services/smb_integration.py` (`SETUP_REGISTRY`, `resolve_setup_name`) |
+| m5 | **Canonical grading rollup** (`GRADING_CANONICAL_ROLLUP`, default ON). Grades/EV group by `canonicalize(setup_type)`; edge-excluded artifacts (`reconciled_*`, `imported_from_ib`, `watchlist`) are dropped, not bucketed. | `setup_grading_service._canonical_grade_key`, `ev_tracking_service._canon_for_ev` |
+| m7 | **Horizon-aware lookback** in the classifier — intraday vs swing/position use different bar lookbacks (30-bar vs 252-bar), removing train/serve skew on `market_setup`. | `services/market_setup_classifier.py` |
+| m8 | `tidal_wave` split into the canonical **momentum** vs **fading_bounce** buckets. | grading + EV canon maps |
+| m9 | **exit_archetype data-override** — the realized MFE/MAE of closed trades reclassifies a setup's exit archetype between `runner` ↔ `target` when the data disagrees with the static label. | `services/exit_archetype_service.py` |
+
+### Canonical resolution — the contract
+- Raw `setup_type` (what the scanner stamps) → `canonicalize()` → the
+  **`canonical_setup`** bucket used by grading, EV, and edge ranking.
+- `canonical_setup == setup_type` when rollup is OFF (reversible kill-switch).
+- **Artifacts are excluded, not relabeled.** `is_edge_excluded()` returns
+  True for `reconciled_*` / `imported_from_ib` / `watchlist` — these never
+  reach a grade bucket or an EV record.
+
+### Data models touched
+- **`bot_trades`** (per-trade record) — stamped at close: `gross_pnl`,
+  `total_commissions`, `net_pnl`, and (v19.34.274) **`hold_seconds`**
+  (realized duration in seconds = `closed_at − (executed_at||created_at)`,
+  computed centrally in `BotTrade.to_dict()`; `None` while open). Backfill
+  legacy rows via `scripts/backfill_hold_seconds.py` (idempotent).
+- **`setup_grade_records`** — one daily snapshot per `(setup_type,
+  trading_date)`; carries `canonical_setup`, `avg_r`, `avg_mfe_r`,
+  `avg_mae_r`, `avg_hold_seconds`. Rolled up on the fly by
+  `get_all_rolling_grades(days)` → `SetupRollingGrade`.
+- **EV records** (`ev_tracking_service`) — per canonical setup: EV(R),
+  win-rate, gate (A/B/C/D/F), profit-factor, size-multiplier, EV trend.
+  Surfaced by `GET /api/scanner/ev-leaderboard` (merges grade + EV) and
+  the Mission Control **EV Leaderboard** panel.
+
+### exit_archetype override (m9) — how to reason about it
+- Static archetype comes from the setup definition (`runner` vs `target`).
+- `exit_archetype_service` reads the realized MFE/MAE distribution of the
+  setup's closed trades; if the data says a "target" setup routinely runs
+  (or vice-versa) past a sample threshold, it **overrides** the archetype
+  used for trade management. Endpoint: `GET /api/trading-bot/exit-archetype`.
+- **Do not** hardcode an archetype anywhere downstream — always read the
+  resolved (possibly overridden) value from the service.
+
+### Observability probes (read-only)
+- `scripts/probe_bracket_reconcile.py` — bracket/position reconcile health.
+- `scripts/probe_inplay_health.py` + `GET /api/scanner/in-play-health` —
+  per-cycle wave composition, RVOL freshness, qualify-rate.
+- `scripts/retrain_readiness.py` — GO/WAIT verdict per training dimension
+  (model staleness, corpus freshness, new-label accrual, m7 flip-rate).
+  Memo: `memory/TRAINING_PIPELINE_AUDIT_2026-06.md`.
+
+---
+
 ## 7. Common operations — copy-paste-ready
 
 ### Check bot's view of a position
