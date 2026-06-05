@@ -611,6 +611,40 @@ def get_detector_stats():
     }
 
 
+@router.get("/in-play-health")
+def get_in_play_health(sample: int = 8):
+    """Live in-play health: wave composition + RVOL freshness + qualify-rate.
+
+    Reads the LIVE enhanced scanner (not the predictive `_scanner_service`
+    singleton) so the numbers reflect the scanner actually generating
+    today's alerts. Powers the `probe_inplay_health.py` per-cycle health
+    probe — poll it repeatedly and diff successive reads to get a true
+    per-cycle qualify-rate. Read-only; never mutates scanner state.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        live_scanner = get_enhanced_scanner()
+    except Exception:
+        live_scanner = None
+
+    if not live_scanner or not hasattr(live_scanner, "get_in_play_health"):
+        return {
+            "success": True,
+            "running": False,
+            "wave": {}, "rvol": {}, "qualify": {},
+            "message": "Enhanced scanner not initialized",
+        }
+
+    try:
+        sample = max(0, min(50, int(sample)))
+        health = live_scanner.get_in_play_health(sample=sample)
+        return {"success": True, **health}
+    except Exception as e:
+        logger.error(f"Error getting in-play health: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/setup-coverage")
 def get_setup_coverage():
     """Cross-reference the live scanner's enabled_setups against the

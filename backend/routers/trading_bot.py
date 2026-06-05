@@ -1291,6 +1291,25 @@ async def clear_rejection_cooldown(payload: Optional[Dict[str, Any]] = None):
 
 
 # ─── v19.34.11 — Bracket lifecycle history ───────────────────────────
+@router.get("/exit-archetype")
+def get_exit_archetype(setup_type: str = Query(..., description="setup_type to resolve")):
+    """m9 — explain the data-driven exit_archetype for a setup.
+
+    Shows the static `prior`, the `empirical` runner/target verdict from the
+    setup's rolling MFE/MAE distribution (with sample count + p50/p75 MFE_R),
+    and the `final` archetype the live bracket builder will use. `overridden`
+    is true when live data has flipped the prior. Read-only; fail-open.
+    """
+    try:
+        from services.exit_archetype_service import get_exit_archetype_service
+        db = _trading_bot._db if (_trading_bot is not None) else None
+        svc = get_exit_archetype_service(db=db)
+        return {"success": True, **svc.describe(setup_type)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"exit-archetype resolve failed: {e}")
+
+
+
 @router.get("/bracket-history")
 async def get_bracket_history(
     trade_id: Optional[str] = Query(None, description="Filter by trade ID"),

@@ -806,8 +806,8 @@ class SmartStopService:
             "0", "false", "no", "off", "",
         ):
             try:
-                from services.setup_taxonomy import exit_archetype_prior
-                arch = exit_archetype_prior(setup_type)
+                from services.exit_archetype_service import resolve_exit_archetype
+                arch = resolve_exit_archetype(setup_type)
                 if arch in ARCHETYPE_STOP_RULES:
                     return ARCHETYPE_STOP_RULES[arch]
             except Exception:  # pragma: no cover - fall back to legacy map
