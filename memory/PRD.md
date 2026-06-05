@@ -169,6 +169,10 @@ canonical/family names to trained models without a retrain.
 break, long runner; env-tunable TIDAL_WAVE_MIN_*) owns the name. Historical
 `tidal_wave` rows migrate to `fading_bounce` via
 `scripts/migrate_v19_34_272_tidal_wave.py`.
+**Issue 2 (v273):** `smart_stop_service` bracket geometry now driven by SSOT
+`exit_archetype_prior()` (INTRADAY_BRACKET_V2, env-reversible) — runner archetypes
+(momentum/breakout/tidal_wave) get a tight stop + trailing remainder; target
+archetypes (scalp/fade/fading_bounce) get a fixed 2-wave bracket.
 
 ## Pipeline architecture (Bellafiore + ML hybrid)
 
