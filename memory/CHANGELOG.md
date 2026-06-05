@@ -1,3 +1,33 @@
+## 2026-06-?? — v19.34.273: Issue 2 — INTRADAY_BRACKET_V2 (archetype-driven bracket geometry) — SHIPPED (pending DGX apply)
+
+### Why
+`smart_stop_service._get_setup_rules` mapped setups to stop/bracket rules via a
+loose substring match on generic family names (breakout/momentum/…), which
+mis-bracketed intraday/scalp trades (early chop-outs) and never distinguished a
+"let it run" momentum setup from a "take the 2R" fade.
+
+### Scope (services/smart_stop_service.py + 1 test)
+- `_get_setup_rules`: when INTRADAY_BRACKET_V2_ENABLED (default ON, reversible),
+  resolve geometry from the SSOT `exit_archetype_prior()` →
+  `ARCHETYPE_STOP_RULES[runner|target|swing_hold|position_hold]`; legacy
+  substring map kept as fallback.
+- New `ARCHETYPE_STOP_RULES`:
+  - runner (momentum/breakout/tidal_wave) → tight 1.0-ATR stop, BE @0.75R,
+    bank 1R/2R/3R partials, CHANDELIER-trail the last 25% (ride extension).
+  - target (scalp/fade/fading_bounce) → fixed 2-wave 50/50 @1R/2R, no runner.
+  - swing_hold / position_hold → wider stops, longer-horizon partials + runner.
+- `_create_scale_out_plan`: honors `leave_runner_pct` (reserve a trailing runner)
+  + `partial_exit_pct`; backward-compatible (legacy rules default 0 → unchanged).
+- New SetupStopRules fields `leave_runner_pct`, `partial_exit_pct` (defaulted).
+
+### Verification
+5 new pytest (`test_intraday_bracket_v2_v19_34_273.py`) + 32 pure-logic stop
+regression green. The 86 server-dependent smart_stop tests fail identically with
+the flag ON vs OFF → confirmed NOT caused by this change (pre-existing HTTP tests).
+smart_stop_service lints clean. Applier: paste.rs/nawrI (pre-sha-guarded, idempotent,
+byte-identical round-trip). Apply AFTER m8 (v272). Revert: INTRADAY_BRACKET_V2_ENABLED=0.
+
+
 ## 2026-06-?? — v19.34.272: Taxonomy m8 — tidal_wave split + m6 audit — SHIPPED (pending DGX apply)
 
 ### Why
