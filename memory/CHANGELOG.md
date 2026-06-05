@@ -1,3 +1,44 @@
+## 2026-06-05 — v19.34.275: strategy_stats HYGIENE — SHIPPED (pending DGX apply via paste.rs)
+
+Fixes the Smart-Filter / TQS setup-pillar pollution surfaced during the 2026-06-05
+CRM reconcile incident: artifact closes (reconcile / phantom / imported) were
+counted as genuine strategy outcomes, dragging real setups' win-rates down and
+over-gating clean trades. Diagnostic `setup-winrate-breakdown` showed 222 artifact
+rows (reconciled_orphan n=99, reconciled_excess_slice n=123).
+
+### Shipped (1 modified + 2 new; git-patch applier @ paste.rs/srtxD)
+- **routers/trading_bot.py** — NEW `POST /api/trading-bot/reload-strategy-stats`:
+  hot-reloads `enhanced_scanner._strategy_stats` from Mongo with NO restart.
+- **scripts/rebuild_strategy_stats_clean.py** — recomputes `strategy_stats` from the
+  authoritative `bot_trades` ledger (has close_reason/entered_by/net_pnl/hold_seconds)
+  via the `trade_outcome_hygiene.classify_close()` SSOT. DRY-RUN by default (prints
+  old-vs-new WR + EV + excluded-by-tag); `--commit` backs up the whole collection to
+  `strategy_stats_backup_<ts>` before writing and drops artifact-setup rows. Reuses the
+  live `StrategyStats` math (win_rate/profit_factor/EV) for parity.
+- **tests/test_strategy_stats_hygiene.py** — 4 pytest: artifact exclusion, long/short
+  base collapse, realized-R/EV signs, base-setup helper. All green.
+
+### Operator workflow (user-driven; nothing auto-touches data)
+apply → `rebuild_strategy_stats_clean.py` (dry-run) → `--commit` (+backup) →
+`POST /reload-strategy-stats` (no restart) → pytest.
+
+### Context (same session, earlier)
+- Diagnosed + contained CRM overnight-naked-flip incident (manual TWS flatten; books
+  cleaned). Root cause: RegT-cutoff bracket-attach block carried a position naked
+  overnight → morning orphan-reconcile thrash flipped +56 long → naked −56 short.
+- Diagnosed the open-session trade drought = restart-at-the-open warm-up (bar cache
+  cold → TQS scored on neutral defaults rsi 50 / rvol 1.0 → compressed to C/C+ → gate
+  blocked everything). Self-healed once bars warmed (trades 1→5). Lesson: never restart
+  at the bell.
+
+### Still queued (P1)
+- Squeeze intraday-vs-swing split (trade_style stamping + per-horizon params/policy/eval).
+- CRM overnight-naked-flip reconciler guard (extend v260 flatten to naked_sweep_reissue
+  past-RegT path + oversell/direction-flip HALT).
+- EV-tracking population (ev_tracking empty → EV Leaderboard nulls + TQS EV pillar 0).
+
+---
+
 ## 2026-06-?? — v19.34.274: 4-item backlog bundle — SHIPPED (pending DGX apply via paste.rs)
 
 ### Scope (6 modified + 3 new files; delivered as a git-patch applier)
