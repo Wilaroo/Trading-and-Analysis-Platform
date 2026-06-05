@@ -129,7 +129,18 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
   const quotesReady = summary?.quotes_ready !== false;
 
   const marketBias = gp?.market_bias || gp?.bias;
-  const stocksInPlay = gp?.stocks_in_play || gp?.watchlist || [];
+  const stocksInPlay = (() => {
+    const raw = gp?.stocks_in_play || gp?.watchlist || [];
+    if (!Array.isArray(raw)) return [];
+    // v19.34.274 — lead with the highest-conviction names. The backend edge
+    // ranker stamps a 1-indexed `edge_rank` (realized edge, TQS fallback);
+    // string-shape legacy entries (no rank) sort to the bottom, stable.
+    return [...raw].sort((a, b) => {
+      const ra = (a && typeof a === 'object' && a.edge_rank != null) ? a.edge_rank : 1e6;
+      const rb = (b && typeof b === 'object' && b.edge_rank != null) ? b.edge_rank : 1e6;
+      return ra - rb;
+    });
+  })();
   const focusSetups = gp?.focus_setups || gp?.focus;
   const riskNotes = gp?.risk_notes || drc?.notes;
   const regime = gp?.regime || gp?.market_regime || scanner?.regime;

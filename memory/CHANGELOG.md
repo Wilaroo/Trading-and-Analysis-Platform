@@ -1,3 +1,38 @@
+## 2026-06-?? — v19.34.274: 4-item backlog bundle — SHIPPED (pending DGX apply via paste.rs)
+
+### Scope (6 modified + 3 new files; delivered as a git-patch applier)
+1. **hold_seconds instrumentation** — `BotTrade` now carries `hold_seconds`
+   (Optional[float]); `to_dict()` computes `closed_at − (executed_at||created_at)`
+   in seconds via new module helper `_compute_hold_seconds()`. Stamped on EVERY
+   close path for free (save_trade → to_dict). None while open; negatives/unparseable
+   → None. New `scripts/backfill_hold_seconds.py` (idempotent) backfills legacy
+   closed `bot_trades`.
+2. **EV Leaderboard** — new `GET /api/scanner/ev-leaderboard?days=30` merges
+   `ev_tracking_service.get_ev_report()` + `setup_grading_service
+   .get_all_rolling_grades()` into one per-setup table sorted by EV(R) desc.
+   New `components/sentcom/v5/EVLeaderboard.jsx` (EV, win%, gate, grade, PF,
+   sample, trend sparkline); surfaced via a new "EV Board" toggle + slide-over
+   on `MissionControlPage.jsx`.
+3. **Gameplan prioritization BOOST** — `GamePlanStockCard.jsx` shows a ⚡BOOST
+   chip + amber ring on top realized-edge names (edge_source=realized, edge_ev_r>0,
+   edge_rank≤3). `MorningBriefingModal.jsx` now sorts stocks_in_play by edge_rank.
+4. **AGENTS.md SSOT refresh** — new §6.6 documenting the m1–m9 taxonomy,
+   canonical resolution contract, data models (incl. hold_seconds), the m9
+   exit_archetype data-override, and the observability probes.
+
+### Verification (container; DGX-hardware-bound so NO testing_agent)
+- 10 new pytest (`tests/test_hold_seconds_and_ev_leaderboard.py`) green; full
+  suite incl. exit_archetype + horizon = 26 passed.
+- `/api/scanner/ev-leaderboard` returns `success` live; backfill `--dry-run` OK.
+- Frontend webpack compiles clean (no errors; 1 pre-existing exhaustive-deps warn).
+- Applier validated: byte-exact patch on a clean HEAD clone, idempotent re-run
+  (reverse-check), drift-safe (git context-check refuses on drift, no clobber).
+
+### Delivery
+Compact git-patch applier (gzip+b64, ~22KB) at paste.rs → `curl -s <url> | python3 -`.
+
+---
+
 ## 2026-06-?? — v19.34.273: Issue 2 — INTRADAY_BRACKET_V2 (archetype-driven bracket geometry) — SHIPPED (pending DGX apply)
 
 ### Why

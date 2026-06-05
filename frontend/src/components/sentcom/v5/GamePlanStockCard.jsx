@@ -19,7 +19,7 @@
  * briefing doesn't fan out 5 simultaneous LLM calls on modal open.
  */
 import React, { memo, useEffect, useState, useCallback, useMemo } from 'react';
-import { ChevronRight, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { ChevronRight, TrendingUp, TrendingDown, Loader2, Zap } from 'lucide-react';
 import api from '../../../utils/api';
 // v19.34.258 — single trusted TQS score on the gameplan card face.
 import TqsBadge from './TqsBadge';
@@ -174,10 +174,23 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
     (v) => v != null && v !== '' && v !== 0,
   );
 
+  // v19.34.274 — Prioritization BOOST: draw the operator's eye to the
+  // highest-conviction names backed by REALIZED edge (not TQS fallback).
+  // A name is boosted when the data-driven edge ranker placed it top-3 AND
+  // its realized expected value over similar trades is positive.
+  const isBoosted =
+    stock?.edge_source === 'realized' &&
+    Number(stock?.edge_ev_r ?? 0) > 0 &&
+    Number(stock?.edge_rank ?? 99) <= 3;
+
   return (
     <div
       data-testid={`gp-card-${symbol}`}
-      className="rounded-md border border-zinc-800 bg-zinc-950/60 overflow-hidden"
+      className={`rounded-md border bg-zinc-950/60 overflow-hidden transition-shadow ${
+        isBoosted
+          ? 'border-amber-500/40 ring-1 ring-amber-500/30 shadow-[0_0_18px_-6px_rgba(245,158,11,0.5)]'
+          : 'border-zinc-800'
+      }`}
     >
       {/* Compact header — always visible */}
       <button
@@ -189,6 +202,17 @@ const GamePlanStockCard = memo(({ stock, date, marketBias, onSymbolClick }) => {
         <ChevronRight
           className={`w-4 h-4 text-zinc-500 transition-transform ${expanded ? 'rotate-90' : ''}`}
         />
+        {/* v19.34.274 — prioritization BOOST chip: realized top-edge play. */}
+        {isBoosted && (
+          <span
+            data-testid={`gp-card-boost-${symbol}`}
+            title={`BOOST · top realized edge #${stock.edge_rank} · EV ${Number(stock.edge_ev_r ?? 0).toFixed(2)}R over ${stock.edge_sample_size} similar trades`}
+            className="inline-flex items-center gap-0.5 v5-mono text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 border text-amber-300 bg-amber-500/10 border-amber-500/30"
+          >
+            <Zap className="w-3 h-3" />
+            BOOST
+          </span>
+        )}
         {/* v19.34.233 (Phase D) — realized open-session edge rank badge */}
         {stock?.edge_rank != null && (
           <span

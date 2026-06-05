@@ -644,6 +644,122 @@ def get_in_play_health(sample: int = 8):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/ev-leaderboard")
+def get_ev_leaderboard(days: int = 30):
+    """v19.34.274 — Expected-Value leaderboard for Mission Control.
+
+    Merges two read-only sources, keyed by canonical setup:
+      • `ev_tracking_service.get_ev_report()` — EV(R), win-rate, gate
+        (A/B/C/D/F), profit-factor, size-multiplier, EV trend + improving
+        flag, A/B-grade win-rates, recommendation.
+      • `setup_grading_service.get_all_rolling_grades(days)` — rolling
+        letter grade, avg_r, total_r, avg hold/MFE/MAE, sample size.
+
+    Returns one row per setup, sorted by expected_value_r desc (setups
+    with a grade but no EV record sort below those with EV). Pure read —
+    never mutates either service.
+    """
+    try:
+        from services.ev_tracking_service import get_ev_service
+        from services.setup_grading_service import get_setup_grading_service
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"EV service import failed: {e}")
+
+    try:
+        from database import get_database
+        _db = get_database()
+    except Exception:
+        _db = None
+
+    try:
+        ev_report = get_ev_service(_db).get_ev_report() or {}
+    except Exception as e:
+        logger.warning(f"ev-leaderboard: EV report failed: {e}")
+        ev_report = {}
+
+    try:
+        grades = get_setup_grading_service().get_all_rolling_grades(days=days) or []
+    except Exception as e:
+        logger.warning(f"ev-leaderboard: rolling grades failed: {e}")
+        grades = []
+
+    rows: Dict[str, Dict[str, Any]] = {}
+
+    # Seed from EV report (the primary edge signal).
+    for setup, rep in ev_report.items():
+        if not isinstance(rep, dict):
+            continue
+        rows[setup] = {
+            "setup_type": setup,
+            "expected_value_r": rep.get("expected_value_r"),
+            "win_rate": rep.get("win_rate"),
+            "avg_win_r": rep.get("avg_win_r"),
+            "avg_loss_r": rep.get("avg_loss_r"),
+            "profit_factor": rep.get("profit_factor"),
+            "ev_gate": rep.get("ev_gate"),
+            "size_multiplier": rep.get("size_multiplier"),
+            "ev_improving": rep.get("ev_improving"),
+            "ev_trend": rep.get("ev_trend") or [],
+            "recommendation": rep.get("recommendation"),
+            "ev_trades": rep.get("total_trades", 0),
+            "min_sample_reached": rep.get("min_sample_reached", False),
+            # grade fields filled below (if present)
+            "grade": None,
+            "avg_r": None,
+            "total_r": None,
+            "avg_hold_seconds": None,
+            "grade_trades": 0,
+        }
+
+    # Merge rolling-grade rows.
+    for g in grades:
+        setup = getattr(g, "setup_type", None)
+        if not setup:
+            continue
+        row = rows.get(setup)
+        if row is None:
+            row = {
+                "setup_type": setup,
+                "expected_value_r": None,
+                "win_rate": getattr(g, "win_rate", None),
+                "avg_win_r": None,
+                "avg_loss_r": None,
+                "profit_factor": None,
+                "ev_gate": None,
+                "size_multiplier": None,
+                "ev_improving": None,
+                "ev_trend": [],
+                "recommendation": None,
+                "ev_trades": 0,
+                "min_sample_reached": False,
+            }
+            rows[setup] = row
+        row["grade"] = getattr(g, "grade", None)
+        row["avg_r"] = getattr(g, "avg_r", None)
+        row["total_r"] = getattr(g, "total_r", None)
+        row["avg_hold_seconds"] = getattr(g, "avg_hold_seconds", None)
+        row["grade_trades"] = getattr(g, "trades_count", 0)
+        if row.get("win_rate") is None:
+            row["win_rate"] = getattr(g, "win_rate", None)
+
+    # Sort: EV desc (None last), then avg_r desc, then sample size.
+    def _sort_key(r):
+        ev = r.get("expected_value_r")
+        ar = r.get("avg_r")
+        return (
+            ev if ev is not None else -1e9,
+            ar if ar is not None else -1e9,
+            (r.get("ev_trades") or 0) + (r.get("grade_trades") or 0),
+        )
+
+    leaderboard = sorted(rows.values(), key=_sort_key, reverse=True)
+    return {
+        "success": True,
+        "days": days,
+        "count": len(leaderboard),
+        "leaderboard": leaderboard,
+    }
+
 
 @router.get("/setup-coverage")
 def get_setup_coverage():
