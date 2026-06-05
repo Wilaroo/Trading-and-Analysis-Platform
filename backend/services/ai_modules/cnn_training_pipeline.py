@@ -88,6 +88,21 @@ async def run_cnn_training(
 
     await _progress(3, f"Training {total_profiles} CNN models across {len(setups_to_train)} setup types")
 
+    # Fail fast if torchvision is unavailable — otherwise EVERY CNN silently
+    # produces "0 valid images after processing" only AFTER wasting minutes
+    # rendering charts (the failure that bit us 2026-06: torch present but
+    # torchvision missing → get_image_transform() is None).
+    from services.ai_modules.chart_pattern_cnn import get_image_transform
+    if get_image_transform() is None:
+        msg = ("torchvision not installed — CNN image transform unavailable. "
+               "Install a torchvision matching your torch build "
+               "(e.g. `pip install --no-deps torchvision==0.25.0`), then re-run "
+               "the CNN phase. Skipping CNN training (other phases unaffected).")
+        logger.error(f"[CNN] {msg}")
+        return {"success": False, "error": msg, "trained": 0,
+                "skipped": total_profiles, "total_profiles": total_profiles,
+                "gpu_info": get_gpu_info(), "models": {}}
+
     trained_count = 0
     skipped_count = 0
 
@@ -214,6 +229,8 @@ def _train_single_model(
     pattern_labels = []
     win_labels = []
     symbols_per_sample = []  # Track symbol for group-based train/val/test split
+    _tensor_err_logged = False
+    tensor_fail = 0
 
     for s in samples:
         try:
@@ -222,11 +239,18 @@ def _train_single_model(
             pattern_labels.append(CLASS_TO_IDX.get(s["setup_type"], CLASS_TO_IDX["UNKNOWN"]))
             win_labels.append(1.0 if s["outcome"] == "WIN" else 0.0)
             symbols_per_sample.append(s.get("symbol", "UNKNOWN"))
-        except Exception:
+        except Exception as e:
+            tensor_fail += 1
+            if not _tensor_err_logged:  # log once, don't spam per-image
+                logger.error(f"[CNN] image_bytes_to_tensor failed for {setup_type}/{bar_size} "
+                             f"(suppressing repeats): {e}", exc_info=True)
+                _tensor_err_logged = True
             continue
 
     if len(images) < MIN_TRAINING_SAMPLES:
-        return {"success": False, "error": f"Only {len(images)} valid images after processing"}
+        return {"success": False,
+                "error": f"Only {len(images)} valid images after processing "
+                         f"({tensor_fail} tensor conversions failed of {len(samples)} samples)"}
 
     # Stack into tensors
     X = torch.stack(images)
