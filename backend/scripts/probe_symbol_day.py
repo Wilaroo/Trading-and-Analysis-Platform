@@ -71,6 +71,19 @@ def main():
               + (f"  setups={setups}" if setups else ""))
         if e.get("last_reason"):
             print(f"       last: {e.get('last_reason')}")
+    # v19.34.288 — intake-eligibility backfill (the "PRE-eval blind spot" answer):
+    # recomputes auto-exec eligibility from today's persisted live_alerts when no
+    # trade_drop was logged, so we see WHY surfaced alerts never auto-traded.
+    ie = data.get("intake_eligibility", {}) or {}
+    if ie.get("checked"):
+        ae = ie.get("auto_exec_enabled")
+        print(f"intake  : checked={ie.get('checked')}  auto_exec_enabled={ae}  "
+              f"min_win_rate={ie.get('min_win_rate')}  eligible_no_drop={ie.get('eligible_no_drop', 0)}")
+        for reason, e in sorted((ie.get("by_reason") or {}).items(),
+                                key=lambda kv: kv[1].get("count", 0), reverse=True):
+            setups = ",".join((e.get("setups") or [])[:3])
+            print(f"   - {reason} ×{e.get('count')}"
+                  + (f"  setups={setups}" if setups else ""))
     print()
 
 

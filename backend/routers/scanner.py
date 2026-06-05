@@ -826,6 +826,54 @@ def get_symbol_trace(symbol: str):
     except Exception:
         pass
 
+    # 5c) v19.34.288 — INTAKE-ELIGIBILITY BACKFILL. The "PRE-eval blind spot":
+    # when alerts surfaced but NO trade_drop landed, the v287 forward-logger only
+    # covers NEW alerts processed after the patch — pre-existing alerts (or alerts
+    # that surfaced through a non-instrumented path / before a restart) showed
+    # "0 gate-drops" with no reason. We now RECOMPUTE the auto-execute eligibility
+    # verdict from today's PERSISTED `live_alerts` docs (which store priority /
+    # tape_confirmation / strategy_win_rate / auto_execute_eligible via to_dict),
+    # so the operator gets the WHY immediately without waiting for a re-fire.
+    # Read-only — recomputation only, never writes.
+    intake = {"checked": 0, "auto_exec_enabled": None, "min_win_rate": None,
+              "by_reason": {}, "eligible_no_drop": 0}
+    try:
+        if counts.get("live_alerts", 0) > 0 and gate_funnel["total"] == 0:
+            from services.enhanced_scanner import EnhancedBackgroundScanner
+            auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
+            min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+            intake["auto_exec_enabled"] = auto_enabled
+            intake["min_win_rate"] = min_wr
+            docs = list(sc.db["live_alerts"].find(
+                {"symbol": sym, "created_at": {"$gte": today}},
+                {"_id": 0, "priority": 1, "tape_confirmation": 1,
+                 "strategy_win_rate": 1, "auto_execute_eligible": 1,
+                 "setup_type": 1},
+            ).limit(200))
+            tmp_reasons: dict = {}
+            for d in docs:
+                intake["checked"] += 1
+                if d.get("auto_execute_eligible"):
+                    intake["eligible_no_drop"] += 1
+                    continue
+                if not auto_enabled:
+                    reasons = ["auto_execute_disabled"]
+                else:
+                    reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons(
+                        d.get("priority"), d.get("tape_confirmation"),
+                        d.get("strategy_win_rate"), min_wr) or ["unknown"]
+                key = " + ".join(reasons)
+                slot = tmp_reasons.setdefault(key, {"count": 0, "setups": set()})
+                slot["count"] += 1
+                if d.get("setup_type"):
+                    slot["setups"].add(d["setup_type"])
+            intake["by_reason"] = {
+                k: {"count": v["count"], "setups": sorted(v["setups"])[:5]}
+                for k, v in tmp_reasons.items()
+            }
+    except Exception:
+        pass
+
     # 6) Plain-language verdict.
     verdict = "unknown"
     if in_universe is False:
@@ -855,6 +903,27 @@ def get_symbol_trace(symbol: str):
                     margin_str = f" — {ge.get('margin')}" if ge.get("margin") else ""
                     verdict = (f"SCANNED & ALERTED but 0 TRADES — {counts.get('live_alerts')} "
                                f"alert(s) killed at gate '{g}' ({ge.get('count')}×){margin_str}")
+                elif intake.get("checked"):
+                    # v19.34.288 — resolve the PRE-eval blind spot from recomputed intake.
+                    if intake.get("auto_exec_enabled") is False:
+                        verdict = (f"SCANNED & ALERTED, 0 trades — AUTO-EXECUTE GLOBALLY OFF "
+                                   f"(_auto_execute_enabled=False). {counts.get('live_alerts')} "
+                                   f"alert(s) surfaced but none can auto-trade until auto-exec is on.")
+                    elif intake.get("by_reason"):
+                        top = max(intake["by_reason"].items(), key=lambda kv: kv[1]["count"])
+                        verdict = (f"SCANNED & ALERTED, 0 trades — INTAKE-INELIGIBLE: "
+                                   f"{counts.get('live_alerts')} alert(s); top reason "
+                                   f"'{top[0]}' ({top[1]['count']}×). Auto-exec eligibility gate "
+                                   f"(priority/tape/win-rate) filtered them before execution.")
+                    elif intake.get("eligible_no_drop"):
+                        verdict = (f"SCANNED & ALERTED, {intake['eligible_no_drop']} ELIGIBLE but "
+                                   f"0 trades & NO drop logged — a DOWNSTREAM silent drop AFTER "
+                                   f"the eligibility gate. Investigate _auto_execute_alert / "
+                                   f"trading_bot execution gates.")
+                    else:
+                        verdict = (f"SCANNED & ALERTED, 0 trades — {counts.get('live_alerts')} "
+                                   f"alert(s); intake recomputed but no clear reason "
+                                   f"(check live_alerts persisted fields).")
                 else:
                     verdict = (f"SCANNED & ALERTED, 0 trades, NO gate-drop logged — "
                                f"{counts.get('live_alerts')} alert(s) filtered PRE-eval "
@@ -873,6 +942,7 @@ def get_symbol_trace(symbol: str):
         "last_eval": last_eval,
         "today_counts": counts,
         "gate_funnel": gate_funnel,
+        "intake_eligibility": intake,
         "timestamp": now.isoformat(),
     }
 
