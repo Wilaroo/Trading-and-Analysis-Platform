@@ -1041,6 +1041,11 @@ class EnhancedBackgroundScanner:
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0  # Skipped due to low volume
         self._symbols_skipped_in_play = 0  # Skipped due to strict in-play gate
+        # v19.34.281 — per-symbol scan-trace + no-data counter. `no_data` was a
+        # SILENT drop pre-v281 (snapshot None -> bare return); now counted +
+        # traced + narrated so missing-bars symbols are visible in symbol-trace.
+        self._symbols_skipped_no_data = 0
+        self._symbol_last_eval = {}
         # Per-detector firing telemetry — counts evaluations vs hits per setup_type
         # so the operator can answer "why is the scanner only emitting RS hits?"
         # without grep-walking logs. Surfaced via /api/scanner/detector-stats.
@@ -1291,6 +1296,21 @@ class EnhancedBackgroundScanner:
             "adv_cache_ttl_seconds": self._adv_cache_ttl,
         }
 
+    def _record_symbol_eval(self, symbol, stage, **fields):
+        """v19.34.281 — record the last scan outcome for one symbol so
+        `/api/scanner/symbol-trace` can answer why a symbol did/didn't alert.
+        One entry per symbol (bounded by universe size). Never raises."""
+        try:
+            entry = {
+                "symbol": str(symbol).upper(),
+                "stage": stage,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            entry.update(fields)
+            self._symbol_last_eval[str(symbol).upper()] = entry
+        except Exception:
+            pass
+
     def get_in_play_health(self, sample: int = 8) -> Dict:
         """Read-only in-play health snapshot (2026-06).
 
@@ -1371,6 +1391,7 @@ class EnhancedBackgroundScanner:
             "scan_count": int(getattr(self, "_scan_count", 0) or 0),
             "symbols_scanned_last": int(getattr(self, "_symbols_scanned_last", 0) or 0),
             "symbols_skipped_rvol": int(getattr(self, "_symbols_skipped_rvol", 0) or 0),
+            "symbols_skipped_no_data": int(getattr(self, "_symbols_skipped_no_data", 0) or 0),  # v19.34.281
             "symbols_skipped_adv": int(getattr(self, "_symbols_skipped_adv", 0) or 0),
             "symbols_skipped_in_play": int(getattr(self, "_symbols_skipped_in_play", 0) or 0),
             "cumulative_evals": int(cum_evals),
@@ -2793,6 +2814,7 @@ class EnhancedBackgroundScanner:
         self._symbols_skipped_rvol = 0
         self._symbols_skipped_adv = 0
         self._symbols_skipped_in_play = 0
+        self._symbols_skipped_no_data = 0  # v19.34.281
         # Per-cycle detector telemetry resets so the operator sees the latest
         # "why is this scan tick quiet?" signal in /api/scanner/detector-stats.
         # Cumulative totals (`_detector_*_total`) persist across cycles.
@@ -3297,11 +3319,30 @@ class EnhancedBackgroundScanner:
                 symbol, mongo_only=True,
             )
             if not snapshot:
+                # v19.34.281 — was a SILENT drop. Now counted + traced + narrated
+                # so "no intraday bars" symbols stop vanishing without a trace.
+                self._symbols_skipped_no_data += 1
+                self._record_symbol_eval(
+                    symbol, "no_data",
+                    reason="get_technical_snapshot returned None (no/insufficient mongo bars)",
+                )
+                try:
+                    await self._emit_scanner_thought(
+                        symbol=symbol, kind="skip",
+                        text=f"⚪ {symbol} skipped — no intraday bars (snapshot unavailable)",
+                        filter="no_data",
+                    )
+                except Exception:
+                    pass
                 return
             
             # Skip low RVOL stocks (second filter after ADV)
             if snapshot.rvol < self._min_rvol_filter:
                 self._symbols_skipped_rvol += 1
+                self._record_symbol_eval(
+                    symbol, "rvol_skip",
+                    rvol=round(float(snapshot.rvol), 3), min_rvol=self._min_rvol_filter,
+                )
                 # v19.34.26 — surface RVOL gating so the operator sees
                 # which symbols are being filtered out as illiquid (and
                 # can adjust `_min_rvol_filter` if the threshold is
@@ -3316,6 +3357,9 @@ class EnhancedBackgroundScanner:
             # Update caches with fresh data
             now = datetime.now(timezone.utc)
             self._rvol_cache[symbol] = (snapshot.rvol, now)
+            self._record_symbol_eval(  # v19.34.281 — passed ADV+RVOL pre-filters
+                symbol, "scanned", rvol=round(float(snapshot.rvol), 3),
+            )
             # Only update ADV cache from snapshot if we don't already have IB-sourced data
             if symbol not in self._adv_cache:
                 self._adv_cache[symbol] = (int(snapshot.avg_volume), now)
@@ -3336,6 +3380,10 @@ class EnhancedBackgroundScanner:
                 )
                 if ipsvc.is_strict_gate() and not in_play_qual.is_in_play:
                     self._symbols_skipped_in_play += 1
+                    self._record_symbol_eval(  # v19.34.281
+                        symbol, "in_play_skip",
+                        score=getattr(in_play_qual, "score", None),
+                    )
                     # v19.34.26 — narrate the strict-gate rejection so
                     # the operator knows it's the in-play scorer (not
                     # RVOL/ADV) blocking this row.
@@ -3423,6 +3471,25 @@ class EnhancedBackgroundScanner:
                         # Grade the trade based on EV and context
                         alert.grade_trade(strategy_ev=stats.expected_value_r, market_context_score=0.5)
                     
+                    # v19.34.282 — user-approved immediate auto-execute for the newly
+                    # added trend_continuation_short. Canonicalizes to
+                    # `trend_continuation` for stats; force the win-rate floor as its
+                    # cold-start baseline so it auto-executes on priority+tape from its
+                    # first signal (operator choice, 2026-06-05).
+                    if setup_type == "trend_continuation_short":
+                        alert.strategy_win_rate = max(
+                            float(getattr(alert, "strategy_win_rate", 0.0) or 0.0),
+                            self._auto_execute_min_win_rate,
+                        )
+                        alert.calculate_r_multiple()
+                        try:
+                            alert.grade_trade(
+                                strategy_ev=float(getattr(alert, "strategy_ev_r", 0.0) or 0.0),
+                                market_context_score=0.5,
+                            )
+                        except Exception:
+                            pass
+
                     # Add tape reading to alert
                     # v19.34.213 — normalize tape_score from the producer's raw
                     # -1..+1 scale to the canonical 0..10 scale that ALL consumers
@@ -3464,6 +3531,39 @@ class EnhancedBackgroundScanner:
                     
                     alerts.append(alert)
             
+            # v19.34.282b — intraday trend-continuation SHORT (bars-based on 5-min
+            # data). Bars-based so it can't go through _check_setup (snapshot/tape);
+            # gated to ~every 2.5 min (5-min bars only change every 5 min) to bound
+            # DB cost. Appended to `alerts` so it inherits the SAME AI/TQS enrichment
+            # + auto-execute loop below. Eligibility mirrors the snapshot path.
+            if self._scan_count % 10 == 0:
+                try:
+                    _fmb = self.technical_service._get_intraday_bars_from_db(symbol, "5 mins", 60)
+                    if _fmb and len(_fmb) >= 25:
+                        _tcs = await self._check_trend_continuation_short(symbol, _fmb)
+                        if _tcs is not None:
+                            _tcs.time_window = "INTRADAY"
+                            _tcs.trade_style = "intraday"
+                            _tcs.scan_tier = "intraday"
+                            _tcs.strategy_win_rate = self._auto_execute_min_win_rate
+                            _tcs.tape_score = round((tape.tape_score + 1.0) * 5.0, 2)
+                            _tcs.tape_confirmation = tape.confirmation_for_short
+                            _tcs.rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+                            _tcs.calculate_r_multiple()
+                            try:
+                                _tcs.grade_trade(strategy_ev=0.0, market_context_score=0.5)
+                            except Exception:
+                                pass
+                            _tcs.auto_execute_eligible = (
+                                self._auto_execute_enabled and
+                                _tcs.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
+                                _tcs.tape_confirmation and
+                                _tcs.strategy_win_rate >= self._auto_execute_min_win_rate
+                            )
+                            alerts.append(_tcs)
+                except Exception:
+                    pass
+
             # Process all alerts for this symbol - AI ENRICHMENT first, then TQS SCORING
             # GAP 2 FIX: AI enrichment runs first so TQS can incorporate AI model alignment
             for alert in alerts:
@@ -7301,6 +7401,97 @@ class EnhancedBackgroundScanner:
             setup_category="trend_momentum",
             scan_tier="swing",
             direction_bias="long",
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        )
+
+    async def _check_trend_continuation_short(self, symbol: str, bars: list) -> Optional[LiveAlert]:
+        """v19.34.282 — SHORT mirror of _check_trend_continuation.
+
+        Lower highs + lower lows, pulling back UP to a FALLING 20 EMA, then
+        resuming down (trend-continuation short). Added because the bot had no
+        way to express 'stay short with the trend' on clean downtrend days
+        (e.g. NVDA / TSLA 2026-06-05, which produced only counter-trend longs).
+        Emits HIGH priority + is granted the win-rate floor downstream so it is
+        auto-execute-eligible from its first signal (operator choice)."""
+        if len(bars) < 25:
+            return None
+
+        closes = [b["close"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+
+        # 20 EMA (current)
+        ema20 = closes[-20]
+        multiplier = 2 / 21
+        for c in closes[-19:]:
+            ema20 = c * multiplier + ema20 * (1 - multiplier)
+
+        # 20 EMA as of 5 bars ago (for slope)
+        ema20_5ago = closes[-25]
+        for c in closes[-24:-5]:
+            ema20_5ago = c * multiplier + ema20_5ago * (1 - multiplier)
+
+        if ema20 >= ema20_5ago:
+            return None  # EMA not falling
+
+        # Lower highs and lower lows (last 3 swings) — mirror of the long's HH/HL
+        recent_highs = [max(highs[-15:-10]), max(highs[-10:-5]), max(highs[-5:])]
+        recent_lows = [min(lows[-15:-10]), min(lows[-10:-5]), min(lows[-5:])]
+
+        lh = all(recent_highs[i] < recent_highs[i - 1] for i in range(1, len(recent_highs)))
+        ll = all(recent_lows[i] < recent_lows[i - 1] for i in range(1, len(recent_lows)))
+
+        if not (lh and ll):
+            return None  # No downtrend structure
+
+        # Price pulling back UP near the falling 20 EMA (within band).
+        # Long zone is (-0.5%..+2.0%); the short mirror is (-2.0%..+0.5%).
+        current = closes[-1]
+        dist_from_ema = (current - ema20) / ema20 * 100
+        if dist_from_ema > 0.5 or dist_from_ema < -0.5:
+            return None  # v19.34.282b — tightened: clean pullback-to-EMA only
+
+        # ATR for stop
+        atrs = []
+        for i in range(1, min(15, len(bars))):
+            tr = max(highs[-(i)] - lows[-(i)], abs(highs[-(i)] - closes[-(i + 1)]), abs(lows[-(i)] - closes[-(i + 1)]))
+            atrs.append(tr)
+        atr = sum(atrs) / len(atrs) if atrs else current * 0.02
+
+        stop = round(ema20 + atr * 1.5, 2)
+        target = round(current - atr * 3, 2)
+        rr = abs(current - target) / abs(stop - current) if abs(stop - current) > 0 else 0
+        if rr < 1.5:
+            return None  # v19.34.282b — skip low-quality late entries
+
+        return LiveAlert(
+            id=f"trend_continuation_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="trend_continuation_short",
+            strategy_name="trend_continuation_short",
+            direction="short",
+            priority=AlertPriority.HIGH,
+            current_price=current,
+            trigger_price=current,
+            stop_loss=stop,
+            target=target,
+            risk_reward=round(rr, 1),
+            trigger_probability=0.6,
+            win_probability=0.55,
+            minutes_to_trigger=0,
+            headline=f"{symbol} Trend Continuation SHORT - Pullback to falling 20 EMA",
+            reasoning=[
+                "Daily downtrend: Lower highs + lower lows confirmed",
+                f"Price {dist_from_ema:.1f}% from falling 20 EMA (pullback-to-resistance short)",
+                f"EMA slope: falling (current ${ema20:.2f} < 5-bar-ago ${ema20_5ago:.2f})",
+                f"ATR: ${atr:.2f} | R:R {rr:.1f}:1 | Swing hold",
+            ],
+            time_window="DAILY",
+            market_regime="neutral",
+            trade_style="multi_day",
+            setup_category="trend_momentum",
+            scan_tier="swing",
+            direction_bias="short",
             expires_at=(datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         )
 

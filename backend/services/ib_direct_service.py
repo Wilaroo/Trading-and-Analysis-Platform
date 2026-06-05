@@ -1791,8 +1791,25 @@ class IBDirectService:
 
             # v19.34.42 -- round entry to IB minTick.
             _mt_p = await self._resolve_min_tick(contract)
+            # v19.34.283 — marketable-limit entry: anchor to LIVE price + a small
+            # offset THROUGH the market (instead of the passive alert trigger) so
+            # fast/breakout setups actually fill. Capped by IB_ENTRY_MARKETABLE_
+            # SLIP_PCT (default 0.25%) so a bad print can't fill arbitrarily far.
+            # Falls back to the trigger price if live is unavailable. The staleness
+            # band above still skips genuinely blown setups.
+            _entry_px = entry_price
+            try:
+                _slip = float(_os39.environ.get('IB_ENTRY_MARKETABLE_SLIP_PCT', '0.25')) / 100.0
+            except Exception:
+                _slip = 0.0025
+            if _live_px > 0 and _slip > 0:
+                _entry_px = _live_px * (1.0 + _slip) if parent_action == "BUY" else _live_px * (1.0 - _slip)
+                logger.warning(
+                    "[v19.34.283 marketable] %s %s marketable-limit @ %.4f (live %.4f +/- %.2f%%, trigger was %.4f)",
+                    symbol, parent_action, _entry_px, _live_px, _slip * 100.0, entry_price,
+                )
             parent_order = LimitOrder(parent_action, qty,
-                                      self._round_to_tick(entry_price, _mt_p))
+                                      self._round_to_tick(_entry_px, _mt_p))
             try:
                 parent_order.tif = "DAY"
                 parent_order.transmit = True
@@ -1822,9 +1839,11 @@ class IBDirectService:
                     )
                     last_status = status
                 if status == "filled" and filled_qty > 0:
-                    terminal_status = "filled"; break
+                    terminal_status = "filled"
+                    break
                 if status in ("cancelled", "apicancelled", "inactive"):
-                    terminal_status = status; break
+                    terminal_status = status
+                    break
                 await asyncio.sleep(0.5)
 
             if terminal_status != "filled" or filled_qty <= 0:
@@ -1854,6 +1873,25 @@ class IBDirectService:
                 )
             _orig_shares = trade.shares
             trade.shares = filled_qty
+            # v19.34.283 — preserve original $risk / R: shift stop + all targets by
+            # the fill-vs-trigger delta (pure translation keeps every risk/reward
+            # distance intact, multi-target scale-outs included).
+            try:
+                if avg_fill and avg_fill > 0 and entry_price and entry_price > 0:
+                    _delta = avg_fill - entry_price
+                    if abs(_delta) > 1e-9:
+                        if getattr(trade, "stop_price", None):
+                            trade.stop_price = round(float(trade.stop_price) + _delta, 4)
+                        _tps = getattr(trade, "target_prices", None) or []
+                        if _tps:
+                            trade.target_prices = [round(float(t) + _delta, 4) for t in _tps]
+                        logger.warning(
+                            "[v19.34.283 R-preserve] %s fill=%.4f trigger=%.4f delta=%.4f -> stop=%s targets=%s",
+                            symbol, avg_fill, entry_price, _delta,
+                            getattr(trade, "stop_price", None), getattr(trade, "target_prices", None),
+                        )
+            except Exception as _ra_err:
+                logger.warning("[v19.34.283 R-preserve] %s skipped: %s", symbol, _ra_err)
             try:
                 oca_result = await self.place_oca_stop_target(
                     trade, time_in_force="GTC", outside_rth=False,
