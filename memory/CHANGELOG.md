@@ -23823,3 +23823,8 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     applier leftovers before apply.
   - paste.rs: https://paste.rs/TpeXv (sha256 207447e5...). Recovery = reset --hard origin +
     rm stale new files + git apply.
+
+  - DEPLOYED 2026-06-05 ~20:08: applied clean on DGX (git apply --check all 16 files OK),
+    backend restarted healthy (pusher green / IB connected), 65/65 tests pass. Committed
+    ee947876 (16 files, +1908/-5) and PUSHED to origin/main (1b88edd6..ee947876,
+    github.com/Wilaroo/Trading-and-Analysis-Platform). EV gate now LIVE in production.
