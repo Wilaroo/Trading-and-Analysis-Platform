@@ -59,6 +59,31 @@ def main():
     print(f"today   : live_alerts={tc.get('live_alerts', 0)}  "
           f"alerts={tc.get('alerts', 0)}  shadow={tc.get('shadow_decisions', 0)}  "
           f"rejections={tc.get('rejection_events', 0)}  bot_trades={tc.get('bot_trades', 0)}")
+    # v19.34.286 — alert→trade gate funnel (which gate ate the alerts, by how much)
+    gf = data.get("gate_funnel", {}) or {}
+    bg = gf.get("by_gate", {}) or {}
+    fk = f"  first_killing={gf.get('first_killing_gate')}" if gf.get("first_killing_gate") else ""
+    print(f"gates   : {gf.get('total', 0)} trade_drop(s) today{fk}")
+    for g, e in sorted(bg.items(), key=lambda kv: kv[1].get("count", 0), reverse=True):
+        margin = f"  [{e.get('margin')}]" if e.get("margin") else ""
+        setups = ",".join((e.get("setups") or [])[:3])
+        print(f"   - {g} ×{e.get('count')}{margin}"
+              + (f"  setups={setups}" if setups else ""))
+        if e.get("last_reason"):
+            print(f"       last: {e.get('last_reason')}")
+    # v19.34.288 — intake-eligibility backfill (the "PRE-eval blind spot" answer):
+    # recomputes auto-exec eligibility from today's persisted live_alerts when no
+    # trade_drop was logged, so we see WHY surfaced alerts never auto-traded.
+    ie = data.get("intake_eligibility", {}) or {}
+    if ie.get("checked"):
+        ae = ie.get("auto_exec_enabled")
+        print(f"intake  : checked={ie.get('checked')}  auto_exec_enabled={ae}  "
+              f"min_ev_r={ie.get('min_ev_r')}  eligible_no_drop={ie.get('eligible_no_drop', 0)}")
+        for reason, e in sorted((ie.get("by_reason") or {}).items(),
+                                key=lambda kv: kv[1].get("count", 0), reverse=True):
+            setups = ",".join((e.get("setups") or [])[:3])
+            print(f"   - {reason} ×{e.get('count')}"
+                  + (f"  setups={setups}" if setups else ""))
     print()
 
 

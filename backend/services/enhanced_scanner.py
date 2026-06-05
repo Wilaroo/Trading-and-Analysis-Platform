@@ -437,6 +437,7 @@ class LiveAlert:
     
     # SMB-style Expected Value and R-multiple tracking
     strategy_ev_r: float = 0.0           # Expected Value in R-multiples
+    strategy_outcomes: int = 0           # v19.34.294 — graded outcomes behind EV/win_rate (for EV-gate diagnostics)
     projected_r: float = 0.0             # Projected R-multiple if target hit
     risk_r: float = 1.0                  # Risk in R-multiples (1R = stop loss distance)
     
@@ -1097,6 +1098,15 @@ class EnhancedBackgroundScanner:
         self._auto_execute_min_win_rate = 0.55
         self._auto_execute_min_priority = AlertPriority.HIGH
 
+        # v19.34.293 Part 2 — EV-AWARE auto-exec quality gate (operator-approved
+        # 2026-06-05). Once a setup has >= _win_rate_grace_min_trades graded
+        # outcomes, it must show a PROVEN positive expectancy (EV_R > this) to
+        # auto-execute — REPLACING the old bare win-rate floor. EV rewards
+        # expectancy over hit-rate: a 40%-win/+2.7R setup (daily_breakout) passes;
+        # a 17%-win/-4R one (vwap_fade) does not. Cold-start setups (< grace) keep
+        # the grace pass so they can earn data on priority+tape.
+        self._auto_execute_min_ev_r = 0.10
+
         # 2026-04-30 — grace period for cold-start strategies. Until a
         # strategy has accumulated this many graded outcomes (closed bot
         # trades with R-multiples), use `_auto_execute_min_win_rate` as
@@ -1470,6 +1480,117 @@ class EnhancedBackgroundScanner:
         """Check if a symbol is blacklisted"""
         return symbol.upper() in self._blacklisted_symbols
     
+    @staticmethod
+    def _auto_exec_fail_reasons(priority_value, tape_confirmation, win_rate, min_win_rate):
+        """v19.34.287 — which auto-execute eligibility conditions an alert FAILED.
+        Pure + unit-testable; mirrors the gate stamped in _scan_symbol_all_setups
+        (priority in {critical,high} AND tape_confirmation AND win_rate >= floor)."""
+        failed = []
+        if str(priority_value).lower() not in ("critical", "high"):
+            failed.append(f"priority={priority_value}<high")
+        if not tape_confirmation:
+            failed.append("tape_unconfirmed")
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+        wr, mn = _num(win_rate), _num(min_win_rate)
+        if wr < mn:
+            failed.append(f"win-rate {wr * 100:.0f}%<{mn * 100:.0f}%")
+        return failed
+
+    def _passes_ev_quality_gate(self, alert) -> bool:
+        """v19.34.293 Part 2 — EV-aware auto-exec quality gate (replaces the bare
+        win-rate floor). A setup with >= grace_min graded outcomes must show a
+        PROVEN positive expectancy (EV_R > _auto_execute_min_ev_r). Cold-start
+        setups (< grace_min) keep the grace pass so they can earn data on
+        priority+tape. Unregistered setups have no basis to auto-trade (mirrors the
+        legacy 0.0-win-rate block). Never raises."""
+        try:
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            stats = self._strategy_stats.get(base)
+            if stats is None:
+                return False
+            outcomes = int(getattr(stats, "alerts_triggered", 0) or 0)
+            if outcomes < self._win_rate_grace_min_trades:
+                return True
+            ev_r = float(getattr(stats, "expected_value_r", 0.0) or 0.0)
+            return ev_r > float(self._auto_execute_min_ev_r)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _auto_exec_fail_reasons_ev(priority_value, tape_confirmation, ev_r,
+                                   min_ev_r, outcomes, grace_min, registered=True):
+        """v19.34.293 — which auto-execute conditions an alert FAILED under the EV
+        gate. Mirrors _passes_ev_quality_gate exactly (proven setups need
+        EV_R > min_ev_r; cold-start passes; unregistered fails). Pure + testable."""
+        failed = []
+        if str(priority_value).lower() not in ("critical", "high"):
+            failed.append(f"priority={priority_value}<high")
+        if not tape_confirmation:
+            failed.append("tape_unconfirmed")
+        if not registered:
+            failed.append("no_strategy_stats")
+            return failed
+        try:
+            o = int(outcomes or 0)
+        except (TypeError, ValueError):
+            o = 0
+        if o >= int(grace_min):
+            try:
+                ev = float(ev_r)
+            except (TypeError, ValueError):
+                ev = 0.0
+            mn = float(min_ev_r)
+            if not (ev > mn):
+                failed.append(f"EV {ev:+.2f}R<=+{mn:.2f}R")
+        return failed
+
+    def _record_auto_exec_ineligible(self, alert):
+        """v19.34.287 — intake visibility: record WHY a surfaced alert failed the
+        auto-execute eligibility gate, so symbol-trace's gate funnel stops showing
+        'NO gate-drop logged' for alerts that never auto-trade. Deduped per
+        (symbol, setup) / 5 min so it can't flood `trade_drops`. Never raises."""
+        try:
+            import time as _t
+            seen = getattr(self, "_auto_exec_drop_seen", None)
+            if seen is None:
+                seen = self._auto_exec_drop_seen = {}
+            key = (getattr(alert, "symbol", "?"), getattr(alert, "setup_type", "?"))
+            now_t = _t.time()
+            if now_t - seen.get(key, 0.0) < 300:
+                return
+            seen[key] = now_t
+            pr = alert.priority.value if getattr(alert, "priority", None) else "?"
+            tape_ok = bool(getattr(alert, "tape_confirmation", False))
+            # v19.34.293 Part 2 — report the EV-gate verdict (win-rate floor dropped).
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            st = self._strategy_stats.get(base)
+            ev_r = float(getattr(st, "expected_value_r", 0.0) or 0.0) if st else 0.0
+            outcomes = int(getattr(st, "alerts_triggered", 0) or 0) if st else 0
+            mn = float(self._auto_execute_min_ev_r)
+            failed = self._auto_exec_fail_reasons_ev(
+                pr, tape_ok, ev_r, mn, outcomes,
+                self._win_rate_grace_min_trades, registered=st is not None)
+            from services.trade_drop_recorder import record_trade_drop
+            record_trade_drop(
+                getattr(self, "db", None),
+                gate="auto_exec_ineligible",
+                symbol=getattr(alert, "symbol", None),
+                setup_type=getattr(alert, "setup_type", None),
+                direction=getattr(alert, "direction", "long") or "long",
+                reason="auto-exec ineligible: " + (", ".join(failed) or "unknown"),
+                context={"priority": pr, "tape_confirmation": tape_ok,
+                         "ev_r": ev_r, "min_ev_r": mn, "outcomes": outcomes,
+                         "failed": failed},
+            )
+        except Exception:
+            pass
+
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
         if not self._trading_bot or not self._auto_execute_enabled:
@@ -3526,7 +3647,7 @@ class EnhancedBackgroundScanner:
                         self._auto_execute_enabled and
                         alert.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
                         alert.tape_confirmation and
-                        alert.strategy_win_rate >= self._auto_execute_min_win_rate
+                        self._passes_ev_quality_gate(alert)
                     )
                     
                     alerts.append(alert)
@@ -3558,7 +3679,7 @@ class EnhancedBackgroundScanner:
                                 self._auto_execute_enabled and
                                 _tcs.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
                                 _tcs.tape_confirmation and
-                                _tcs.strategy_win_rate >= self._auto_execute_min_win_rate
+                                self._passes_ev_quality_gate(_tcs)
                             )
                             alerts.append(_tcs)
                 except Exception:
@@ -3578,6 +3699,10 @@ class EnhancedBackgroundScanner:
                 # Auto-execute if eligible
                 if alert.auto_execute_eligible:
                     await self._auto_execute_alert(alert)
+                # v19.34.287 — record WHY an otherwise-surfaced alert won't
+                # auto-trade (intake visibility for symbol-trace's gate funnel).
+                elif self._auto_execute_enabled:
+                    self._record_auto_exec_ineligible(alert)
                 
         except Exception as e:
             logger.warning(f"Error scanning {symbol}: {e}")
@@ -7861,9 +7986,42 @@ class EnhancedBackgroundScanner:
                 f"SMB 5-var compute failed for {getattr(alert, 'symbol', '?')}: {e}")
             return None
 
+    def _stamp_strategy_metrics(self, alert):
+        """v19.34.292 Part 1 / v19.34.294 — DATA-HONESTY. Stamp strategy_outcomes /
+        EV(R) / profit_factor (and win_rate) from _strategy_stats, lazy-registering
+        unseen setups so 'no data' reads as the cold-start GRACE baseline instead of
+        a misleading 0%. outcomes + EV are ALWAYS stamped so the EV-gate diagnostics
+        can replay the decision; win_rate is only derived when it wasn't already set
+        upstream (intraday path / trend_continuation_short floor grant). Pure data
+        honesty — never touches auto_execute_eligible. Never raises."""
+        try:
+            base = (str(getattr(alert, "setup_type", "") or "")
+                    .split("_long")[0].split("_short")[0])
+            if not base:
+                return
+            stats = self._strategy_stats.get(base)
+            if stats is None:
+                stats = self._strategy_stats[base] = StrategyStats(setup_type=base)
+            outcomes = int(getattr(stats, "alerts_triggered", 0) or 0)
+            alert.strategy_outcomes = outcomes
+            alert.strategy_profit_factor = float(getattr(stats, "profit_factor", 0.0) or 0.0)
+            alert.strategy_ev_r = float(getattr(stats, "expected_value_r", 0.0) or 0.0)
+            if float(getattr(alert, "strategy_win_rate", 0.0) or 0.0) <= 0.0:
+                alert.strategy_win_rate = (
+                    self._auto_execute_min_win_rate
+                    if outcomes < self._win_rate_grace_min_trades
+                    else float(getattr(stats, "win_rate", 0.0) or 0.0))
+        except Exception:
+            pass
+
     async def _process_new_alert(self, alert: LiveAlert):
         """Process a new alert — enforces per-symbol dedup (max 1 active per symbol)"""
-        # Check for duplicate: same symbol + same setup_type
+        # v19.34.292 Part 1 / v19.34.294 — stamp honest strategy metrics (outcomes /
+        # EV / profit_factor, + win_rate when unset). Runs AFTER auto_execute_eligible
+        # is decided upstream, so what auto-trades is UNCHANGED — it only makes the
+        # persisted signal + ML features + EV-gate diagnostics honest. win_rate stamping
+        # is internally guarded so intraday / trend_continuation_short grants are kept.
+        self._stamp_strategy_metrics(alert)
         for existing in self._live_alerts.values():
             if (existing.symbol == alert.symbol and 
                 existing.setup_type == alert.setup_type and

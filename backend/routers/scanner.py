@@ -644,6 +644,92 @@ def get_in_play_health(sample: int = 8):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── v19.34.286 — gate near-miss funnel ──────────────────────────────────────
+# symbol-trace historically counted the legacy `rejection_events` collection
+# (effectively always 0) and stopped at "SCANNED & ALERTED — N alerts; check the
+# gates". The actual alert→trade kill reasons all land in `trade_drops` (BOTH
+# record_trade_drop AND record_rejection persist there, with margin context).
+# These helpers join that per-symbol so the trace answers *which* gate ate the
+# alerts and *by how much* (e.g. "tqs_too_low: TQS 52 < min 60, missed by 8").
+def _drop_margin(gate, ctx):
+    """Compact 'by how much' string for a gate's margin from its drop context.
+    Returns None when no numeric margin is available for the gate. Never raises."""
+    ctx = ctx or {}
+
+    def _f(*keys):
+        for k in keys:
+            v = ctx.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    try:
+        if gate == "tqs_too_low":
+            tqs, mn = _f("tqs", "tqs_score"), _f("min_tqs")
+            if tqs is not None and mn is not None:
+                return f"TQS {tqs:.0f} < min {mn:.0f} (missed by {mn - tqs:.0f})"
+        if gate in ("rr_below_min", "rr_below_min_v19_34_88"):
+            rr, mn = _f("rr_ratio", "risk_reward"), _f("min_required", "global_min")
+            if rr is not None and mn is not None:
+                return f"R:R {rr:.2f} < min {mn:.2f}"
+        if gate == "smart_filter_skip":
+            wr = _f("win_rate", "strategy_win_rate")
+            if wr is not None:
+                return f"win-rate {wr * 100:.0f}%" if wr <= 1 else f"win-rate {wr:.0f}%"
+        if gate in ("symbol_direction_open_cap_v123", "symbol_exposure_saturated",
+                    "max_open_positions"):
+            cur = _f("current", "open_count", "current_exposure")
+            cap = _f("cap", "max", "limit", "max_open_positions")
+            if cur is not None and cap is not None:
+                return f"{cur:.0f}/{cap:.0f} cap"
+        if gate == "post_stop_cooldown":
+            left = _f("cooldown_seconds_left", "seconds_left")
+            if left is not None:
+                return f"{left:.0f}s cooldown left"
+    except Exception:
+        return None
+    return None
+
+
+def _summarize_symbol_drops(drops):
+    """Aggregate a symbol's `trade_drops` rows into a per-gate funnel.
+    Pure + unit-testable. `drops` in any order; each is a dict with keys
+    gate / setup_type / reason / context / ts."""
+    by_gate = {}
+    for d in drops:
+        g = d.get("gate") or "unknown"
+        e = by_gate.get(g)
+        if e is None:
+            e = {"count": 0, "last_ts": None, "last_reason": None,
+                 "margin": None, "setups": set()}
+            by_gate[g] = e
+        e["count"] += 1
+        ts = d.get("ts")
+        if e["last_ts"] is None or (ts and ts > e["last_ts"]):
+            e["last_ts"] = ts
+            e["last_reason"] = ((d.get("reason") or "")[:160]) or None
+            m = _drop_margin(g, d.get("context"))
+            if m:
+                e["margin"] = m
+        st = d.get("setup_type")
+        if st:
+            e["setups"].add(st)
+    out = {}
+    for g, e in by_gate.items():
+        e["setups"] = sorted(e["setups"])
+        out[g] = e
+    first_killing = (max(out.items(), key=lambda kv: kv[1]["count"])[0]
+                     if out else None)
+    return {
+        "total": sum(e["count"] for e in out.values()),
+        "first_killing_gate": first_killing,
+        "by_gate": out,
+    }
+
+
 @router.get("/symbol-trace")
 def get_symbol_trace(symbol: str):
     """v19.34.281 — per-symbol scan forensics. Answers "did the live scanner
@@ -724,6 +810,73 @@ def get_symbol_trace(symbol: str):
     except Exception:
         pass
 
+    # 5b) v19.34.286 — alert→trade GATE funnel from `trade_drops` (the unified
+    # sink where every gate's kill lands). This is where alerts actually die;
+    # `rejection_events` above is the legacy/near-empty collection kept only for
+    # back-compat counts. `ts` is a full ISO string → lexical >= on the day works.
+    gate_funnel = {"total": 0, "first_killing_gate": None, "by_gate": {}}
+    try:
+        drops = list(sc.db["trade_drops"].find(
+            {"symbol": sym, "ts": {"$gte": today}},
+            {"_id": 0, "gate": 1, "setup_type": 1, "reason": 1,
+             "context": 1, "ts": 1},
+        ).sort("ts", -1).limit(200))
+        gate_funnel = _summarize_symbol_drops(drops)
+        counts["trade_drops"] = gate_funnel["total"]
+    except Exception:
+        pass
+
+    # 5c) v19.34.288 — INTAKE-ELIGIBILITY BACKFILL. The "PRE-eval blind spot":
+    # when alerts surfaced but NO trade_drop landed, the v287 forward-logger only
+    # covers NEW alerts processed after the patch — pre-existing alerts (or alerts
+    # that surfaced through a non-instrumented path / before a restart) showed
+    # "0 gate-drops" with no reason. We now RECOMPUTE the auto-execute eligibility
+    # verdict from today's PERSISTED `live_alerts` docs (which store priority /
+    # tape_confirmation / strategy_win_rate / auto_execute_eligible via to_dict),
+    # so the operator gets the WHY immediately without waiting for a re-fire.
+    # Read-only — recomputation only, never writes.
+    intake = {"checked": 0, "auto_exec_enabled": None, "min_ev_r": None,
+              "by_reason": {}, "eligible_no_drop": 0}
+    try:
+        if counts.get("live_alerts", 0) > 0 and gate_funnel["total"] == 0:
+            from services.enhanced_scanner import EnhancedBackgroundScanner
+            auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
+            # v19.34.294 — recompute on the EV gate (win-rate floor dropped in v293).
+            min_ev = float(getattr(sc, "_auto_execute_min_ev_r", 0.10) or 0.10)
+            grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
+            intake["auto_exec_enabled"] = auto_enabled
+            intake["min_ev_r"] = min_ev
+            docs = list(sc.db["live_alerts"].find(
+                {"symbol": sym, "created_at": {"$gte": today}},
+                {"_id": 0, "priority": 1, "tape_confirmation": 1,
+                 "strategy_ev_r": 1, "strategy_outcomes": 1,
+                 "auto_execute_eligible": 1, "setup_type": 1},
+            ).limit(200))
+            tmp_reasons: dict = {}
+            for d in docs:
+                intake["checked"] += 1
+                if d.get("auto_execute_eligible"):
+                    intake["eligible_no_drop"] += 1
+                    continue
+                if not auto_enabled:
+                    reasons = ["auto_execute_disabled"]
+                else:
+                    reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons_ev(
+                        d.get("priority"), d.get("tape_confirmation"),
+                        d.get("strategy_ev_r"), min_ev,
+                        d.get("strategy_outcomes"), grace_min) or ["unknown"]
+                key = " + ".join(reasons)
+                slot = tmp_reasons.setdefault(key, {"count": 0, "setups": set()})
+                slot["count"] += 1
+                if d.get("setup_type"):
+                    slot["setups"].add(d["setup_type"])
+            intake["by_reason"] = {
+                k: {"count": v["count"], "setups": sorted(v["setups"])[:5]}
+                for k, v in tmp_reasons.items()
+            }
+    except Exception:
+        pass
+
     # 6) Plain-language verdict.
     verdict = "unknown"
     if in_universe is False:
@@ -744,8 +897,41 @@ def get_symbol_trace(symbol: str):
             verdict = f"DROPPED @ in_play_strict_gate — score {last_eval.get('score')}"
         elif st == "scanned":
             if counts.get("live_alerts", 0) > 0:
-                verdict = (f"SCANNED & ALERTED — {counts.get('live_alerts')} alert(s) today; "
-                           "if no trade, check priority/tape/TQS gate or rejection-events")
+                if counts.get("bot_trades", 0) > 0:
+                    verdict = (f"SCANNED & ALERTED & TRADED — {counts.get('live_alerts')} "
+                               f"alert(s) → {counts.get('bot_trades')} trade(s) today ✓")
+                elif gate_funnel["total"] > 0:
+                    g = gate_funnel["first_killing_gate"]
+                    ge = gate_funnel["by_gate"].get(g, {})
+                    margin_str = f" — {ge.get('margin')}" if ge.get("margin") else ""
+                    verdict = (f"SCANNED & ALERTED but 0 TRADES — {counts.get('live_alerts')} "
+                               f"alert(s) killed at gate '{g}' ({ge.get('count')}×){margin_str}")
+                elif intake.get("checked"):
+                    # v19.34.288 — resolve the PRE-eval blind spot from recomputed intake.
+                    if intake.get("auto_exec_enabled") is False:
+                        verdict = (f"SCANNED & ALERTED, 0 trades — AUTO-EXECUTE GLOBALLY OFF "
+                                   f"(_auto_execute_enabled=False). {counts.get('live_alerts')} "
+                                   f"alert(s) surfaced but none can auto-trade until auto-exec is on.")
+                    elif intake.get("by_reason"):
+                        top = max(intake["by_reason"].items(), key=lambda kv: kv[1]["count"])
+                        verdict = (f"SCANNED & ALERTED, 0 trades — INTAKE-INELIGIBLE: "
+                                   f"{counts.get('live_alerts')} alert(s); top reason "
+                                   f"'{top[0]}' ({top[1]['count']}×). Auto-exec eligibility gate "
+                                   f"(priority/tape/EV) filtered them before execution.")
+                    elif intake.get("eligible_no_drop"):
+                        verdict = (f"SCANNED & ALERTED, {intake['eligible_no_drop']} ELIGIBLE but "
+                                   f"0 trades & NO drop logged — a DOWNSTREAM silent drop AFTER "
+                                   f"the eligibility gate. Investigate _auto_execute_alert / "
+                                   f"trading_bot execution gates.")
+                    else:
+                        verdict = (f"SCANNED & ALERTED, 0 trades — {counts.get('live_alerts')} "
+                                   f"alert(s); intake recomputed but no clear reason "
+                                   f"(check live_alerts persisted fields).")
+                else:
+                    verdict = (f"SCANNED & ALERTED, 0 trades, NO gate-drop logged — "
+                               f"{counts.get('live_alerts')} alert(s) filtered PRE-eval "
+                               f"(priority / auto_execute_eligible / tape intake). "
+                               f"Drop is happening before any instrumented gate.")
             else:
                 verdict = ("SCANNED, NO ALERT — passed ADV+RVOL pre-filters but no detector "
                            "fired (the setup pattern wasn't present per the bot's read)")
@@ -758,6 +944,283 @@ def get_symbol_trace(symbol: str):
                  "min_filter": float(getattr(sc, "_min_rvol_filter", 0) or 0)},
         "last_eval": last_eval,
         "today_counts": counts,
+        "gate_funnel": gate_funnel,
+        "intake_eligibility": intake,
+        "timestamp": now.isoformat(),
+    }
+
+
+# v19.34.290 — segment alerts by whether the auto-exec gate's intraday
+# `tape_confirmation` requirement is even APPLICABLE. Swing/positional setups run
+# through the daily-detector path which NEVER computes tape, so a tape_unconfirmed
+# "block" there is STRUCTURAL (wrong gate applied), not a signal-quality verdict.
+# Splitting the rollup on this stops intraday auto-exec candidates and positional
+# watchlist setups from being conflated into one misleading bottleneck number.
+_TAPE_APPLICABLE_STYLES = {"scalp", "intraday"}
+_POSITIONAL_STYLES = {"swing", "multi_day", "multiday", "position", "investment"}
+
+
+def _tape_applicable(trade_style, scan_tier=None) -> bool:
+    ts = str(trade_style or "").lower()
+    if ts in _TAPE_APPLICABLE_STYLES:
+        return True
+    if ts in _POSITIONAL_STYLES:
+        return False
+    return str(scan_tier or "").lower() == "intraday"
+
+
+@router.get("/intake-summary")
+def get_intake_summary(days: int = 30):
+    """v19.34.289 — universe-wide auto-exec INELIGIBILITY rollup over a window
+    (default 30 days). Recomputes eligibility from PERSISTED `live_alerts` so the
+    operator sees, in one glance, what's bottlenecking the bot market-wide:
+    win-rate floors vs tape confirmation vs priority. Read-only — never writes.
+
+    The `condition_tally` is the headline: how many INELIGIBLE alerts tripped EACH
+    individual condition (an alert can trip several), which directly answers
+    "is the bot mostly blocked on win-rate vs tape vs priority?".
+    """
+    try:
+        from services.enhanced_scanner import (
+            get_enhanced_scanner, EnhancedBackgroundScanner,
+        )
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "running": False,
+                "message": "Enhanced scanner not initialized"}
+
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    days = max(1, min(int(days or 30), 365))
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
+    # v19.34.294 — EV gate (win-rate floor dropped in v293).
+    min_ev = float(getattr(sc, "_auto_execute_min_ev_r", 0.10) or 0.10)
+    grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
+
+    total = eligible = ineligible = 0
+    by_reason: dict = {}   # combined-reason key -> {count, symbols:set, setups:set}
+    by_setup: dict = {}    # setup -> {total, ineligible, style, seg}
+    cond = {"ev_below": 0, "tape_unconfirmed": 0, "priority_low": 0,
+            "auto_execute_disabled": 0}
+    # v19.34.290 — segmented views (intraday-tape-applicable vs positional).
+    def _seg():
+        return {"alerts": 0, "eligible": 0, "ineligible": 0,
+                "cond": {"ev_below": 0, "tape_unconfirmed": 0,
+                         "priority_low": 0, "auto_execute_disabled": 0}}
+    segments = {"intraday": _seg(), "positional": _seg()}
+    by_trade_style: dict = {}  # style -> {total, eligible, ineligible}
+    by_scan_tier: dict = {}    # tier  -> {total, eligible, ineligible}
+    try:
+        cursor = sc.db["live_alerts"].find(
+            {"created_at": {"$gte": cutoff}},
+            {"_id": 0, "symbol": 1, "priority": 1, "tape_confirmation": 1,
+             "strategy_ev_r": 1, "strategy_outcomes": 1, "auto_execute_eligible": 1,
+             "setup_type": 1, "trade_style": 1, "scan_tier": 1},
+        )
+        for d in cursor:
+            total += 1
+            setup = d.get("setup_type") or "?"
+            style = str(d.get("trade_style") or "").lower() or "?"
+            tier = str(d.get("scan_tier") or "").lower() or "?"
+            seg = ("intraday" if _tape_applicable(d.get("trade_style"),
+                                                  d.get("scan_tier")) else "positional")
+            sg = segments[seg]
+            bs = by_setup.setdefault(
+                setup, {"total": 0, "ineligible": 0, "style": style, "seg": seg})
+            bts = by_trade_style.setdefault(
+                style, {"total": 0, "eligible": 0, "ineligible": 0})
+            bsc = by_scan_tier.setdefault(
+                tier, {"total": 0, "eligible": 0, "ineligible": 0})
+            bs["total"] += 1
+            sg["alerts"] += 1
+            bts["total"] += 1
+            bsc["total"] += 1
+            if d.get("auto_execute_eligible"):
+                eligible += 1
+                sg["eligible"] += 1
+                bts["eligible"] += 1
+                bsc["eligible"] += 1
+                continue
+            ineligible += 1
+            bs["ineligible"] += 1
+            sg["ineligible"] += 1
+            bts["ineligible"] += 1
+            bsc["ineligible"] += 1
+            if not auto_enabled:
+                reasons = ["auto_execute_disabled"]
+            else:
+                reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons_ev(
+                    d.get("priority"), d.get("tape_confirmation"),
+                    d.get("strategy_ev_r"), min_ev,
+                    d.get("strategy_outcomes"), grace_min) or ["unknown"]
+            for r in reasons:
+                if r.startswith("priority="):
+                    cond["priority_low"] += 1
+                    sg["cond"]["priority_low"] += 1
+                elif r == "tape_unconfirmed":
+                    cond["tape_unconfirmed"] += 1
+                    sg["cond"]["tape_unconfirmed"] += 1
+                elif r.startswith("EV "):
+                    cond["ev_below"] += 1
+                    sg["cond"]["ev_below"] += 1
+                elif r == "auto_execute_disabled":
+                    cond["auto_execute_disabled"] += 1
+                    sg["cond"]["auto_execute_disabled"] += 1
+            key = " + ".join(reasons)
+            slot = by_reason.setdefault(
+                key, {"count": 0, "symbols": set(), "setups": set()})
+            slot["count"] += 1
+            if d.get("symbol"):
+                slot["symbols"].add(d["symbol"])
+            slot["setups"].add(setup)
+    except Exception as exc:
+        return {"success": False, "running": True, "error": str(exc)}
+
+    for sg in segments.values():
+        a = sg["alerts"]
+        sg["eligible_pct"] = round(sg["eligible"] / a * 100, 1) if a else 0.0
+
+    by_reason_out = sorted(
+        [{"reason": k, "count": v["count"], "symbols": len(v["symbols"]),
+          "top_setups": sorted(v["setups"])[:5]} for k, v in by_reason.items()],
+        key=lambda x: x["count"], reverse=True)
+    by_setup_out = sorted(
+        [{"setup": k, "total": v["total"], "ineligible": v["ineligible"],
+          "trade_style": v.get("style"), "segment": v.get("seg"),
+          "ineligible_pct": round(v["ineligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_setup.items()],
+        key=lambda x: x["ineligible"], reverse=True)[:25]
+    by_trade_style_out = sorted(
+        [{"trade_style": k, "tape_applicable": _tape_applicable(k),
+          "total": v["total"], "eligible": v["eligible"],
+          "ineligible": v["ineligible"],
+          "eligible_pct": round(v["eligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_trade_style.items()],
+        key=lambda x: x["total"], reverse=True)
+    by_scan_tier_out = sorted(
+        [{"scan_tier": k, "total": v["total"], "eligible": v["eligible"],
+          "ineligible": v["ineligible"],
+          "eligible_pct": round(v["eligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_scan_tier.items()],
+        key=lambda x: x["total"], reverse=True)
+
+    return {
+        "success": True, "running": True, "days": days, "since": cutoff,
+        "auto_exec_enabled": auto_enabled, "min_ev_r": min_ev,
+        "totals": {"alerts": total, "eligible": eligible, "ineligible": ineligible,
+                   "eligible_pct": round(eligible / total * 100, 1) if total else 0.0},
+        "condition_tally": cond,
+        "segments": segments,
+        "by_trade_style": by_trade_style_out,
+        "by_scan_tier": by_scan_tier_out,
+        "by_reason": by_reason_out,
+        "by_setup": by_setup_out,
+        "timestamp": now.isoformat(),
+    }
+
+
+def _canon_setup_base(setup_type) -> str:
+    """v19.34.291 — canonicalize a setup_type to its base, mirroring the scanner's
+    win-rate lookup (`setup_type.split("_long")[0].split("_short")[0]`). The audit
+    MUST fold the same way or it will mis-report which setups are registered."""
+    s = str(setup_type or "")
+    return s.split("_long")[0].split("_short")[0]
+
+
+@router.get("/strategy-stats-audit")
+def get_strategy_stats_audit(days: int = 30):
+    """v19.34.291 — win-rate / EV TRUST audit. For every setup seen in the window,
+    reveals whether its strategy_win_rate is REAL data, a cold-start GRACE baseline,
+    or a misleading NO-DATA→0% default (setup not registered in `_strategy_stats`,
+    or only emitted on a path that never computes win-rate). Read-only.
+
+    The scanner uses (enhanced_scanner.py:3500-3519): if base_setup in _strategy_stats
+    AND alerts_triggered >= grace_min -> real win_rate; elif registered -> floor;
+    else -> the LiveAlert default 0.0. This audit replays that decision per setup so
+    we can separate 'genuinely weak' (e.g. vwap_fade 17%) from 'no data mislabeled 0%'.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "running": False,
+                "message": "Enhanced scanner not initialized"}
+
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    days = max(1, min(int(days or 30), 365))
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
+    min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+    stats_map = getattr(sc, "_strategy_stats", {}) or {}
+
+    # 1) Fold window alerts to base setup with raw-type examples + counts.
+    bases: dict = {}
+    try:
+        cursor = sc.db["live_alerts"].find(
+            {"created_at": {"$gte": cutoff}}, {"_id": 0, "setup_type": 1})
+        for d in cursor:
+            raw = d.get("setup_type") or "?"
+            base = _canon_setup_base(raw)
+            b = bases.setdefault(base, {"alerts": 0, "raw": set()})
+            b["alerts"] += 1
+            b["raw"].add(raw)
+    except Exception as exc:
+        return {"success": False, "running": True, "error": str(exc)}
+
+    # 2) Replay the gate's win-rate decision per base setup.
+    def _classify(base):
+        st = stats_map.get(base)
+        registered = st is not None
+        triggered = int(getattr(st, "alerts_triggered", 0) or 0) if st else 0
+        won = int(getattr(st, "alerts_won", 0) or 0) if st else 0
+        lost = int(getattr(st, "alerts_lost", 0) or 0) if st else 0
+        win_rate = float(getattr(st, "win_rate", 0.0) or 0.0) if st else 0.0
+        ev_r = float(getattr(st, "expected_value_r", 0.0) or 0.0) if st else 0.0
+        pf = float(getattr(st, "profit_factor", 0.0) or 0.0) if st else 0.0
+        if not registered:
+            eff, verdict = 0.0, "NO-DATA->0% (unregistered)"
+        elif triggered < grace_min:
+            eff, verdict = min_wr, "GRACE (floor baseline)"
+        elif win_rate >= min_wr:
+            eff, verdict = win_rate, "REAL-OK (>=floor)"
+        else:
+            eff, verdict = win_rate, "REAL-LOW (<floor)"
+        return {
+            "registered": registered, "alerts_triggered": triggered,
+            "alerts_won": won, "alerts_lost": lost,
+            "win_rate": round(win_rate, 4), "effective_win_rate": round(eff, 4),
+            "expected_value_r": round(ev_r, 4), "profit_factor": round(pf, 4),
+            "verdict": verdict,
+        }
+
+    setups_out = []
+    summary: dict = {}
+    for base, b in bases.items():
+        c = _classify(base)
+        setups_out.append({
+            "setup_base": base,
+            "alerts_in_window": b["alerts"],
+            "example_setup_types": sorted(b["raw"])[:5],
+            **c,
+        })
+        tag = c["verdict"].split(" ")[0]
+        s = summary.setdefault(tag, {"setups": 0, "alerts": 0})
+        s["setups"] += 1
+        s["alerts"] += b["alerts"]
+    setups_out.sort(key=lambda x: x["alerts_in_window"], reverse=True)
+
+    return {
+        "success": True, "running": True, "days": days, "since": cutoff,
+        "grace_min_trades": grace_min, "min_win_rate": min_wr,
+        "registered_setup_count": len(stats_map),
+        "summary_by_verdict": summary,
+        "setups": setups_out,
         "timestamp": now.isoformat(),
     }
 
