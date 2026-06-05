@@ -78,7 +78,7 @@ def main():
     if ie.get("checked"):
         ae = ie.get("auto_exec_enabled")
         print(f"intake  : checked={ie.get('checked')}  auto_exec_enabled={ae}  "
-              f"min_win_rate={ie.get('min_win_rate')}  eligible_no_drop={ie.get('eligible_no_drop', 0)}")
+              f"min_ev_r={ie.get('min_ev_r')}  eligible_no_drop={ie.get('eligible_no_drop', 0)}")
         for reason, e in sorted((ie.get("by_reason") or {}).items(),
                                 key=lambda kv: kv[1].get("count", 0), reverse=True):
             setups = ",".join((e.get("setups") or [])[:3])

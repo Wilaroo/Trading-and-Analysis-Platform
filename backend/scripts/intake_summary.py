@@ -7,7 +7,7 @@ universe over a window (default 30 days). Recomputes auto-exec eligibility from
 persisted `live_alerts` via /api/scanner/intake-summary and prints:
   • totals (eligible vs ineligible),
   • the BOTTLENECK tally (how many ineligible alerts tripped each condition:
-    win-rate floor vs tape vs priority — conditions can overlap),
+    win-rate floor vs tape vs priority — wait, EV floor vs tape vs priority; conditions can overlap),
   • top combined ineligibility reasons, and worst setups by ineligible count.
 
 Usage (on the DGX, backend running):
@@ -49,7 +49,7 @@ def main():
     t = data.get("totals", {}) or {}
     print(f"\n=== intake-summary: last {data.get('days')}d (since {data.get('since')}) ===")
     print(f"auto_exec_enabled={data.get('auto_exec_enabled')}  "
-          f"min_win_rate={data.get('min_win_rate')}")
+          f"min_ev_r={data.get('min_ev_r')}")
     print(f"alerts={t.get('alerts', 0)}  "
           f"eligible={t.get('eligible', 0)} ({t.get('eligible_pct', 0)}%)  "
           f"ineligible={t.get('ineligible', 0)}")
@@ -57,7 +57,7 @@ def main():
 
     c = data.get("condition_tally", {}) or {}
     print("BOTTLENECK — ineligible alerts tripping each condition (can overlap):")
-    print(f"   win-rate < floor : {c.get('win_rate_below', 0)}")
+    print(f"   EV <= floor      : {c.get('ev_below', 0)}")
     print(f"   tape unconfirmed : {c.get('tape_unconfirmed', 0)}")
     print(f"   priority < high  : {c.get('priority_low', 0)}")
     if c.get("auto_execute_disabled"):
@@ -77,7 +77,7 @@ def main():
             print(f"   {label}: alerts={s.get('alerts', 0)}  "
                   f"eligible={s.get('eligible', 0)} ({s.get('eligible_pct', 0)}%)  "
                   f"ineligible={s.get('ineligible', 0)}")
-            print(f"       bottleneck: win-rate={sc.get('win_rate_below', 0)}  "
+            print(f"       bottleneck: EV={sc.get('ev_below', 0)}  "
                   f"tape={sc.get('tape_unconfirmed', 0)}  "
                   f"priority={sc.get('priority_low', 0)}")
         print("-" * 60)

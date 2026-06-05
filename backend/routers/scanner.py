@@ -835,20 +835,22 @@ def get_symbol_trace(symbol: str):
     # tape_confirmation / strategy_win_rate / auto_execute_eligible via to_dict),
     # so the operator gets the WHY immediately without waiting for a re-fire.
     # Read-only — recomputation only, never writes.
-    intake = {"checked": 0, "auto_exec_enabled": None, "min_win_rate": None,
+    intake = {"checked": 0, "auto_exec_enabled": None, "min_ev_r": None,
               "by_reason": {}, "eligible_no_drop": 0}
     try:
         if counts.get("live_alerts", 0) > 0 and gate_funnel["total"] == 0:
             from services.enhanced_scanner import EnhancedBackgroundScanner
             auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
-            min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+            # v19.34.294 — recompute on the EV gate (win-rate floor dropped in v293).
+            min_ev = float(getattr(sc, "_auto_execute_min_ev_r", 0.10) or 0.10)
+            grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
             intake["auto_exec_enabled"] = auto_enabled
-            intake["min_win_rate"] = min_wr
+            intake["min_ev_r"] = min_ev
             docs = list(sc.db["live_alerts"].find(
                 {"symbol": sym, "created_at": {"$gte": today}},
                 {"_id": 0, "priority": 1, "tape_confirmation": 1,
-                 "strategy_win_rate": 1, "auto_execute_eligible": 1,
-                 "setup_type": 1},
+                 "strategy_ev_r": 1, "strategy_outcomes": 1,
+                 "auto_execute_eligible": 1, "setup_type": 1},
             ).limit(200))
             tmp_reasons: dict = {}
             for d in docs:
@@ -859,9 +861,10 @@ def get_symbol_trace(symbol: str):
                 if not auto_enabled:
                     reasons = ["auto_execute_disabled"]
                 else:
-                    reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons(
+                    reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons_ev(
                         d.get("priority"), d.get("tape_confirmation"),
-                        d.get("strategy_win_rate"), min_wr) or ["unknown"]
+                        d.get("strategy_ev_r"), min_ev,
+                        d.get("strategy_outcomes"), grace_min) or ["unknown"]
                 key = " + ".join(reasons)
                 slot = tmp_reasons.setdefault(key, {"count": 0, "setups": set()})
                 slot["count"] += 1
@@ -914,7 +917,7 @@ def get_symbol_trace(symbol: str):
                         verdict = (f"SCANNED & ALERTED, 0 trades — INTAKE-INELIGIBLE: "
                                    f"{counts.get('live_alerts')} alert(s); top reason "
                                    f"'{top[0]}' ({top[1]['count']}×). Auto-exec eligibility gate "
-                                   f"(priority/tape/win-rate) filtered them before execution.")
+                                   f"(priority/tape/EV) filtered them before execution.")
                     elif intake.get("eligible_no_drop"):
                         verdict = (f"SCANNED & ALERTED, {intake['eligible_no_drop']} ELIGIBLE but "
                                    f"0 trades & NO drop logged — a DOWNSTREAM silent drop AFTER "
@@ -993,17 +996,19 @@ def get_intake_summary(days: int = 30):
     days = max(1, min(int(days or 30), 365))
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d")
     auto_enabled = bool(getattr(sc, "_auto_execute_enabled", False))
-    min_wr = float(getattr(sc, "_auto_execute_min_win_rate", 0.55) or 0.55)
+    # v19.34.294 — EV gate (win-rate floor dropped in v293).
+    min_ev = float(getattr(sc, "_auto_execute_min_ev_r", 0.10) or 0.10)
+    grace_min = int(getattr(sc, "_win_rate_grace_min_trades", 20) or 20)
 
     total = eligible = ineligible = 0
     by_reason: dict = {}   # combined-reason key -> {count, symbols:set, setups:set}
     by_setup: dict = {}    # setup -> {total, ineligible, style, seg}
-    cond = {"win_rate_below": 0, "tape_unconfirmed": 0, "priority_low": 0,
+    cond = {"ev_below": 0, "tape_unconfirmed": 0, "priority_low": 0,
             "auto_execute_disabled": 0}
     # v19.34.290 — segmented views (intraday-tape-applicable vs positional).
     def _seg():
         return {"alerts": 0, "eligible": 0, "ineligible": 0,
-                "cond": {"win_rate_below": 0, "tape_unconfirmed": 0,
+                "cond": {"ev_below": 0, "tape_unconfirmed": 0,
                          "priority_low": 0, "auto_execute_disabled": 0}}
     segments = {"intraday": _seg(), "positional": _seg()}
     by_trade_style: dict = {}  # style -> {total, eligible, ineligible}
@@ -1012,8 +1017,8 @@ def get_intake_summary(days: int = 30):
         cursor = sc.db["live_alerts"].find(
             {"created_at": {"$gte": cutoff}},
             {"_id": 0, "symbol": 1, "priority": 1, "tape_confirmation": 1,
-             "strategy_win_rate": 1, "auto_execute_eligible": 1, "setup_type": 1,
-             "trade_style": 1, "scan_tier": 1},
+             "strategy_ev_r": 1, "strategy_outcomes": 1, "auto_execute_eligible": 1,
+             "setup_type": 1, "trade_style": 1, "scan_tier": 1},
         )
         for d in cursor:
             total += 1
@@ -1047,9 +1052,10 @@ def get_intake_summary(days: int = 30):
             if not auto_enabled:
                 reasons = ["auto_execute_disabled"]
             else:
-                reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons(
+                reasons = EnhancedBackgroundScanner._auto_exec_fail_reasons_ev(
                     d.get("priority"), d.get("tape_confirmation"),
-                    d.get("strategy_win_rate"), min_wr) or ["unknown"]
+                    d.get("strategy_ev_r"), min_ev,
+                    d.get("strategy_outcomes"), grace_min) or ["unknown"]
             for r in reasons:
                 if r.startswith("priority="):
                     cond["priority_low"] += 1
@@ -1057,9 +1063,9 @@ def get_intake_summary(days: int = 30):
                 elif r == "tape_unconfirmed":
                     cond["tape_unconfirmed"] += 1
                     sg["cond"]["tape_unconfirmed"] += 1
-                elif r.startswith("win-rate"):
-                    cond["win_rate_below"] += 1
-                    sg["cond"]["win_rate_below"] += 1
+                elif r.startswith("EV "):
+                    cond["ev_below"] += 1
+                    sg["cond"]["ev_below"] += 1
                 elif r == "auto_execute_disabled":
                     cond["auto_execute_disabled"] += 1
                     sg["cond"]["auto_execute_disabled"] += 1
@@ -1103,7 +1109,7 @@ def get_intake_summary(days: int = 30):
 
     return {
         "success": True, "running": True, "days": days, "since": cutoff,
-        "auto_exec_enabled": auto_enabled, "min_win_rate": min_wr,
+        "auto_exec_enabled": auto_enabled, "min_ev_r": min_ev,
         "totals": {"alerts": total, "eligible": eligible, "ineligible": ineligible,
                    "eligible_pct": round(eligible / total * 100, 1) if total else 0.0},
         "condition_tally": cond,

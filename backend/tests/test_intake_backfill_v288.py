@@ -62,10 +62,11 @@ class _FakeDB:
 
 
 class _FakeScanner:
-    def __init__(self, db, auto_enabled=True, min_wr=0.55):
+    def __init__(self, db, auto_enabled=True):
         self.db = db
         self._auto_execute_enabled = auto_enabled
-        self._auto_execute_min_win_rate = min_wr
+        self._auto_execute_min_ev_r = 0.10
+        self._win_rate_grace_min_trades = 20
         self._min_rvol_filter = 0.8
         self._tier_cache = {"NVDA": "intraday"}
         self._rvol_cache = {"NVDA": (1.25, datetime.now(timezone.utc))}
