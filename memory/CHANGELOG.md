@@ -23809,3 +23809,17 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     30 outcomes -> "EV -0.50R<=+0.10R"). _alert() now carries strategy_ev_r/strategy_outcomes.
     31 related tests pass; lint clean.
   - paste.rs: https://paste.rs/Z0D2K (sha256 f7aecef0...). curl roundtrip verified.
+
+### v286–v294 FULL-STACK recovery patch (fork 2026-06-05)
+  - DGX git base was discovered to be v285 (origin/main 1b88edd6), NOT v292 — missing the
+    entire v286→v294 scanner-observability + EV-gate stack. Prior 6-file patch failed
+    (context mismatch) and produced a broken local commit 18af4795 (unpushed, ahead 1) that
+    added test files referencing not-yet-present methods.
+  - Rebuilt ONE comprehensive patch against the exact v285 base (pod commit 1476d3f9, fingerprint
+    es=8528/sc=1572/pr=66 matches DGX): 16 files, +1902/-5. git apply --check clean on the
+    reconstructed base; all 16 files byte-identical to pod HEAD after apply.
+  - Fixed 3 stale tests left in the v288/v289/v290 suites (asserted dropped win_rate_below tally
+    -> now ev_below / EV reason). 65 v286–v294 tests pass; recovery clears stale untracked
+    applier leftovers before apply.
+  - paste.rs: https://paste.rs/TpeXv (sha256 207447e5...). Recovery = reset --hard origin +
+    rm stale new files + git apply.

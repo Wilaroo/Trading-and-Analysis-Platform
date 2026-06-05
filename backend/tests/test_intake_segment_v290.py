@@ -52,17 +52,19 @@ class _FakeDB:
 
 
 class _FakeScanner:
-    def __init__(self, db, auto_enabled=True, min_wr=0.55):
+    def __init__(self, db, auto_enabled=True):
         self.db = db
         self._auto_execute_enabled = auto_enabled
-        self._auto_execute_min_win_rate = min_wr
+        self._auto_execute_min_ev_r = 0.10
+        self._win_rate_grace_min_trades = 20
 
 
 def _alert(symbol="NVDA", priority="high", tape=True, wr=0.60, eligible=False,
-           setup="x", style="intraday", tier="intraday", days_ago=1):
+           setup="x", style="intraday", tier="intraday", days_ago=1, ev=0.0, outcomes=0):
     ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
     return {"symbol": symbol, "priority": priority, "tape_confirmation": tape,
-            "strategy_win_rate": wr, "auto_execute_eligible": eligible,
+            "strategy_win_rate": wr, "strategy_ev_r": ev, "strategy_outcomes": outcomes,
+            "auto_execute_eligible": eligible,
             "setup_type": setup, "trade_style": style, "scan_tier": tier,
             "created_at": ts.strftime("%Y-%m-%d") + "T12:00:00+00:00"}
 
@@ -129,14 +131,15 @@ class TestSegmentation:
 
     def test_segment_cond_sums_match_global(self, monkeypatch):
         rows = (
-            [_alert(style="intraday", priority="low", tape=False, wr=0.10)] * 5 +
+            [_alert(style="intraday", priority="low", tape=False,
+                    ev=-0.50, outcomes=30)] * 5 +
             [_alert(style="position", priority="medium", tape=False, wr=0.60,
                     tier="investment")] * 3
         )
         out = _run(_FakeScanner(_FakeDB(rows)), monkeypatch)
         glob = out["condition_tally"]
         seg = out["segments"]
-        for cond_key in ("win_rate_below", "tape_unconfirmed", "priority_low"):
+        for cond_key in ("ev_below", "tape_unconfirmed", "priority_low"):
             seg_sum = (seg["intraday"]["cond"][cond_key]
                        + seg["positional"]["cond"][cond_key])
             assert seg_sum == glob[cond_key], cond_key

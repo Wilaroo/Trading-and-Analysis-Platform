@@ -51,17 +51,19 @@ class _FakeDB:
 
 
 class _FakeScanner:
-    def __init__(self, db, auto_enabled=True, min_wr=0.55):
+    def __init__(self, db, auto_enabled=True):
         self.db = db
         self._auto_execute_enabled = auto_enabled
-        self._auto_execute_min_win_rate = min_wr
+        self._auto_execute_min_ev_r = 0.10
+        self._win_rate_grace_min_trades = 20
 
 
 def _alert(symbol="NVDA", priority="medium", tape=False, wr=0.50,
-           eligible=False, setup="9_ema_scalp", days_ago=1):
+           eligible=False, setup="9_ema_scalp", days_ago=1, ev=0.0, outcomes=0):
     ts = (datetime.now(timezone.utc) - timedelta(days=days_ago))
     return {"symbol": symbol, "priority": priority, "tape_confirmation": tape,
-            "strategy_win_rate": wr, "auto_execute_eligible": eligible,
+            "strategy_win_rate": wr, "strategy_ev_r": ev, "strategy_outcomes": outcomes,
+            "auto_execute_eligible": eligible,
             "setup_type": setup, "created_at": ts.strftime("%Y-%m-%d") + "T12:00:00+00:00"}
 
 
@@ -75,7 +77,8 @@ class TestIntakeSummary:
         rows = (
             [_alert(priority="high", tape=True, wr=0.60, eligible=True)] * 4 +      # eligible
             [_alert(priority="low", tape=True, wr=0.60)] * 3 +                       # priority only
-            [_alert(priority="high", tape=False, wr=0.40, setup="orb")] * 2          # tape + win-rate
+            [_alert(priority="high", tape=False, ev=-0.50, outcomes=30,
+                    setup="orb")] * 2                                                # tape + proven -EV
         )
         out = _run(_FakeScanner(_FakeDB(rows)), monkeypatch)
         t = out["totals"]
@@ -85,7 +88,7 @@ class TestIntakeSummary:
         c = out["condition_tally"]
         assert c["priority_low"] == 3          # 3 low-priority
         assert c["tape_unconfirmed"] == 2      # 2 tape-fail
-        assert c["win_rate_below"] == 2        # 2 win-rate-fail (overlap with tape)
+        assert c["ev_below"] == 2              # 2 proven-negative-EV (overlap with tape)
 
     def test_by_reason_aggregation_sorted(self, monkeypatch):
         rows = (
