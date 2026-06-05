@@ -64,6 +64,34 @@ def main():
         print(f"   auto-exec OFF    : {c.get('auto_execute_disabled', 0)}")
     print("-" * 60)
 
+    # v19.34.290 — segmented view: separate intraday auto-exec candidates (tape
+    # gate APPLIES) from positional/swing setups (daily path, no tape — a
+    # tape_unconfirmed "block" there is structural, not a signal verdict).
+    seg = data.get("segments", {}) or {}
+    if seg:
+        print("SEGMENTS (tape gate applicable vs structural):")
+        for name, label in (("intraday", "intraday (tape APPLIES)"),
+                            ("positional", "positional (no tape — structural)")):
+            s = seg.get(name, {}) or {}
+            sc = s.get("cond", {}) or {}
+            print(f"   {label}: alerts={s.get('alerts', 0)}  "
+                  f"eligible={s.get('eligible', 0)} ({s.get('eligible_pct', 0)}%)  "
+                  f"ineligible={s.get('ineligible', 0)}")
+            print(f"       bottleneck: win-rate={sc.get('win_rate_below', 0)}  "
+                  f"tape={sc.get('tape_unconfirmed', 0)}  "
+                  f"priority={sc.get('priority_low', 0)}")
+        print("-" * 60)
+
+    bts = data.get("by_trade_style") or []
+    if bts:
+        print("BY TRADE STYLE (eligible rate — where can the bot actually act?):")
+        for s in bts[:8]:
+            ta = "tape✓" if s.get("tape_applicable") else "no-tape"
+            print(f"   - {s.get('trade_style')} [{ta}]: "
+                  f"{s.get('eligible')}/{s.get('total')} eligible "
+                  f"({s.get('eligible_pct')}%)")
+        print("-" * 60)
+
     print("TOP INELIGIBILITY REASONS (combined):")
     for r in (data.get("by_reason") or [])[:12]:
         setups = ",".join((r.get("top_setups") or [])[:3])
@@ -73,8 +101,9 @@ def main():
 
     print("WORST SETUPS BY INELIGIBLE COUNT:")
     for s in (data.get("by_setup") or [])[:12]:
+        seg_tag = f" [{s.get('segment')}/{s.get('trade_style')}]" if s.get("segment") else ""
         print(f"   - {s.get('setup')}: {s.get('ineligible')}/{s.get('total')} "
-              f"ineligible ({s.get('ineligible_pct')}%)")
+              f"ineligible ({s.get('ineligible_pct')}%){seg_tag}")
     print()
 
 

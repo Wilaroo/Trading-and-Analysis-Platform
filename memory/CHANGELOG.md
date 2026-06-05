@@ -23708,3 +23708,18 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
   - test_intake_summary_v289.py (6 cases). Verified live (preview): route serves, set
     serialization clean. Applier stacks on v288: paste.rs Q9yP8 (sha 9854b17d), idempotent,
     py_compile OK, byte-identical vs HEAD+v288+v289.
+
+### v19.34.290 — intake-summary SEGMENTATION (intraday-tape-applicable vs positional)
+  - routers/scanner.py: _tape_applicable(trade_style, scan_tier) helper +
+    /api/scanner/intake-summary now returns `segments` (intraday vs positional, each
+    with alerts/eligible/ineligible/eligible_pct + per-segment condition_tally),
+    `by_trade_style` (with tape_applicable flag + eligible_pct) and `by_scan_tier`.
+    by_setup rows now carry trade_style + segment. RATIONALE: swing/positional setups
+    run the daily-detector path which NEVER computes tape_confirmation, so their
+    tape_unconfirmed "blocks" are STRUCTURAL, not signal-quality — segmenting stops
+    the conflation that inflated the 93% tape bottleneck.
+  - backend/scripts/intake_summary.py prints SEGMENTS + BY TRADE STYLE sections.
+  - test_intake_segment_v290.py (8 cases incl. segment-sum == global invariant).
+    All 27 intake tests pass (v287+v288+v289+v290). Applier stacks on v289:
+    paste.rs BnvYh (sha 2fb1f2fa), idempotent, py_compile OK, byte-identical vs
+    HEAD+v288+v289+v290. Verified live (preview): segmented payload serializes.

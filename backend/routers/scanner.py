@@ -947,6 +947,25 @@ def get_symbol_trace(symbol: str):
     }
 
 
+# v19.34.290 — segment alerts by whether the auto-exec gate's intraday
+# `tape_confirmation` requirement is even APPLICABLE. Swing/positional setups run
+# through the daily-detector path which NEVER computes tape, so a tape_unconfirmed
+# "block" there is STRUCTURAL (wrong gate applied), not a signal-quality verdict.
+# Splitting the rollup on this stops intraday auto-exec candidates and positional
+# watchlist setups from being conflated into one misleading bottleneck number.
+_TAPE_APPLICABLE_STYLES = {"scalp", "intraday"}
+_POSITIONAL_STYLES = {"swing", "multi_day", "multiday", "position", "investment"}
+
+
+def _tape_applicable(trade_style, scan_tier=None) -> bool:
+    ts = str(trade_style or "").lower()
+    if ts in _TAPE_APPLICABLE_STYLES:
+        return True
+    if ts in _POSITIONAL_STYLES:
+        return False
+    return str(scan_tier or "").lower() == "intraday"
+
+
 @router.get("/intake-summary")
 def get_intake_summary(days: int = 30):
     """v19.34.289 — universe-wide auto-exec INELIGIBILITY rollup over a window
@@ -978,25 +997,53 @@ def get_intake_summary(days: int = 30):
 
     total = eligible = ineligible = 0
     by_reason: dict = {}   # combined-reason key -> {count, symbols:set, setups:set}
-    by_setup: dict = {}    # setup -> {total, ineligible}
+    by_setup: dict = {}    # setup -> {total, ineligible, style, seg}
     cond = {"win_rate_below": 0, "tape_unconfirmed": 0, "priority_low": 0,
             "auto_execute_disabled": 0}
+    # v19.34.290 — segmented views (intraday-tape-applicable vs positional).
+    def _seg():
+        return {"alerts": 0, "eligible": 0, "ineligible": 0,
+                "cond": {"win_rate_below": 0, "tape_unconfirmed": 0,
+                         "priority_low": 0, "auto_execute_disabled": 0}}
+    segments = {"intraday": _seg(), "positional": _seg()}
+    by_trade_style: dict = {}  # style -> {total, eligible, ineligible}
+    by_scan_tier: dict = {}    # tier  -> {total, eligible, ineligible}
     try:
         cursor = sc.db["live_alerts"].find(
             {"created_at": {"$gte": cutoff}},
             {"_id": 0, "symbol": 1, "priority": 1, "tape_confirmation": 1,
-             "strategy_win_rate": 1, "auto_execute_eligible": 1, "setup_type": 1},
+             "strategy_win_rate": 1, "auto_execute_eligible": 1, "setup_type": 1,
+             "trade_style": 1, "scan_tier": 1},
         )
         for d in cursor:
             total += 1
             setup = d.get("setup_type") or "?"
-            bs = by_setup.setdefault(setup, {"total": 0, "ineligible": 0})
+            style = str(d.get("trade_style") or "").lower() or "?"
+            tier = str(d.get("scan_tier") or "").lower() or "?"
+            seg = ("intraday" if _tape_applicable(d.get("trade_style"),
+                                                  d.get("scan_tier")) else "positional")
+            sg = segments[seg]
+            bs = by_setup.setdefault(
+                setup, {"total": 0, "ineligible": 0, "style": style, "seg": seg})
+            bts = by_trade_style.setdefault(
+                style, {"total": 0, "eligible": 0, "ineligible": 0})
+            bsc = by_scan_tier.setdefault(
+                tier, {"total": 0, "eligible": 0, "ineligible": 0})
             bs["total"] += 1
+            sg["alerts"] += 1
+            bts["total"] += 1
+            bsc["total"] += 1
             if d.get("auto_execute_eligible"):
                 eligible += 1
+                sg["eligible"] += 1
+                bts["eligible"] += 1
+                bsc["eligible"] += 1
                 continue
             ineligible += 1
             bs["ineligible"] += 1
+            sg["ineligible"] += 1
+            bts["ineligible"] += 1
+            bsc["ineligible"] += 1
             if not auto_enabled:
                 reasons = ["auto_execute_disabled"]
             else:
@@ -1006,12 +1053,16 @@ def get_intake_summary(days: int = 30):
             for r in reasons:
                 if r.startswith("priority="):
                     cond["priority_low"] += 1
+                    sg["cond"]["priority_low"] += 1
                 elif r == "tape_unconfirmed":
                     cond["tape_unconfirmed"] += 1
+                    sg["cond"]["tape_unconfirmed"] += 1
                 elif r.startswith("win-rate"):
                     cond["win_rate_below"] += 1
+                    sg["cond"]["win_rate_below"] += 1
                 elif r == "auto_execute_disabled":
                     cond["auto_execute_disabled"] += 1
+                    sg["cond"]["auto_execute_disabled"] += 1
             key = " + ".join(reasons)
             slot = by_reason.setdefault(
                 key, {"count": 0, "symbols": set(), "setups": set()})
@@ -1022,15 +1073,33 @@ def get_intake_summary(days: int = 30):
     except Exception as exc:
         return {"success": False, "running": True, "error": str(exc)}
 
+    for sg in segments.values():
+        a = sg["alerts"]
+        sg["eligible_pct"] = round(sg["eligible"] / a * 100, 1) if a else 0.0
+
     by_reason_out = sorted(
         [{"reason": k, "count": v["count"], "symbols": len(v["symbols"]),
           "top_setups": sorted(v["setups"])[:5]} for k, v in by_reason.items()],
         key=lambda x: x["count"], reverse=True)
     by_setup_out = sorted(
         [{"setup": k, "total": v["total"], "ineligible": v["ineligible"],
+          "trade_style": v.get("style"), "segment": v.get("seg"),
           "ineligible_pct": round(v["ineligible"] / v["total"] * 100, 1)
           if v["total"] else 0.0} for k, v in by_setup.items()],
         key=lambda x: x["ineligible"], reverse=True)[:25]
+    by_trade_style_out = sorted(
+        [{"trade_style": k, "tape_applicable": _tape_applicable(k),
+          "total": v["total"], "eligible": v["eligible"],
+          "ineligible": v["ineligible"],
+          "eligible_pct": round(v["eligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_trade_style.items()],
+        key=lambda x: x["total"], reverse=True)
+    by_scan_tier_out = sorted(
+        [{"scan_tier": k, "total": v["total"], "eligible": v["eligible"],
+          "ineligible": v["ineligible"],
+          "eligible_pct": round(v["eligible"] / v["total"] * 100, 1)
+          if v["total"] else 0.0} for k, v in by_scan_tier.items()],
+        key=lambda x: x["total"], reverse=True)
 
     return {
         "success": True, "running": True, "days": days, "since": cutoff,
@@ -1038,6 +1107,9 @@ def get_intake_summary(days: int = 30):
         "totals": {"alerts": total, "eligible": eligible, "ineligible": ineligible,
                    "eligible_pct": round(eligible / total * 100, 1) if total else 0.0},
         "condition_tally": cond,
+        "segments": segments,
+        "by_trade_style": by_trade_style_out,
+        "by_scan_tier": by_scan_tier_out,
         "by_reason": by_reason_out,
         "by_setup": by_setup_out,
         "timestamp": now.isoformat(),
