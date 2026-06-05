@@ -415,3 +415,28 @@ corrected stop via shared `_retune_stop_core` helper. v111 cooldown
 legacy wide-stop scalp in the book. Wires into V6 Position Health
 Console's "Tighten all wide-stop scalps" batch action.
 17/17 new tests, 255/255 cumulative v100→v117 PASS.
+
+---
+## Status update — 2026-06-05 (forked session)
+
+### Done & verified on DGX (pytest 8/8, endpoint live)
+- ✅ m5 (canonical grading/EV), m8 (tidal_wave momentum split / fading_bounce reversion) — code+data+tests committed (6696927f).
+- ✅ Issue 2 — INTRADAY_BRACKET_V2 (runner/target/swing_hold/position_hold archetype brackets) — committed (b652f364).
+- ✅ A — bracket reconciliation trace (`scripts/probe_bracket_reconcile.py`).
+- ✅ B — horizon-aware daily-bar lookback (`market_setup_classifier.py`).
+- ✅ C — `/api/scanner/in-play-health` endpoint + `scripts/probe_inplay_health.py`.
+  (Deployed via compact anchored idempotent applier on paste.rs; backups *.bak.abc0606.)
+
+### Next / backlog (P1 unless noted)
+- (d) EV Leaderboard on Mission Control.
+- Bot-Vitals header on Mission Control.
+- Mission Control sticky per-symbol search/filter across all 5 lanes.
+- Surface Gameplan prioritization boost on position card + Mission Control.
+- Adopted-position unrealized P&L split (P2); EOD close honors trade-style (P2);
+  EOD close popup modal (P2); scanner feed group/display (P2); regime classifier
+  tolerance patch (P2); L2 depth probe (P2).
+- Break up server.py monolith (P3); refresh AGENTS.md for SSOT architecture (P3).
+
+### Deploy/test constraints (unchanged)
+- DO NOT use testing_agent (DGX hardware-bound). Validate via pytest + curl + probes in container, ship idempotent appliers via paste.rs.
+- DGX restart: `./start_backend.sh --force`.

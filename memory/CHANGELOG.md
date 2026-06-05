@@ -23409,3 +23409,50 @@ magnitude (scale x0.808) so the mean position-size multiplier returns to
 the historical ~0.30x (was 0.371x). Env-only, no code change.
   POSITION_SIZE_GRADE_A_MULT=0.80  B=0.48  C=0.24  D=0.12  F=0.08
 Restart required (.env -> process env at startup).
+
+## 2026-06-05 — A/B/C deployed to DGX (deployed via paste.rs applier, pytest 8/8)
+
+Forked-session work items A, B, C — shipped as a compact anchored idempotent
+applier (hunk-level, drift-tolerant, *.bak.abc0606 backups). Verified on DGX:
+pytest 8/8 green; `/api/scanner/in-play-health` returns correct shape live;
+A dry-trace confirms tidal_wave→runner / fading_bounce→target.
+
+### A — INTRADAY_BRACKET_V2 reconciliation trace
+- NEW `backend/scripts/probe_bracket_reconcile.py` (read-only).
+  - `--setup X [--setup Y]` dry trace: setup → exit_archetype_prior() →
+    ARCHETYPE_STOP_RULES geometry → _create_scale_out_plan() (fixed targets +
+    runner reservation). No live data needed.
+  - default/live: GET /api/trading-bot/trades/open, per-position reconcile —
+    PROTECTED/NAKED, target-leg count, runner-expected vs fixed, attach_count,
+    + /api/trading-bot/bracket-history lifecycle trail.
+
+### B — Horizon-aware daily-bar lookback (market_setup_classifier.py)
+- `HORIZON_HISTORY_DAYS` map: scalp/intraday 30 · multi_day 120 · swing 252 ·
+  investment/position 504. `_history_days_for_style()` resolves via
+  trade_style_classifier SSOT.
+- `classify(..., trade_style=...)` threads style from the scanner alert
+  (enhanced_scanner `_apply_setup_context`); `_load_daily_bars(symbol,
+  history_days=...)` limits the mongo read by horizon. Cache is superset-aware
+  (3-tuple `(result, ts, history_days)`) — deeper requests never reuse a
+  shallower cache; external `_cache.get(symbol)` reads unaffected.
+
+### C — In-play health probe
+- NEW enhanced_scanner `_last_wave_batch`/`_last_wave_batch_at` stash (in the
+  wave-scan loop) + `get_in_play_health(sample=8)` method.
+- NEW `GET /api/scanner/in-play-health` (routers/scanner.py) — reads the LIVE
+  enhanced scanner. Returns wave composition (T1/T2/T3 sizes+samples+rotation),
+  RVOL freshness (% fresh, oldest/newest age, gate-pass %), qualify-rate
+  (cumulative + last-cycle + scanned/skipped counts + scan cadence).
+- NEW `backend/scripts/probe_inplay_health.py` — polls the endpoint N×, diffs
+  successive reads for TRUE per-cycle qualify-rate, prints per-cycle table +
+  health verdict.
+
+### Tests
+- NEW `backend/tests/test_horizon_lookback_and_archetype.py` (8 tests, all green
+  on DGX): B horizon map/alias/depth/cache-superset; A archetype resolution +
+  scale-out plan (runner reserves shares, target has none); C health snapshot
+  shape (wave/rvol/qualify counters).
+
+### DGX restart note (from AGENTS.md)
+- Restart is `./start_backend.sh --force` (NOT supervisor — that's the Emergent
+  container only). `--force` overrides the v19.30.11 skip-if-healthy guard.
