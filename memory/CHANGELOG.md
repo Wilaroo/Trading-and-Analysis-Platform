@@ -23756,3 +23756,10 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     persist 0.0 despite having real stats — the persisted signal was lying. Part 1 fixes the
     honesty leak. Parts 2 (EV-aware eligibility) + 3 (quarantine capital-destroyers like
     vwap_fade EV -3.98) DEFERRED pending operator decision after reviewing post-Part-1 data.
+
+  - VERIFIED LIVE ON DGX (2026-06-05 ~15:0x): verify_v292_stamp.py (paste.rs bU5bB) showed
+    160/160 fresh alerts with non-zero strategy_win_rate (wr=0 count = 0): real rates flow
+    (vwap_fade 0.172/EV-3.98, squeeze 0.399/EV-0.115, gap_fade 0.618/EV+0.088) AND no-data
+    setups lazy-register to 0.55 grace (trend_continuation, bouncy_ball). strategy_ev_r now
+    persisted honestly. Part 1 SUCCESS — persisted signal + ML features no longer lie.
+    Part 2 (EV-aware eligibility) + Part 3 (quarantine) still pending operator decision.
