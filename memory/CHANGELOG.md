@@ -23589,4 +23589,3 @@ shorts he saw on TC2000 (TSLA, NVDA on 2026-06-05). Investigation chain:
     Appliers validated HEAD->v281->v282->v282b: clean apply, py_compile, idempotent.
 
 NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 trades;
-AAPL 1 -> 0). Then optional: (b) core-liquid RVOL relax; vwap_fade trend filter.
