@@ -3531,6 +3531,39 @@ class EnhancedBackgroundScanner:
                     
                     alerts.append(alert)
             
+            # v19.34.282b — intraday trend-continuation SHORT (bars-based on 5-min
+            # data). Bars-based so it can't go through _check_setup (snapshot/tape);
+            # gated to ~every 2.5 min (5-min bars only change every 5 min) to bound
+            # DB cost. Appended to `alerts` so it inherits the SAME AI/TQS enrichment
+            # + auto-execute loop below. Eligibility mirrors the snapshot path.
+            if self._scan_count % 10 == 0:
+                try:
+                    _fmb = self.technical_service._get_intraday_bars_from_db(symbol, "5 mins", 60)
+                    if _fmb and len(_fmb) >= 25:
+                        _tcs = await self._check_trend_continuation_short(symbol, _fmb)
+                        if _tcs is not None:
+                            _tcs.time_window = "INTRADAY"
+                            _tcs.trade_style = "intraday"
+                            _tcs.scan_tier = "intraday"
+                            _tcs.strategy_win_rate = self._auto_execute_min_win_rate
+                            _tcs.tape_score = round((tape.tape_score + 1.0) * 5.0, 2)
+                            _tcs.tape_confirmation = tape.confirmation_for_short
+                            _tcs.rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+                            _tcs.calculate_r_multiple()
+                            try:
+                                _tcs.grade_trade(strategy_ev=0.0, market_context_score=0.5)
+                            except Exception:
+                                pass
+                            _tcs.auto_execute_eligible = (
+                                self._auto_execute_enabled and
+                                _tcs.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
+                                _tcs.tape_confirmation and
+                                _tcs.strategy_win_rate >= self._auto_execute_min_win_rate
+                            )
+                            alerts.append(_tcs)
+                except Exception:
+                    pass
+
             # Process all alerts for this symbol - AI ENRICHMENT first, then TQS SCORING
             # GAP 2 FIX: AI enrichment runs first so TQS can incorporate AI model alignment
             for alert in alerts:
@@ -6358,7 +6391,6 @@ class EnhancedBackgroundScanner:
                     for check in [
                         self._check_daily_squeeze,
                         self._check_trend_continuation,
-                        self._check_trend_continuation_short,  # v19.34.282
                         self._check_daily_breakout,
                         self._check_base_breakout,
                         self._check_accumulation_entry,
@@ -7416,8 +7448,8 @@ class EnhancedBackgroundScanner:
         # Long zone is (-0.5%..+2.0%); the short mirror is (-2.0%..+0.5%).
         current = closes[-1]
         dist_from_ema = (current - ema20) / ema20 * 100
-        if dist_from_ema > 0.5 or dist_from_ema < -2.0:
-            return None  # Not in the pullback-to-EMA short zone
+        if dist_from_ema > 0.5 or dist_from_ema < -0.5:
+            return None  # v19.34.282b — tightened: clean pullback-to-EMA only
 
         # ATR for stop
         atrs = []
@@ -7429,6 +7461,8 @@ class EnhancedBackgroundScanner:
         stop = round(ema20 + atr * 1.5, 2)
         target = round(current - atr * 3, 2)
         rr = abs(current - target) / abs(stop - current) if abs(stop - current) > 0 else 0
+        if rr < 1.5:
+            return None  # v19.34.282b — skip low-quality late entries
 
         return LiveAlert(
             id=f"trend_continuation_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
