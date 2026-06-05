@@ -15,16 +15,34 @@ fix was purely the frontend's hardcoded shallow lookbacks. Backend optimization
 + backfill from the original plan DROPPED as unnecessary. Operator confirmed
 charts "much better and faster".
 
-### Next session priorities
-- 🟡 **P1**: EV Leaderboard on Mission Control (now feasible — EV accurate post-v263).
-- 🟡 **P1**: Bot-Vitals header on Mission Control.
-- 🟡 **P1**: Mission Control sticky per-symbol search/filter across all 5 lanes.
-- 🟡 **P1**: EOD close ignores trade-style — toggle vs strictly honoring `close_at_eod=False` for swings.
-- 🟡 **P1**: Surface Gameplan prioritization boost on the position card + Mission Control.
-- 🟡 **P1**: Run the L2 probe (`probe_l2_depth.py`) on the DGX.
-- 🟢 **P2**: Open Adopted Positions unrealized P&L split (`/api/sentcom/positions` `adopted_pnl_today`).
-- 🟢 **P2**: Scanner feed group/display adjustments; EOD close popup modal; regime classifier tolerance patch.
-- 🟢 **P3**: Break up `server.py` monolith.
+### Backlog reconciliation — 2026-06-05 (verified against code, not docs)
+
+**✅ Shipped since these were written (removed from open backlog):**
+- EV Leaderboard on Mission Control — `EVLeaderboard.jsx` rendered at `MissionControlPage.jsx:231`.
+- Adopted-position unrealized P&L split (backend) — `routers/sentcom.py:817` `adopted_pnl_today`.
+- `hold_seconds` stamped on `bot_trades` at close — `trading_bot_service.py:1015`.
+- EOD close honors trade-style — `opportunity_evaluator.py` v245 derives `close_at_eod` from style policy.
+
+**🟡 P1 — genuinely open (verified):**
+- Bot-Vitals header on Mission Control (live strip off `/api/scanner/in-play-health`) — backend exists, **no frontend consumer**.
+- Mission Control sticky per-symbol search/filter across all 5 lanes — only *severity* filters exist today.
+- Squeeze intraday-vs-swing `trade_style` split (handoff Issue 2) — verify-then-fix.
+- ML: freshness retrain of family primaries (models ~39d stale, probe=GO); extend `retrain_readiness.py` with realized-outcome trainability budget.
+
+**🟢 P2 — open:**
+- L2 depth probe (`probe_l2_depth.py`) — script does NOT exist yet (DGX-run).
+- "Why this didn't auto-trade" EV chip on MC cards (reads v294 `ev_below`/`strategy_outcomes`).
+- Adopted-position P&L split **frontend chip** (backend already returns it); Gameplan prioritization-boost surfacing.
+- EOD close popup modal; scanner feed group/display; regime-classifier tolerance patch; EOD operator-override toggle.
+- GPU-torch swap (CUDA torch+torchvision for Spark GB10) — isolated task w/ CPU-build backup.
+- Trade Journey Sparkline + Scale-Out Grade modal (~6–9h, spec below); Adoption Review UI; PnL data-drift telemetry (60s).
+
+**🟢 P3 — open:**
+- Break up `server.py` monolith; refresh AGENTS.md for SSOT architecture.
+- Minors: pusher `reqAccountUpdates` 10s timeout log cleanup; APScheduler nightly auto-smart_backfill; `--reload` in start script; one-shot `ib_historical_data {bar_size:null}` junk-row delete.
+
+**🔵 Gated (not actionable yet):**
+- Realized-outcome meta-labeling layer — sample-gated (tidal_wave=0, fading_bounce=2); park until ~50–100 closed trades/canonical setup.
 
 
 ## Session Summary - 2026-05-22 (3 behavioral patches shipped — last $$ risks closed)

@@ -427,15 +427,17 @@ Console's "Tighten all wide-stop scalps" batch action.
 - ✅ C — `/api/scanner/in-play-health` endpoint + `scripts/probe_inplay_health.py`.
   (Deployed via compact anchored idempotent applier on paste.rs; backups *.bak.abc0606.)
 
-### Next / backlog (P1 unless noted)
-- (d) EV Leaderboard on Mission Control.
-- Bot-Vitals header on Mission Control.
-- Mission Control sticky per-symbol search/filter across all 5 lanes.
-- Surface Gameplan prioritization boost on position card + Mission Control.
-- Adopted-position unrealized P&L split (P2); EOD close honors trade-style (P2);
-  EOD close popup modal (P2); scanner feed group/display (P2); regime classifier
-  tolerance patch (P2); L2 depth probe (P2).
-- Break up server.py monolith (P3); refresh AGENTS.md for SSOT architecture (P3).
+### Next / backlog (reconciled 2026-06-05 — see ROADMAP.md for the live list)
+- ✅ SHIPPED (verified in code): EV Leaderboard on MC (`EVLeaderboard.jsx`),
+  adopted-position P&L split backend (`sentcom.py` `adopted_pnl_today`),
+  `hold_seconds` at close (`trading_bot_service.py:1015`), EOD honors trade-style
+  (`opportunity_evaluator.py` v245).
+- 🟡 P1 OPEN: Bot-Vitals header on MC (off `/api/scanner/in-play-health`); MC sticky
+  per-symbol search/filter across 5 lanes; squeeze intraday-vs-swing `trade_style` split.
+- 🟢 P2 OPEN: L2 depth probe (`probe_l2_depth.py` — not built); "why-not-auto-traded" EV
+  chip (v294 `ev_below`); adopted P&L split frontend chip; Gameplan boost surfacing;
+  EOD close popup modal; scanner feed group/display; regime classifier tolerance patch.
+- 🟢 P3 OPEN: break up server.py monolith; refresh AGENTS.md for SSOT architecture.
 
 ### Deploy/test constraints (unchanged)
 - DO NOT use testing_agent (DGX hardware-bound). Validate via pytest + curl + probes in container, ship idempotent appliers via paste.rs.
@@ -477,6 +479,8 @@ NEXT ML STEPS:
 3. (later, gated) build the meta-labeling layer when the budget says GO.
 4. (watch) confirm hold_seconds is stamped on bot_trades at close (net_pnl/mfe_r/
    mae_r already present) — needed as a clean label/feature for the meta-model.
+   ✅ CONFIRMED 2026-06-05: `trading_bot_service.py:1015` stamps `hold_seconds` via
+   `_compute_hold_seconds(entry_ts, close_ts)` at close.
 
 ---
 ## Action item added 2026-06-05: GPU-torch swap (P2, own task)

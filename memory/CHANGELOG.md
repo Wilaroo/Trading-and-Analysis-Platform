@@ -1,3 +1,36 @@
+## 2026-06-05 — Hygiene sweep + backlog reconciliation — SHIPPED
+
+Housekeeping pass (no trading-logic change). Validated via pytest (6/6 on the fixed
+test) + lint; ships to DGX as a small patch + a `git rm` command for the bundles.
+
+WHY
+  Planning docs (ROADMAP/PRD) had drifted from the code: several "P1 backlog" items
+  were already shipped and never crossed off. Also one test was red and 7 stale
+  backup bundles were still tracked in the repo.
+
+SCOPE
+  1. Reconciled backlog against the actual codebase (verified, not doc-trusted):
+     - Marked SHIPPED: EV Leaderboard on MC (`EVLeaderboard.jsx` → `MissionControlPage.jsx:231`),
+       adopted-position P&L split backend (`sentcom.py:817 adopted_pnl_today`),
+       `hold_seconds` at close (`trading_bot_service.py:1015`), EOD honors trade-style
+       (`opportunity_evaluator.py` v245).
+     - Rewrote ROADMAP "Next session priorities" → dated reconciliation block;
+       updated PRD Next/backlog + ML watch #4.
+  2. Fixed red test `test_orphan_reconciler_skips_excess_slice_v19_34_22` (2 failing → 6/6).
+     Root cause was NOT just the MagicMock note in the roadmap: the v19.34.260
+     EOD-ORPHAN-FLATTEN branch flattens past-Reg-T-cutoff orphans instead of adopting,
+     so the two adoption tests failed whenever run after the ET cutoff (time-dependent).
+     Fix (test-only): `_mock_bot` now sets `_recently_closed_symbols = {}` (kills the
+     `0 <= age_s` MagicMock TypeError) AND both adoption tests patch
+     `bracket_attach_governor.get_governor().should_attempt_attach → (True, "ok")` so the
+     adopt path runs deterministically. No production code touched.
+  3. `git rm` the 7 stale `*.bak.bundle.20260528_142108` files (854 KB) from the repo.
+
+VERIFICATION
+  - `pytest test_orphan_reconciler_skips_excess_slice_v19_34_22.py` → 6 passed (0.47s).
+  - Lint clean. No backend/runtime change.
+
+
 ## 2026-06-05 — v19.34.286: alert→trade GATE near-miss funnel (symbol-trace)
 
 Observability (pure-additive, no trading-logic change). Validated via pytest +
