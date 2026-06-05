@@ -111,6 +111,8 @@ class SetupStopRules:
     trailing_atr_mult: float = 2.0
     breakeven_r_target: float = 1.0
     scale_out_r_targets: List[float] = field(default_factory=list)
+    leave_runner_pct: float = 0.0     # INTRADAY_BRACKET_V2: residual % left to TRAIL (a "runner")
+    partial_exit_pct: float = 0.25    # exit fraction per non-final scale-out level
     min_stop_pct: float = 0.02
     max_stop_pct: float = 0.08
     use_swing_levels: bool = True
@@ -271,6 +273,69 @@ SETUP_STOP_RULES = {
         scale_out_r_targets=[1.0, 2.0, 3.0],
         description="Standard balanced approach"
     )
+}
+
+
+# ============================================================================
+# INTRADAY_BRACKET_V2 — geometry driven by the SSOT exit_archetype (m8)
+# ============================================================================
+# Replaces the legacy substring family map: bracket geometry now follows the
+# canonical exit_archetype_prior() of the setup, so momentum/breakout setups get
+# a runner and scalps/fades get a fixed bracket — regardless of the setup's name.
+#   runner        → tight stop, bank partials, TRAIL the remainder (ride extension)
+#   target        → fixed 2-wave bracket (50/50), full exit, NO runner
+#   swing_hold    → wider stop, multi-day partials, small runner
+#   position_hold → widest stop, long-horizon partials, runner
+ARCHETYPE_STOP_RULES = {
+    "runner": SetupStopRules(
+        setup_type="runner",
+        initial_stop_atr_mult=1.0,
+        trailing_mode=TrailingMode.CHANDELIER,
+        trailing_atr_mult=2.5,
+        breakeven_r_target=0.75,
+        scale_out_r_targets=[1.0, 2.0, 3.0],
+        leave_runner_pct=0.25,
+        partial_exit_pct=0.25,
+        min_stop_pct=0.005,
+        description="INTRADAY_BRACKET_V2 runner: tight stop, bank 1R/2R/3R partials, trail the last 25%",
+    ),
+    "target": SetupStopRules(
+        setup_type="target",
+        initial_stop_atr_mult=1.25,
+        trailing_mode=TrailingMode.BREAKEVEN_PLUS,
+        trailing_atr_mult=1.0,
+        breakeven_r_target=0.75,
+        scale_out_r_targets=[1.0, 2.0],
+        leave_runner_pct=0.0,
+        partial_exit_pct=0.5,
+        max_stop_pct=0.06,
+        description="INTRADAY_BRACKET_V2 target: fixed 2-wave bracket (50% @1R, 50% @2R), no runner",
+    ),
+    "swing_hold": SetupStopRules(
+        setup_type="swing_hold",
+        initial_stop_atr_mult=2.0,
+        trailing_mode=TrailingMode.ATR,
+        trailing_atr_mult=2.5,
+        breakeven_r_target=1.0,
+        scale_out_r_targets=[1.5, 3.0, 5.0],
+        leave_runner_pct=0.2,
+        partial_exit_pct=0.3,
+        max_stop_pct=0.12,
+        description="INTRADAY_BRACKET_V2 swing: wider stop, multi-day partials, small runner",
+    ),
+    "position_hold": SetupStopRules(
+        setup_type="position_hold",
+        initial_stop_atr_mult=3.0,
+        trailing_mode=TrailingMode.PERCENT,
+        trailing_atr_mult=4.0,
+        breakeven_r_target=1.5,
+        scale_out_r_targets=[2.0, 4.0],
+        leave_runner_pct=0.25,
+        partial_exit_pct=0.375,
+        max_stop_pct=0.18,
+        respect_regime=False,
+        description="INTRADAY_BRACKET_V2 position: widest stop, long-horizon partials, runner",
+    ),
 }
 
 
@@ -729,7 +794,25 @@ class SmartStopService:
     # ========================================================================
     
     def _get_setup_rules(self, setup_type: str) -> SetupStopRules:
-        """Get rules for a setup type"""
+        """Resolve stop/bracket rules for a setup.
+
+        INTRADAY_BRACKET_V2 (env INTRADAY_BRACKET_V2_ENABLED, default ON) drives
+        geometry from the SSOT exit_archetype (runner/target/swing_hold/
+        position_hold) so momentum setups get a runner and scalps/fades get a
+        fixed bracket — independent of the setup's name. Falls back to the legacy
+        substring family map when the flag is off or the archetype is unknown."""
+        import os
+        if os.environ.get("INTRADAY_BRACKET_V2_ENABLED", "1").strip().lower() not in (
+            "0", "false", "no", "off", "",
+        ):
+            try:
+                from services.setup_taxonomy import exit_archetype_prior
+                arch = exit_archetype_prior(setup_type)
+                if arch in ARCHETYPE_STOP_RULES:
+                    return ARCHETYPE_STOP_RULES[arch]
+            except Exception:  # pragma: no cover - fall back to legacy map
+                pass
+
         normalized = setup_type.lower().replace(" ", "_").replace("-", "_")
         if normalized in self.setup_rules:
             return self.setup_rules[normalized]
@@ -792,7 +875,7 @@ class SmartStopService:
         return VolumeProfile(
             poc=round(poc, 2), vah=round(vah, 2), val=round(val, 2),
             hvn_levels=[round(h, 2) for h in hvn[:5]],
-            lvn_levels=[round(l, 2) for l in lvn[:5]],
+            lvn_levels=[round(x, 2) for x in lvn[:5]],
             total_volume=total_vol
         )
     
@@ -803,7 +886,7 @@ class SmartStopService:
         
         # Proximity to key levels
         levels = ([swing_low] + (supports or [])) if direction == 'long' else ([swing_high] + (resistances or []))
-        for level in [l for l in levels if l]:
+        for level in [x for x in levels if x]:
             if abs(price - level) / price < self.config.obvious_level_proximity_pct:
                 score += 30
                 obvious.append(f"${level:.2f}")
@@ -951,21 +1034,36 @@ class SmartStopService:
         return layers
     
     def _create_scale_out_plan(self, entry, direction, atr, rules, position_size):
-        """Create scale-out profit plan"""
+        """Create scale-out profit plan.
+
+        INTRADAY_BRACKET_V2: when rules.leave_runner_pct > 0, reserve that
+        fraction as a trailing RUNNER (no fixed target) instead of exiting the
+        full position; the rest is banked in `partial_exit_pct` slices. When
+        leave_runner_pct == 0 this reduces to the legacy full-exit behaviour."""
         if not rules.scale_out_r_targets:
             return []
         risk = atr * rules.initial_stop_atr_mult
         plan = []
-        remaining = 1.0
+        runner_pct = max(0.0, min(0.9, getattr(rules, "leave_runner_pct", 0.0)))
+        part_pct = getattr(rules, "partial_exit_pct", 0.25)
+        remaining = 1.0 - runner_pct
+        n = len(rules.scale_out_r_targets)
         for i, r_target in enumerate(rules.scale_out_r_targets):
             profit = risk * r_target
             target = (entry + profit) if direction == 'long' else (entry - profit)
-            exit_pct = 0.25 if i < len(rules.scale_out_r_targets) - 1 else remaining
+            exit_pct = min(part_pct, remaining) if i < n - 1 else remaining
+            exit_pct = max(0.0, round(exit_pct, 4))
             plan.append({
                 'level': i + 1, 'r_target': r_target, 'target_price': round(target, 2),
                 'exit_pct': exit_pct, 'shares': int(position_size * exit_pct)
             })
             remaining -= exit_pct
+        if runner_pct > 0:
+            plan.append({
+                'level': n + 1, 'r_target': None, 'target_price': None,
+                'exit_pct': round(runner_pct, 4), 'shares': int(position_size * runner_pct),
+                'runner': True, 'note': 'trail remainder (no fixed target)'
+            })
         return plan
     
     def _determine_urgency(self, current, stop, direction, hunt_risk, regime):
