@@ -72,11 +72,22 @@ def _get(base, path):
 
 def resolve_geometry(setup_type: str, entry: float, atr: float, shares: int,
                      direction: str = "long"):
-    """Resolve archetype + bracket geometry + scale-out plan via the SSOT."""
-    from services.setup_taxonomy import exit_archetype_prior
-    from services.smart_stop_service import ARCHETYPE_STOP_RULES, get_smart_stop_service
+    """Resolve archetype + bracket geometry + scale-out plan via the SSOT.
 
-    arch = exit_archetype_prior(setup_type)
+    Uses the m9 data-aware resolver (empirical MFE/MAE override along
+    runner↔target, else the static prior), so the trace reflects exactly
+    what the live bot's smart_stop_service would place.
+    """
+    from services.smart_stop_service import ARCHETYPE_STOP_RULES, get_smart_stop_service
+    try:
+        from services.exit_archetype_service import resolve_exit_archetype, get_exit_archetype_service
+        arch = resolve_exit_archetype(setup_type)
+        desc = get_exit_archetype_service().describe(setup_type)
+    except Exception:
+        from services.setup_taxonomy import exit_archetype_prior
+        arch = exit_archetype_prior(setup_type)
+        desc = {"prior": arch, "empirical": None, "overridden": False, "stats": {}}
+
     rules = ARCHETYPE_STOP_RULES.get(arch)
     plan = []
     if rules is not None and entry and atr:
@@ -85,13 +96,25 @@ def resolve_geometry(setup_type: str, entry: float, atr: float, shares: int,
             plan = svc._create_scale_out_plan(entry, direction, atr, rules, shares)
         except Exception as e:  # pragma: no cover - defensive
             plan = [{"error": f"plan build failed: {e}"}]
-    return arch, rules, plan
+    return arch, rules, plan, desc
 
 
 def print_geometry(setup_type, entry, atr, shares, direction):
-    arch, rules, plan = resolve_geometry(setup_type, entry, atr, shares, direction)
+    arch, rules, plan, desc = resolve_geometry(setup_type, entry, atr, shares, direction)
     print(f"\n{_bold('━' * 64)}")
-    print(f"{_bold(setup_type)}  →  exit_archetype = {_bold(arch)}")
+    prior = desc.get("prior", arch)
+    if desc.get("overridden"):
+        st = desc.get("stats", {})
+        print(f"{_bold(setup_type)}  →  exit_archetype = {_bold(arch)}  "
+              f"{_green('[DATA-OVERRIDE]')} (prior was {prior}; "
+              f"n={st.get('n', '?')} p50={st.get('p50_mfe_r', '?')}R "
+              f"p75={st.get('p75_mfe_r', '?')}R)")
+    else:
+        st = desc.get("stats", {}) or {}
+        note = ""
+        if desc.get("enabled") and not desc.get("horizon_locked"):
+            note = _yellow(f"  (prior held: {st.get('reason', 'n/a')}, n={st.get('n', 0)})")
+        print(f"{_bold(setup_type)}  →  exit_archetype = {_bold(arch)}{note}")
     print(f"{_bold('━' * 64)}")
     if rules is None:
         print(_red(f"  no ARCHETYPE_STOP_RULES entry for '{arch}' — using legacy map"))
@@ -134,8 +157,11 @@ def _first(d, *keys, default=None):
 
 
 def reconcile_live(base: str):
-    from services.setup_taxonomy import exit_archetype_prior
     from services.smart_stop_service import ARCHETYPE_STOP_RULES
+    try:
+        from services.exit_archetype_service import resolve_exit_archetype as _arch_of
+    except Exception:
+        from services.setup_taxonomy import exit_archetype_prior as _arch_of
 
     try:
         payload = _get(base, "/api/trading-bot/trades/open")
@@ -153,7 +179,7 @@ def reconcile_live(base: str):
         sym = t.get("symbol", "?")
         setup = t.get("setup_type") or t.get("setup_variant") or "?"
         direction = str(_first(t, "direction", default="long")).lower()
-        arch = exit_archetype_prior(setup)
+        arch = _arch_of(setup)
         rules = ARCHETYPE_STOP_RULES.get(arch)
         expects_runner = bool(rules and getattr(rules, "leave_runner_pct", 0.0) > 0)
 

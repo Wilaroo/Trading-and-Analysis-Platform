@@ -23456,3 +23456,25 @@ A dry-trace confirms tidal_wave→runner / fading_bounce→target.
 ### DGX restart note (from AGENTS.md)
 - Restart is `./start_backend.sh --force` (NOT supervisor — that's the Emergent
   container only). `--force` overrides the v19.30.11 skip-if-healthy guard.
+
+## 2026-06-05 — m9: exit_archetype MFE/MAE data-override (paste.rs/vOlNF, 16/16 tests)
+
+Completes the m-series. The static exit_archetype prior is now overridden
+from each setup's REAL MFE/MAE distribution, along the runner↔target axis ONLY
+(horizon-locked swing_hold/position_hold are never flipped). Env-flagged,
+TTL-cached, fail-open to the prior.
+
+- NEW services/exit_archetype_service.py:
+  classify_distribution(mfe_values) → runner (p50≥2.0R & p75≥3.5R) / target
+  (p75≤2.0R) / None (insufficient<30 or ambiguous → keep prior).
+  resolve_exit_archetype(setup_type, db) used by smart_stop_service._get_setup_rules.
+  describe() explainable trace. Env: EXIT_ARCHETYPE_DATA_OVERRIDE_ENABLED(1),
+  _MIN_SAMPLES(30), _LOOKBACK_DAYS(90), _RUNNER_P50_R(2.0), _RUNNER_P75_R(3.5),
+  _TARGET_P75_R(2.0), _CACHE_TTL_S(3600).
+- smart_stop_service._get_setup_rules → resolve_exit_archetype() (was static prior).
+- NEW GET /api/trading-bot/exit-archetype?setup_type=... (prior/empirical/final/stats).
+- probe_bracket_reconcile.py shows [DATA-OVERRIDE] when live data flips the prior.
+- tests/test_exit_archetype_override.py (8) + updated geometry tests = 16/16 green.
+
+m9 remaining: a live market-hours run of probe_bracket_reconcile.py --base ...
+against open positions to confirm bracket attach+reconcile on the real IB path.

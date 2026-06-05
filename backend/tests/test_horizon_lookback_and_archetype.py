@@ -119,8 +119,8 @@ def test_resolve_geometry_runner_reserves_runner_shares():
     sys.path.insert(0, str(_BACKEND / "scripts"))
     from probe_bracket_reconcile import resolve_geometry
 
-    arch, rules, plan = resolve_geometry("tidal_wave", entry=100.0, atr=2.0,
-                                         shares=400, direction="long")
+    arch, rules, plan, desc = resolve_geometry("tidal_wave", entry=100.0, atr=2.0,
+                                               shares=400, direction="long")
     assert arch == "runner"
     assert getattr(rules, "leave_runner_pct", 0.0) > 0
     # The plan must contain a runner leg and the leg shares must not exceed total.
@@ -134,8 +134,8 @@ def test_resolve_geometry_target_has_no_runner():
     sys.path.insert(0, str(_BACKEND / "scripts"))
     from probe_bracket_reconcile import resolve_geometry
 
-    arch, rules, plan = resolve_geometry("fading_bounce", entry=50.0, atr=1.0,
-                                         shares=200, direction="short")
+    arch, rules, plan, desc = resolve_geometry("fading_bounce", entry=50.0, atr=1.0,
+                                               shares=200, direction="short")
     assert arch == "target"
     assert getattr(rules, "leave_runner_pct", 0.0) == 0
     assert not any(p.get("runner") for p in plan)
