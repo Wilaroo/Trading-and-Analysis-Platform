@@ -105,7 +105,7 @@ class TechnicalSnapshot:
     
     # Source tracking
     bars_used: int
-    data_quality: str  # "real", "partial", "estimated"
+    data_quality: str  # "real" | "warming" (1-4 real bars) | "proxy" (daily-anchored, no intraday yet)
     # NEW (Feb-2026): Tracks which data path produced these intraday bars.
     #   "live_only"    — entire 5-min window came from pusher RPC live bars
     #   "live_extended" — pusher RPC bars appended onto Mongo backfill bars
@@ -333,7 +333,29 @@ class RealTimeTechnicalService:
         except Exception as e:
             logger.debug(f"Error fetching daily bars for {symbol}: {e}")
         return None
-    
+
+    def _flag_daily_data_gap(self, symbol: str) -> None:
+        """v19.34.288 F3 (hybrid-C): record a missing-daily-bars gap so the
+        smart-backfill sweep can PRIORITIZE healing it. Telemetry only,
+        idempotent per (symbol, day), never raises — a flag hiccup must never
+        break the scan path. The actual re-queue happens inside
+        ib_historical_collector.smart_backfill (which owns the request schema
+        + correct end_date), which reads these flags and queues them first."""
+        if self._db is None:
+            return
+        try:
+            now = datetime.now(timezone.utc)
+            self._db["data_gap_events"].update_one(
+                {"symbol": symbol.upper(), "kind": "daily_missing",
+                 "day": now.strftime("%Y-%m-%d")},
+                {"$set": {"last_seen": now, "source": "realtime_technical_service"},
+                 "$inc": {"hits": 1},
+                 "$setOnInsert": {"first_seen": now}},
+                upsert=True,
+            )
+        except Exception:
+            pass
+
     def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
         """Try to get quote from IB pushed data (non-async)"""
         try:
@@ -455,6 +477,13 @@ class RealTimeTechnicalService:
                 return None
             
             if not quote or not daily_bars:
+                # v19.34.288 F3 (hybrid-C): a missing daily history for a
+                # universe symbol is a DATA-PIPELINE GAP — never paper over it
+                # with fabricated levels. Fail closed (skip this cycle, no
+                # alert) AND flag the gap so smart-backfill prioritizes healing
+                # it. Only flag the genuine daily-gap case (live price present).
+                if quote and not daily_bars:
+                    self._flag_daily_data_gap(symbol)
                 logger.warning(f"Insufficient data for {symbol}")
                 return None
             
@@ -572,14 +601,39 @@ class RealTimeTechnicalService:
             data_quality = "real"
             bars_used = len(intraday_bars)
             
+        elif intraday_bars and len(intraday_bars) >= 1:
+            # WARMING (v19.34.288 F3): 1-4 real bars. A short VWAP/EMA computed
+            # from the REAL bars that exist is a real measurement, NOT a
+            # fabrication. RSI needs >=15 closes; if we have fewer, fall back to
+            # a REAL daily RSI rather than the old hardcoded 50.
+            closes = [bar["close"] for bar in intraday_bars]
+            vwap = self._calculate_vwap(intraday_bars)
+            ema_9 = self._calculate_ema(closes, 9)
+            ema_20 = self._calculate_ema(closes, 20)
+            if len(closes) >= 15:
+                rsi_14 = self._calculate_rsi(closes, 14)
+            else:
+                rsi_14 = self._calculate_rsi([bar["close"] for bar in daily_bars], 14)
+            intraday_high = max(bar["high"] for bar in intraday_bars)
+            intraday_low = min(bar["low"] for bar in intraday_bars)
+            high_of_day = max(high_of_day, intraday_high)
+            low_of_day = min(low_of_day, intraday_low)
+            data_quality = "warming"
+            bars_used = len(intraday_bars)
+
         else:
-            # Use estimates from daily data
-            vwap = current_price * 0.998
-            ema_9 = current_price * 0.99
-            ema_20 = current_price * 0.985
-            rsi_14 = 50
-            data_quality = "partial" if daily_bars else "estimated"
-            bars_used = len(daily_bars) if daily_bars else 0
+            # REAL PROXY (v19.34.288 F3): no intraday bars yet (pre-open / thin
+            # tape). DO NOT fabricate (old code used current_price*0.998, *0.99,
+            # *0.985, rsi=50). Anchor to REAL daily values instead: today's
+            # session open as the VWAP anchor, prior close for the short EMAs,
+            # and a REAL daily RSI. All measured, all labeled data_quality=
+            # "proxy" so downstream (UI / learning) can see it traded on a proxy.
+            vwap = open_price if open_price > 0 else prev_close
+            ema_9 = prev_close
+            ema_20 = prev_close
+            rsi_14 = self._calculate_rsi([bar["close"] for bar in daily_bars], 14)
+            data_quality = "proxy"
+            bars_used = 0
         
         # === CALCULATED METRICS ===
         
