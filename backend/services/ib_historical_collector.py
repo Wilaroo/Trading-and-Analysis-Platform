@@ -2781,6 +2781,24 @@ class IBHistoricalCollector:
                         end_anchor = end_anchor - timedelta(days=take)
                         remaining -= take
 
+        # v19.34.288 F3 (hybrid-C): prioritize symbols the LIVE scanner flagged
+        # as a daily-data gap in the last 2h (realtime_technical_service writes
+        # `data_gap_events`). Stable-sort flagged symbols to the front so their
+        # backfill is fetched first and the gap self-heals within a cycle or two.
+        try:
+            flagged_syms = {
+                d.get("symbol")
+                for d in self._db["data_gap_events"].find(
+                    {"kind": "daily_missing",
+                     "last_seen": {"$gte": now_dt - timedelta(hours=2)}},
+                    {"_id": 0, "symbol": 1},
+                )
+            }
+            if flagged_syms:
+                to_queue.sort(key=lambda t: 0 if t[0] in flagged_syms else 1)
+        except Exception:
+            pass
+
         by_bar_size = Counter(t[1] for t in to_queue)
 
         if dry_run:
