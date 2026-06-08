@@ -35,19 +35,27 @@ APPLY = "--apply" in sys.argv
 
 
 def _blended_r(bt):
+    """Returns (r_multiple_or_None, risk_unreliable_bool).
+    r is None when the risk basis is corrupt (stop ≈ entry / |R|>20) so callers
+    null + flag the row instead of storing garbage."""
     try:
         entry = float(bt.get("fill_price") or 0)
         stop = float(bt.get("stop_price") or bt.get("stop_loss") or 0)
         orig = int(abs(bt.get("original_shares") or bt.get("shares") or 0))
         realized = bt.get("realized_pnl")
         if entry <= 0 or stop <= 0 or orig <= 0 or realized is None:
-            return None
-        risk_dollars = abs(entry - stop) * orig
-        if risk_dollars <= 0:
-            return None
-        return round(float(realized) / risk_dollars, 3)
+            return None, False
+        rps = abs(entry - stop)
+        # v19.34.307 — reject corrupt risk basis (stop ~ entry → tiny denominator
+        # → absurd R like -28R). A real protective stop is a plausible distance.
+        if rps < max(0.01, 0.0015 * entry):
+            return None, True
+        r = round(float(realized) / (rps * orig), 3)
+        if abs(r) > 20.0:
+            return None, True  # corrupt — don't trust this R
+        return r, False
     except Exception:
-        return None
+        return None, False
 
 
 def main():
@@ -77,11 +85,20 @@ def main():
         if not bt:
             continue
         inspected += 1
-        new_r = _blended_r(bt)
-        if new_r is None:
-            continue
+        new_r, unreliable = _blended_r(bt)
         old_r = row.get("r_multiple")
         setup = row.get("setup_type") or bt.get("setup_type") or "?"
+        if unreliable:
+            # corrupt risk basis → null the R + flag so EV recompute excludes it
+            changed += 1
+            if APPLY:
+                from pymongo import UpdateOne
+                ops.append(UpdateOne(
+                    {"_id": row["_id"]},
+                    {"$set": {"r_multiple": None, "r_risk_unreliable": True}}))
+            continue
+        if new_r is None:
+            continue
         if old_r is not None:
             delta_by_setup[setup]["old"].append(float(old_r))
         delta_by_setup[setup]["new"].append(new_r)
@@ -92,6 +109,7 @@ def main():
                 from pymongo import UpdateOne
                 ops.append(UpdateOne({"_id": row["_id"]},
                                      {"$set": {"r_multiple": new_r,
+                                               "r_risk_unreliable": False,
                                                "r_multiple_blended_v306": True}}))
 
     print(f"inspected {inspected} alert_outcomes rows joined to closed bot_trades")

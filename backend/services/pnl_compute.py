@@ -189,6 +189,24 @@ def _record_alert_outcome_bestEffort(
         except Exception:
             pass
 
+    # v19.34.307 — risk-basis sanity guard. A trade with a real protective stop
+    # loses ~-1R (a bit more on slippage/gaps). An |R| beyond ±20 means the risk
+    # basis (entry/stop) is corrupt — e.g. stop ≈ entry → a tiny denominator
+    # produced the -28R seen on some gap_give_go closes. Flag such rows so the
+    # learning loop / EV recompute can exclude them, and clamp the stored value
+    # so the raw scoreboard can't be polluted by garbage-in risk inputs.
+    r_risk_unreliable = False
+    try:
+        _e = float(getattr(trade, "fill_price", 0) or 0)
+        _s = float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0)
+        if _e > 0 and (abs(_e - _s) < max(0.01, 0.0015 * _e)):
+            r_risk_unreliable = True
+        if abs(r_multiple) > 20.0:
+            r_risk_unreliable = True
+            r_multiple = max(-20.0, min(20.0, r_multiple))
+    except Exception:
+        pass
+
     # v19.34.240 — trade-outcome hygiene: classify GENUINE strategy close vs
     # execution/reconciliation artifact (phantom sweep, sub-minute external OCA
     # unwind, operator flatten, corrupt entry==exit pnl). Non-genuine closes are
@@ -247,6 +265,8 @@ def _record_alert_outcome_bestEffort(
         "pnl": realized,
         "net_pnl": pnl.get("net_pnl", 0.0),
         "r_multiple": r_multiple,
+        # v19.34.307 — corrupt entry/stop basis (R clamped/flagged above).
+        "r_risk_unreliable": r_risk_unreliable,
         # v19.34.89 — trade_grade fallback chain.
         # Historical bug: writer read ONLY `trade.trade_grade`, but the
         # canonical SMB grade (set by setup_grader at signal time) lives
@@ -422,15 +442,18 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             d for d in ao.find(
                 {}, {"_id": 1, "setup_type": 1, "outcome": 1, "r_multiple": 1,
                      "net_pnl": 1, "pnl": 1, "closed_at": 1, "genuine": 1,
-                     "close_reason": 1})
+                     "close_reason": 1, "r_risk_unreliable": 1})
             if _base_setup(d.get("setup_type")) == base
         ]
         if genuine_only:
             # Exclude both flagged artifacts AND legacy rows (no `genuine` field)
             # that decode to reconciliation/phantom artifacts by setup/reason.
+            # v19.34.307 — also drop rows with a corrupt risk basis (stop ≈ entry
+            # → absurd R), which would otherwise skew avg_r / EV.
             rows = [
                 d for d in rows
                 if d.get("genuine", True) is not False
+                and d.get("r_risk_unreliable") is not True
                 and not _is_reconciliation_artifact(
                     d.get("setup_type"), d.get("close_reason"))
             ]
