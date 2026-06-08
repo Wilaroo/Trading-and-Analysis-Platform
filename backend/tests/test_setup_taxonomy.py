@@ -124,7 +124,7 @@ class TestStrategyFamily:
 
     def test_continuation(self):
         for n in ["opening_drive", "vwap_continuation", "back_through_open",
-                  "gap_pick_roll", "trend_continuation", "accumulation_entry"]:
+                  "gap_pick_roll", "trend_continuation"]:
             assert st.strategy_family(n) == "continuation", n
 
     def test_reversion(self):
@@ -134,7 +134,7 @@ class TestStrategyFamily:
 
     def test_reversal(self):
         for n in ["first_move_up", "backside", "off_sides_short",
-                  "volume_capitulation", "bouncy_ball"]:
+                  "volume_capitulation", "bouncy_ball", "accumulation_entry"]:
             assert st.strategy_family(n) == "reversal", n
 
     def test_unknown(self):
@@ -193,6 +193,61 @@ class TestExportTaxonomy:
         assert "STRATEGY FAMILY" in text
         assert "exit_archetype" in text
         assert "squeeze" in text
+
+
+class TestT1CoverageFixes:
+    """fork 2026-06 — taxonomy coverage + canonicalization fixes (audit pass 1).
+    a-i: accumulation_entry reclassified reversal. b: relative_strength edge-excluded.
+    """
+
+    def test_scalp_full_names_resolve_not_unknown(self):
+        # _scalp suffix-strip previously dropped these to 'unknown' -> MOMENTUM misroute
+        for n in ["spencer_scalp", "abc_scalp", "9_ema_scalp"]:
+            assert st.canonicalize(n) == n, n
+            assert st.setup_class(n) == "momentum", n
+
+    def test_scalp_infix_variants_still_collapse(self):
+        # the known-base guard must NOT break legitimate variant collapse
+        assert st.canonicalize("rubber_band_scalp_long") == "rubber_band"
+        assert st.canonicalize("off_sides_scalp") == "off_sides"
+
+    def test_stacked_suffixes_collapse(self):
+        assert st.canonicalize("orb_long_confirmed") == "orb"
+        assert st.setup_class("orb_long_confirmed") == "momentum"
+
+    def test_relative_strength_edge_excluded(self):
+        for n in ["relative_strength_long", "relative_strength_short",
+                  "relative_strength_leader", "relative_strength_laggard"]:
+            assert st.is_edge_excluded(n), n
+        # rs_leader_break is a REAL position setup — must NOT be excluded
+        assert not st.is_edge_excluded("rs_leader_break")
+
+    def test_accumulation_entry_reclassified_reversal(self):
+        assert st.strategy_family("accumulation_entry") == "reversal"
+        assert st.ai_feature_family("accumulation_entry") == "REVERSAL"
+        # management unchanged: swing class, swing_hold exit
+        assert st.setup_class("accumulation_entry") == "swing"
+        assert st.exit_archetype_prior("accumulation_entry") == "swing_hold"
+
+    def test_no_traded_setup_classifies_unknown(self):
+        # Regression guard: every setup that actually trades (from the live
+        # bot_trades audit) must classify; none may silently fall to 'unknown'.
+        traded = [
+            "squeeze", "vwap_bounce", "accumulation_entry", "second_chance",
+            "gap_fade", "vwap_fade_long", "vwap_fade_short", "vwap_continuation",
+            "rs_leader_break", "fashionably_late", "daily_squeeze", "chart_pattern",
+            "fading_bounce", "abc_scalp", "pocket_pivot", "daily_breakout",
+            "mean_reversion_short", "stage_2_breakout", "power_trend_stack",
+            "backside", "bouncy_ball", "hod_breakout", "gap_give_go",
+            "volume_capitulation", "three_week_tight", "opening_drive", "orb",
+            "mean_reversion_long", "breakout_confirmed", "big_dog",
+            "off_sides_short", "rubber_band_short", "rubber_band",
+            "premarket_high_break", "gap_pick_roll", "breakout", "spencer_scalp",
+            "range_break_confirmed", "puppy_dog", "trend_continuation_short",
+            "trend_continuation", "bella_fade", "the_3_30_trade", "9_ema_scalp",
+        ]
+        for n in traded:
+            assert st.setup_class(n) != "unknown", n
 
 
 class TestM2StyleResolutionFixes:

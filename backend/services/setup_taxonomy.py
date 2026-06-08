@@ -74,7 +74,12 @@ _EDGE_EXCLUDED_EXACT: Set[str] = {
     "day_2_continuation_watch",
     "gap_fill_open_watch",
 }
-_EDGE_EXCLUDED_PREFIXES = ("reconciled_", "approaching_")
+# `relative_strength` (relative_strength_long/short/leader/laggard): the intraday
+# rs-vs-SPY detector was DISABLED on 2026-04-30 (no concrete entry trigger; wrong
+# horizon — durable RS leadership is multi-month per O'Neil/Minervini/Qullamaggie).
+# Exclude its historical alerts from edge stats. NOTE: `rs_leader_break` is a REAL
+# position setup and does NOT match this prefix, so it is unaffected.
+_EDGE_EXCLUDED_PREFIXES = ("reconciled_", "approaching_", "relative_strength")
 
 # ── class map (momentum vs fade) — drives INTRADAY_BRACKET_V2 scope ────────
 # Grounded in the operator's own cheat-sheet exit rules:
@@ -122,6 +127,15 @@ _POSITION_CLASS: Set[str] = {
     "death_cross_filtered", "two_hundred_day_reclaim", "two_hundred_day_loss",
 }
 
+# Union of all canonical base names. A raw value equal to one of these is ALREADY
+# canonical and must NEVER be suffix-stripped — otherwise names whose own tail
+# looks like a variant suffix (e.g. 'spencer_scalp', 'abc_scalp', '9_ema_scalp')
+# get stripped to 'spencer'/'abc'/'9_ema', fall to setup_class='unknown', and are
+# silently misrouted to the MOMENTUM model. (fork 2026-06 audit pass 1.)
+_KNOWN_BASES: Set[str] = (
+    _MOMENTUM_CLASS | _FADE_CLASS | _SWING_CLASS | _POSITION_CLASS
+)
+
 # ── strategy_family (the edge thesis) — aligned to the AI feature-extractor
 #    family keys (MOMENTUM/BREAKOUT/REVERSAL/MEAN_REVERSION/RANGE/TREND_CONTINUATION)
 #    so the taxonomy and the model share one vocabulary (consistency-map §3).
@@ -141,6 +155,15 @@ _REVERSAL_FAMILY: Set[str] = {
     "first_move_up", "first_move_down", "backside", "off_sides",
     "volume_capitulation", "bouncy_ball", "breakdown",
     "stage_3_to_4_breakdown", "death_cross_filtered", "two_hundred_day_loss",
+    # accumulation_entry (a-i, 2026-06): the detector enters on RSI<35 + within
+    #   10% of the 50-day low + rising volume = a contrarian bottom-buy. That is
+    #   a REVERSAL thesis at entry (Wyckoff accumulation), NOT trend-continuation.
+    #   Reclassified so the SSOT matches the entry mechanics AND the confidence_gate
+    #   routing ([REVERSAL, MEAN_REVERSION]). Management is unchanged: it stays in
+    #   _SWING_CLASS (setup_class='swing' -> exit_archetype='swing_hold').
+    #   (ii, deferred): add a spring-reclaim / Sign-of-Strength confirmation trigger
+    #   to the detector to upgrade it to a true markup (continuation) entry.
+    "accumulation_entry",
 }
 _REVERSION_FAMILY: Set[str] = {
     "vwap_fade", "mean_reversion", "rubber_band", "gap_fade", "bella_fade",
@@ -165,10 +188,23 @@ def _norm(v) -> str:
 
 
 def _strip_suffix(name: str) -> str:
-    for suf in _SUFFIXES_BY_LEN:
-        if name.endswith(suf) and len(name) > len(suf):
-            return name[: -len(suf)]
-    return name
+    # Greedily strip STACKED variant suffixes ('orb_long_confirmed' -> 'orb').
+    # Guard: never strip a known canonical name down to an UNKNOWN token — that is
+    # what wrongly turned 'spencer_scalp'/'abc_scalp'/'9_ema_scalp' (whose '_scalp'
+    # tail is part of their identity) into 'spencer'/'abc'/'9_ema' -> unknown ->
+    # MOMENTUM misroute. When the strip target is itself known (e.g.
+    # 'breakdown_confirmed' -> 'breakdown'), collapsing is correct and preserved.
+    while True:
+        stripped = None
+        for suf in _SUFFIXES_BY_LEN:
+            if name.endswith(suf) and len(name) > len(suf):
+                stripped = name[: -len(suf)]
+                break
+        if stripped is None:
+            return name
+        if stripped not in _KNOWN_BASES and name in _KNOWN_BASES:
+            return name
+        name = stripped
 
 
 def canonicalize(raw) -> str:
