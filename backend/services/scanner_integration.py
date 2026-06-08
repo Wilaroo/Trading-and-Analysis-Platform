@@ -35,6 +35,25 @@ class ScannerIntegration:
             target = trade_request.get('target')
             alert_id = trade_request.get('alert_id')
 
+            # ── v19.34.294 (Audit Phase 3, T1/T3) — carry the REAL alert
+            # fields threaded from _auto_execute_alert instead of fabricating
+            # score=80 / trigger_probability=0.65. These drive the grade
+            # multiplier, volatility sizing, trade-style caps and confidence
+            # gate downstream. Fall back to the legacy synthetic values only
+            # when a field is absent (manual/legacy callers).
+            tqs_grade = trade_request.get('tqs_grade')
+            tqs_score = trade_request.get('tqs_score')
+            tape_score = trade_request.get('tape_score')
+            tape_confirmation = trade_request.get('tape_confirmation')
+            risk_reward = trade_request.get('risk_reward')
+            priority = trade_request.get('priority')
+            atr = trade_request.get('atr')
+            atr_percent = trade_request.get('atr_percent')
+            trade_style = trade_request.get('trade_style')
+            smb_grade = trade_request.get('smb_grade')
+            proven_outcomes = trade_request.get('proven_outcomes')
+            _real_score = int(tqs_score) if tqs_score else 80
+
             logger.info(f"🤖 Scanner auto-submit: {symbol} {direction.upper()} {setup_type}")
 
             # Create alert dict for existing evaluation flow
@@ -46,7 +65,7 @@ class ScannerIntegration:
                 'trigger_price': entry_price,
                 'stop_price': stop_loss,
                 'targets': [target],
-                'score': 80,
+                'score': _real_score,
                 'trigger_probability': 0.65,
                 'headline': f"Auto-execute: {setup_type} on {symbol}",
                 'technical_reasons': [
@@ -55,7 +74,22 @@ class ScannerIntegration:
                 ],
                 'warnings': [],
                 'source': 'scanner_auto_execute',
-                'alert_id': alert_id
+                'alert_id': alert_id,
+                # v19.34.294 (T1) — real, trusted decision inputs threaded
+                # through from the LiveAlert (None values dropped so the
+                # evaluator's own defaults apply for legacy callers).
+                'tqs_grade': tqs_grade,
+                'tqs_score': tqs_score,
+                'tape_score': tape_score,
+                'tape_confirmation': tape_confirmation,
+                'risk_reward': risk_reward,
+                'priority': priority,
+                'atr': atr,
+                'atr_percent': atr_percent,
+                'trade_style': trade_style,
+                'smb_grade': smb_grade,
+                # v19.34.294 (P2-B) — proven-outcome count for cold-start haircut
+                'proven_outcomes': proven_outcomes,
             }
 
             # Evaluate and create trade

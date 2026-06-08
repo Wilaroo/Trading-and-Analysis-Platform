@@ -1615,7 +1615,22 @@ class EnhancedBackgroundScanner:
         try:
             logger.info(f"🤖 Auto-executing alert: {alert.headline}")
             
-            # Create trade request for bot
+            # ── v19.34.294 (Audit Phase 3, T1) — proven-outcome count for
+            # the cold-start size haircut (P2-B). Mirrors the EV-gate base
+            # keying so the sizer sees the SAME outcome count the gate used.
+            _base = (str(alert.setup_type or "")
+                     .split("_long")[0].split("_short")[0])
+            _st = self._strategy_stats.get(_base)
+            _proven_outcomes = int(getattr(_st, "alerts_triggered", 0) or 0) if _st else 0
+
+            # Create trade request for bot.
+            # ── v19.34.294 (Audit Phase 3, T1) — thread the REAL, already-
+            # computed LiveAlert fields through the auto-exec boundary so the
+            # evaluator sizes on trusted data instead of falling back to the
+            # D-grade (0.15x), synthetic-ATR (price*0.02), empty-trade_style
+            # (portfolio caps skipped) and default-priority paths. Previously
+            # only 7 fields crossed this boundary; the rich TQS/tape/atr/style
+            # fields the scanner already trusts were discarded.
             trade_request = {
                 "symbol": alert.symbol,
                 "direction": alert.direction,
@@ -1624,7 +1639,20 @@ class EnhancedBackgroundScanner:
                 "stop_loss": alert.stop_loss,
                 "target": alert.target,
                 "source": "scanner_auto_execute",
-                "alert_id": alert.id
+                "alert_id": alert.id,
+                # v19.34.294 (T1) — real decision inputs
+                "tqs_grade": getattr(alert, "tqs_grade", "") or "",
+                "tqs_score": float(getattr(alert, "tqs_score", 0.0) or 0.0),
+                "tape_score": float(getattr(alert, "tape_score", 0.0) or 0.0),
+                "tape_confirmation": bool(getattr(alert, "tape_confirmation", False)),
+                "risk_reward": float(getattr(alert, "risk_reward", 0.0) or 0.0),
+                "priority": alert.priority.value if getattr(alert, "priority", None) else None,
+                "atr": float(getattr(alert, "atr", 0.0) or 0.0),
+                "atr_percent": float(getattr(alert, "atr_percent", 0.0) or 0.0),
+                "trade_style": getattr(alert, "trade_style", "") or "",
+                "smb_grade": getattr(alert, "smb_grade", "") or "",
+                # v19.34.294 (P2-B) — proven-outcome count for cold-start haircut
+                "proven_outcomes": _proven_outcomes,
             }
             
             # Submit to trading bot

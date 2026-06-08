@@ -1121,6 +1121,7 @@ class OpportunityEvaluator:
                 multipliers_out=position_multipliers,
                 grade=alert_grade,
                 setup_type=alert_setup_type,
+                proven_outcomes=(alert.get("proven_outcomes") if isinstance(alert, dict) else None),
             )
 
             # ==================== SMART STRATEGY FILTER SIZE ADJUSTMENT ====================
@@ -1694,7 +1695,7 @@ class OpportunityEvaluator:
 
     # ==================== HELPERS ====================
 
-    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None, grade: Optional[str] = None, setup_type: Optional[str] = None) -> Tuple[int, float]:
+    def calculate_position_size(self, entry_price: float, stop_price: float, direction, bot: 'TradingBotService', atr: float = None, atr_percent: float = None, symbol: Optional[str] = None, bar_size: str = "5 mins", multipliers_out: Optional[Dict[str, Any]] = None, grade: Optional[str] = None, setup_type: Optional[str] = None, proven_outcomes: Optional[int] = None) -> Tuple[int, float]:
         """Calculate position size based on risk management rules with volatility and market regime adjustment.
 
         2026-04-28e: also applies a Volume-Profile path multiplier — if the
@@ -1824,6 +1825,45 @@ class OpportunityEvaluator:
             # Never let the MR lookup block trade execution.
             logger.debug(f"MR regime multiplier skipped for {symbol}: {mr_err}")
 
+        # ── v19.34.294 (Audit Phase 3, P2-B) — cold-start size haircut ──────
+        # Setups with fewer than COLD_START_MIN_OUTCOMES (default 20) graded
+        # outcomes pass the scanner's EV gate on GRACE alone — they have no
+        # proven expectancy yet. For UNMANAGED paper trading, full-size capital
+        # on an unproven setup is the residual risk flagged in Phase 2 (P2-B).
+        # Haircut their size to COLD_START_SIZE_MULT (default 0.33x) until they
+        # earn enough outcomes. Applies ONLY when `proven_outcomes` is supplied
+        # (the scanner auto-exec path stamps it); manual/legacy callers pass
+        # None → no haircut (preserves existing behaviour). Fully env-tunable
+        # and reversible (COLD_START_SIZE_MULT=1.0 disables).
+        cold_start_multiplier = 1.0
+        cold_start_applied = False
+        if proven_outcomes is not None:
+            import os as _os_cs
+
+            def _csf(_k: str, _d: float) -> float:
+                _v = _os_cs.environ.get(_k)
+                if _v in (None, ""):
+                    return _d
+                try:
+                    return float(_v)
+                except (TypeError, ValueError):
+                    return _d
+
+            try:
+                _cs_min = int(_csf("COLD_START_MIN_OUTCOMES", 20.0))
+            except (TypeError, ValueError):
+                _cs_min = 20
+            _cs_mult = _csf("COLD_START_SIZE_MULT", 0.33)
+            if int(proven_outcomes) < _cs_min and 0.0 < _cs_mult < 1.0:
+                cold_start_multiplier = _cs_mult
+                cold_start_applied = True
+                adjusted_max_risk *= cold_start_multiplier
+                logger.info(
+                    "🐣 [v19.34.294 cold-start] %s — %d/%d proven outcomes; "
+                    "sizing at %.0f%% (COLD_START_SIZE_MULT).",
+                    symbol or "?", int(proven_outcomes), _cs_min, _cs_mult * 100,
+                )
+
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
         max_shares_by_capital = int(max_position_value / entry_price)
@@ -1941,6 +1981,10 @@ class OpportunityEvaluator:
                 "mr_hurst": round(mr_hurst, 3) if isinstance(mr_hurst, (int, float)) else None,
                 "mr_half_life_bars": round(mr_half_life, 2) if isinstance(mr_half_life, (int, float)) else None,
                 "mr_reason": mr_reason,
+                # v19.34.294 (P2-B) — cold-start haircut provenance
+                "cold_start_multiplier": round(cold_start_multiplier, 3),
+                "cold_start_applied": cold_start_applied,
+                "proven_outcomes": int(proven_outcomes) if proven_outcomes is not None else None,
             })
         return shares, risk_amount
 
