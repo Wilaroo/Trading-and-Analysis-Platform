@@ -1,3 +1,29 @@
+## 2026-06-08 — v19.34.300: cancel-before-reap (naked-orphan fix) — SHIPPED
+
+Patch: https://paste.rs/7d5Az  Validated: 7/7 new pytest + 38/38 cross-file, AST/
+import OK, ruff clean, git reverse-check. NO testing_agent (DGX mandate).
+
+ROOT CAUSE (MA 2026-06-08 orphan): the stale-pending reaper
+(_stale_pending_reaper_loop) marked a stale pending `rejected` and dropped
+tracking WITHOUT cancelling the still-working entry order at IB. The order filled
+AFTER the reap → reconciler adopted a synthetic, possibly-naked orphan. v234
+position guard only catches orders ALREADY filled at reap time (reaper_skip_
+likely_filled = 0 ever). Recurring (6/04=163 reaps, 6/03=124, 6/02=52).
+
+FIX: gather live working orders (get_open_orders) once/tick; new pure predicate
+_reaper_order_still_working (orderId match → symbol fallback for entry_order_id=
+None race); before reaping, cancel_order(entry_order_id) and only mark rejected if
+cancel provably succeeds — else KEEP tracking + log state_integrity_events:
+reaper_skip_working_order. Reversible: PENDING_REAPER_CANCEL_FIRST (default ON).
+Files: services/trading_bot_service.py, tests/test_pending_reaper_cancel_first_v300.py.
+
+OPERATOR DOUBLE-CHECK (trade flow): v297 universal_liquidity_gate = 1 drop / 24h —
+NOT choking flow (first check used a nonexistent created_at field → spurious 0;
+corrected via ts_epoch_ms). watchlist_only_skip (107k/6h) is the normal dominant
+filter. Today's bot_trades (2) is below baseline (59–276 on trading days) — not a
+regression from today's work; flagged for separate auto-exec-conversion review.
+
+
 ## 2026-06-08 — v19.34.299: Audit Phase 7 — remove dishonest legacy outcome writer — SHIPPED
 
 Patch: https://paste.rs/28bGu  Validated: 4/4 new pytest + 31/31 cross-file

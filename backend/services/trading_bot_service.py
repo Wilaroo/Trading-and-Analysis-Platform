@@ -1053,6 +1053,24 @@ def _reaper_should_skip_filled(symbol: str, ib_pos_syms: set, bot_open_syms: set
     return bool(s) and s in ib_pos_syms and s not in bot_open_syms
 
 
+def _reaper_order_still_working(
+    entry_order_id, symbol: str, live_orders_by_id: dict, live_order_syms: set
+) -> bool:
+    """v19.34.300 — True when a stale pending still has a WORKING order at IB
+    that must be cancelled before the record can be safely reaped.
+
+    Matches by IB orderId first (authoritative); falls back to a symbol match
+    so an `entry_order_id=None` race still trips the guard rather than letting
+    a working order be abandoned. Pure / no I/O so it's unit-testable.
+    """
+    try:
+        oid = int(entry_order_id) if entry_order_id not in (None, "", 0, "0") else 0
+    except (TypeError, ValueError):
+        oid = 0
+    s = (symbol or "").upper()
+    return bool(oid and oid in (live_orders_by_id or {})) or bool(s and s in (live_order_syms or set()))
+
+
 
 class TradingBotService:
     """
@@ -3585,6 +3603,17 @@ class TradingBotService:
             import os as _os3
             interval_s = int(_os3.environ.get("PENDING_REAPER_INTERVAL_S", "60") or 60)
             max_age_s = int(_os3.environ.get("PENDING_REAPER_MAX_AGE_S", "300") or 300)
+            # v19.34.300 — cancel-before-reap. Before marking a stale pending
+            # `rejected`, cancel its still-WORKING entry order at IB so it cannot
+            # fill AFTER the reap into a naked, unmanaged orphan (the MA
+            # 2026-06-08 incident; the v234 position guard only catches orders
+            # ALREADY filled at reap time, never a fill that lands later). If the
+            # working order can't be provably killed, we KEEP tracking instead of
+            # abandoning it. Reversible via env (default ON).
+            cancel_first = (
+                _os3.environ.get("PENDING_REAPER_CANCEL_FIRST", "true").strip().lower()
+                in ("1", "true", "yes", "on")
+            )
             disabled = (
                 _os3.environ.get("PENDING_REAPER_ENABLED", "true").strip().lower()
                 in ("0", "false", "no", "off")
@@ -3617,7 +3646,8 @@ class TradingBotService:
                         }
                         stale = list(
                             db["bot_trades"].find(
-                                query, {"_id": 0, "id": 1, "symbol": 1, "pre_submit_at": 1}
+                                query, {"_id": 0, "id": 1, "symbol": 1, "pre_submit_at": 1,
+                                        "entry_order_id": 1}
                             ).limit(50)
                         )
                         if stale:
@@ -3643,7 +3673,25 @@ class TradingBotService:
                                 (getattr(t, "symbol", "") or "").upper()
                                 for t in (self._open_trades or {}).values()
                             }
+                            # v19.34.300 — gather live WORKING orders once so we
+                            # can cancel an order before reaping its record.
+                            live_orders_by_id: dict = {}
+                            live_order_syms: set = set()
+                            if cancel_first:
+                                try:
+                                    for _o in (await _ibd.get_open_orders()) or []:
+                                        _oid = int(_o.get("order_id") or 0)
+                                        if _oid:
+                                            live_orders_by_id[_oid] = _o
+                                        _osym = (_o.get("symbol") or "").upper()
+                                        if _osym:
+                                            live_order_syms.add(_osym)
+                                except Exception as _oe:
+                                    logger.debug(
+                                        "[v19.34.300 cancel-first] get_open_orders failed: %s", _oe
+                                    )
                             skipped_filled: List[str] = []
+                            kept_working: List[str] = []
                             for row in stale:
                                 tid = row.get("id")
                                 if not tid:
@@ -3667,6 +3715,57 @@ class TradingBotService:
                                     except Exception:
                                         pass
                                     continue
+                                # v19.34.300 — CANCEL-BEFORE-REAP. If a working
+                                # entry order still exists at IB, kill it before
+                                # rejecting the record; if we can't provably kill
+                                # it, KEEP tracking (never abandon a live order
+                                # that could fill into a naked orphan).
+                                if cancel_first:
+                                    _eoid = row.get("entry_order_id")
+                                    try:
+                                        _eoid_int = int(_eoid) if _eoid not in (None, "", 0, "0") else 0
+                                    except Exception:
+                                        _eoid_int = 0
+                                    _order_is_live = _reaper_order_still_working(
+                                        row.get("entry_order_id"), _sym,
+                                        live_orders_by_id, live_order_syms,
+                                    )
+                                    if _order_is_live:
+                                        _cancelled = False
+                                        if _eoid_int:
+                                            try:
+                                                _cres = await _ibd.cancel_order(_eoid_int)
+                                                _cancelled = bool(_cres.get("success"))
+                                            except Exception as _ce:
+                                                logger.debug(
+                                                    "[v19.34.300] cancel_order(%s) raised: %s",
+                                                    _eoid_int, _ce,
+                                                )
+                                        if not _cancelled:
+                                            # Could not provably kill the working
+                                            # order → do NOT reap; keep tracking so
+                                            # the reconciler/attribution promotes a
+                                            # real fill instead of orphaning it.
+                                            kept_working.append(f"{_sym}:{tid}")
+                                            try:
+                                                db["state_integrity_events"].insert_one({
+                                                    "event": "reaper_skip_working_order",
+                                                    "severity": "high",
+                                                    "symbol": _sym,
+                                                    "trade_id": tid,
+                                                    "entry_order_id": _eoid_int or None,
+                                                    "detail": (
+                                                        "stale pending NOT reaped — a working "
+                                                        "order still exists at IB and could not "
+                                                        "be cancelled; kept tracking to avoid a "
+                                                        "naked post-reap fill (MA-class incident)."
+                                                    ),
+                                                    "ts": stamp,
+                                                })
+                                            except Exception:
+                                                pass
+                                            continue
+                                        # order cancelled — safe to mark rejected.
                                 res = db["bot_trades"].update_one(
                                     {"id": tid, "status": "pending"},
                                     {"$set": {
@@ -3692,6 +3791,13 @@ class TradingBotService:
                                     "holds live position(s) the bot isn't tracking (likely "
                                     "unattributed fill): %s",
                                     len(skipped_filled), ", ".join(skipped_filled),
+                                )
+                            if kept_working:
+                                logger.warning(
+                                    "[v19.34.300 cancel-first] KEPT %d stale pending(s) — a "
+                                    "working order still exists at IB and could not be cancelled; "
+                                    "not abandoning it (would risk a naked post-reap fill): %s",
+                                    len(kept_working), ", ".join(kept_working),
                                 )
                 except asyncio.CancelledError:
                     raise
