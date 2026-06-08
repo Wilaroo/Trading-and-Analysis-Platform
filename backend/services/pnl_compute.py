@@ -160,7 +160,50 @@ def _record_alert_outcome_bestEffort(
                     pps = exit_price - entry
                 else:
                     pps = entry - exit_price
-                r_multiple = round(pps / risk_per_share, 3)
+    except Exception:
+        pass
+
+    # v19.34.306 — BLENDED trade R. The single-leg calc above (final exit_price
+    # vs entry over the FULL risk) OVER-states trades that scale out and trail a
+    # runner: alert_outcomes is upserted 1-row-per-trade, so the row ends up
+    # carrying the runner leg's big R as if the whole position achieved it
+    # (e.g. daily_breakout +2.32R / ~8R avg winner over n=17). When scale-out
+    # partials exist, recompute R as the POSITION-WEIGHTED total realized P&L
+    # over the full-position risk dollars. Env-gated (TQS_BLENDED_R, default on).
+    # Single-exit trades have no partials → keep the single-leg value above.
+    if os.environ.get("TQS_BLENDED_R", "true").strip().lower() not in ("0", "false", "no", "off"):
+        try:
+            _soc = getattr(trade, "scale_out_config", None) or {}
+            _partials = _soc.get("partial_exits", []) or []
+            if _partials:
+                _entry = float(getattr(trade, "fill_price", 0) or 0)
+                _stop = float(getattr(trade, "stop_price", 0)
+                              or getattr(trade, "stop_loss", 0) or 0)
+                _orig = int(abs(getattr(trade, "original_shares", 0)
+                                or getattr(trade, "shares", 0) or 0))
+                _risk_dollars = abs(_entry - _stop) * _orig
+                if _risk_dollars > 0:
+                    _partial_pnl = sum(float(p.get("pnl", 0) or 0) for p in _partials)
+                    _total_realized = _partial_pnl + float(pnl.get("realized_pnl", 0) or 0)
+                    r_multiple = round(_total_realized / _risk_dollars, 3)
+        except Exception:
+            pass
+
+    # v19.34.307 — risk-basis sanity guard. A trade with a real protective stop
+    # loses ~-1R (a bit more on slippage/gaps). An |R| beyond ±20 means the risk
+    # basis (entry/stop) is corrupt — e.g. stop ≈ entry → a tiny denominator
+    # produced the -28R seen on some gap_give_go closes. Flag such rows so the
+    # learning loop / EV recompute can exclude them, and clamp the stored value
+    # so the raw scoreboard can't be polluted by garbage-in risk inputs.
+    r_risk_unreliable = False
+    try:
+        _e = float(getattr(trade, "fill_price", 0) or 0)
+        _s = float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0)
+        if _e > 0 and (abs(_e - _s) < max(0.01, 0.0015 * _e)):
+            r_risk_unreliable = True
+        if abs(r_multiple) > 20.0:
+            r_risk_unreliable = True
+            r_multiple = max(-20.0, min(20.0, r_multiple))
     except Exception:
         pass
 
@@ -222,6 +265,8 @@ def _record_alert_outcome_bestEffort(
         "pnl": realized,
         "net_pnl": pnl.get("net_pnl", 0.0),
         "r_multiple": r_multiple,
+        # v19.34.307 — corrupt entry/stop basis (R clamped/flagged above).
+        "r_risk_unreliable": r_risk_unreliable,
         # v19.34.89 — trade_grade fallback chain.
         # Historical bug: writer read ONLY `trade.trade_grade`, but the
         # canonical SMB grade (set by setup_grader at signal time) lives
@@ -418,15 +463,18 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             d for d in ao.find(
                 {}, {"_id": 1, "setup_type": 1, "outcome": 1, "r_multiple": 1,
                      "net_pnl": 1, "pnl": 1, "closed_at": 1, "genuine": 1,
-                     "close_reason": 1})
+                     "close_reason": 1, "r_risk_unreliable": 1})
             if _base_setup(d.get("setup_type")) == base
         ]
         if genuine_only:
             # Exclude both flagged artifacts AND legacy rows (no `genuine` field)
             # that decode to reconciliation/phantom artifacts by setup/reason.
+            # v19.34.307 — also drop rows with a corrupt risk basis (stop ≈ entry
+            # → absurd R), which would otherwise skew avg_r / EV.
             rows = [
                 d for d in rows
                 if d.get("genuine", True) is not False
+                and d.get("r_risk_unreliable") is not True
                 and not _is_reconciliation_artifact(
                     d.get("setup_type"), d.get("close_reason"))
             ]
@@ -452,14 +500,22 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             if r is not None:
                 r_all.append(r)
 
-        r_out = r_all[-100:]
+        r_out = r_all[-100:]  # last-100 retained for storage only
         win_rate = (won / trig) if trig else 0.0
-        wins_r = [x for x in r_out if x > 0]
-        losses_r = [x for x in r_out if x <= 0]
+        # v19.34.305 — EV must be the realized expectancy of the SAME sample the
+        # win_rate is measured over. The legacy code mixed full-sample win_rate
+        # with last-100 avg_win/avg_loss, so EV diverged from the realized mean
+        # (e.g. -0.13R "Expected Value" vs +0.01R "avg_r" on the same card). Use
+        # the FULL window sample (r_all) for both, which makes EV == mean(R) and
+        # eliminates the contradiction. avg_win_r/avg_loss_r are also computed on
+        # the full sample for display consistency.
+        n_all = len(r_all)
+        wins_r = [x for x in r_all if x > 0]
+        losses_r = [x for x in r_all if x <= 0]
         avg_win_r = (sum(wins_r) / len(wins_r)) if wins_r else 0.0
         avg_loss_r = abs(sum(losses_r) / len(losses_r)) if losses_r else 1.0
-        ev = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r) if len(r_out) >= 5 else 0.0
-        avg_rr = (sum(r_out) / len(r_out)) if r_out else 0.0
+        avg_rr = (sum(r_all) / n_all) if n_all else 0.0
+        ev = avg_rr if n_all >= 5 else 0.0  # realized expectancy == mean(R)
         profit_factor = (
             (sum(wins_r) / abs(sum(losses_r)))
             if losses_r and sum(losses_r) != 0 else 0.0
@@ -474,6 +530,12 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             "win_rate": round(win_rate, 4),
             "profit_factor": round(profit_factor, 3),
             "avg_rr_achieved": round(avg_rr, 3),
+            # v19.34.305 — expose the realized mean + sample size under the field
+            # names the TQS card-detail / drill-down read, so the displayed EV,
+            # avg_r and n all come from this one artifact-free recompute.
+            "avg_r": round(avg_rr, 4),
+            "sample_size": trig,
+            "total_trades": trig,
             "r_outcomes": [round(x, 4) for x in r_out],
             "avg_win_r": round(avg_win_r, 4),
             "avg_loss_r": round(avg_loss_r, 4),

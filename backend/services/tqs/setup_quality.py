@@ -218,12 +218,17 @@ class SetupQualityService:
             result.factors.append(f"Good win rate: {win_rate*100:.0f}% (+)")
         elif win_rate >= 0.50:
             result.win_rate_score = 50 + (win_rate - 0.50) * 250
-        elif win_rate >= 0.40:
-            result.win_rate_score = (win_rate - 0.40) * 500
-            result.factors.append(f"Below average win rate: {win_rate*100:.0f}% (-)")
         else:
-            result.win_rate_score = 0
-            result.factors.append(f"Poor win rate: {win_rate*100:.0f}% (--)")
+            # v19.34.305 — remove the 40%→0 cliff. Win rate in ISOLATION is not
+            # edge: a 40%-win / +2R setup is highly profitable. Expectancy (EV)
+            # now carries that signal (its sub-weight is raised below), so a low
+            # win rate is scored linearly (0%→0 … 50%→50) instead of being
+            # auto-zeroed, which used to tank legitimate low-win/high-R setups.
+            result.win_rate_score = max(0.0, win_rate * 100.0)
+            if win_rate < 0.40:
+                result.factors.append(f"Poor win rate: {win_rate*100:.0f}% (--)")
+            else:
+                result.factors.append(f"Below average win rate: {win_rate*100:.0f}% (-)")
             
         # 3. Expected Value Score (20% weight)
         # EV of 0.5R+ is good, 1R+ is excellent
@@ -308,10 +313,16 @@ class SetupQualityService:
                 result.factors.append(f"Poor R:R of {risk_reward:.1f}:1 (-)")
             
         # Calculate weighted total
+        # v19.34.305 — rebalance sub-weights so realized EXPECTANCY (EV) carries
+        # the most authority and raw win-rate carries less. Win rate alone isn't
+        # edge; EV is. Old: pattern .20 / win .25 / ev .20 / tape .20 / smb .15.
+        # New: ev .30 (up), win .15 (down) — a low-EV setup can no longer hide
+        # behind a clean-looking pattern, and a high-EV/low-win setup isn't
+        # auto-graded D. Sum still 1.00.
         result.score = (
             result.pattern_score * 0.20 +
-            result.win_rate_score * 0.25 +
-            result.ev_score * 0.20 +
+            result.win_rate_score * 0.15 +
+            result.ev_score * 0.30 +
             result.tape_score * 0.20 +
             result.smb_score * 0.15
         )
