@@ -627,8 +627,8 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.294 (2026-06-09, "Audit Phase 3 — auto-exec field threading + cold-start 0.33x haircut (T1+T3+P2-B)")
-- **Last green test run**: 94/94 across v19.34.69 → v19.34.73
+- **Current version**: v19.34.310 (2026-06-08, "IB-Gateway boot hard-block probe (A) + fundamental absent->neutral-50 (B) + SMB timeframe-aware checklist & smb_5var_score persistence (C)")
+- **Last green test run**: 94/94 across v19.34.69 -> v19.34.73; + 11/11 across v19.34.308 -> v19.34.310 (test_v308_ib_boot_probe, test_v309_fundamental_neutral, test_v310_smb_timeframe)
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
   due to 4s cancel-wait timeout under load)
