@@ -1,3 +1,33 @@
+## 2026-06-09 — v19.34.302: EOD final-window force-flatten of BRACKETED sweep-misses — PATCH READY (user-apply pending)
+
+Patch: https://paste.rs/0bQwE (apply AFTER v301). Validated: 11/11 new pytest +
+12/12 v301 predicate regression, py_compile OK. NO testing_agent (DGX mandate).
+
+ROOT CAUSE (EOD-trust audit on real data, 06-01→06-08): The "survivors" the bot
+didn't close at 15:45 were RECONCILED ORPHANS that kept their SYNTHETIC bracket
+(06-03 reconciler-vs-sweep race: 13 orphans adopted at 15:45:47; 06-04 MRSH/CEG:
+early-adopted orphans the tracked EOD close missed). They were NOT naked — they had
+a stop — so v301 skipped them and they rode to the 16:01 auction / 16:58 AH. v260
+only covers orphans appearing AFTER the cutoff; neither v260 nor v301 covered the
+bracketed-sweep-miss case.
+
+DIAGNOSTICS (read-only, hosted): eod_trust_reconcile.py (https://paste.rs/IeXwM),
+diag_eod_survivor_attribution.py (https://paste.rs/ERr07), diag_eod_lateopen_disambig.py
+(https://paste.rs/PRQ69), diag_eod_guard_efficacy.py (https://paste.rs/Vf9tL). Findings:
+EOD sweep works; survivors only 06-01→06-04 (all PROTECTED, never naked); 0 survivors
+06-05 & 06-08; v260 has 0 production firings (06-03 predates it, nothing to catch since).
+
+FIX: extend PositionManager._eod_naked_flatten_guard — past the final cutoff (default
+15:56 ET, after the 15:55 sweep ran) any intraday/orphan position STILL open (even
+bracketed) is force-flattened: cancel working bracket via
+ib_direct.cancel_all_open_orders_for_symbol → re-read position (leg may fill during
+cancel → already flat, no MKT) → MKT close remainder. Swing holds (close_at_eod=False)
+exempt. Reversible EOD_FORCE_FLATTEN_BRACKETED (default ON), EOD_FORCE_FLATTEN_MINUTE
+(default 56). Events: state_integrity_events.eod_v302_force_flatten. Files:
+services/position_manager.py, tests/test_eod_force_flatten_bracketed_v302.py.
+
+
+
 ## 2026-06-08 — v19.34.301: pusher-independent EOD naked-flatten guard — SHIPPED
 
 Patch: https://paste.rs/QLjw4  Validated: 12/12 new pytest + 50/50 cross-file,
