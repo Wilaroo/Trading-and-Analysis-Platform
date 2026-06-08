@@ -24083,3 +24083,83 @@ NEXT: 24/35 broker-reject + alert->trade conversion leak (NVDA 7 alerts -> 0 tra
     backend restarted healthy (pusher green / IB connected), 65/65 tests pass. Committed
     ee947876 (16 files, +1908/-5) and PUSHED to origin/main (1b88edd6..ee947876,
     github.com/Wilaroo/Trading-and-Analysis-Platform). EV gate now LIVE in production.
+
+
+================================================================================
+## SESSION 2026-06-08 — Zero-trade unblock + EV/TQS trust audit (v303–v307)
+================================================================================
+Workflow: DGX is physical hardware. NO testing agents. Deliver `.patch` via
+paste.rs → user `git apply`. Backend restart = `./start_backend.sh --force`
+(NO supervisorctl). Heredocs corrupt on DGX → use one-line `python -c`. Repo:
+~/Trading-and-Analysis-Platform. Respond in English.
+
+### v19.34.303 — Regime asymmetry fix (DEFENSIVE-mode unblock)  [DEPLOYED+VERIFIED]
+- ROOT CAUSE of zero trades: `market_regime_engine.py` had asymmetric thresholds
+  CONFIRMED_UP>=70 but CONFIRMED_DOWN<50 (== neutral), so a flat ~48.4 composite
+  was branded CONFIRMED_DOWN → confidence_gate forced DEFENSIVE (GO threshold 60,
+  longs -10 + 30% size). 1033/1052 skips.
+- FIX: CONFIRMED_DOWN_THRESHOLD 50→30 (symmetric ±20 neutral band 30-69=HOLD).
+- VERIFIED live: /api/market-regime/refresh → state HOLD @ 48.4; mode defensive→cautious.
+
+### Degraded-models finding (NOT a bug — system honest)
+- TFT 46.8% / CNN-LSTM 47.6% (dl_models registry, real measured) → BELOW coin-flip
+  → gate correctly IGNORES them. FinBERT "no news data". Meta-labeler force-skips
+  p_win<0.5. In flat HOLD regime, max score ~38 vs GO 50 → bot honestly low-conviction.
+  Root = degraded DL stack, not threshold. User chose path (a)+(c) earlier (not yet done).
+
+### v19.34.305 — TQS trust fixes (3× P1)  [DEPLOYED+VERIFIED, 2 pytests pass]
+- Files: tqs_router.py, pnl_compute.py, enhanced_scanner.py, tqs/setup_quality.py.
+- (1) Weight display: card-detail reconstructs style-aware weights (scalp 30/35/5/20/10)
+  instead of generic 25/25/15/20/15 fallback.
+- (2) EV unification: StrategyStats + pnl_compute.recompute_strategy_stats_for_setup
+  mixed full-sample win_rate with last-100 avg_win/avg_loss → EV != mean(R) (-0.13 vs
+  +0.01). Now EV = realized mean over same sample == avg_r. pnl_compute now also writes
+  avg_r/sample_size/total_trades. card-detail prefers avg_r.
+- (3) Setup pillar rebalance: removed 40%→0 win-rate cliff (now linear), EV sub-weight
+  .20→.30, win-rate .25→.15.
+- Tests: backend/tests/test_tqs_ev_and_setup_v305.py.
+- Backfill scripts: recompute_all_strategy_stats.py.
+
+### v19.34.306 — Blended-R (scale-out) EV fix  [DEPLOYED]
+- r_multiple was single runner-leg R over FULL risk (over-states bank-and-trail
+  trades). Now position-weighted: total_realized / (risk_per_share*original_shares)
+  when scale-out partials exist. Env TQS_BLENDED_R (default on).
+- Backfill: backfill_blended_r_v306.py (dry-run default, --apply).
+- KEY RESULT: daily_breakout +2.32R is GENUINE (not artifact). vwap_fade was a FALSE
+  ALARM: -4.28R → -0.674R/n=76 after excluding corrupt-risk rows. squeeze ~breakeven.
+
+### v19.34.307 — Risk-basis sanity guard  [DEPLOYED]
+- Some trades have stop≈entry (corrupt risk) → absurd R (gap_give_go -28R). Now
+  flag r_risk_unreliable + clamp |R|>20, and recompute_strategy_stats_for_setup
+  EXCLUDES r_risk_unreliable rows. 54 rows cleaned. EV scoreboard now trustworthy.
+- OPEN: 54 trades w/ corrupt stop basis (mostly vwap_fade/reconciliation) — if a
+  setup's stop-placement logic writes zero-risk stops, real risk bug to chase later.
+
+### #3 INVESTIGATION (fundamental + SMB) — findings, fixes NOT yet applied
+- Fundamental: Finnhub WORKS (SI 41%, float 48%). Institutional = 4% — IB
+  ReportsOwnership (60s/symbol × 1241, weekly Sun 3AM) doesn't complete. Wiring is
+  correct (fundamental_quality → get_cached_fundamentals chain IB→Finnhub→FINRA→inst).
+  RECOMMENDED: (a) absent data → neutral-50 not optimistic-80 (small patch),
+  (b) prioritize inst refresh to in-play symbols. User wanted "source data first".
+- SMB: computes via alert.trade_grade (NOT smb_grade field='none' red herring) + v207
+  _compute_smb_5var. But grades cluster ONLY B(68%)/C(32%), smb_5var_score NOT persisted,
+  Setup pillar decompresses C→50. RECOMMENDED: timeframe-aware checklist + persist
+  smb_5var_score + drop blanket 50-decompress.
+- Diag: diag_fundamental_smb_sources.py.
+
+### #4 INVESTIGATION (DL training pipeline) — IN PROGRESS
+- Entrypoints: local_train.py (LightGBM direction_predictor — WORKS, feeds consensus).
+  DL collapse = ai_modules/training_pipeline.py (14 phases; DL=phase11, finbert=12,
+  validate=13) + temporal_fusion_transformer.py / cnn_lstm_model.py / vae_regime.py.
+- ROOT CAUSE (suspected, strong): triple_barrier_labeler 3-class {-1,0,+1}, class 0
+  (timeout) "eats 30-60%" with pt_atr=2.0/sl_atr=1.0/max_bars=20 → majority-class
+  collapse. Pipeline ALREADY flags edge<=0.01 as collapsed_to_majority/non-promotable.
+- FIX PATH: re-tune triple-barrier via sweep_triple_barrier.py; fix FinBERT news; GPU torch.
+- Diag shipped: diag_dl_training_pipeline.py (awaiting user output).
+- SECURITY: LOCAL_TRAINING_README.md line 13 has HARDCODED Mongo Atlas creds — rotate+remove.
+
+### Diagnostics created this session (all on DGX via patch)
+diag_confidence_gate_autopsy.py, diag_intraday_quality_tape.py, diag_dl_accuracy_audit.py,
+recompute_all_strategy_stats.py, backfill_blended_r_v306.py, diag_fundamental_smb_sources.py,
+diag_dl_training_pipeline.py
+
