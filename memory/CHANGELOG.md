@@ -1,3 +1,48 @@
+## 2026-06-08 — v19.34.297: UNIVERSAL LIQUIDITY GATE at alert emission — SHIPPED
+
+Closes the DGCB illiquid-scalp bypass. Validated via pytest (13/13 new + 23/23
+cross-file with v294, loop-safe) + lint + git reverse-check. NO testing_agent
+(DGX hardware mandate). Applied + committed on DGX (`0d8ea5ca`); backend healthy.
+
+PROBLEM
+  The premarket generator `_scan_premarket_setups` builds ORB/gap alerts via
+  `_make_premarket_alert` and calls `_process_new_alert` DIRECTLY, bypassing the
+  per-setup intraday dollar-volume gate (`enhanced_scanner.py` ~3617). Its "tight
+  3-day contracting range" ORB branch requires ZERO volume proof, so a thin name
+  (DGCB, avg_volume missing / rvol=0) cleared straight to a ~$27k-notional scalp.
+
+FIX (operator: 1A tier-aware floors + 2-yes known-liquid bypass)
+  - ONE hard avg-DOLLAR-volume floor at the top of `_process_new_alert` — the
+    funnel EVERY alert path passes through (premarket + per-setup + carry-forward).
+  - Tier-aware (canonical get_adv_thresholds): intraday $50M / swing $10M /
+    investment $2M, off scan_tier → trade_style (unknown → strictest $50M).
+  - FAIL CLOSED: unprovable ADV (symbol_adv_cache miss → ib_historical fallback →
+    still 0) is REJECTED. Known-liquid mega-caps/ETFs bypass.
+  - Drops → trade_drops (gate=universal_liquidity_gate) + 💧 scanner thought.
+  - Reversible kill-switch SCANNER_UNIVERSAL_LIQUIDITY_GATE (default ON);
+    fails OPEN on internal error.
+  Files: services/enhanced_scanner.py (+config, _liquidity_tier_floor,
+  _passes_universal_liquidity_gate, first-guard call), services/trade_drop_recorder.py
+  (KNOWN_GATES), tests/test_universal_liquidity_gate_v297.py (13 pytest).
+
+## 2026-06-08 — Deep Code Audit PHASE 6 (Track/Learn) — REPORT (no code change)
+
+Diagnosis-only phase documented in memory/AUDIT_2026-06.md. VERDICT: live outcome
+capture + EV rollups are substantially SOUND and HONEST (realized R from fills,
+idempotent trade_id-keyed upsert, whole-trade EV recompute, genuine-only feed,
+entry-time context join, data-starvation handled). Real gaps found:
+  - 🟡 L1: the `trade_outcomes` store (AI confidence-gate calibration + tilt) has
+    NO genuine/artifact filter — phantom/reconciled/operator-flatten closes pollute
+    the ML gate the unmanaged forward-test relies on. Highest-leverage fix.
+  - 🟡 L2: store-coverage asymmetry — silent close paths feed alert_outcomes but
+    NOT trade_outcomes; the ML gate never learns from operator/zombie closes.
+  - 🟢 L3/L4: scratch rows dropped from win-rate denominator; avg_loss_r=1.0
+    synthetic default — note-only modeling choices.
+  - 🟢 P2-LEGACY (re-confirmed): enhanced_scanner.record_alert_outcome (manual API
+    only) — non-idempotent insert, wrong split("_")[0] key, projected-R/−1R caps;
+    pollutes single-word setups. → Phase 7 fix-or-delete.
+
+
 ## 2026-06-09 — v19.34.294: Audit Phase 3 (Take/Deny) — auto-exec field threading + cold-start haircut — SHIPPED
 
 Deep Code Audit Phase 3 fix (T1 + T3 + P2-B). Validated via pytest (10/10 new +
