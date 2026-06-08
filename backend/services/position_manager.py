@@ -2857,6 +2857,91 @@ class PositionManager:
         )
         return ib_abs
 
+    # ── v19.34.298 — Audit Phase 6 (L1+L2): learning-store hygiene + coverage ──
+    # L1: the `trade_outcomes` store (AI confidence-gate calibration + tilt) must
+    #     learn ONLY from GENUINE strategy closes (target/stop/trail/EOD/time-
+    #     decay) — NOT phantom/reconciled/operator-flatten/external-unwind
+    #     artifacts (Phase 6 finding). Same `classify_close` hygiene the
+    #     alert_outcomes EV feed already applies.
+    # L2: route v162 fast-EOD closes (which bypassed BOTH stores) into the
+    #     learning loop so EOD + time-decay closes still teach target/stop/decay.
+    # Reversible: LEARNING_HYGIENE_FILTER=false → record every close (legacy).
+    def _is_genuine_close_for_learning(self, trade, reason: str):
+        """Return (genuine: bool, tag: str). GENUINE = real strategy exit worth
+        teaching the ML gate. Fail-OPEN (genuine) on any error so a hygiene bug
+        never silently starves the learning loop."""
+        try:
+            import os as _os
+            if _os.environ.get("LEARNING_HYGIENE_FILTER", "true").lower() != "true":
+                return True, "hygiene_disabled"
+            from services.trade_outcome_hygiene import classify_close
+            from services.pnl_compute import _hold_seconds
+            d_obj = getattr(trade, "direction", None)
+            d = getattr(d_obj, "value", str(d_obj) if d_obj else "long").lower()
+            tps = getattr(trade, "target_prices", None)
+            if not tps:
+                _t1 = getattr(trade, "tp_price", None) or getattr(trade, "target", None)
+                tps = [_t1] if _t1 else []
+            return classify_close(
+                close_reason=reason,
+                entered_by=str(getattr(trade, "entered_by", "") or ""),
+                entry_price=float(getattr(trade, "fill_price", 0) or 0),
+                exit_price=float(getattr(trade, "exit_price", 0) or 0),
+                net_pnl=float(getattr(trade, "net_pnl", 0) or 0),
+                hold_seconds=_hold_seconds(trade),
+                setup_type=str(getattr(trade, "setup_type", "") or ""),
+                direction=d,
+                stop_price=float(getattr(trade, "stop_price", 0) or getattr(trade, "stop_loss", 0) or 0),
+                target_prices=tps,
+                realized_pnl=float(getattr(trade, "realized_pnl", 0) or 0),
+                shares=getattr(trade, "shares", None),
+            )
+        except Exception:
+            return True, "genuine_fail_open"
+
+    def _record_learning_outcome(self, bot, trade, reason: str):
+        """Feed the ML learning store (`trade_outcomes` → AI confidence-gate
+        calibration + tilt) for a GENUINE close ONLY (L1). Shared by close_trade
+        and the v162 fast-EOD path (L2) so EOD + time-decay closes still teach the
+        model while phantom/reconciled artifacts are kept out. Fire-and-forget;
+        never blocks the close."""
+        if not (hasattr(bot, "_learning_loop") and bot._learning_loop):
+            return
+        genuine, tag = self._is_genuine_close_for_learning(trade, reason)
+        if not genuine:
+            logger.debug(
+                "[v298 Phase6 L1] learning outcome SKIPPED for %s (reason=%s, %s)",
+                getattr(trade, "symbol", "?"), reason, tag,
+            )
+            return
+        try:
+            outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
+            _ec = getattr(trade, "entry_context", None)
+            _ec = _ec if isinstance(_ec, dict) else {}
+            asyncio.create_task(bot._learning_loop.record_trade_outcome(
+                trade_id=trade.id,
+                alert_id=trade.alert_id or trade.id,
+                symbol=trade.symbol,
+                setup_type=trade.setup_type,
+                strategy_name=trade.setup_type,
+                direction=trade.direction.value if hasattr(trade.direction, 'value') else str(trade.direction),
+                trade_style=getattr(trade, 'trade_style', 'move_2_move'),
+                entry_price=trade.fill_price,
+                exit_price=trade.exit_price,
+                stop_price=trade.stop_price,
+                target_price=trade.target_prices[0] if trade.target_prices else trade.fill_price * 1.02,
+                outcome=outcome,
+                pnl=trade.realized_pnl,
+                entry_time=getattr(trade, 'executed_at', None) or getattr(trade, 'created_at', None),
+                exit_time=trade.closed_at,
+                confirmation_signals=getattr(trade, 'confirmation_signals', []),
+                catalyst_tag=_ec.get("catalyst_tag", ""),
+                gap_pct=_ec.get("gap_pct", 0.0),
+            ))
+        except Exception as e:
+            logger.warning(f"[v298] Failed to record trade to learning loop: {e}")
+
+
     # ── v19.34.162 EOD fast-path ────────────────────────────────────────
     async def _eod_close_one_fast(
         self, trade_id: str, trade, bot: 'TradingBotService'
@@ -3001,6 +3086,26 @@ class PositionManager:
                     })
             except Exception:
                 pass
+
+            # v19.34.298 (Audit Phase 6 L2) — v162 fast-EOD previously fed NEITHER
+            # outcome store, so EOD closes taught the bot nothing under this path.
+            # Now mirror close_trade: write the alert_outcomes row (→ strategy_stats
+            # EV / TQS Setup pillar — itself genuine-gated inside) AND feed the ML
+            # learning store (hygiene-gated). EOD is a GENUINE strategy exit.
+            try:
+                from services.pnl_compute import _record_alert_outcome_bestEffort
+                _record_alert_outcome_bestEffort(
+                    trade,
+                    "eod_auto_close_v162",
+                    {"realized_pnl": float(getattr(trade, "realized_pnl", 0) or 0),
+                     "net_pnl":      float(getattr(trade, "net_pnl", 0) or 0),
+                     "shares":       int(shares_to_close or 0)},
+                    float(getattr(trade, "exit_price", 0) or 0),
+                    "eod_close_v162",
+                )
+            except Exception as _ao_err:
+                logger.debug(f"[v298 L2] v162 EOD alert_outcomes write skipped: {_ao_err}")
+            self._record_learning_outcome(bot, trade, "eod_auto_close_v162")
 
             return True, getattr(trade, "realized_pnl", 0.0)
 
@@ -3331,40 +3436,11 @@ class PositionManager:
                     logger.warning(f"Failed to record trade performance: {e}")
 
             # NEW: Record to Learning Loop (Phase 1)
-            if hasattr(bot, '_learning_loop') and bot._learning_loop:
-                try:
-                    outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
-                    asyncio.create_task(bot._learning_loop.record_trade_outcome(
-                        trade_id=trade.id,
-                        # v19.34.36 — real alert_id (stamped at evaluator).
-                        # Pre-fix this fell back to trade.id, breaking
-                        # the pending-context lookup → context was always
-                        # recaptured at CLOSE time, polluting the regime
-                        # field with exit-time conditions instead of
-                        # entry-time conditions.
-                        alert_id=trade.alert_id or trade.id,
-                        symbol=trade.symbol,
-                        setup_type=trade.setup_type,
-                        strategy_name=trade.setup_type,
-                        direction=trade.direction.value if hasattr(trade.direction, 'value') else str(trade.direction),
-                        trade_style=getattr(trade, 'trade_style', 'move_2_move'),
-                        entry_price=trade.fill_price,
-                        exit_price=trade.exit_price,
-                        stop_price=trade.stop_price,
-                        target_price=trade.target_prices[0] if trade.target_prices else trade.fill_price * 1.02,
-                        outcome=outcome,
-                        pnl=trade.realized_pnl,
-                        entry_time=getattr(trade, 'executed_at', None) or getattr(trade, 'created_at', None),
-                        exit_time=trade.closed_at,
-                        confirmation_signals=getattr(trade, 'confirmation_signals', []),
-                        # v19.34.251 (F2) — carry catalyst_tag + gap_pct from the
-                        # entry_context captured at entry so trade_outcomes are
-                        # bucketable by the Phase-D edge ranker (was 100% empty).
-                        catalyst_tag=(trade.entry_context or {}).get("catalyst_tag", "") if isinstance(getattr(trade, 'entry_context', None), dict) else "",
-                        gap_pct=(trade.entry_context or {}).get("gap_pct", 0.0) if isinstance(getattr(trade, 'entry_context', None), dict) else 0.0
-                    ))
-                except Exception as e:
-                    logger.warning(f"Failed to record trade to learning loop: {e}")
+            # v19.34.298 (Audit Phase 6 L1) — now hygiene-gated: only GENUINE
+            # strategy closes (target/stop/trail/EOD/time-decay) calibrate the ML
+            # confidence gate + tilt; phantom/reconciled/operator-flatten/external-
+            # unwind artifacts are excluded (see _record_learning_outcome).
+            self._record_learning_outcome(bot, trade, reason)
 
             # Log to regime performance tracking
             await bot._log_trade_to_regime_performance(trade)
