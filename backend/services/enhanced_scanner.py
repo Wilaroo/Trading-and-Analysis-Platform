@@ -818,6 +818,10 @@ class EnhancedBackgroundScanner:
         
         # Optimized configuration for 200+ symbols
         self._scan_interval = 15  # Base interval between scan cycles (seconds)
+        # v19.34.291 F4 — max snapshot staleness for the scan / auto-exec decision
+        # path. The shared snapshot cache TTL is 120s (fine for bar-poll over
+        # 1000s of symbols), but trade decisions must run on fresher data. Tunable.
+        self._snapshot_max_age_sec = int(os.environ.get("SCANNER_SNAPSHOT_MAX_AGE_SEC", "30"))
         self._symbols_per_batch = 100  # Process 100 symbols per batch (up from 10)
         self._batch_delay = 0.1  # 100ms delay between batches (down from 1s)
         self._min_scan_interval = 10
@@ -3441,6 +3445,7 @@ class EnhancedBackgroundScanner:
             # Get technical snapshot (mongo_only — see docstring)
             snapshot = await self.technical_service.get_technical_snapshot(
                 symbol, mongo_only=True,
+                max_age_sec=self._snapshot_max_age_sec,  # v19.34.291 F4
             )
             if not snapshot:
                 # v19.34.281 — was a SILENT drop. Now counted + traced + narrated
