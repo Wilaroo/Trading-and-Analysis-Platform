@@ -281,6 +281,22 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 7b. Regime Expectancy Refresh - Daily at 4:35 PM ET (T6, after gate
+            # calibration). Recomputes the per-setup×regime suppression table from
+            # fresh trade outcomes so the gate adapts as the regime turns.
+            self._scheduler.add_job(
+                _wrap_async(self._run_regime_expectancy_refresh),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=16,
+                    minute=35,
+                    timezone='US/Eastern'
+                ),
+                id='regime_expectancy_refresh',
+                name='Regime Expectancy Refresh',
+                replace_existing=True
+            )
+
             # 8. Weekly Auto-Revalidation - Sunday 10:00 PM ET
             # Honest promote/reject check on every trained model, run
             # overnight when markets are closed. Results land in
@@ -809,6 +825,50 @@ class TradingScheduler:
             result.error = str(e)
             result.result_summary = f"Calibration failed: {e}"
             logger.error(f"Gate calibration failed: {e}")
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
+
+    async def _run_regime_expectancy_refresh(self):
+        """T6 — recompute the per-setup×regime suppression table from trade outcomes."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="regime_expectancy_refresh",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled regime expectancy refresh...")
+            from services.ai_modules.regime_expectancy_calibrator import (
+                init_regime_expectancy_calibrator,
+            )
+            cal = init_regime_expectancy_calibrator(db=self._db)
+            ref = cal.refresh()
+            if ref.get("success"):
+                # Reload the table in the live gate
+                from services.ai_modules.confidence_gate import get_confidence_gate
+                gate = get_confidence_gate()
+                gate._load_regime_expectancy()
+                result.success = True
+                result.result_summary = (
+                    f"Refreshed {ref.get('cell_count', 0)} cells from "
+                    f"{ref.get('trades', 0)} closed trades (mode="
+                    f"{gate._regime_suppression_mode})"
+                )
+            else:
+                result.success = True  # not a failure, just insufficient data
+                result.result_summary = ref.get("reason", "No refresh needed")
+            logger.info(f"Regime expectancy refresh: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Regime expectancy refresh failed: {e}"
+            logger.error(f"Regime expectancy refresh failed: {e}")
         finally:
             end_time = datetime.now(timezone.utc)
             result.completed_at = end_time.isoformat()

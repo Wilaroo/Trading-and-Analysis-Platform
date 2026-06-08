@@ -122,3 +122,31 @@ REMEDIATION PRIORITY (proposed):
   T4 frontend reads /api/sentcom/taxonomy (or generate tradeStyleMeta.js from it).
   T5 TFT baseline-persistence fix.
   T6 data-driven per-setup x regime suppression gate (the bleeding fix).
+
+
+## SHIP LOG (fork 2026-06)
+- T0 security (Atlas creds removed) — patch s23S6. DONE (operator must still ROTATE pwd).
+- T1 SSOT coverage (scalp canon, relative_strength_* exclude, stacked suffix) — V7Sfd. DONE.
+- T5 TFT baseline persistence — hioYs. DONE.
+- T2 confidence_gate routing → SSOT (_SETUP_TO_MODEL canonical-keyed + ai_feature_family
+  fallback; accumulation_entry→REVERSAL; specialized VWAP/SCALP/ORB/GAP/RANGE kept) —
+  patch W... (pushed by operator, 4d73a2a9). DONE.
+- T3 alias delegation — patch W4lzg. DONE. SMB_SETUP_ALIASES now sourced from SSOT
+  ALIASES (no 2nd copy); market_setup_classifier.lookup_trade_context canonicalizes
+  trade first (fixes vwap_fade_short silently → NOT_APPLIC) w/ monotonic experimental
+  check (raw OR canonical). test_t3_alias_delegation.py.
+- T6 data-driven per-setup×regime suppression — patch abISD. DONE (SHADOW mode default).
+  New services/ai_modules/regime_expectancy_calibrator.py: clean_R per
+  (canonical_setup × direction × band BULL>60/NEUT46-60/BEAR<=45), EXP recency weight
+  half-life 60d, 180d cap. decide_suppression: weighted_mean_R<=-0.50 & eff_n>=25 →SKIP;
+  <=-0.10 →REDUCE(x0.4); else NONE (gap_fade/daily_breakout safe by data, no hardcode).
+  Stored setup_regime_expectancy(_id=current); mode in (_id=config) default shadow.
+  Gate loads via _load_regime_expectancy(), enforces in evaluate() (shadow=record only,
+  active=force SKIP / soft REDUCE). Daily refresh hook in trading_scheduler (16:35 ET).
+  Script: scripts/refresh_regime_expectancy.py (--preview-only / --set-mode active|shadow).
+  short(30d)/mid(90d)/all-time means stored DISPLAY-ONLY (diag) for edge-decay eyeballing.
+  Tunables signed off by operator: HARD=-0.50, SOFT=-0.10, MIN_EFF_N=25, half-life 60d.
+
+REMAINING: T4 frontend reads /api/sentcom/taxonomy (kill stale tradeStyleMeta.js).
+  Pending user-side: rotate Atlas pwd; apply v304 tape-momentum patch (paste.rs/nq4TJ);
+  after a few days of T6 shadow logs look clean → flip to active (--set-mode active).
