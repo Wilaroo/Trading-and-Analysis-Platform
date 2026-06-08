@@ -495,6 +495,34 @@ def _check_task_heartbeats(db) -> SubsystemHealth:
         return _error("task_heartbeats", exc)
 
 
+def _check_ib_boot_probe() -> SubsystemHealth:
+    """v19.34.308 — surfaces the boot-time IB hard-block probe result.
+
+    RED = the boot probe never saw a live IB execution feed within the
+    grace window and tripped the kill-switch (bot is hard-blocked from
+    arming). PENDING (shortly after boot) and GREEN are both reported as
+    green so the HUD doesn't alarm during the normal grace window.
+    """
+    try:
+        from services.ib_boot_probe import get_boot_probe_state
+        st = get_boot_probe_state()
+        status = st.get("status", "pending")
+        norm = "green" if status in ("green", "pending") else "red"
+        return SubsystemHealth(
+            name="ib_boot_probe",
+            status=norm,
+            detail=st.get("detail", ""),
+            metrics={
+                "probe_status": status,
+                "order_path": st.get("order_path"),
+                "tripped_kill_switch": st.get("tripped_kill_switch", False),
+                "checked_at": st.get("checked_at"),
+            },
+        )
+    except Exception as exc:
+        return _error("ib_boot_probe", exc)
+
+
 def _worst(statuses: List[str]) -> str:
     if "red" in statuses:
         return "red"
@@ -514,6 +542,7 @@ def build_health(db) -> Dict[str, Any]:
         _check_live_subscriptions(),
         _check_live_bar_cache(db),
         _check_task_heartbeats(db),
+        _check_ib_boot_probe(),
     ]
     total_ms = round((time.time() - t0) * 1000, 2)
     overall = _worst([c.status for c in checks])

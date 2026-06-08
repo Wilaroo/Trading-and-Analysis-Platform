@@ -753,6 +753,12 @@ class LiveAlert:
     def to_dict(self) -> Dict:
         result = asdict(self)
         result['priority'] = self.priority.value
+        # v19.34.310 — expose the REAL 5-var score under the key the TQS
+        # batch path (tqs_engine.batch_calculate) reads. Pre-fix to_dict only
+        # emitted `smb_score_total`, so the batch / opportunity path defaulted
+        # `smb_5var_score` to a flat 25 → tripped the C→50 decompress band-aid
+        # even when a real 5-var score had been computed.
+        result['smb_5var_score'] = self.smb_score_total
         return result
 
 
@@ -8080,7 +8086,8 @@ class EnhancedBackgroundScanner:
                          "strong_downtrend": "bearish"}.get(regime, "neutral")
 
             checklist = get_scoring_engine(self.db).evaluate_smb_checklist(
-                data, {"regime": sentiment})
+                data, {"regime": sentiment},
+                timeframe=getattr(alert, "trade_style", "") or "")
             return convert_checklist_to_smb_score(checklist)
         except Exception as e:
             logger.debug(

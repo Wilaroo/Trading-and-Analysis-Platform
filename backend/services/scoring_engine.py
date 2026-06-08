@@ -1063,7 +1063,7 @@ class UniversalScoringEngine:
     
     # ==================== SMB TRADE EVALUATION CHECKLIST ====================
     
-    def evaluate_smb_checklist(self, data: Dict, market_data: Dict = None) -> Dict:
+    def evaluate_smb_checklist(self, data: Dict, market_data: Dict = None, timeframe: str = "") -> Dict:
         """
         SMB Trade Evaluation Checklist - Applies to ALL timeframes
         (Scalp, Intraday, Swing, Position)
@@ -1086,6 +1086,25 @@ class UniversalScoringEngine:
         if market_data is None:
             market_data = {}
         
+        # v19.34.310 — TIMEFRAME-AWARE thresholds (env-gated, default OFF →
+        # identical legacy behavior). Intraday/scalp setups need an intraday
+        # volume spike (RVOL) + VWAP/prev-close confluence; swing/position
+        # setups should NOT be penalised for a quiet intraday tape — daily-
+        # level participation + 50-SMA confluence matter more. The legacy
+        # checklist used one intraday-centric threshold set for ALL
+        # timeframes, part of why grades clustered at C for swings. Enable
+        # with SMB_CHECKLIST_TIMEFRAME_AWARE=true.
+        import os as _os
+        _tf_aware = _os.environ.get("SMB_CHECKLIST_TIMEFRAME_AWARE", "false").strip().lower() in ("1", "true", "yes", "on")
+        _style = (str(data.get("trade_style") or timeframe or "")).strip().lower()
+        _is_swing = _style in ("swing", "multi_day", "multiday", "position", "investment")
+        if _tf_aware and _is_swing:
+            _catalyst_rvol_thr = 2.0   # swings: lower intraday volume-spike bar
+            _vol_inplay_thr = 1.2
+        else:
+            _catalyst_rvol_thr = 2.5   # legacy intraday-centric defaults
+            _vol_inplay_thr = 1.5
+        
         checklist = {}
         passed_count = 0
         total_checks = 11
@@ -1107,7 +1126,7 @@ class UniversalScoringEngine:
         
         # Check for volume spike (indicates catalyst)
         rvol = data.get("rvol", 1)
-        if rvol >= 2.5:
+        if rvol >= _catalyst_rvol_thr:
             has_catalyst = True
             catalyst_details.append(f"Volume spike: {rvol:.1f}x RVOL")
         
@@ -1240,7 +1259,7 @@ class UniversalScoringEngine:
         volume_supports = False
         volume_details = []
         
-        if rvol >= 1.5:  # Minimum "In Play" threshold
+        if rvol >= _vol_inplay_thr:  # Minimum "In Play" threshold
             volume_supports = True
             volume_details.append(f"RVOL: {rvol:.1f}x (In Play)")
         
@@ -1278,6 +1297,15 @@ class UniversalScoringEngine:
             if prev_close_dist < 1:
                 mtf_aligned = True
                 mtf_details.append("Price near previous close")
+        
+        # v19.34.310 — swing/position MTF confluence: VWAP / prev-close are
+        # intraday concepts. For swings, treat price riding the 50-SMA as the
+        # daily-level confluence signal (env-gated, default OFF).
+        if _tf_aware and _is_swing and not mtf_aligned and sma_50 > 0 and current_price > 0:
+            sma50_dist = abs(current_price - sma_50) / sma_50 * 100
+            if sma50_dist < 2.0:
+                mtf_aligned = True
+                mtf_details.append("Price near 50 SMA (daily confluence)")
         
         checklist["mtf_alignment"] = {
             "passed": mtf_aligned,
