@@ -160,9 +160,34 @@ def _record_alert_outcome_bestEffort(
                     pps = exit_price - entry
                 else:
                     pps = entry - exit_price
-                r_multiple = round(pps / risk_per_share, 3)
     except Exception:
         pass
+
+    # v19.34.306 — BLENDED trade R. The single-leg calc above (final exit_price
+    # vs entry over the FULL risk) OVER-states trades that scale out and trail a
+    # runner: alert_outcomes is upserted 1-row-per-trade, so the row ends up
+    # carrying the runner leg's big R as if the whole position achieved it
+    # (e.g. daily_breakout +2.32R / ~8R avg winner over n=17). When scale-out
+    # partials exist, recompute R as the POSITION-WEIGHTED total realized P&L
+    # over the full-position risk dollars. Env-gated (TQS_BLENDED_R, default on).
+    # Single-exit trades have no partials → keep the single-leg value above.
+    if os.environ.get("TQS_BLENDED_R", "true").strip().lower() not in ("0", "false", "no", "off"):
+        try:
+            _soc = getattr(trade, "scale_out_config", None) or {}
+            _partials = _soc.get("partial_exits", []) or []
+            if _partials:
+                _entry = float(getattr(trade, "fill_price", 0) or 0)
+                _stop = float(getattr(trade, "stop_price", 0)
+                              or getattr(trade, "stop_loss", 0) or 0)
+                _orig = int(abs(getattr(trade, "original_shares", 0)
+                                or getattr(trade, "shares", 0) or 0))
+                _risk_dollars = abs(_entry - _stop) * _orig
+                if _risk_dollars > 0:
+                    _partial_pnl = sum(float(p.get("pnl", 0) or 0) for p in _partials)
+                    _total_realized = _partial_pnl + float(pnl.get("realized_pnl", 0) or 0)
+                    r_multiple = round(_total_realized / _risk_dollars, 3)
+        except Exception:
+            pass
 
     # v19.34.240 — trade-outcome hygiene: classify GENUINE strategy close vs
     # execution/reconciliation artifact (phantom sweep, sub-minute external OCA
