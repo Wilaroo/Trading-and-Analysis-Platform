@@ -627,7 +627,7 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.80 (2026-05-22, "Bracket-stacking auto-cancel + quote-resub watchdog — first real backend features after the docs-only run")
+- **Current version**: v19.34.294 (2026-06-09, "Audit Phase 3 — auto-exec field threading + cold-start 0.33x haircut (T1+T3+P2-B)")
 - **Last green test run**: 94/94 across v19.34.69 → v19.34.73
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72

@@ -1,3 +1,57 @@
+## 2026-06-09 — v19.34.294: Audit Phase 3 (Take/Deny) — auto-exec field threading + cold-start haircut — SHIPPED
+
+Deep Code Audit Phase 3 fix (T1 + T3 + P2-B). Validated via pytest (10/10 new +
+28/28 Phase-1/2 regression) + lint + git-HEAD-vs-worktree apply round-trip. NO
+testing_agent (DGX hardware mandate).
+
+PROBLEM (Audit Phase 3, finding T1/T3)
+  The scanner→bot auto-exec boundary (`_auto_execute_alert`) forwarded only a 7-field
+  thin dict, DISCARDING the rich, already-computed LiveAlert decision inputs
+  (tqs_grade, tqs_score, tape_score, tape_confirmation, risk_reward, priority, atr,
+  atr_percent, trade_style, smb_grade). Downstream consequences on EVERY auto-trade:
+    - grade → None → D multiplier (0.15x): an A-grade scanner setup was sized like a D.
+    - trade_style → empty: portfolio exposure caps (30%/55%), position/investment
+      stop-cap and the trade-style R-ladder were all SKIPPED for swing/position autos.
+    - atr → 0 → synthetic price*0.02 (the exact F3 fabrication Phase 1 removed,
+      re-entering at the execution layer for volatility sizing + stop-floor).
+    - priority → None → confidence-gate quality defaulted to 70.
+  Separately, `submit_trade_from_scanner` hardcoded a fabricated score=80 (T3),
+  biasing the smart-filter + confidence gate with an invented quality number.
+
+PROBLEM (Audit Phase 2, finding P2-B)
+  The EV gate passes any setup with < 20 proven outcomes on grace alone (no proven
+  expectancy). For UNMANAGED paper trading that meant full-size capital on unproven
+  setups.
+
+SCOPE
+  1. services/enhanced_scanner.py — `_auto_execute_alert` now threads the real
+     LiveAlert fields into trade_request, plus `proven_outcomes`
+     (`_strategy_stats[base].alerts_triggered`, same base-keying as the EV gate).
+  2. services/scanner_integration.py — `submit_trade_from_scanner` carries those
+     fields into the evaluator's alert dict; `score` = real tqs_score (fallback 80
+     only when absent → legacy/manual callers unaffected).
+  3. services/opportunity_evaluator.py — `calculate_position_size` gains a
+     `proven_outcomes` param + a `cold_start_multiplier` (env COLD_START_SIZE_MULT=0.33,
+     COLD_START_MIN_OUTCOMES=20). Applied ONLY when proven_outcomes is supplied
+     (auto-exec path); None → no haircut. Surfaced in multipliers_out. Call site
+     passes proven_outcomes=alert.get("proven_outcomes").
+  4. tests/test_auto_exec_field_threading_and_coldstart_v294.py — 10 pytest.
+
+EFFECT
+  An A-grade scanner auto-exec is now sized as an A (was D 0.15x); trade-style caps +
+  R-ladder re-engage for swing/position autos; synthetic ATR/score on the auto path
+  are gone; unproven setups (<20 outcomes) size at 0.33x until they earn data.
+
+VERIFICATION
+  - 10/10 new tests green; 28/28 Phase-1/2 regression (v288/289/290/291-292/293) green.
+  - 3 changed files lint clean; backend imports OK; apply-clean on base 56ec48e6.
+
+TUNABLES (reversible, no patch)
+  COLD_START_SIZE_MULT (0.33), COLD_START_MIN_OUTCOMES (20; set mult=1.0 to disable).
+
+DEPLOY: applied to DGX as commit 7d566456; paste.rs https://paste.rs/d1wtQ.
+
+
 ## 2026-06-05 — Hygiene sweep + backlog reconciliation — SHIPPED
 
 Housekeeping pass (no trading-logic change). Validated via pytest (6/6 on the fixed
