@@ -2283,98 +2283,19 @@ class EnhancedBackgroundScanner:
             )
     
     # ==================== WIN-RATE TRACKING ====================
-    
-    def record_alert_outcome(self, alert_id: str, outcome: str, pnl: float = 0.0, exit_price: float = None):
-        """
-        Record the outcome of an alert for win-rate and EV tracking.
-        SMB-style: Tracks R-multiples for Expected Value calculation.
-        """
-        if alert_id not in self._live_alerts:
-            return
-        
-        alert = self._live_alerts[alert_id]
-        setup_type = alert.setup_type.split("_")[0] if "_long" in alert.setup_type or "_short" in alert.setup_type else alert.setup_type
-        
-        if setup_type not in self._strategy_stats:
-            self._strategy_stats[setup_type] = StrategyStats(setup_type=setup_type)
-        
-        stats = self._strategy_stats[setup_type]
-        stats.alerts_triggered += 1
-        
-        # Calculate R-multiple for this trade
-        r_multiple = 0.0
-        risk_per_share = abs(alert.current_price - alert.stop_loss)
-        
-        if risk_per_share > 0 and exit_price is not None:
-            if alert.direction == "long":
-                profit_per_share = exit_price - alert.current_price
-            else:
-                profit_per_share = alert.current_price - exit_price
-            r_multiple = profit_per_share / risk_per_share
-        elif risk_per_share > 0 and pnl != 0:
-            # Estimate R-multiple from PnL if exit_price not provided
-            # This is approximate - assumes full position
-            estimated_shares = abs(pnl) / risk_per_share if outcome == "lost" else abs(pnl) / (alert.target - alert.current_price) if alert.target != alert.current_price else 1
-            r_multiple = pnl / (risk_per_share * max(estimated_shares, 1)) if estimated_shares > 0 else 0
-        
-        # Update stats based on outcome
-        if outcome == "won":
-            stats.alerts_won += 1
-            stats.total_pnl += pnl
-            if stats.alerts_won > 0:
-                stats.avg_win = stats.total_pnl / stats.alerts_won if stats.total_pnl > 0 else stats.avg_win
-            # R-multiple for wins should be positive
-            if r_multiple <= 0:
-                r_multiple = alert.risk_reward  # Use projected R:R as estimate
-        elif outcome == "lost":
-            stats.alerts_lost += 1
-            stats.total_pnl += pnl  # pnl is negative for losses
-            if stats.alerts_lost > 0:
-                total_losses = stats.total_pnl - (stats.avg_win * stats.alerts_won) if stats.alerts_won > 0 else stats.total_pnl
-                stats.avg_loss = total_losses / stats.alerts_lost
-            # R-multiple for losses should be negative (typically -1R at stop)
-            if r_multiple >= 0:
-                r_multiple = -1.0  # Standard 1R loss
-        
-        # Record R-multiple for EV calculation
-        stats.record_r_outcome(r_multiple, alert.trade_grade)
-        
-        stats.update_win_rate()
-        self._save_strategy_stats(setup_type)
-        
-        # Update alert
-        alert.outcome = outcome
-        alert.actual_pnl = pnl
-        alert.actual_r_multiple = r_multiple
-        alert.workflow_state = "reviewed"
-        
-        # Save to outcomes collection with R-multiple data
-        if self.alert_outcomes_collection is not None:
-            try:
-                self.alert_outcomes_collection.insert_one({
-                    "alert_id": alert_id,
-                    "symbol": alert.symbol,
-                    "setup_type": setup_type,
-                    "direction": alert.direction,
-                    "outcome": outcome,
-                    "pnl": pnl,
-                    "r_multiple": r_multiple,
-                    "trade_grade": alert.trade_grade,
-                    "entry_price": alert.current_price,
-                    "exit_price": exit_price,
-                    "stop_loss": alert.stop_loss,
-                    "target": alert.target,
-                    "projected_rr": alert.risk_reward,
-                    "created_at": alert.created_at,
-                    "closed_at": datetime.now(timezone.utc).isoformat()
-                })
-            except Exception as e:
-                logger.warning(f"Could not save alert outcome: {e}")
-        
-        # Log with EV information
-        ev_info = f"EV: {stats.expected_value_r:.2f}R" if len(stats.r_outcomes) >= 5 else "EV: tracking"
-        logger.info(f"📊 Recorded {outcome} ({r_multiple:+.2f}R) for {setup_type}: Win rate {stats.win_rate:.1%}, {ev_info}")
-    
+
+    # v19.34.299 (Audit Phase 7) — REMOVED legacy `record_alert_outcome`.
+    # It was a dishonest, near-dead parallel outcome writer reachable ONLY via the
+    # manual `POST /api/scanner/stats/record-outcome` route (no autonomous caller):
+    #   • non-idempotent insert_one → duplicate alert_outcomes rows
+    #   • wrong base key `split("_")[0]` (gap_give_go→gap) → orphan strategy_stats
+    #   • projected-R win fallback + −1R loss cap → fabricated EV
+    #   • double `_calculate_expected_value` → corrupt ev_trend
+    # It collided with + polluted single-word setups (squeeze/orb) in the canonical
+    # EV feed. The honest, idempotent path is `pnl_compute._record_alert_outcome_
+    # bestEffort` (live close paths) + `recompute_strategy_stats_for_setup`. The
+    # matching route was deleted from routers/live_scanner.py in the same patch.
+
     def get_strategy_ev(self, setup_type: str) -> dict:
         """Get SMB-style Expected Value assessment for a strategy"""
         if setup_type in self._strategy_stats:

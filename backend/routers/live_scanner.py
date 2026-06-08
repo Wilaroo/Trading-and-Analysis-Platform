@@ -314,25 +314,13 @@ def get_strategy_stats(setup_type: Optional[str] = None):
     }
 
 
-@router.post("/stats/record-outcome")
-def record_alert_outcome(
-    alert_id: str = Query(..., description="Alert ID"),
-    outcome: str = Query(..., description="Outcome: won, lost, expired, cancelled"),
-    pnl: float = Query(default=0.0, description="Realized P&L")
-):
-    """Record the outcome of an alert for win-rate tracking"""
-    if not _scanner:
-        raise HTTPException(status_code=500, detail="Scanner not initialized")
-    
-    if outcome not in ["won", "lost", "expired", "cancelled"]:
-        raise HTTPException(status_code=400, detail="Invalid outcome. Use: won, lost, expired, cancelled")
-    
-    _scanner.record_alert_outcome(alert_id, outcome, pnl)
-    
-    return {
-        "success": True,
-        "message": f"Recorded {outcome} for alert {alert_id}"
-    }
+# v19.34.299 (Audit Phase 7) — REMOVED `POST /stats/record-outcome`. It was the
+# sole caller of the dishonest legacy `enhanced_scanner.record_alert_outcome`
+# (now also deleted): projected-R/−1R-capped, wrong base key, non-idempotent
+# insert that polluted single-word setups (squeeze/orb). No frontend/backend
+# caller. Outcome capture is handled honestly + idempotently by the live close
+# paths (pnl_compute). NOTE: the unrelated `POST /api/ev-tracking/record-outcome`
+# (routers/ev_tracking.py) is a DIFFERENT, legitimate route and is untouched.
 
 
 # ===================== Auto-Execution Control =====================
