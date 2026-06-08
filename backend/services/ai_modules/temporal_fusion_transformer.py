@@ -59,6 +59,14 @@ class TFTModel:
         self._version = "v0.1.0"
         self._accuracy = 0.0
         self._training_samples = 0
+        # Edge metrics — stashed by train() so _save_model() can persist them at
+        # the TOP LEVEL of the dl_models doc (previously only nested in 'scorecard',
+        # so a top-level query for majority_baseline/edge/num_classes saw None).
+        self._majority_baseline = None
+        self._edge_above_baseline = None
+        self._num_classes = 3
+        self._class_counts = None
+        self._metric_type = "3class_val_accuracy"
 
     def _build_model(self):
         """Build the TFT PyTorch model."""
@@ -567,6 +575,18 @@ class TFTModel:
         self._accuracy = best_val_acc
         self._training_samples = len(X)
         self._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        # Stash edge metrics so _save_model persists them at the dl_models TOP LEVEL
+        # (not just inside 'scorecard'). majority_pct & class_counts come from the
+        # class-balance diagnostic above; edge = val_acc - majority baseline.
+        self._majority_baseline = float(majority_pct)
+        self._edge_above_baseline = float(best_val_acc - majority_pct)
+        self._num_classes = 3
+        self._class_counts = {
+            "down": int(class_counts[0]),
+            "flat": int(class_counts[1]),
+            "up": int(class_counts[2]),
+        }
+        self._metric_type = "3class_val_accuracy"
 
         # Get timeframe importance
         self._model.eval()
@@ -804,6 +824,11 @@ class TFTModel:
                     "version": self._version,
                     "accuracy": self._accuracy,
                     "training_samples": self._training_samples,
+                    "majority_baseline": self._majority_baseline,
+                    "edge_above_baseline": self._edge_above_baseline,
+                    "num_classes": self._num_classes,
+                    "class_counts": self._class_counts,
+                    "metric_type": self._metric_type,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }},
                 upsert=True
