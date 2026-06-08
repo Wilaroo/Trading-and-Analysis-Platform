@@ -111,6 +111,13 @@ class TechnicalSnapshot:
     #   "live_extended" — pusher RPC bars appended onto Mongo backfill bars
     #   "mongo_only"   — Mongo `ib_historical_data` only (RPC unavailable / disabled)
     data_source: str = "mongo_only"
+    # v19.34.289 F2 — minute-level intraday-bar freshness. The day-level
+    # _check_staleness (and its live-quote bypass) let hours-stale intraday bars
+    # feed VWAP/RSI/EMA while a fresh quote made them look "real". These track
+    # the trailing bar's COLLECTED age (UTC, tz-safe) so the auto-exec gate can
+    # block stale-indicator alerts (info-only — the alert still surfaces).
+    intraday_bar_age_min: Optional[float] = None
+    intraday_stale: bool = False
 
 
 class RealTimeTechnicalService:
@@ -146,7 +153,7 @@ class RealTimeTechnicalService:
                 {"$match": {"symbol": symbol.upper(), "bar_size": bar_size}},
                 {"$sort": {"date": -1}},
                 {"$limit": limit},
-                {"$project": {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}},
+                {"$project": {"_id": 0, "date": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "collected_at": 1}},
             ]
             bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
             if bars and len(bars) >= 5:
@@ -356,6 +363,30 @@ class RealTimeTechnicalService:
         except Exception:
             pass
 
+    def _intraday_collected_age_min(self, bars):
+        """v19.34.289 F2 — minutes since the trailing intraday bar was COLLECTED
+        (written to Mongo). Uses `collected_at` (always UTC ISO, written by the
+        collectors + tick persister) so it is TIMEZONE-SAFE — unlike the bar
+        `date`, which can be ET or UTC depending on the pusher. Returns None when
+        absent (e.g. a fresh live-overlay bar, or a legacy row) → caller treats
+        the symbol as fresh (fail-open, never a false block)."""
+        if not bars:
+            return None
+        ca = bars[-1].get("collected_at")
+        if not ca:
+            return None
+        try:
+            if isinstance(ca, datetime):
+                dt = ca if ca.tzinfo else ca.replace(tzinfo=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(str(ca).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+            return round(age, 2) if age >= 0 else None
+        except Exception:
+            return None
+
     def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
         """Try to get quote from IB pushed data (non-async)"""
         try:
@@ -504,6 +535,25 @@ class RealTimeTechnicalService:
             # Stamp which data path produced the intraday bars so callers
             # (e.g. the LiveAlertCard UI) can prove freshness at a glance.
             snapshot.data_source = intraday_source
+
+            # v19.34.289 F2 — minute-level intraday freshness gate. A live quote
+            # only proves PRICE is fresh; the mongo intraday bars feeding
+            # VWAP/RSI/EMA can be stale if the collectors stalled. During RTH, if
+            # the trailing bar was COLLECTED longer than
+            # SCANNER_INTRADAY_MAX_BAR_AGE_MIN ago, flag the snapshot stale so the
+            # auto-exec gate blocks it (info-only). collected_at is UTC (tz-safe);
+            # a fresh live-overlay bar has no collected_at → treated as fresh.
+            try:
+                import os as _os
+                from services.live_bar_cache import classify_market_state
+                age_min = self._intraday_collected_age_min(intraday_bars)
+                snapshot.intraday_bar_age_min = age_min
+                _max_age = float(_os.environ.get("SCANNER_INTRADAY_MAX_BAR_AGE_MIN", "15"))
+                if (age_min is not None and age_min > _max_age
+                        and classify_market_state() == "rth"):
+                    snapshot.intraday_stale = True
+            except Exception:
+                pass
 
             # Cache the result
             self._cache[symbol] = snapshot

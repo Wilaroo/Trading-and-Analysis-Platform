@@ -1576,6 +1576,9 @@ class EnhancedBackgroundScanner:
             failed = self._auto_exec_fail_reasons_ev(
                 pr, tape_ok, ev_r, mn, outcomes,
                 self._win_rate_grace_min_trades, registered=st is not None)
+            # v19.34.289 F2 — surface stale-intraday as the first kill reason.
+            if getattr(alert, "intraday_stale", False):
+                failed = ["stale_intraday_bars"] + failed
             from services.trade_drop_recorder import record_trade_drop
             record_trade_drop(
                 getattr(self, "db", None),
@@ -3641,12 +3644,17 @@ class EnhancedBackgroundScanner:
                     alert.rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
                     alert.gap_pct = float(getattr(snapshot, "gap_pct", 0.0) or 0.0)
                     alert.atr_percent = float(getattr(snapshot, "atr_percent", 0.0) or 0.0)
+                    # v19.34.289 F2 — stamp intraday-freshness so diagnostics +
+                    # the auto-exec ineligible recorder can see a stale block.
+                    alert.intraday_stale = bool(getattr(snapshot, "intraday_stale", False))
+                    alert.intraday_bar_age_min = getattr(snapshot, "intraday_bar_age_min", None)
                     
                     # Check auto-execute eligibility
                     alert.auto_execute_eligible = (
                         self._auto_execute_enabled and
                         alert.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
                         alert.tape_confirmation and
+                        not getattr(snapshot, "intraday_stale", False) and
                         self._passes_ev_quality_gate(alert)
                     )
                     
