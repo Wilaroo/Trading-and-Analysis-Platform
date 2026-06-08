@@ -1145,6 +1145,11 @@ class EnhancedBackgroundScanner:
         self.stats_collection = db["strategy_stats"]
         self.alert_outcomes_collection = db["alert_outcomes"]
         self._load_strategy_stats()
+        # v19.34.293 P2-A' — periodically refresh strategy_stats from the canonical
+        # DB (pnl_compute upserts realized EV on every close) so the EV gate never
+        # decides on as-of-last-restart expectancy. Tunable; 0 disables.
+        self._stats_reload_interval = int(os.environ.get("SCANNER_STATS_RELOAD_SEC", "300"))
+        self._last_stats_reload = datetime.now(timezone.utc)
         # Refresh _watchlist from the canonical AI-training universe so the
         # scanner only fires on symbols the AI has models for.
         self._refresh_watchlist_from_canonical_universe()
@@ -2716,7 +2721,18 @@ class EnhancedBackgroundScanner:
                 
                 # Update market context first
                 await self._update_market_context()
-                
+
+                # v19.34.293 P2-A' — throttled strategy_stats refresh so the EV
+                # gate reflects realized closes since the last restart.
+                try:
+                    if self._stats_reload_interval > 0:
+                        _now_rs = datetime.now(timezone.utc)
+                        if (_now_rs - self._last_stats_reload).total_seconds() >= self._stats_reload_interval:
+                            self._load_strategy_stats()
+                            self._last_stats_reload = _now_rs
+                except Exception:
+                    pass
+
                 # Check if market is open
                 current_window = self._get_current_time_window()
                 if current_window == TimeWindow.CLOSED:
