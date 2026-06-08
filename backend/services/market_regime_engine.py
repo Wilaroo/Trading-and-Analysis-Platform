@@ -733,9 +733,17 @@ class MarketRegimeEngine:
     # Update frequency (30 minutes)
     UPDATE_INTERVAL_SECONDS = 30 * 60
     
-    # Score thresholds for state determination
+    # Score thresholds for state determination.
+    # v19.34.303 — FIX asymmetric neutral band. Composite score is centered on
+    # 50 (neutral). CONFIRMED_UP requires +20 (>=70), so CONFIRMED_DOWN must be
+    # symmetric at -20 (<30). Previously CONFIRMED_DOWN sat at 50, meaning ANY
+    # sub-neutral read (e.g. a flat 48.4) was branded a confirmed bear regime,
+    # which forced the confidence gate into DEFENSIVE mode (GO threshold 60 +
+    # -10 long penalty) and skipped virtually every intraday setup. A genuine
+    # confirmed downtrend should require broad, strong bearishness (<30), not a
+    # hair below neutral. The 30-69 band is HOLD/neutral → CAUTIOUS trading.
     CONFIRMED_UP_THRESHOLD = 70
-    CONFIRMED_DOWN_THRESHOLD = 50
+    CONFIRMED_DOWN_THRESHOLD = 30
     
     def __init__(self, alpaca_service=None, ib_service=None, db=None):
         self.alpaca_service = alpaca_service
