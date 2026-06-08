@@ -40,6 +40,7 @@ import { ScaleOutBadge, ScaleOutDetails } from './ScaleOutBadge';
 import PositionThoughtsInline from './PositionThoughtsInline';
 // v19.34.160 — single source of truth for "is this a scalp?"
 import { isScalpStyle } from '../../../utils/tradeStyleMeta';
+import { useTaxonomyVersion } from '../../../utils/useTaxonomy';
 // v19.34.72 — Operator Close panel (Market/Limit + percentage).
 import CloseTradeModal from './CloseTradeModal';
 // v19.34.258 — single trusted TQS score on the face + shared drill-down.
@@ -818,6 +819,8 @@ const GroupMemberRow = ({ member, idx }) => {
 
 
 export const OpenPositionsV5 = ({ positions, totalPnl, loading, onSelectPosition }) => {
+  // Re-render scalp grouping when the live SSOT taxonomy hydrates.
+  useTaxonomyVersion();
   const open = useMemo(
     () => (positions || []).filter(p => p && p.status !== 'closed'),
     [positions],

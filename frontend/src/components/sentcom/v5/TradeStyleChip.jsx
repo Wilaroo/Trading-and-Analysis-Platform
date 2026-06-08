@@ -21,6 +21,7 @@
 import React from 'react';
 
 import { getTradeStyleMeta, humanizeSetupName, resolveTradeStyle } from '../../../utils/tradeStyleMeta';
+import { useTaxonomyVersion } from '../../../utils/useTaxonomy';
 
 const TONE_CLASS = {
   fuchsia:  'bg-fuchsia-950/60 text-fuchsia-300 border-fuchsia-800',
@@ -55,6 +56,8 @@ export default function TradeStyleChip({
   size = 'sm',
   testIdSuffix,
 }) {
+  // Re-render when the live SSOT taxonomy hydrates so styles never stay stale.
+  useTaxonomyVersion();
   if (!row) return null;
   const meta = getTradeStyleMeta(row);
   const styleKey = resolveTradeStyle(row);

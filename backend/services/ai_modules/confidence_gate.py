@@ -43,6 +43,11 @@ logger = logging.getLogger(__name__)
 # Maximum decisions to keep in memory
 MAX_DECISION_LOG = 200
 
+# T6: position multiplier applied when an ACTIVE regime suppression soft-benches a
+# setup (data-driven per-setup×regime expectancy gate). Kept in sync with
+# regime_expectancy_calibrator.REDUCE_MULT.
+REGIME_SUPPRESSION_REDUCE_MULT = 0.4
+
 # Setup -> directional sub-model FAMILY routing for live consensus voting.
 # Keyed by CANONICAL setup names (setup_taxonomy.canonicalize). Hoisted to module
 # level so it is a single, testable source. resolve_model_bases() falls back to the
@@ -125,6 +130,8 @@ class ConfidenceGate:
         self._regime_cache = None
         self._ai_regime_cache = None
         self._calibrated_thresholds = None  # Loaded from gate_calibration collection
+        self._regime_expectancy = None  # Loaded from setup_regime_expectancy (T6)
+        self._regime_suppression_mode = "shadow"  # 'shadow' | 'active' (T6)
         self._finbert_scorer = None  # Lazy-init on first Layer 13 call
         self._stats = {
             "total_evaluated": 0,
@@ -138,6 +145,8 @@ class ConfidenceGate:
         }
         # Load calibrated thresholds if available
         self._load_calibrated_thresholds()
+        # Load data-driven per-setup×regime suppression table (T6)
+        self._load_regime_expectancy()
         # Hydrate from MongoDB (recent decisions + today's stats)
         self._load_from_db()
 
@@ -259,6 +268,28 @@ class ConfidenceGate:
                 logger.info(f"Loaded calibrated gate thresholds: {thresholds}")
         except Exception as e:
             logger.debug(f"No calibrated thresholds available: {e}")
+
+    def _load_regime_expectancy(self):
+        """Load the data-driven per-setup×regime suppression table + mode (T6)."""
+        if self._db is None:
+            return
+        try:
+            from services.ai_modules.regime_expectancy_calibrator import (
+                init_regime_expectancy_calibrator,
+            )
+            cal = init_regime_expectancy_calibrator(db=self._db)
+            doc = cal.load()
+            self._regime_suppression_mode = cal.load_mode()
+            if doc and doc.get("cells"):
+                self._regime_expectancy = doc
+                logger.info(
+                    f"Loaded regime expectancy: {doc.get('cell_count', 0)} cells "
+                    f"(mode={self._regime_suppression_mode})"
+                )
+            else:
+                logger.debug("No regime expectancy table available yet")
+        except Exception as e:
+            logger.debug(f"No regime expectancy available: {e}")
 
     def set_db(self, db):
         self._db = db
@@ -946,19 +977,72 @@ class ConfidenceGate:
             go_threshold = 60
             reduce_threshold = 45
 
-        if force_skip:
-            # Meta-labeler hard veto — overrides any positive score
+        # --- T6: DATA-DRIVEN PER-SETUP × REGIME SUPPRESSION ---
+        # Look up this (canonical setup × direction × regime band) cell in the
+        # self-refreshing expectancy table. Only ever downgrades (SKIP/REDUCE),
+        # never promotes. In 'shadow' mode it records what it WOULD do without
+        # changing the live decision; in 'active' mode it enforces.
+        regime_suppression = None
+        _sup_skip = False
+        _sup_reduce = False
+        if self._regime_expectancy and self._regime_expectancy.get("cells"):
+            try:
+                from services.ai_modules.regime_expectancy_calibrator import (
+                    decide_suppression, band_of,
+                )
+                from services.setup_taxonomy import canonicalize as _canon_sup
+                _band = band_of(regime_score)
+                _canon = _canon_sup(setup_type)
+                _sup = decide_suppression(
+                    self._regime_expectancy["cells"], _canon, direction, _band,
+                    self._regime_expectancy.get("params", {}),
+                )
+                regime_suppression = {
+                    **_sup, "mode": self._regime_suppression_mode,
+                    "band": _band, "canonical_setup": _canon,
+                }
+                if _sup["action"] != "NONE":
+                    if self._regime_suppression_mode == "active":
+                        if _sup["action"] == "SKIP":
+                            _sup_skip = True
+                            reasoning.append(
+                                f"⛔ Regime suppression (ACTIVE): {_canon} {direction} in "
+                                f"{_band} — {_sup['reason']} → SKIP"
+                            )
+                        else:  # REDUCE
+                            _sup_reduce = True
+                            reasoning.append(
+                                f"⚠️ Regime suppression (ACTIVE): {_canon} {direction} in "
+                                f"{_band} — {_sup['reason']} → REDUCE size"
+                            )
+                    else:
+                        reasoning.append(
+                            f"👁️ [SHADOW] Regime suppression would {_sup['action']}: "
+                            f"{_canon} {direction} in {_band} — {_sup['reason']}"
+                        )
+            except Exception as e:
+                logger.debug(f"Regime suppression check skipped: {e}")
+
+        if force_skip or _sup_skip:
+            # Hard veto (meta-labeler OR active regime suppression) — overrides score
             decision = "SKIP"
             position_multiplier = 0
             self._stats["skip_count"] += 1
             self._stats["today_skip"] += 1
         elif confidence_score >= go_threshold:
-            decision = "GO"
-            self._stats["go_count"] += 1
-            self._stats["today_go"] += 1
+            if _sup_reduce:
+                decision = "REDUCE"
+                position_multiplier *= REGIME_SUPPRESSION_REDUCE_MULT
+                self._stats["reduce_count"] += 1
+            else:
+                decision = "GO"
+                self._stats["go_count"] += 1
+                self._stats["today_go"] += 1
         elif confidence_score >= reduce_threshold:
             decision = "REDUCE"
             position_multiplier *= 0.6
+            if _sup_reduce:
+                position_multiplier *= REGIME_SUPPRESSION_REDUCE_MULT
             self._stats["reduce_count"] += 1
             reasoning.append(f"Borderline confidence ({confidence_score}, need {go_threshold} for GO) — reducing to 60% size")
         else:
@@ -974,6 +1058,7 @@ class ConfidenceGate:
             "scoring_version": "additive_v1",  # Track scoring system version for migration
             "regime_state": regime_state,
             "regime_score": regime_score,
+            "regime_suppression": regime_suppression,
             "ai_regime": ai_regime,
             "trading_mode": self._trading_mode,
             "position_multiplier": round(position_multiplier, 2),

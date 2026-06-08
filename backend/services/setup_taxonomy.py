@@ -66,6 +66,12 @@ _ALIASES: Dict[str, str] = {
     "scalp": "spencer_scalp",
 }
 
+# Public, read-only view of the alias table. Consumed by smb_integration so the
+# SMB layer does NOT keep a second hand-maintained alias copy (was a drift source
+# — pass 2 audit). One definition point => the two maps can never diverge.
+# (T3, fork 2026-06)
+ALIASES: Dict[str, str] = _ALIASES
+
 # ── artifacts that must NEVER count toward per-setup edge / grading ─────────
 # Exact names + prefix families. From audit sections [B]/[D].
 _EDGE_EXCLUDED_EXACT: Set[str] = {

@@ -184,9 +184,21 @@ def lookup_trade_context(trade: str, setup: MarketSetup) -> TradeContext:
     Returns NOT_APPLIC if either the trade isn't in the matrix or the
     current setup isn't allowed for that trade. Caller decides whether
     to block the alert (strict mode) or just warn (soft mode).
+
+    The incoming `trade` is canonicalized via the SSOT (setup_taxonomy.canonicalize)
+    FIRST so directional/confirmed variants (e.g. 'vwap_fade_short', 'big_dog_long')
+    resolve to their base name — previously these silently missed both the
+    experimental set and the matrix and returned NOT_APPLIC. The 3 matrix-specific
+    aliases in TRADE_ALIASES (puppy_dog/vwap_bounce/fading_bounce) are applied ON TOP
+    because the SSOT deliberately keeps those as distinct trades. The experimental
+    check is monotonic (raw OR canonical) so nothing that was experimental before
+    stops being experimental. (T3, fork 2026-06)
     """
-    canonical = TRADE_ALIASES.get(trade, trade)
-    if canonical in EXPERIMENTAL_TRADES:
+    from services.setup_taxonomy import canonicalize as _ssot_canon
+    raw = (trade or "").lower()
+    base = _ssot_canon(trade) or raw
+    canonical = TRADE_ALIASES.get(base, base)
+    if raw in EXPERIMENTAL_TRADES or canonical in EXPERIMENTAL_TRADES:
         # Experimental trades have no matrix opinion — treat all setups as
         # acceptable but the alert will be tagged `experimental=True`.
         return TradeContext.WITH_TREND
