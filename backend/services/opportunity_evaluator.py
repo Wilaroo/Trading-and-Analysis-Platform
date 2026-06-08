@@ -1864,6 +1864,43 @@ class OpportunityEvaluator:
                     symbol or "?", int(proven_outcomes), _cs_min, _cs_mult * 100,
                 )
 
+        # ── v19.34.295 — per-setup size haircut (operator throttle) ─────────
+        # Reduce size on chronically underperforming / over-traded setups
+        # WITHOUT removing them (keeps collecting outcome data). Env-driven and
+        # DEFAULT-OFF (empty → no-op), so deploying is behaviour-neutral until
+        # the operator opts in — safe to apply mid-session. Format:
+        #   SETUP_SIZE_HAIRCUTS="squeeze:0.33,vwap_fade:0.5"
+        # Audit Phase 5: `squeeze` = 421 trades / 32% win / −$24k (biggest
+        # single bleed). Base-keyed (squeeze_long/squeeze_short → "squeeze").
+        setup_haircut_multiplier = 1.0
+        setup_haircut_applied = False
+        if setup_type:
+            import os as _os_sh
+            _raw_hc = (_os_sh.environ.get("SETUP_SIZE_HAIRCUTS", "") or "").strip()
+            if _raw_hc:
+                _hc_map = {}
+                for _part in _raw_hc.split(","):
+                    if ":" not in _part:
+                        continue
+                    _k, _v = _part.split(":", 1)
+                    try:
+                        _m = float(_v)
+                    except (TypeError, ValueError):
+                        continue
+                    if 0.0 < _m <= 1.0:
+                        _hc_map[_k.strip().lower()] = _m
+                _base_setup = (str(setup_type).lower()
+                               .split("_long")[0].split("_short")[0].strip())
+                _hc = _hc_map.get(_base_setup) or _hc_map.get(str(setup_type).lower())
+                if _hc and 0.0 < _hc < 1.0:
+                    setup_haircut_multiplier = _hc
+                    setup_haircut_applied = True
+                    adjusted_max_risk *= _hc
+                    logger.info(
+                        "✂️ [v19.34.295 setup-haircut] %s sized at %.0f%% "
+                        "(SETUP_SIZE_HAIRCUTS).", setup_type, _hc * 100,
+                    )
+
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
         max_position_value = bot.risk_params.starting_capital * (bot.risk_params.max_position_pct / 100)
         max_shares_by_capital = int(max_position_value / entry_price)
@@ -1985,6 +2022,9 @@ class OpportunityEvaluator:
                 "cold_start_multiplier": round(cold_start_multiplier, 3),
                 "cold_start_applied": cold_start_applied,
                 "proven_outcomes": int(proven_outcomes) if proven_outcomes is not None else None,
+                # v19.34.295 — per-setup haircut provenance
+                "setup_haircut_multiplier": round(setup_haircut_multiplier, 3),
+                "setup_haircut_applied": setup_haircut_applied,
             })
         return shares, risk_amount
 
