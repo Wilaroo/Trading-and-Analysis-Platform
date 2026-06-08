@@ -1,3 +1,22 @@
+## 2026-06-08 — v19.34.299: Audit Phase 7 — remove dishonest legacy outcome writer — SHIPPED
+
+Patch: https://paste.rs/28bGu  Validated: 4/4 new pytest + 31/31 cross-file
+(v297/v298), router imports clean, ruff clean, git reverse-check. NO testing_agent.
+
+Deleted `EnhancedBackgroundScanner.record_alert_outcome` (enhanced_scanner.py
+2287-2377) + its sole caller `POST /stats/record-outcome` (routers/live_scanner.py
+317-339). The legacy writer was dishonest (non-idempotent insert, wrong
+split("_")[0] key, projected-R win fallback, −1R loss cap, double-EV) and polluted
+single-word setups (squeeze/orb). No autonomous caller. Honest capture lives in
+pnl_compute._record_alert_outcome_bestEffort + recompute_strategy_stats_for_setup.
+REGRESSION-GUARDED: the unrelated POST /api/ev/record-outcome (ev_tracking.py) is
+a DIFFERENT, legitimate route — left intact (test asserts it survives).
+
+Phase 7 re-audit correction: position_sizer.py / CircuitBreaker /
+market_scanner_service are NOT dead (live REST + collector wiring) — DEFERRED as
+post-forward-test consolidation, not deletion.
+
+
 ## 2026-06-08 — v19.34.298: Audit Phase 6 (L1+L2) — learning-store hygiene + coverage — SHIPPED
 
 Fixes the two Phase-6 ML-learning gaps. Validated via pytest (14/14 new + 37/37
