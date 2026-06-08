@@ -764,24 +764,17 @@ SETUP_REGISTRY: Dict[str, SetupConfig] = {
 
 # ==================== SMB ALIAS MAPPING ====================
 
-# Maps SMB original terminology to your implementation names
-SMB_SETUP_ALIASES: Dict[str, str] = {
-    "big_dawg": "big_dog",
-    "gap_and_go": "gap_give_go",
-    "bounce": "rubber_band",
-    "stuffed": "off_sides",
-    "scalp": "spencer_scalp",
-    "market_play": "hitchhiker",
-    "changing_fundamentals": "breaking_news",
-    "above_the_clouds": "hod_breakout",
-    "afternoon_to_light": "hod_breakout",
-    "back_through": "back_through_open",
-    "opening_range_breakout": "orb",
-}
+# Sourced from the SSOT alias table (services.setup_taxonomy.ALIASES) so the SMB
+# layer no longer keeps a second hand-maintained synonym map. This eliminates the
+# parallel-taxonomy drift flagged in the 2026-06 audit (pass 2). Maps SMB original
+# terminology to your implementation names. (T3, fork 2026-06)
+from services.setup_taxonomy import ALIASES as _SSOT_ALIASES
+
+SMB_SETUP_ALIASES: Dict[str, str] = dict(_SSOT_ALIASES)
 
 
 def resolve_setup_name(name: str) -> str:
-    """Resolve an alias to the canonical setup name"""
+    """Resolve an alias to the canonical setup name (SSOT-sourced alias table)."""
     return SMB_SETUP_ALIASES.get(name.lower(), name.lower())
 
 
