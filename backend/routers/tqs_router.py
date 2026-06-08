@@ -193,7 +193,13 @@ async def get_tqs_card_detail(
         "direction": rec.get("direction") or (detail.get("position") or {}).get("direction") or "long",
         "trade_style": rec.get("trade_style") or "",
         "breakdown": breakdown,
-        "weights": rec.get("tqs_weights") or tqs.WEIGHTS,
+        # v19.34.305 — when the persisted alert predates weight-capture (or it
+        # was stored empty), reconstruct the ACTUAL style-aware weights for this
+        # trade_style instead of falling back to the generic 25/25/15/20/15
+        # default (which mislabelled e.g. scalp setups that really used
+        # 30/35/5/20/10). Only the true weights are ever shown.
+        "weights": rec.get("tqs_weights")
+        or tqs._get_weights_for_style(rec.get("trade_style") or "intraday"),
         # folded-in context (previously separate badges)
         "catalyst_tag": rec.get("catalyst_tag") or "",
         "catalyst_summary": rec.get("catalyst_summary") or "",
@@ -207,10 +213,18 @@ async def get_tqs_card_detail(
         ss = db["strategy_stats"].find_one({"strategy": setup_type}) \
             or db["strategy_stats"].find_one({"setup_type": setup_type})
         if ss:
+            # v19.34.305 — unify the displayed EV onto the single realized-mean
+            # source (avg_r) so the card can never show a contradictory pair like
+            # "avg +0.01R" next to "Expected Value -0.13R". Prefer avg_r; fall
+            # back to the legacy decomposed fields only for not-yet-recomputed
+            # legacy docs.
+            _avg_r = ss.get("avg_r")
+            _ev = _avg_r if _avg_r is not None else (
+                ss.get("expected_value_r") or ss.get("genuine_ev_r"))
             detail["setup_perf"] = {
                 "win_rate": ss.get("win_rate"),
-                "expected_value_r": ss.get("expected_value_r") or ss.get("genuine_ev_r"),
-                "avg_r": ss.get("avg_r"),
+                "expected_value_r": _ev,
+                "avg_r": _avg_r if _avg_r is not None else ss.get("avg_rr_achieved"),
                 "sample_size": ss.get("sample_size") or ss.get("total_trades"),
             }
 

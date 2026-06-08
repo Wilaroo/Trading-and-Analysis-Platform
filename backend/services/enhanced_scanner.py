@@ -327,8 +327,13 @@ class StrategyStats:
         if losses_r:
             self.avg_loss_r = abs(sum(losses_r) / len(losses_r))
         
-        loss_rate = 1 - self.win_rate
-        self.expected_value_r = (self.win_rate * self.avg_win_r) - (loss_rate * self.avg_loss_r)
+        # v19.34.305 — EV is the realized expectancy of THIS r_outcomes sample.
+        # The decomposed `p_win*avg_win - p_loss*avg_loss` previously used
+        # self.win_rate (counted over ALL alerts_triggered) together with
+        # avg_win/avg_loss from the capped r_outcomes list — two different
+        # samples — so EV != mean(r_outcomes). Use the direct realized mean for
+        # an internally-consistent, artifact-free EV.
+        self.expected_value_r = sum(self.r_outcomes) / len(self.r_outcomes)
         
         # Track EV trend (rolling 20)
         self.ev_trend.append(self.expected_value_r)

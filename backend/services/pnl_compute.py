@@ -431,14 +431,22 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             if r is not None:
                 r_all.append(r)
 
-        r_out = r_all[-100:]
+        r_out = r_all[-100:]  # last-100 retained for storage only
         win_rate = (won / trig) if trig else 0.0
-        wins_r = [x for x in r_out if x > 0]
-        losses_r = [x for x in r_out if x <= 0]
+        # v19.34.305 — EV must be the realized expectancy of the SAME sample the
+        # win_rate is measured over. The legacy code mixed full-sample win_rate
+        # with last-100 avg_win/avg_loss, so EV diverged from the realized mean
+        # (e.g. -0.13R "Expected Value" vs +0.01R "avg_r" on the same card). Use
+        # the FULL window sample (r_all) for both, which makes EV == mean(R) and
+        # eliminates the contradiction. avg_win_r/avg_loss_r are also computed on
+        # the full sample for display consistency.
+        n_all = len(r_all)
+        wins_r = [x for x in r_all if x > 0]
+        losses_r = [x for x in r_all if x <= 0]
         avg_win_r = (sum(wins_r) / len(wins_r)) if wins_r else 0.0
         avg_loss_r = abs(sum(losses_r) / len(losses_r)) if losses_r else 1.0
-        ev = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r) if len(r_out) >= 5 else 0.0
-        avg_rr = (sum(r_out) / len(r_out)) if r_out else 0.0
+        avg_rr = (sum(r_all) / n_all) if n_all else 0.0
+        ev = avg_rr if n_all >= 5 else 0.0  # realized expectancy == mean(R)
         profit_factor = (
             (sum(wins_r) / abs(sum(losses_r)))
             if losses_r and sum(losses_r) != 0 else 0.0
@@ -453,6 +461,12 @@ def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> 
             "win_rate": round(win_rate, 4),
             "profit_factor": round(profit_factor, 3),
             "avg_rr_achieved": round(avg_rr, 3),
+            # v19.34.305 — expose the realized mean + sample size under the field
+            # names the TQS card-detail / drill-down read, so the displayed EV,
+            # avg_r and n all come from this one artifact-free recompute.
+            "avg_r": round(avg_rr, 4),
+            "sample_size": trig,
+            "total_trades": trig,
             "r_outcomes": [round(x, 4) for x in r_out],
             "avg_win_r": round(avg_win_r, 4),
             "avg_loss_r": round(avg_loss_r, 4),
