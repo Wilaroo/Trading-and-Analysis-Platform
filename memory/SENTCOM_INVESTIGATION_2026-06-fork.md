@@ -146,7 +146,23 @@ REMEDIATION PRIORITY (proposed):
   Script: scripts/refresh_regime_expectancy.py (--preview-only / --set-mode active|shadow).
   short(30d)/mid(90d)/all-time means stored DISPLAY-ONLY (diag) for edge-decay eyeballing.
   Tunables signed off by operator: HARD=-0.50, SOFT=-0.10, MIN_EFF_N=25, half-life 60d.
+  (SOFT later raised to -0.12 per operator after reviewing the live 1,522-trade table —
+   protects breakeven rs_leader_break/squeeze|long at ~-0.10; enforced set = 4 REDUCE,
+   0 SKIP. patch UbtCz.)
 
-REMAINING: T4 frontend reads /api/sentcom/taxonomy (kill stale tradeStyleMeta.js).
-  Pending user-side: rotate Atlas pwd; apply v304 tape-momentum patch (paste.rs/nq4TJ);
+- T4 frontend SSOT alignment — patch ag41A. DONE. tradeStyleMeta.js already fetched
+  /api/sentcom/taxonomy (initTaxonomyStyles → _dynamicStyleMap wins over static
+  SETUP_TO_STYLE). T4 hardened it: (1) fixed real static drift vs SSOT (tidal_wave
+  scalp→intraday, breakdown_confirmed multi_day→intraday, added fading_bounce→scalp);
+  (2) made hydration observable (subscribeTaxonomy/getTaxonomyVersion + React hook
+  utils/useTaxonomy.js) and wired TradeStyleChip + OpenPositionsV5 so views re-render
+  the instant the SSOT map arrives (kills cold-start static-fallback staleness);
+  (3) committed taxonomy_ssot.snapshot.json + taxonomy_ssot_sync.smoke.js drift-guard
+  (static must agree with SSOT for all 68 overlapping setups). webpack compiled clean;
+  node smoke: 68/68 drift-guard + 38/38 resolveTradeStyle regression.
+  static SETUP_TO_STYLE intentionally kept as offline fallback (now drift-guarded).
+
+ALL TAXONOMY-UNIFICATION TASKS (T1-T6) COMPLETE. No parallel taxonomies remain.
+
+REMAINING / user-side: rotate Atlas pwd; apply v304 tape-momentum patch (paste.rs/nq4TJ);
   after a few days of T6 shadow logs look clean → flip to active (--set-mode active).

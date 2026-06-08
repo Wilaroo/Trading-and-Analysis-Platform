@@ -76,14 +76,14 @@ export const TRADE_STYLE_META = {
  * filled `trade_style` on the row. Mirrors `SETUP_REGISTRY` in
  * `services/smb_integration.py` v19.34.95.
  */
-const SETUP_TO_STYLE = {
+export const SETUP_TO_STYLE = {
   // ── SCALP (23)
   '9_ema_scalp': 'scalp', abc_scalp: 'scalp', backside: 'scalp', bella_fade: 'scalp',
   fashionably_late: 'scalp', first_move_down: 'scalp', first_move_up: 'scalp',
   gap_fade: 'scalp', gap_give_go: 'scalp', gap_pick_roll: 'scalp', hitchhiker: 'scalp',
   mean_reversion: 'scalp', off_sides: 'scalp', off_sides_short: 'scalp', puppy_dog: 'scalp',
   rubber_band: 'scalp', rubber_band_long: 'scalp', rubber_band_short: 'scalp',
-  second_chance: 'scalp', spencer_scalp: 'scalp', tidal_wave: 'scalp',
+  second_chance: 'scalp', spencer_scalp: 'scalp', fading_bounce: 'scalp',
   time_of_day_fade: 'scalp', volume_capitulation: 'scalp', vwap_fade: 'scalp',
   // ── INTRADAY (17)
   back_through_open: 'intraday', big_dog: 'intraday', breakdown: 'intraday',
@@ -93,9 +93,10 @@ const SETUP_TO_STYLE = {
   relative_strength: 'intraday', relative_weakness: 'intraday', squeeze: 'intraday',
   up_through_open: 'intraday', vwap_bounce: 'intraday', vwap_continuation: 'intraday',
   premarket_high_break: 'intraday', the_3_30_trade: 'intraday', bouncy_ball: 'intraday',
+  tidal_wave: 'intraday',                            // SSOT: momentum/breakout → intraday (was 'scalp')
   // ── SWING — pre-existing daily setups (multi_day) + v19.34.95 new (swing)
   base_breakout: 'swing',                            // v19.34.32 — re-mapped from 'position' (1-3 weeks is the realistic hold horizon)
-  breakdown_confirmed: 'multi_day',
+  breakdown_confirmed: 'intraday',                   // SSOT: breakdown family → intraday (was 'multi_day')
   daily_breakout: 'multi_day',
   daily_squeeze: 'multi_day',
   day_2_continuation: 'swing',
@@ -137,6 +138,28 @@ const SETUP_TO_STYLE = {
 let _dynamicStyleMap = {};
 let _taxonomyLoaded = false;
 
+// v19.34.272 (T4) — taxonomy hydration is observable so React views re-render
+// the moment the live SSOT map arrives (instead of being stuck on the static
+// fallback for the session). subscribeTaxonomy/getTaxonomyVersion are pure JS
+// (no React dep) so the node smoke test can import this file unchanged; the
+// `useTaxonomyVersion` React hook lives in utils/useTaxonomy.js.
+let _taxonomyVersion = 0;
+const _taxonomySubs = new Set();
+
+export const getTaxonomyVersion = () => _taxonomyVersion;
+
+export const subscribeTaxonomy = (fn) => {
+  _taxonomySubs.add(fn);
+  return () => _taxonomySubs.delete(fn);
+};
+
+const _notifyTaxonomy = () => {
+  _taxonomyVersion += 1;
+  _taxonomySubs.forEach((fn) => {
+    try { fn(_taxonomyVersion); } catch { /* ignore subscriber errors */ }
+  });
+};
+
 export const initTaxonomyStyles = async () => {
   if (_taxonomyLoaded) return _dynamicStyleMap;
   try {
@@ -152,6 +175,7 @@ export const initTaxonomyStyles = async () => {
     });
     _dynamicStyleMap = next;
     _taxonomyLoaded = true;
+    _notifyTaxonomy();  // tell subscribed views the SSOT map is live
   } catch {
     // Network/parse failure — silently keep the static fallback.
   }
