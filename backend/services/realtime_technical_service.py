@@ -412,6 +412,42 @@ class RealTimeTechnicalService:
         except Exception:
             return 1.0
 
+    def _filter_current_session(self, bars):
+        """v19.34.292 F5 — keep only intraday bars from the most recent session
+        (the trailing bar's ET calendar date) so VWAP / short EMAs / HOD-LOD
+        reflect ONLY the current session. The 78-bar by-recency window could
+        otherwise blend PRIOR sessions into 'today' (esp. pre-market / low-volume
+        days). ISO timestamps are converted UTC→ET before taking the date (so an
+        evening extended-hours bar past UTC-midnight isn't mis-bucketed); IB-format
+        'YYYYMMDD ...' already carries the ET trading date. Fail-open: returns the
+        input unchanged if dates can't be determined."""
+        if not bars or len(bars) < 2:
+            return bars
+        try:
+            from zoneinfo import ZoneInfo
+            _ET = ZoneInfo("America/New_York")
+
+            def _et_date(b):
+                ts = str(b.get("timestamp") or b.get("date") or "").strip().replace("/", "-")
+                if not ts:
+                    return ""
+                if "T" in ts:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt.astimezone(_ET).strftime("%Y-%m-%d")
+                if len(ts) >= 8 and ts[:8].isdigit():
+                    return f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+                return ts[:10]
+
+            latest_day = _et_date(bars[-1])
+            if not latest_day:
+                return bars
+            same = [b for b in bars if _et_date(b) == latest_day]
+            return same if same else bars
+        except Exception:
+            return bars
+
     def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
         """Try to get quote from IB pushed data (non-async)"""
         try:
@@ -459,7 +495,7 @@ class RealTimeTechnicalService:
     
     async def get_technical_snapshot(
         self, symbol: str, force_refresh: bool = False,
-        mongo_only: bool = False,
+        mongo_only: bool = False, max_age_sec: Optional[float] = None,
     ) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
@@ -484,11 +520,15 @@ class RealTimeTechnicalService:
         if not is_valid_ticker(symbol):
             return None
         
-        # Check cache
+        # Check cache. v19.34.291 F4: callers on the decision path pass a tighter
+        # `max_age_sec` so auto-exec never runs on a snapshot up to the global
+        # 120s TTL stale; other callers (e.g. bar-poll over 1000s of symbols)
+        # keep the default TTL to avoid a re-fetch storm.
+        effective_ttl = max_age_sec if max_age_sec is not None else self._cache_ttl
         if not force_refresh and symbol in self._cache:
             cached = self._cache[symbol]
             cache_age = (datetime.now(timezone.utc) - datetime.fromisoformat(cached.timestamp.replace('Z', '+00:00'))).total_seconds()
-            if cache_age < self._cache_ttl:
+            if cache_age < effective_ttl:
                 return cached
         
         try:
@@ -549,6 +589,10 @@ class RealTimeTechnicalService:
             
             # Calculate all indicators
             spy_change = await self._get_spy_change()
+            # v19.34.292 F5 — session-anchor: drop prior-session bars so VWAP /
+            # short EMAs / HOD-LOD reflect ONLY the current session (the 78-bar
+            # by-recency window could otherwise blend yesterday into 'today').
+            intraday_bars = self._filter_current_session(intraday_bars)
             snapshot = self._calculate_snapshot(
                 symbol=symbol,
                 current_price=current_price,
