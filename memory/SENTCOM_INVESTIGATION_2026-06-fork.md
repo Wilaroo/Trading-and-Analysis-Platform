@@ -95,3 +95,30 @@ are correct), THEN build the regime gate.
 diag_tft_real_baseline.py, diag_meta_labeler_freeze.py, diag_live_gate_decisions.py,
 diag_bot_trades_truth.py, diag_expectancy_clean.py, diag_setup_recency.py,
 diag_setup_x_regime.py, diag_family_x_regime.py, diag_taxonomy_coverage.py
+
+## TAXONOMY AUDIT PASSES 2-6 (static code analysis, complete)
+DELEGATE TO SSOT (good): trade_style_classifier (canonicalize), enhanced_scanner
+alerts (canonicalize+strategy_family), tqs/setup_quality, ev_tracking_service,
+learning_loop_service, setup_grading_service (canonicalize + is_edge_excluded).
+=> Pass 6 grading/EV is clean.
+
+DRIFT / PARALLEL TAXONOMIES:
+1. 🔴 confidence_gate.SETUP_TO_MODEL (line ~1017): hand map, NOT from ai_feature_family.
+   ACCUMULATION_ENTRY -> [REVERSAL, MEAN_REVERSION] but SSOT=TREND_CONTINUATION
+   (accumulation_entry is the +0.104R/100 WINNER -> scored by reversal model in
+   _get_model_consensus, line 1057). Also own ad-hoc base_setup via .replace("_LONG"...).
+   Scalps -> [SCALP] here vs MOMENTUM in SSOT (canonicalization-bug divergence).
+2. 🔴 smb_integration.SETUP_REGISTRY (68 setups) + SMB_SETUP_ALIASES: independent
+   registry w/ own category/direction/aliases; does NOT delegate to SSOT canonicalize.
+3. 🔴 market_setup_classifier.TRADE_ALIASES/TRADE_SETUP_MATRIX: own alias map.
+4. 🟡 frontend tradeStyleMeta.js: static mirror, does NOT fetch /api/sentcom/taxonomy.
+
+REMEDIATION PRIORITY (proposed):
+  P0 security (Atlas) + rotate.
+  T1 fix SSOT coverage bugs (scalp canon, relative_strength_*, multi-suffix) + unit test.
+  T2 make confidence_gate.SETUP_TO_MODEL derive from ai_feature_family (fixes
+     accumulation_entry mis-route) — highest signal-quality win.
+  T3 smb_integration + market_setup_classifier delegate aliasing to SSOT canonicalize.
+  T4 frontend reads /api/sentcom/taxonomy (or generate tradeStyleMeta.js from it).
+  T5 TFT baseline-persistence fix.
+  T6 data-driven per-setup x regime suppression gate (the bleeding fix).
