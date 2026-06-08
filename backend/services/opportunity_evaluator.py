@@ -1863,6 +1863,16 @@ class OpportunityEvaluator:
                     "sizing at %.0f%% (COLD_START_SIZE_MULT).",
                     symbol or "?", int(proven_outcomes), _cs_min, _cs_mult * 100,
                 )
+                # v19.34.296 — print() too: server.py has no logging.basicConfig
+                # so service-module logger.info() is dropped from /tmp/backend.log.
+                # print(flush=True) makes the haircut greppable (same pattern as
+                # the v123 kill-switch monitor).
+                print(
+                    f"🐣 [v19.34.294 cold-start] {symbol or '?'} — "
+                    f"{int(proven_outcomes)}/{_cs_min} proven outcomes; "
+                    f"sizing at {_cs_mult * 100:.0f}% (COLD_START_SIZE_MULT).",
+                    flush=True,
+                )
 
         # ── v19.34.295 — per-setup size haircut (operator throttle) ─────────
         # Reduce size on chronically underperforming / over-traded setups
@@ -1899,6 +1909,12 @@ class OpportunityEvaluator:
                     logger.info(
                         "✂️ [v19.34.295 setup-haircut] %s sized at %.0f%% "
                         "(SETUP_SIZE_HAIRCUTS).", setup_type, _hc * 100,
+                    )
+                    # v19.34.296 — print() too (see cold-start note above) so the
+                    # throttle is visible in /tmp/backend.log.
+                    print(
+                        f"✂️ [v19.34.295 setup-haircut] {setup_type} sized at "
+                        f"{_hc * 100:.0f}% (SETUP_SIZE_HAIRCUTS).", flush=True,
                     )
 
         max_shares_by_risk = int(adjusted_max_risk / risk_per_share)
