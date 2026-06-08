@@ -49,7 +49,10 @@ HALF_LIFE_DAYS = 60.0
 WINDOW_DAYS = 180
 MIN_EFF_N = 25.0          # minimum effective (weighted) sample to act on a cell
 HARD_R = -0.50            # weighted_mean_R <= this -> SKIP
-SOFT_R = -0.10            # weighted_mean_R <= this -> REDUCE
+SOFT_R = -0.12            # weighted_mean_R <= this -> REDUCE (was -0.10; raised to
+                          # -0.12 so breakeven/high-value cells at ~-0.10
+                          # (rs_leader_break, squeeze|long) are NOT trimmed —
+                          # operator sign-off, fork 2026-06)
 REDUCE_MULT = 0.4         # position multiplier applied on a soft suppression
 
 # Artifacts / non-edge rows excluded from expectancy.

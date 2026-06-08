@@ -134,6 +134,13 @@ class TestSuppressionDecision:
         cells = self._cells_with("s|long|BEAR<=45", SOFT_R, 40)
         assert decide_suppression(cells, "s", "long", "BEAR<=45")["action"] == "REDUCE"
 
+    def test_breakeven_cell_above_soft_not_reduced(self):
+        # -0.10 is shallower than SOFT (-0.12) -> must NOT be trimmed (protects
+        # rs_leader_break / squeeze|long which sit right at breakeven).
+        assert SOFT_R == -0.12
+        cells = self._cells_with("rs_leader_break|long|BULL>60", -0.10, 40)
+        assert decide_suppression(cells, "rs_leader_break", "long", "BULL>60")["action"] == "NONE"
+
 
 class _FakeRegime:
     """Minimal regime_engine stub returning a strong-bull score."""
