@@ -486,3 +486,12 @@ NEXT ML STEPS:
 ## Action item added 2026-06-05: GPU-torch swap (P2, own task)
 - torch is CPU build (2.10.0+cpu) while GPU works for XGBoost (CUDA enabled). CNN/deep-learning heads (P9 chart-pattern, P11 CNN-LSTM) train on CPU = slow.
 - TODO: swap to a CUDA-enabled torch + matching torchvision (aarch64/Spark GB10) so P9/P11 train on GPU (~5–10× faster). Careful stack change, do as isolated task with a backup of the working CPU torch+torchvision (0.25.0). Verify `torch.cuda.is_available()` + re-run tensor probe after.
+
+---
+## 2026-06-08 — A+B+C audit P1 batch (v19.34.308–310) — PATCH READY (operator-apply pending)
+Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
+- **A (v308)** IB-Gateway STARTUP hard-block probe: new `services/ib_boot_probe.py`, 30s grace poll of the IB execution feed; on fail → trips existing kill-switch (bot can't arm) + `/api/system/health` RED via new `ib_boot_probe` subsystem. Manual-reset by design.
+- **B (v309)** Fundamental absent-data → NEUTRAL 50 (was optimistic: inst→80/float→65/earnings→60). `tqs/fundamental_quality.py`.
+- **C (v310)** SMB: (C-1 always-on) persist `smb_5var_score` in `LiveAlert.to_dict()`; (C-2 env-gated `SMB_CHECKLIST_TIMEFRAME_AWARE`, DEFAULT OFF) timeframe-aware checklist thresholds + 50-SMA swing MTF confluence; (C-3 operator follow-up) drop the C→50 decompress via `TQS_SETUP_DECOMPRESS=false` after verifying real scores flow.
+- Tests: 11/11 new (test_v308/309/310) + v305/smb_profiles/l4c regression green. NO testing_agent (DGX mandate).
+- STILL PENDING (operator): rotate Atlas DB password (P0 security, old creds in git history).

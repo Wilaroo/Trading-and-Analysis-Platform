@@ -3880,6 +3880,20 @@ async def startup_event():
     except Exception as _e:
         print(f"[STARTUP] WARN: kill-switch restore failed: {_e}")
 
+    # v19.34.308 — IB-Gateway STARTUP health probe (HARD BLOCK).
+    # Polls the IB execution feed for a bounded grace window after boot;
+    # if it never comes up, TRIPS the kill-switch (bot cannot arm) and
+    # marks /api/system/health RED via the `ib_boot_probe` subsystem.
+    # Prevents the system from silently starting a trading session with
+    # no live data/execution feed. Runs as a background task so it never
+    # blocks startup.
+    try:
+        from services.ib_boot_probe import run_ib_boot_probe
+        asyncio.create_task(run_ib_boot_probe(grace_s=30.0, poll_s=2.0))
+        print("[STARTUP] v19.34.308 — IB-Gateway boot probe scheduled (30s grace, hard-block on fail).")
+    except Exception as _e:
+        print(f"[STARTUP] WARN: IB boot probe failed to schedule: {_e}")
+
     # v19.34.41 — Proactive Coach background loop.
     # Scans open trades every 60s and emits coachable-state suggestions
     # (move stop to BE, take partial at first target, trail past 2R,

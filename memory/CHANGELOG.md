@@ -1,3 +1,48 @@
+## 2026-06-08 — v19.34.308–310: IB boot hard-block probe (A) + fundamental absent→neutral-50 (B) + SMB timeframe-aware checklist & smb_5var persistence (C) — PATCH READY (user-apply pending)
+
+Consolidated patch covers v308/v309/v310. Validated: 11/11 new pytest
+(test_v308_ib_boot_probe, test_v309_fundamental_neutral, test_v310_smb_timeframe)
++ v305 setup/EV (2/2), smb_profiles (9/9), l4c health (4/4) regression green.
+py_compile/ast OK. NO testing_agent (DGX mandate). Failing test_tqs_engine.py
+cases are HTTP-integration (need live REACT_APP_BACKEND_URL) — operator validates on DGX.
+
+### v19.34.308 — IB-Gateway STARTUP health probe (HARD BLOCK)
+- NEW `services/ib_boot_probe.py`: polls the IB EXECUTION feed for a 30s grace
+  window after boot (ib_direct.is_connected() in direct mode; ib_service /
+  pusher-RPC reachable in pusher mode). On persistent failure → calls the
+  EXISTING public `trip_kill_switch("ib_gateway_boot_probe_failed: …")` (bot
+  cannot arm) AND flips `/api/system/health` RED via a new `ib_boot_probe`
+  subsystem. Manual-reset by design — operator resets the kill-switch once the
+  feed is confirmed live (re-arming without a human check is the silent-start
+  failure mode we prevent). NEVER patches the kill-switch loop (AGENTS.md §2.1).
+- Wired in server.py startup_event (background task, non-blocking) +
+  system_health_service `_check_ib_boot_probe` (pending/green report green
+  during grace; red only after a confirmed boot-fail).
+
+### v19.34.309 — Fundamental absent-data → NEUTRAL 50 (not optimistic)
+- `tqs/fundamental_quality.py`: pre-fix, absent institutional% defaulted to a
+  50% raw value that SCORED 80, absent float (100M)→65, absent earnings→60 — an
+  unearned ~57 fundamental-pillar baseline for symbols with NO data. Now each
+  genuinely-absent component (SI / float / institutional / earnings) is forced
+  to a neutral 50 AFTER scoring, so PRESENT data is scored exactly as before.
+  (Audit #3 recommendation (a).)
+
+### v19.34.310 — SMB timeframe-aware checklist + smb_5var_score persistence
+- C-1 (always-on, additive): `LiveAlert.to_dict()` now also emits
+  `smb_5var_score` (= smb_score_total) so the TQS batch path
+  (tqs_engine.batch_calculate, key `smb_5var_score`) stops defaulting to 25 →
+  no longer trips the C→50 decompress for alerts that DID compute a real score.
+- C-2 (env-gated `SMB_CHECKLIST_TIMEFRAME_AWARE`, DEFAULT OFF → identical legacy
+  behavior): `evaluate_smb_checklist(..., timeframe=...)`. When ON + swing/
+  position style: catalyst volume-spike bar 2.5→2.0, "In Play" RVOL bar
+  1.5→1.2, and a 50-SMA daily-confluence MTF check (VWAP/prev-close are
+  intraday concepts). Passed through from `_compute_smb_5var` via alert.trade_style.
+- C-3 (operator follow-up, NOT auto-applied): the blanket C→50 decompress
+  (`TQS_SETUP_DECOMPRESS`, setup_quality.py) stays ON. After verifying C-1/C-2
+  flow real scores on DGX, the operator can set `TQS_SETUP_DECOMPRESS=false`
+  to drop the band-aid. Left ON to avoid an unvalidated live scoring shift.
+
+
 ## 2026-06-09 — v19.34.302: EOD final-window force-flatten of BRACKETED sweep-misses — PATCH READY (user-apply pending)
 
 Patch: https://paste.rs/0bQwE (apply AFTER v301). Validated: 11/11 new pytest +

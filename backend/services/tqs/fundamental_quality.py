@@ -193,6 +193,18 @@ class FundamentalQualityService:
             except Exception as e:
                 logger.debug(f"Could not check earnings: {e}")
                 
+        # v19.34.309 — track which fundamental data points are genuinely
+        # ABSENT. Pre-fix, absent institutional% defaulted to a 50% raw
+        # value that SCORED 80, absent float (100M) scored 65, and absent
+        # earnings scored 60 — feeding the TQS fundamental pillar an
+        # optimistic ~57 baseline for symbols we have NO data on. Below we
+        # still set placeholder raw values (for display) but force each
+        # genuinely-absent component to a NEUTRAL 50, never optimistic.
+        _si_absent = short_interest_pct is None
+        _float_absent = float_shares is None
+        _inst_absent = institutional_pct is None
+        _earnings_absent = days_to_earnings is None
+
         # Use defaults
         short_interest_pct = short_interest_pct if short_interest_pct is not None else 5.0
         float_shares = float_shares if float_shares is not None else 100_000_000
@@ -342,6 +354,23 @@ class FundamentalQualityService:
         else:
             result.earnings_score = 60  # No earnings soon - neutral
             
+        # v19.34.309 — absent-data → NEUTRAL 50 (not optimistic). Applied
+        # AFTER per-component scoring so PRESENT data is scored exactly as
+        # before; only genuinely-absent inputs are neutralised. Without
+        # this, a symbol we have no fundamentals on scored inst=80,
+        # float=65, earnings=60 → an unearned ~57 pillar baseline.
+        if _si_absent:
+            result.short_interest_score = 50.0
+            result.factors.append("Short-interest data absent → neutral 50")
+        if _float_absent:
+            result.float_score = 50.0
+            result.factors.append("Float data absent → neutral 50")
+        if _inst_absent:
+            result.institutional_score = 50.0
+            result.factors.append("Institutional-ownership data absent → neutral 50")
+        if _earnings_absent:
+            result.earnings_score = 50.0
+
         # Calculate weighted total
         result.score = (
             result.catalyst_score * 0.30 +
