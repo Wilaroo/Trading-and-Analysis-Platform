@@ -23,6 +23,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── v19.34.301 — pusher-independent EOD naked-flatten guard helpers ──
+_PROTECTIVE_STOP_TYPES = {"STP", "STP LMT", "STOP", "STOP LIMIT", "TRAIL", "TRAIL LIMIT"}
+
+
+def _ib_position_is_naked(position: float, symbol: str, open_orders: list) -> bool:
+    """True when an IB position has NO working PROTECTIVE STOP at IB.
+
+    Protective = a STOP-family order on the EXIT side (SELL for a long, BUY for
+    a short). A plain limit target is NOT protection against adverse moves, so
+    it does not count. Pure / no I/O — unit-testable. (v19.34.301)
+    """
+    qty = float(position or 0)
+    if qty == 0:
+        return False  # flat — nothing to protect
+    sym = (symbol or "").upper()
+    exit_action = "SELL" if qty > 0 else "BUY"
+    for o in (open_orders or []):
+        if (o.get("symbol") or "").upper() != sym:
+            continue
+        if (o.get("action") or "").upper() != exit_action:
+            continue
+        otype = (o.get("order_type") or "").upper()
+        if otype in _PROTECTIVE_STOP_TYPES or (o.get("stop_price") or 0):
+            return False  # a protective stop exists
+    return True
+
+
 class PositionManager:
     """Manages open position updates, scale-outs, closes, and EOD."""
 
@@ -1146,6 +1173,121 @@ class PositionManager:
 
 
 
+    async def _eod_naked_flatten_guard(self, bot: 'TradingBotService') -> dict:
+        """v19.34.301 — pusher-INDEPENDENT EOD safety net.
+
+        From the RegT bracket cutoff (15:45 ET, when brackets can no longer be
+        (re)attached) until market close (16:00 ET), flatten any IB position that
+        has NO protective stop at IB — reading positions + working orders
+        **straight from ib_direct** (clientId=11), so it works even when the
+        Windows pusher is dead (exactly when `_naked_position_sweep` skips out via
+        PATCH E/F). Closes the overnight-naked gap and covers UNTRACKED orphans
+        that the tracked-only EOD close would miss (the MA 2026-06-08 class).
+
+        Policy per naked position:
+          • untracked orphan        → FLATTEN (stray, EOD would miss it)
+          • tracked close_at_eod=True (intraday) → FLATTEN (closing anyway)
+          • tracked close_at_eod=False (swing/position) → DO NOT flatten; raise a
+            HIGH-severity `naked_overnight_hold` alarm (needs a GTC stop, not a
+            forced exit).
+        Reversible via env EOD_NAKED_FLATTEN_GUARD (default ON). Throttled to
+        ~20s so it doesn't hammer IB every manage tick inside the window.
+        """
+        result = {"checked": 0, "naked": 0, "flattened": 0, "alarmed": 0, "skipped_reason": None}
+        import os as _os
+        if _os.environ.get("EOD_NAKED_FLATTEN_GUARD", "true").strip().lower() not in ("1", "true", "yes", "on"):
+            result["skipped_reason"] = "disabled"
+            return result
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        if now_et.weekday() >= 5:
+            result["skipped_reason"] = "weekend"
+            return result
+        # Window: past the RegT bracket cutoff (15:45) and before close (16:00).
+        if (now_et.hour, now_et.minute) < (15, 45) or now_et.hour >= 16:
+            result["skipped_reason"] = "outside_window"
+            return result
+        # Throttle — at most once per ~20s.
+        import time as _time
+        _last = getattr(bot, "_last_naked_guard_ts", 0.0)
+        if (_time.time() - _last) < 20.0:
+            result["skipped_reason"] = "throttled"
+            return result
+        bot._last_naked_guard_ts = _time.time()
+
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            svc = get_ib_direct_service()
+            if svc is None or not getattr(svc, "_connected", False):
+                result["skipped_reason"] = "ib_direct_unavailable"
+                return result
+            positions = await svc.get_positions() or []
+            open_orders = await svc.get_open_orders() or []
+        except Exception as e:
+            result["skipped_reason"] = f"ib_fetch_failed:{e}"
+            return result
+
+        # Map of bot-tracked open positions by symbol (for orphan + close_at_eod).
+        bot_open = {}
+        for t in (getattr(bot, "_open_trades", {}) or {}).values():
+            bot_open[(getattr(t, "symbol", "") or "").upper()] = t
+
+        for p in positions:
+            qty = float(p.get("position") or 0)
+            if qty == 0 or (p.get("sec_type") and p.get("sec_type") != "STK"):
+                continue
+            result["checked"] += 1
+            sym = (p.get("symbol") or "").upper()
+            if not _ib_position_is_naked(qty, sym, open_orders):
+                continue
+            result["naked"] += 1
+            tracked = bot_open.get(sym)
+            close_at_eod = bool(getattr(tracked, "close_at_eod", True)) if tracked else True
+            if tracked is not None and not close_at_eod:
+                # Intentional overnight hold gone naked — alarm, do NOT flatten.
+                result["alarmed"] += 1
+                try:
+                    bot._db["state_integrity_events"].insert_one({
+                        "event": "naked_overnight_hold", "severity": "high",
+                        "symbol": sym, "position": qty,
+                        "detail": ("swing/position hold is NAKED past the RegT cutoff and "
+                                   "cannot be re-bracketed today — operator must add a stop."),
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    pass
+                logger.error("[v19.34.301] NAKED overnight hold %s (%+.0f) — alarmed, not flattened.", sym, qty)
+                continue
+            # Untracked orphan OR intraday → flatten now via ib_direct.
+            action = "SELL" if qty > 0 else "BUY"
+            try:
+                res = await svc.place_market_order(sym, action, int(abs(qty)))
+                ok = bool(res.get("success"))
+            except Exception as fe:
+                ok = False
+                logger.error("[v19.34.301] flatten %s raised: %s", sym, fe)
+            if ok:
+                result["flattened"] += 1
+            kind = "untracked orphan" if tracked is None else "intraday"
+            logger.error(
+                "[v19.34.301] NAKED %s position %s (%+.0f) past cutoff → FLATTEN %s (%s)",
+                kind, sym, qty, "OK" if ok else "FAILED", action,
+            )
+            try:
+                bot._db["state_integrity_events"].insert_one({
+                    "event": "eod_naked_flatten", "severity": "high",
+                    "symbol": sym, "position": qty, "kind": kind,
+                    "flatten_ok": ok, "ts": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+        if result["naked"]:
+            logger.warning("[v19.34.301 naked-guard] %s", result)
+        return result
+
     async def check_eod_close(self, bot: 'TradingBotService'):
         """
         Close ALL open positions near market close (default: 3:55 PM ET).
@@ -1217,6 +1359,16 @@ class PositionManager:
             eod_hour = bot._eod_close_hour
             eod_minute = bot._eod_close_minute
             market_close_hour = 16
+
+        # ── v19.34.301 — pusher-independent naked-flatten guard. Runs from the
+        # RegT bracket cutoff (15:45 ET) — BEFORE the 15:55 EOD close — so a
+        # position that goes naked in the no-bracket window (incl. untracked
+        # orphans the tracked-only EOD close would miss) gets flattened rather
+        # than carried overnight unprotected. Has its own time/throttle gates.
+        try:
+            await self._eod_naked_flatten_guard(bot)
+        except Exception as _ng_err:
+            logger.error(f"v19.34.301 naked-flatten guard failed: {_ng_err}")
 
         # Not yet time to close
         if now_et.hour < eod_hour or (now_et.hour == eod_hour and now_et.minute < eod_minute):

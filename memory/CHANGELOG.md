@@ -1,3 +1,27 @@
+## 2026-06-08 — v19.34.301: pusher-independent EOD naked-flatten guard — SHIPPED
+
+Patch: https://paste.rs/QLjw4  Validated: 12/12 new pytest + 50/50 cross-file,
+AST/import OK, lint clean, git reverse-check. NO testing_agent (DGX mandate).
+
+INVESTIGATION (EOD pusher death): EOD closes go via ib_direct (clientId=11) so a
+dead pusher does NOT stop tracked closes. BUT a stale pusher disables naked-
+protection: _naked_position_sweep skips (PATCH E: snapshot >45s stale; PATCH F:
+direct-mode blind to ib_direct brackets), and _run_eod_orphan_sweep waits on a
+"fresh" pusher snapshot. Likely cause: 3:55 EOD order flood starves the async
+loop / IB Gateway paces both clients → DGX stops ingesting pushes → last_update
+stale. Archived logs don't reach Fri EOD; live capture needed via
+scripts/watch_pusher_eod.py (https://paste.rs/DEdVc, run 3:40–4:05pm ET).
+
+FIX: PositionManager._eod_naked_flatten_guard (called from check_eod_close before
+the 15:55 return, runs from 15:45 RegT cutoff). Reads positions+orders from
+ib_direct (pusher-independent); flattens any position with no protective stop —
+untracked orphan → flatten (MA class), intraday close_at_eod → flatten, swing
+close_at_eod=False → HIGH-sev naked_overnight_hold alarm (no forced exit). Pure
+predicate _ib_position_is_naked. Reversible EOD_NAKED_FLATTEN_GUARD (default ON),
+~20s throttle. Files: services/position_manager.py,
+tests/test_eod_naked_flatten_guard_v301.py.
+
+
 ## 2026-06-08 — v19.34.300: cancel-before-reap (naked-orphan fix) — SHIPPED
 
 Patch: https://paste.rs/7d5Az  Validated: 7/7 new pytest + 38/38 cross-file, AST/
