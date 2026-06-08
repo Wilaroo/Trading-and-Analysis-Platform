@@ -846,6 +846,17 @@ class EnhancedBackgroundScanner:
         # Dollar volume thresholds (preferred over share volume)
         self._min_dollar_vol_intraday = 50_000_000   # $50M for scalps/intraday
         self._min_dollar_vol_general = 10_000_000    # $10M for swing/day trades
+        # v19.34.297 — UNIVERSAL LIQUIDITY GATE. Enforced at alert EMISSION
+        # (_process_new_alert) so EVERY alert path — including the premarket
+        # ORB/gap generator which bypassed the per-setup intraday gate and let
+        # the illiquid DGCB scalp through — must prove its avg DOLLAR volume
+        # clears the canonical tier floor (intraday $50M / swing $10M /
+        # investment $2M). FAIL CLOSED: unprovable ADV (cache miss / 0) is
+        # rejected. Reversible via env (default ON). Known-liquid mega-caps/ETFs
+        # bypass so a transient cache miss can't block a legit signal.
+        self._universal_liquidity_gate_enabled = (
+            os.environ.get("SCANNER_UNIVERSAL_LIQUIDITY_GATE", "true").lower() == "true"
+        )
         # ATR% range
         self._min_atr_pct = 0.015   # 1.5% minimum
         self._max_atr_pct = 0.10    # 10% maximum
@@ -1602,6 +1613,113 @@ class EnhancedBackgroundScanner:
             )
         except Exception:
             pass
+
+    def _liquidity_tier_floor(self, alert) -> Tuple[str, int]:
+        """v19.34.297 — resolve the canonical avg-DOLLAR-volume floor an alert must
+        clear, keyed off its intended horizon. Prefer the explicit `scan_tier`;
+        otherwise infer from `trade_style`. Unknown → strictest (intraday $50M)."""
+        tier = str(getattr(alert, "scan_tier", "") or "").strip().lower()
+        if tier not in ("intraday", "swing", "investment"):
+            style = str(getattr(alert, "trade_style", "") or "").strip().lower()
+            if style in ("scalp", "intraday"):
+                tier = "intraday"
+            elif style in ("swing", "multi_day"):
+                tier = "swing"
+            elif style in ("position", "investment"):
+                tier = "investment"
+            else:
+                tier = "intraday"  # fail toward the strictest floor
+        floor = {
+            "intraday": self._min_adv_intraday,
+            "swing": self._min_adv_general,
+            "investment": self._min_adv_investment,
+        }.get(tier, self._min_adv_intraday)
+        return tier, int(floor)
+
+    async def _passes_universal_liquidity_gate(self, alert) -> bool:
+        """v19.34.297 — UNIVERSAL hard dollar-volume floor enforced at alert
+        emission. Closes the DGCB class of bug: the premarket ORB/gap generator
+        calls _process_new_alert directly, bypassing the per-setup intraday gate,
+        so a thin name with no volume proof slipped through.
+
+        FAIL CLOSED: a symbol whose avg dollar volume can't be proven (cache miss
+        / 0) is REJECTED. Known-liquid mega-caps/ETFs bypass. Reversible via
+        SCANNER_UNIVERSAL_LIQUIDITY_GATE=false. Drops land in `trade_drops`
+        (gate=universal_liquidity_gate) + a scanner thought for observability."""
+        try:
+            if not getattr(self, "_universal_liquidity_gate_enabled", True):
+                return True
+            symbol = (getattr(alert, "symbol", "") or "").upper()
+            if not symbol:
+                return True  # nothing to gate on; let downstream guards handle
+            # Known-liquid bypass (operator decision 2026-06-XX): a transient
+            # ADV cache miss on AAPL/SPY must not block a legit signal.
+            if symbol in self._known_liquid_symbols:
+                return True
+
+            tier, floor = self._liquidity_tier_floor(alert)
+
+            # Prove avg DOLLAR volume from the canonical pre-computed cache,
+            # then fall back to an on-the-fly ib_historical_data compute.
+            adv_dollar = 0
+            try:
+                adv_map = await self._get_adv_from_cache([symbol])
+                adv_dollar = int(adv_map.get(symbol, 0) or 0)
+            except Exception:
+                adv_dollar = 0
+            if adv_dollar <= 0:
+                # Fallback: shares × latest close from ib_historical_data.
+                try:
+                    share_adv = await self._fetch_single_adv(symbol)
+                    px = float(getattr(alert, "current_price", 0) or
+                               getattr(alert, "trigger_price", 0) or 0)
+                    if share_adv and px > 0:
+                        adv_dollar = int(share_adv * px)
+                except Exception:
+                    adv_dollar = 0
+
+            if adv_dollar >= floor:
+                return True
+
+            # REJECTED — record + narrate, then drop.
+            reason = (
+                f"liquidity floor: avg_dollar_vol "
+                f"{'unknown/0' if adv_dollar <= 0 else f'${adv_dollar:,}'} "
+                f"< {tier} floor ${floor:,}"
+            )
+            try:
+                from services.trade_drop_recorder import record_trade_drop
+                record_trade_drop(
+                    getattr(self, "db", None),
+                    gate="universal_liquidity_gate",
+                    symbol=symbol,
+                    setup_type=getattr(alert, "setup_type", None),
+                    direction=getattr(alert, "direction", "long") or "long",
+                    reason=reason,
+                    context={"tier": tier, "floor_usd": floor,
+                             "avg_dollar_volume": adv_dollar,
+                             "fail_closed": adv_dollar <= 0,
+                             "source": getattr(alert, "source", None)},
+                )
+            except Exception:
+                pass
+            try:
+                await self._emit_scanner_thought(
+                    symbol=symbol, kind="reject",
+                    text=f"💧 {symbol} {getattr(alert, 'setup_type', '?')} blocked — {reason}",
+                    setup_type=getattr(alert, "setup_type", None),
+                    direction=getattr(alert, "direction", None),
+                    filter="universal_liquidity_gate",
+                    tier=tier, floor_usd=floor, avg_dollar_volume=adv_dollar,
+                )
+            except Exception:
+                pass
+            return False
+        except Exception:
+            # Never let the gate itself crash the alert pipeline; fail OPEN on a
+            # gate bug (a crashed guard must not silently lock the scanner out).
+            return True
+
 
     async def _auto_execute_alert(self, alert: LiveAlert):
         """Auto-execute an alert through the trading bot"""
@@ -8073,6 +8191,12 @@ class EnhancedBackgroundScanner:
 
     async def _process_new_alert(self, alert: LiveAlert):
         """Process a new alert — enforces per-symbol dedup (max 1 active per symbol)"""
+        # v19.34.297 — UNIVERSAL LIQUIDITY GATE (first guard, before ANY processing).
+        # Every alert path funnels through here, including the premarket ORB/gap
+        # generator that bypassed the per-setup intraday gate (the DGCB illiquid
+        # scalp). Fail-closed: unprovable ADV is rejected.
+        if not await self._passes_universal_liquidity_gate(alert):
+            return
         # v19.34.292 Part 1 / v19.34.294 — stamp honest strategy metrics (outcomes /
         # EV / profit_factor, + win_rate when unset). Runs AFTER auto_execute_eligible
         # is decided upstream, so what auto-trades is UNCHANGED — it only makes the

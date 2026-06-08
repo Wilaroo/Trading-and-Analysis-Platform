@@ -100,6 +100,7 @@ KNOWN_GATES = {
     "watchlist_only_skip",      # alert from a watchlist-only setup (silent)
     "scanner_paused",           # scanner globally paused via guardrails
     "auto_exec_ineligible",     # v19.34.287 scanner auto-execute eligibility gate (priority/tape/win-rate)
+    "universal_liquidity_gate", # v19.34.297 avg-dollar-volume floor at alert emission (fail-closed)
 }
 
 
