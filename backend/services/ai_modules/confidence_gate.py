@@ -43,6 +43,65 @@ logger = logging.getLogger(__name__)
 # Maximum decisions to keep in memory
 MAX_DECISION_LOG = 200
 
+# Setup -> directional sub-model FAMILY routing for live consensus voting.
+# Keyed by CANONICAL setup names (setup_taxonomy.canonicalize). Hoisted to module
+# level so it is a single, testable source. resolve_model_bases() falls back to the
+# SSOT ai_feature_family() for any unmapped setup (previously fell back to the raw
+# name, which matched no trained models). The specialized VWAP/SCALP/ORB/GAP_AND_GO/
+# RANGE model families are kept here because the 5 coarse strategy families that
+# ai_feature_family() returns cannot express them. (T2, fork 2026-06)
+_SETUP_TO_MODEL = {
+    "VWAP_BOUNCE": ["VWAP"], "FIRST_VWAP_PULLBACK": ["VWAP"],
+    "VWAP_FADE": ["VWAP", "SHORT_VWAP"],
+    "SQUEEZE": ["BREAKOUT", "RANGE"], "BREAKOUT": ["BREAKOUT"],
+    "HOD_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
+    "APPROACHING_BREAKOUT": ["BREAKOUT"], "APPROACHING_HOD": ["BREAKOUT"],
+    "APPROACHING_RANGE_BREAK": ["RANGE", "BREAKOUT"],
+    "RANGE_BREAK": ["RANGE", "BREAKOUT"],
+    "RUBBER_BAND": ["MEAN_REVERSION"],
+    "MEAN_REVERSION": ["MEAN_REVERSION"],
+    "SECOND_CHANCE": ["TREND_CONTINUATION", "BREAKOUT"],
+    "FASHIONABLY_LATE": ["TREND_CONTINUATION"],
+    "OPENING_DRIVE": ["ORB", "MOMENTUM"], "ORB": ["ORB"],
+    "APPROACHING_ORB": ["ORB"],
+    "GAP_GIVE_GO": ["GAP_AND_GO"], "GAP_FADE": ["SHORT_GAP_FADE"],
+    "9_EMA_SCALP": ["SCALP"], "ABC_SCALP": ["SCALP"],
+    "SPENCER_SCALP": ["SCALP"], "PUPPY_DOG": ["SCALP"],
+    "BIG_DOG": ["MOMENTUM", "TREND_CONTINUATION"],
+    "TIDAL_WAVE": ["MOMENTUM", "BREAKOUT"],
+    "FADING_BOUNCE": ["MEAN_REVERSION", "REVERSAL"],
+    "HITCHHIKER": ["TREND_CONTINUATION"],
+    "VOLUME_CAPITULATION": ["REVERSAL", "MEAN_REVERSION"],
+    "BACKSIDE": ["REVERSAL", "SHORT_REVERSAL"],
+    "OFF_SIDES": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
+    "CHART_PATTERN": ["BREAKOUT", "RANGE"],
+    # Swing/Position setups map to broader model categories
+    "DAILY_SQUEEZE": ["BREAKOUT", "RANGE"],
+    "DAILY_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
+    "TREND_CONTINUATION": ["TREND_CONTINUATION", "MOMENTUM"],
+    "BASE_BREAKOUT": ["BREAKOUT", "TREND_CONTINUATION"],
+    "ACCUMULATION_ENTRY": ["REVERSAL", "MEAN_REVERSION"],
+    "RELATIVE_STRENGTH_POSITION": ["MOMENTUM", "TREND_CONTINUATION"],
+    "EARNINGS_MOMENTUM": ["MOMENTUM", "BREAKOUT"],
+    "SECTOR_ROTATION": ["MOMENTUM", "TREND_CONTINUATION"],
+    "BREAKDOWN": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
+    "GAP_FADE_DAILY": ["SHORT_GAP_FADE", "SHORT_VWAP"],
+    "SHORT_SQUEEZE_FADE": ["SHORT_SCALP", "REVERSAL"],
+}
+
+
+def resolve_model_bases(setup_type: str):
+    """Canonical setup -> directional sub-model family base names for consensus.
+
+    Uses the SSOT canonicalize() for the lookup key and falls back to the SSOT
+    ai_feature_family() for any unmapped setup. Keeps specialized VWAP/SCALP/ORB/
+    GAP_AND_GO/RANGE routing intact (those cannot be derived from the 5 coarse
+    strategy families).
+    """
+    from services.setup_taxonomy import canonicalize, ai_feature_family
+    key = canonicalize(setup_type).upper()
+    return _SETUP_TO_MODEL.get(key) or [ai_feature_family(setup_type)]
+
 
 class TradingMode:
     AGGRESSIVE = "aggressive"
@@ -1008,53 +1067,17 @@ class ConfidenceGate:
             return {"has_models": False, "summary": "No DB connection"}
 
         try:
-            # Determine which models are relevant to this setup
-            base_setup = setup_type.upper().replace("_LONG", "").replace("_SHORT", "")
+            # Determine which models are relevant to this setup. Routing now comes
+            # from the module-level _SETUP_TO_MODEL (canonical SSOT keys) with an
+            # ai_feature_family() fallback for unmapped setups.
+            from services.setup_taxonomy import canonicalize as _canon
+            base_setup = _canon(setup_type).upper()
             is_short = direction.lower() == "short" or "SHORT" in setup_type.upper()
-            
-            # Map scanner setup types → training model base names
-            # Scanner uses descriptive names; training uses canonical categories
-            SETUP_TO_MODEL = {
-                "VWAP_BOUNCE": ["VWAP"], "FIRST_VWAP_PULLBACK": ["VWAP"],
-                "VWAP_FADE": ["VWAP", "SHORT_VWAP"],
-                "SQUEEZE": ["BREAKOUT", "RANGE"], "BREAKOUT_CONFIRMED": ["BREAKOUT"],
-                "HOD_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
-                "APPROACHING_BREAKOUT": ["BREAKOUT"], "APPROACHING_HOD": ["BREAKOUT"],
-                "APPROACHING_RANGE_BREAK": ["RANGE", "BREAKOUT"],
-                "RANGE_BREAK_CONFIRMED": ["RANGE", "BREAKOUT"],
-                "RUBBER_BAND": ["MEAN_REVERSION"],
-                "MEAN_REVERSION": ["MEAN_REVERSION"],
-                "SECOND_CHANCE": ["TREND_CONTINUATION", "BREAKOUT"],
-                "FASHIONABLY_LATE": ["TREND_CONTINUATION"],
-                "OPENING_DRIVE": ["ORB", "MOMENTUM"], "ORB_LONG_CONFIRMED": ["ORB"],
-                "APPROACHING_ORB": ["ORB"],
-                "GAP_GIVE_GO": ["GAP_AND_GO"], "GAP_FADE": ["SHORT_GAP_FADE"],
-                "9_EMA_SCALP": ["SCALP"], "ABC_SCALP": ["SCALP"],
-                "SPENCER_SCALP": ["SCALP"], "PUPPY_DOG": ["SCALP"],
-                "BIG_DOG": ["MOMENTUM", "TREND_CONTINUATION"],
-                "TIDAL_WAVE": ["MOMENTUM", "BREAKOUT"],
-                "FADING_BOUNCE": ["MEAN_REVERSION", "REVERSAL"],
-                "HITCHHIKER": ["TREND_CONTINUATION"],
-                "VOLUME_CAPITULATION": ["REVERSAL", "MEAN_REVERSION"],
-                "BACKSIDE": ["REVERSAL", "SHORT_REVERSAL"],
-                "OFF_SIDES_SHORT": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
-                "CHART_PATTERN": ["BREAKOUT", "RANGE"],
-                # Swing/Position setups map to broader model categories
-                "DAILY_SQUEEZE": ["BREAKOUT", "RANGE"],
-                "DAILY_BREAKOUT": ["BREAKOUT", "MOMENTUM"],
-                "TREND_CONTINUATION": ["TREND_CONTINUATION", "MOMENTUM"],
-                "BASE_BREAKOUT": ["BREAKOUT", "TREND_CONTINUATION"],
-                "ACCUMULATION_ENTRY": ["REVERSAL", "MEAN_REVERSION"],
-                "RELATIVE_STRENGTH_POSITION": ["MOMENTUM", "TREND_CONTINUATION"],
-                "EARNINGS_MOMENTUM": ["MOMENTUM", "BREAKOUT"],
-                "SECTOR_ROTATION": ["MOMENTUM", "TREND_CONTINUATION"],
-                "BREAKDOWN_CONFIRMED": ["SHORT_BREAKDOWN", "SHORT_MOMENTUM"],
-                "GAP_FADE_DAILY": ["SHORT_GAP_FADE", "SHORT_VWAP"],
-                "SHORT_SQUEEZE_FADE": ["SHORT_SCALP", "REVERSAL"],
-            }
-            
-            # Get mapped model base names, fallback to the raw setup name
-            model_bases = SETUP_TO_MODEL.get(base_setup, [base_setup])
+
+            # Get mapped model base names; unmapped setups fall back to their SSOT
+            # ai_feature_family model (previously fell back to a raw name that
+            # matched no trained models).
+            model_bases = resolve_model_bases(setup_type)
             
             # Build TARGETED model search — only models that should vote
             relevant_patterns = []
