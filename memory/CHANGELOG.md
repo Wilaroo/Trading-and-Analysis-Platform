@@ -1,3 +1,27 @@
+## 2026-06-08 — v19.34.298: Audit Phase 6 (L1+L2) — learning-store hygiene + coverage — SHIPPED
+
+Fixes the two Phase-6 ML-learning gaps. Validated via pytest (14/14 new + 37/37
+cross-file with v294/v297, loop-safe) + lint + git reverse-check. NO testing_agent
+(DGX hardware mandate). Patch: https://paste.rs/PvWZH
+
+OPERATOR REQUIREMENT (2026-06-08): time-decay AND EOD closes MUST keep feeding the
+learning loop (to tune targets/stops/time-decay). Pinned by tests.
+
+L1 — close_trade's learning-loop call (`trade_outcomes` → AI confidence-gate
+     calibration + tilt) is now HYGIENE-GATED via the shared
+     `_record_learning_outcome`, using the same `classify_close` the EV feed uses.
+     Genuine (still learns): target/stop/trail/EOD/time-decay/sane external fills.
+     Excluded: phantom/reconciled/operator-flatten/instant-unwind/corrupt-R.
+     Reversible: LEARNING_HYGIENE_FILTER=false. Fail-OPEN on hygiene error.
+L2 — `_eod_close_one_fast` (BOT_EOD_PATH=v162) fed NEITHER outcome store; its
+     genuine branch now writes alert_outcomes (→ strategy_stats EV) AND feeds the
+     ML learning loop. (The 4 silent apply_close_pnl paths are all phantom
+     artifacts — correctly excluded from the ML store.)
+Files: services/position_manager.py (+_is_genuine_close_for_learning,
++_record_learning_outcome, close_trade gated, v162 EOD dual-store write),
+tests/test_learning_hygiene_and_coverage_v298.py (14 pytest).
+
+
 ## 2026-06-08 — v19.34.297: UNIVERSAL LIQUIDITY GATE at alert emission — SHIPPED
 
 Closes the DGCB illiquid-scalp bypass. Validated via pytest (13/13 new + 23/23
