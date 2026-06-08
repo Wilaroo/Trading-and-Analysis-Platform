@@ -41,11 +41,11 @@ def test_setup_win_rate_no_cliff_and_ev_authority():
             win_rate_override=win_rate, ev_r_override=ev_r)
 
     # 40%-win but POSITIVE EV (+0.8R) — must NOT be auto-zeroed on win rate.
-    pos = asyncio.get_event_loop().run_until_complete(_score(0.40, 0.8))
+    pos = asyncio.run(_score(0.40, 0.8))
     assert pos.win_rate_score > 0, "40% win must not score 0 (cliff removed)"
 
     # Same setup, NEGATIVE EV (-0.5R) — EV authority must grade it lower.
-    neg = asyncio.get_event_loop().run_until_complete(_score(0.40, -0.5))
+    neg = asyncio.run(_score(0.40, -0.5))
     assert neg.score < pos.score, (
         f"negative-EV setup ({neg.score:.1f}) should grade below "
         f"positive-EV ({pos.score:.1f})")
