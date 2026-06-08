@@ -2179,13 +2179,31 @@ class EnhancedBackgroundScanner:
             else:
                 imbalance_signal = TapeSignal.NEUTRAL
             
-            # Momentum signal from RVOL and price action
+            # Momentum signal from RVOL and price action.
+            # v19.34.304 — GRADUATED RVOL momentum. The old hard `rvol>=2.0` gate
+            # gave ZERO momentum credit to moderate-momentum intraday setups
+            # (second_chance / big_dog / bouncy_ball cluster at rvol ~1.4-1.9). With
+            # no L2 imbalance their tape_score never cleared the tight-spread +0.2,
+            # so the tape pillar stayed weak and they rarely confirmed. Now rvol in
+            # [1.5, 2.0) earns a HALF-strength momentum contribution (±0.15) while
+            # >=2.0 keeps FULL strength (±0.3) — backward-compatible for the
+            # already-passing >=2.0 setups. Exhaustion (flat on huge volume) keeps
+            # its >=5.0 semantics.
+            momentum_strength = 0.0
             if snapshot.rvol >= 2.0 and snapshot.dist_from_ema9 > 0:
                 momentum_signal = TapeSignal.MOMENTUM_UP
+                momentum_strength = 0.30
             elif snapshot.rvol >= 2.0 and snapshot.dist_from_ema9 < 0:
                 momentum_signal = TapeSignal.MOMENTUM_DOWN
+                momentum_strength = 0.30
             elif snapshot.rvol >= 5.0:
                 momentum_signal = TapeSignal.EXHAUSTION
+            elif snapshot.rvol >= 1.5 and snapshot.dist_from_ema9 > 0:
+                momentum_signal = TapeSignal.MOMENTUM_UP
+                momentum_strength = 0.15
+            elif snapshot.rvol >= 1.5 and snapshot.dist_from_ema9 < 0:
+                momentum_signal = TapeSignal.MOMENTUM_DOWN
+                momentum_strength = 0.15
             else:
                 momentum_signal = TapeSignal.NEUTRAL
             
@@ -2201,11 +2219,11 @@ class EnhancedBackgroundScanner:
             # Imbalance contribution
             tape_score += imbalance * 0.4  # -0.4 to +0.4
             
-            # Momentum contribution
+            # Momentum contribution (graduated by strength — see v19.34.304 above)
             if momentum_signal == TapeSignal.MOMENTUM_UP:
-                tape_score += 0.3
+                tape_score += momentum_strength
             elif momentum_signal == TapeSignal.MOMENTUM_DOWN:
-                tape_score -= 0.3
+                tape_score -= momentum_strength
             
             # Overall signal
             if tape_score > 0.3:
