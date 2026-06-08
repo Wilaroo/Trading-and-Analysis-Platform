@@ -387,6 +387,31 @@ class RealTimeTechnicalService:
         except Exception:
             return None
 
+    def _rth_time_fraction(self, today_bar: Optional[Dict] = None) -> float:
+        """v19.34.290 F1 — fraction of the RTH session elapsed (0..1], used to
+        de-bias intraday RVOL. Returns 1.0 (NO de-bias) before the open, after the
+        close, on error, OR when the 'today' daily bar is not actually today's ET
+        session — so a COMPLETE prior-day volume is never scaled up into a false
+        high RVOL (guards the F7 stale-today-bar case). Mirrors
+        ib_data_provider.calculate_rvol."""
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            if today_bar is not None:
+                ts = str(today_bar.get("timestamp") or "")[:10].replace("/", "-")
+                if len(ts) == 8 and ts.isdigit():
+                    ts = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+                if ts and ts != now_et.strftime("%Y-%m-%d"):
+                    return 1.0  # daily bar is a complete prior session
+            market_open = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+            market_close = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+            if now_et < market_open or now_et >= market_close:
+                return 1.0
+            minutes_since_open = (now_et - market_open).total_seconds() / 60.0
+            return max(min(minutes_since_open / 390.0, 1.0), 1.0 / 390.0)
+        except Exception:
+            return 1.0
+
     def _get_ib_quote(self, symbol: str) -> Optional[Dict]:
         """Try to get quote from IB pushed data (non-async)"""
         try:
@@ -591,8 +616,21 @@ class RealTimeTechnicalService:
             volumes = [bar["volume"] for bar in daily_bars[-21:-1]] if len(daily_bars) > 21 else [bar["volume"] for bar in daily_bars[:-1]]
             avg_volume = sum(volumes) / len(volumes) if volumes else daily_volume
             
-            # RVOL (Relative Volume)
-            rvol = daily_volume / avg_volume if avg_volume > 0 else 1.0
+            # RVOL — v19.34.290 F1: time-of-day-adjusted. `daily_volume` is the
+            # PARTIAL cumulative volume so far today; dividing it by a FULL-day
+            # 20-day average understated RVOL intraday (a 5x mover read ~0.3 at
+            # 10:00 ET) — and RVOL gates nearly every setup. Scale the baseline by
+            # the fraction of the session elapsed so RVOL means "vs the typical
+            # pace at THIS time of day". Env kill-switch SCANNER_TOD_RVOL=false
+            # reverts to the raw full-day ratio without a patch. Mirrors
+            # ib_data_provider.calculate_rvol.
+            import os as _os
+            if _os.environ.get("SCANNER_TOD_RVOL", "true").lower() in ("1", "true", "yes"):
+                _tf = self._rth_time_fraction(today)
+            else:
+                _tf = 1.0
+            _expected_vol = avg_volume * _tf
+            rvol = daily_volume / _expected_vol if _expected_vol > 0 else 1.0
             
             # Calculate ATR (14-period)
             atr = self._calculate_atr(daily_bars, 14)
