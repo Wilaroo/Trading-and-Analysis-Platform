@@ -96,7 +96,7 @@ class SafetyConfig:
     """Hot-patchable via PUT /api/safety/config. Defaults come from env."""
     max_daily_loss_usd: float = 500.0
     max_daily_loss_pct: float = 2.0   # of account equity; the stricter of usd/pct wins
-    max_positions: int = 5
+    max_positions: int = 25
     max_symbol_exposure_usd: float = 15000.0
     max_total_exposure_pct: float = 60.0   # of account equity
     max_quote_age_seconds: float = 10.0
@@ -107,7 +107,7 @@ class SafetyConfig:
         return cls(
             max_daily_loss_usd      = _env_float("SAFETY_MAX_DAILY_LOSS_USD", 500.0),
             max_daily_loss_pct      = _env_float("SAFETY_MAX_DAILY_LOSS_PCT", 2.0),
-            max_positions           = _env_int  ("SAFETY_MAX_POSITIONS", 5),
+            max_positions           = _env_int  ("SAFETY_MAX_POSITIONS", 25),
             max_symbol_exposure_usd = _env_float("SAFETY_MAX_SYMBOL_EXPOSURE_USD", 15000.0),
             max_total_exposure_pct  = _env_float("SAFETY_MAX_TOTAL_EXPOSURE_PCT", 60.0),
             max_quote_age_seconds   = _env_float("SAFETY_MAX_QUOTE_AGE_SEC", 10.0),

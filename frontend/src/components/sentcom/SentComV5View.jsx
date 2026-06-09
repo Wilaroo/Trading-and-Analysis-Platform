@@ -25,6 +25,7 @@ import { PipelineHUDV5 } from './panels/PipelineHUDV5';
 import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { TopMoversHeatmap } from './v5/TopMoversHeatmap';
+import { RegimeStrip } from './v5/RegimeStrip';
 import { OpsStatusCluster } from './v5/OpsStatusCluster';
 import { EdgePerformanceCluster } from './v5/EdgePerformanceCluster';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
@@ -589,6 +590,14 @@ export const SentComV5View = ({
         isOpen={inspectorOpen}
         onClose={() => setInspectorOpen(false)}
       />
+
+      {/* v316f — Multi-timeframe Regime band (full width). Reads
+          /api/market-regime/summary.multi_tf: 4 lanes (1D/1H/5m/1m),
+          context, long/short modes, $TICK internals, per-index +
+          divergence. Leads the status strip so market context reads first. */}
+      <PanelErrorBoundary label="regime-strip" compact>
+        <RegimeStrip />
+      </PanelErrorBoundary>
 
       {/* Phase 3 TopMoversTile + Pusher Heartbeat + Strategy Mix —
           collapsed into a single horizontal status strip 2026-04-28c

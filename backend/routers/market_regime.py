@@ -250,7 +250,11 @@ async def get_regime_summary():
                 "volume_vix": signal_blocks.get("volume_vix", {}).get("score", 0)
             },
             "recommendation": regime.get("recommendation"),
-            "last_updated": regime.get("last_updated")
+            "last_updated": regime.get("last_updated"),
+            # v316f — surface the multi-timeframe block so the Command
+            # Center RegimeStrip can render 4 lanes + context + per-direction
+            # modes + TICK internals + per-index/divergence without a 2nd call.
+            "multi_tf": regime.get("multi_tf"),
         }
     except Exception as e:
         raise HTTPException(500, f"Error getting summary: {str(e)}")

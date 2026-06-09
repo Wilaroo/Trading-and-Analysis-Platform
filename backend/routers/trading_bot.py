@@ -1948,7 +1948,7 @@ async def llm_rules():
         success: true,
         equity: <float>,                  # net liquidation from /api/ib/account/summary
         risk_per_trade_cap: <float>,      # max(0.01 × equity, $2,500)
-        position_count_cap: <int>,        # max(10, floor(equity / $25K))
+        position_count_cap: <int>,        # max(25, floor(equity / $25K))
         daily_loss_budget: <float>,       # 0.01 × equity (positive number)
         position_concentration_cap_pct: 15,
         rr_min: 1.5,
@@ -1983,7 +1983,7 @@ async def llm_rules():
 
         # Compute the equity-tied caps (mirror v19.34.63 system-prompt formulas).
         risk_cap = max(0.01 * equity, 2500.0) if equity > 0 else 2500.0
-        position_cap = max(10, int(equity // 25000)) if equity > 0 else 10
+        position_cap = max(25, int(equity // 25000)) if equity > 0 else 25
         daily_loss_budget = round(0.01 * equity, 2) if equity > 0 else 0.0
 
         # Live position-count.

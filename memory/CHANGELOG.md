@@ -1,3 +1,45 @@
+## 2026-06-09 — v316f: Command Center RegimeStrip + position-cap unify(25) + slashed-zero font — PATCH READY (user-apply pending)
+
+Patch: https://paste.rs/iagua  (`curl -s https://paste.rs/iagua | git apply` → restart backend + `yarn build`).
+Validated in container: AST OK, 24/24 multi_tf tests, 82/83 safety+risk tests
+(the 1 fail = pre-existing v311 weekend-buffer test in backfill_readiness_service.py,
+NOT touched here — still the unapplied paste.rs/L2rc2 patch). NO testing_agent (DGX mandate).
+
+### Scope (6 files, 245+/5-)
+- **RegimeStrip.jsx** (NEW) — full-width Command Center band off
+  `/api/market-regime/summary.multi_tf`: CONTEXT headline + tf_alignment, 4 lanes
+  (1D/1H/5m/1m bias+score), LONG/SHORT mode chips, $TICK internals (+ BUY/SELL
+  CLIMAX flag), per-index SPY/QQQ/IWM intraday chips, divergence pills. Degrades
+  gracefully (UNKNOWN/— when intraday bars cold). 30s refresh. data-testids:
+  regime-strip / regime-context / regime-lane-{1d,1h,5m,1m} / regime-mode-{long,short}
+  / regime-internals / regime-index-{spy,qqq,iwm} / regime-divergence.
+- **SentComV5View.jsx** — import + render RegimeStrip (PanelErrorBoundary) above the
+  status strip so market context leads.
+- **routers/market_regime.py** — `/summary` now surfaces `multi_tf` (1 call, no 2nd fetch).
+- **services/safety_guardrails.py** — kill-switch `max_positions` 5 → 25 (dataclass
+  default + `SAFETY_MAX_POSITIONS` env default). Confirmed live: sources.safety 5→25.
+- **routers/trading_bot.py** — LLMRules advisory `position_count_cap` floor max(10,…)
+  → max(25,…) so the HUD pill stops showing the legacy 10.
+- **index.css** — `.font-mono-data` gains `font-feature-settings: "zero" 1, "tnum" 1`
+  (slashed zero — operator misread CLOSE TODAY "0" as "8").
+
+### ⚠ OPERATOR ACTION REQUIRED to actually reach cap=25
+Effective cap = min(safety, bot). After this patch safety=25, but the bot's
+Mongo-persisted `bot_state.risk_params.max_open_positions` is still **10** (the
+2026-05-29 revert). Confirmed live in container: effective stayed 10.
+Fix (sticks synchronously since v19.34.180):
+  `curl -s -X PUT http://localhost:8001/api/trading-bot/risk-params -H 'Content-Type: application/json' -d '{"max_open_positions":25}'`
+Then `python scripts/diag_risk_truth.py` should print effective=25.
+
+### Still pending (operator reminders, unchanged)
+- 🔴 Rotate Atlas DB password (P0, old creds in git history).
+- 🟡 Retrain tonight: TB_PT_MULT=1.5 / TB_SL_MULT=1.0 in backend/.env.
+- 🟡 Apply v311 Monday-freshness buffer: `curl -s https://paste.rs/L2rc2 | git apply`.
+
+### Next: HUD diagnostic-chip reorg (Task 2 — 6 core pinned + Ops-Status popover + Guardrails cluster).
+
+---
+
 ## 2026-06-09 — v316d: Multi-index regime (SPY/QQQ/IWM) + TICK internals — PATCH READY (user-apply pending)
 
 Answers "is regime SPY-only?": the new multi_tf lanes WERE SPY-only; now blended.

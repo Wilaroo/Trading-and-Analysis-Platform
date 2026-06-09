@@ -369,6 +369,9 @@ body {
 .font-mono-data {
   font-family: 'JetBrains Mono', monospace;
   font-variant-numeric: tabular-nums;
+  /* Slashed zero so "0" never reads as "8" on dense HUD tiles
+     (operator misread CLOSE TODAY "0" as "8"). */
+  font-feature-settings: "zero" 1, "tnum" 1;
 }
 
 /* Editorial font for newsletter */
