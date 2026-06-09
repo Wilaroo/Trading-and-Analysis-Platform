@@ -58,6 +58,50 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 
+_XGB_DEVICE = None
+
+
+def _xgb_device() -> str:
+    """v19.34.312 — pick the XGBoost compute device by PROBING its CUDA
+    runtime once, then cache it.
+
+    torch is a CPU-only build on the Spark DGX and XGBoost cannot see the
+    Blackwell GPU inside the training subprocess (`cudaErrorNoDevice`). The
+    direction-predictor params used to HARDCODE `device='cuda'`, so EVERY
+    model in the generic/setup/short/etc. phases died instead of falling back
+    to CPU — wiping out the trade-driving models. Probe once, fall back to
+    CPU on any failure. Honors an explicit `XGB_DEVICE=cpu|cuda` override.
+    """
+    global _XGB_DEVICE
+    if _XGB_DEVICE is not None:
+        return _XGB_DEVICE
+    import os
+    override = (os.environ.get("XGB_DEVICE") or "").strip().lower()
+    if override in ("cpu", "cuda"):
+        _XGB_DEVICE = override
+        logger.info(f"[XGB] device pinned via XGB_DEVICE={override}")
+        return _XGB_DEVICE
+    try:
+        import numpy as _np
+        import xgboost as _xgb
+        _dm = _xgb.DMatrix(
+            _np.zeros((9, 3), dtype=_np.float32),
+            label=_np.array([0, 1, 2, 0, 1, 2, 0, 1, 2], dtype=_np.float32),
+        )
+        _xgb.train(
+            {"tree_method": "hist", "device": "cuda", "objective": "multi:softprob",
+             "num_class": 3, "max_depth": 2, "verbosity": 0},
+            _dm, num_boost_round=1,
+        )
+        _XGB_DEVICE = "cuda"
+        logger.info("[XGB] CUDA probe OK -> device=cuda")
+    except Exception as _e:
+        _XGB_DEVICE = "cpu"
+        logger.warning(f"[XGB] CUDA unavailable ({str(_e)[:140]}) -> device=cpu (models will train on CPU)")
+    return _XGB_DEVICE
+
+
+
 class TimeSeriesAIService:
     """
     High-level service for time-series AI predictions.
@@ -1166,13 +1210,16 @@ class TimeSeriesAIService:
             )
             dval = xgb.DMatrix(X_val, label=y_val, feature_names=feature_names)
 
-            # XGBoost GPU parameters — multiclass for 3-class triple-barrier targets.
+            # XGBoost device — PROBED at runtime (CPU fallback). Hardcoding
+            # 'cuda' made every model die with cudaErrorNoDevice on the Spark
+            # DGX (torch is CPU-only; XGBoost can't see the GPU here). See
+            # _xgb_device(). v19.34.312.
             xgb_params = {
                 'objective': 'multi:softprob',
                 'num_class': 3,
                 'eval_metric': 'mlogloss',
                 'tree_method': 'hist',
-                'device': 'cuda',
+                'device': _xgb_device(),
                 'max_depth': 8,
                 'learning_rate': 0.05,
                 'colsample_bytree': 0.8,
