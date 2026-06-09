@@ -22,7 +22,7 @@ import api from '../../../utils/api';
 
 const POLL_MS = 30000;
 
-export const BracketReaperPill = () => {
+export const BracketReaperPill = ({ onStatus }) => {
   const [stats, setStats] = useState({
     reaper_events_today: 0,
     reverse_positions_today: 0,
@@ -71,6 +71,9 @@ export const BracketReaperPill = () => {
   const hasReverse = stats.reverse_positions_today > 0;
   const hasReaper = stats.reaper_events_today > 0;
   const isClean = !hasReverse && !hasReaper;
+  useEffect(() => {
+    onStatus?.(hasReverse ? 'red' : hasReaper ? 'amber' : 'green');
+  }, [onStatus, hasReverse, hasReaper]);
   const palette = hasReverse
     ? 'text-rose-300 border-rose-500/40 bg-rose-900/15'
     : hasReaper

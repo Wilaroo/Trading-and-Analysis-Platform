@@ -106,7 +106,7 @@ const formatPct = (n) => {
   return `${Math.round(n)}%`;
 };
 
-export const ScannerQualityPanel = () => {
+export const ScannerQualityPanel = ({ onStatus }) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -142,10 +142,28 @@ export const ScannerQualityPanel = () => {
   const byReason = data?.by_reason || [];
   const byCategory = data?.by_category || {};
 
+  // v316e — honest display. The score's denominator is ONLY scanner-
+  // attributable signals (accepted + scanner_quality rejections); the
+  // huge `scanner_signals` count is mostly watchlist-only (Other) drops
+  // that by design don't penalise. Showing `0% · 0/19372` read like a
+  // total outage. When there are no scanner-attributable signals yet,
+  // render a neutral IDLE state instead of an alarming red 0%.
+  const scannerQualityRej = byCategory.scanner_quality ?? 0;
+  const scorableDenom = (totals.accepted || 0) + scannerQualityRej;
+  const isIdle = scorableDenom === 0;
+
   // Top 3 reasons for compact pill display
   const topReasons = useMemo(() => byReason.slice(0, 3), [byReason]);
 
-  const pillClass = BUCKET_COLOR[bucket] || BUCKET_COLOR.excellent;
+  const pillClass = isIdle
+    ? 'bg-zinc-700/20 text-zinc-300 border-zinc-700/50'
+    : (BUCKET_COLOR[bucket] || BUCKET_COLOR.excellent);
+
+  useEffect(() => {
+    if (!data) { onStatus?.('unknown'); return; }
+    if (isIdle) { onStatus?.('green'); return; }
+    onStatus?.(bucket === 'poor' ? 'red' : bucket === 'fair' ? 'amber' : 'green');
+  }, [onStatus, data, isIdle, bucket]);
 
   // Hover tooltip (multi-line; same convention as PortfolioHealthPill)
   const tooltip = useMemo(() => {
@@ -204,10 +222,10 @@ export const ScannerQualityPanel = () => {
           data-testid="scanner-quality-panel-label"
           className="font-semibold uppercase tracking-wide"
         >
-          SIGNAL PASS {formatPct(scorePct)}
+          SIGNAL PASS {isIdle ? '· IDLE' : formatPct(scorePct)}
         </span>
         <span className="text-zinc-400 v5-mono">
-          {totals.accepted}/{totals.scanner_signals}
+          {isIdle ? 'no signals yet' : `${totals.accepted}/${scorableDenom}`}
         </span>
         {topReasons.length > 0 && (
           <span

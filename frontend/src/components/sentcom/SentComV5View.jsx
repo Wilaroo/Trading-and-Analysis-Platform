@@ -24,7 +24,9 @@ import { PipelineHUDV5 } from './panels/PipelineHUDV5';
 
 import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
-import { TopMoversTile } from './v5/TopMoversTile';
+import { TopMoversHeatmap } from './v5/TopMoversHeatmap';
+import { OpsStatusCluster } from './v5/OpsStatusCluster';
+import { EdgePerformanceCluster } from './v5/EdgePerformanceCluster';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
 import { DeepFeedV5 } from './v5/DeepFeedV5';
 import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
@@ -41,13 +43,7 @@ import TqsDrillDownDrawer from './v5/TqsDrillDownDrawer';
 import MLFeatureAuditPanel from './v5/MLFeatureAuditPanel';
 import CpuReliefBadge from './v5/CpuReliefBadge';
 import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQuotesPillV5, AccountGuardChipV5, ScannerPauseToggleV5, IbLiveChipV5, ScannerPausedBannerV5 } from './v5/SafetyV5';
-import { PusherHeartbeatTile } from './v5/PusherHeartbeatTile';
-import { PortfolioHealthPill } from './v5/PortfolioHealthPill';
-import { ScannerQualityPanel } from './v5/ScannerQualityPanel';
-// v19.34.161 — Per-style P&L card (Scalp / Intraday / Swing / Investment / Position).
-import { PnLByStyleCard } from './v5/PnLByStyleCard';
-import { StrategyMixCard } from './v5/StrategyMixCard';
-import { ShadowVsRealTile } from './v5/ShadowVsRealTile';
+// v316e — Pusher/Portfolio/Scanner-quality tiles now bundled in OpsStatusCluster.
 import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
 import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
@@ -55,9 +51,7 @@ import { ConnectivityCheck } from './v5/ConnectivityCheck';
 import { ScannerCoverageAuditPanel } from './v5/ScannerCoverageAuditPanel';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { EodPreviewBanner } from './v5/EodPreviewBanner';
-import { CostBasisSyncTile } from './v5/CostBasisSyncTile';
-import { BracketReaperPill } from './v5/BracketReaperPill';
-import { PositionTruthDiffPill } from './v5/PositionTruthDiffPill';
+// v316e — Cost-Basis/Bracket-Reaper/Position-Truth-Diff tiles now bundled in OpsStatusCluster.
 // v19.30.11 (2026-05-01) — high-priority system alerts (pusher dead 30s+,
 // mongo down, etc.) with explicit operator action guidance. Goes ABOVE
 // PusherDeadBanner because it's broader (covers all critical subsystems
@@ -606,35 +600,14 @@ export const SentComV5View = ({
         data-testid="sentcom-v5-status-strip"
         className="flex items-stretch flex-wrap border-b border-zinc-800 divide-x divide-zinc-800"
       >
-        <PanelErrorBoundary label="top-movers" compact>
-          <TopMoversTile onSelectSymbol={handleOpenTicker} className="flex-1 min-w-[420px]" />
+        <PanelErrorBoundary label="top-movers-heatmap" compact>
+          <TopMoversHeatmap onSelectSymbol={handleOpenTicker} className="flex-1 min-w-[420px]" />
         </PanelErrorBoundary>
-        <PanelErrorBoundary label="pusher-heartbeat" compact>
-          <PusherHeartbeatTile />
+        <PanelErrorBoundary label="ops-status" compact>
+          <OpsStatusCluster />
         </PanelErrorBoundary>
-        <PanelErrorBoundary label="portfolio-health" compact>
-          <PortfolioHealthPill />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="scanner-quality" compact>
-          <ScannerQualityPanel />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="pnl-by-style" compact>
-          <PnLByStyleCard />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="cost-basis-sync" compact>
-          <CostBasisSyncTile />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="bracket-reaper" compact>
-          <BracketReaperPill />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="position-truth-diff" compact>
-          <PositionTruthDiffPill />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="strategy-mix" compact>
-          <StrategyMixCard />
-        </PanelErrorBoundary>
-        <PanelErrorBoundary label="shadow-vs-real" compact>
-          <ShadowVsRealTile />
+        <PanelErrorBoundary label="edge-performance" compact>
+          <EdgePerformanceCluster />
         </PanelErrorBoundary>
       </div>
 

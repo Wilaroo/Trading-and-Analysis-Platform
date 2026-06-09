@@ -18,7 +18,7 @@
  *
  * 2026-02-13 v19.34.150b
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Activity } from 'lucide-react';
 import { usePortfolioHealth } from '../../../hooks/usePortfolioHealth';
 
@@ -36,8 +36,12 @@ const LABEL = {
   unknown: 'PORTFOLIO ?',
 };
 
-export const PortfolioHealthPill = () => {
+export const PortfolioHealthPill = ({ onStatus }) => {
   const data = usePortfolioHealth();
+  const _health = data?.health;
+  useEffect(() => {
+    onStatus?.(['green', 'amber', 'red'].includes(_health) ? _health : 'unknown');
+  }, [onStatus, _health]);
   if (!data) return null;
 
   const health = data.health || 'unknown';

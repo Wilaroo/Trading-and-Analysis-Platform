@@ -24370,3 +24370,39 @@ diag_confidence_gate_autopsy.py, diag_intraday_quality_tape.py, diag_dl_accuracy
 recompute_all_strategy_stats.py, backfill_blended_r_v306.py, diag_fundamental_smb_sources.py,
 diag_dl_training_pipeline.py
 
+
+## v316e — Command Center status-strip consolidation (UI, 2026-06-09)
+Goal: free the cramped 10-tile status strip for the upcoming Regime Strip by
+unifying tiles into two named clusters, per operator decisions.
+
+NEW components (frontend/src/components/sentcom/v5/):
+- OpsStatusCluster.jsx — "Ops Status" chip with worst-of dot; popover groups the
+  6 ops tiles under Data Feed / Execution Integrity / Signal Funnel. Safety
+  canaries (Position-Truth-Diff drift, Bracket reverse-at-IB) escalate to a loud
+  red badge even when collapsed. Children stay mounted (display:none) so they keep
+  polling + reporting health via a new optional `onStatus` prop.
+- EdgePerformanceCluster.jsx — "Edge & Performance" chip; popover stacks
+  PnL-by-Style + Strategy Mix + Shadow-vs-Real.
+- TopMoversHeatmap.jsx — replaces TopMoversTile: compact 1-row clickable heatmap
+  (green↔red by |change_pct|, clamped ±3%), fed by /api/live/briefing-top-movers.
+
+MODIFIED:
+- SentComV5View.jsx — status strip now renders Heatmap + OpsStatusCluster +
+  EdgePerformanceCluster (10 tiles → 2 clusters + heatmap). Removed now-unused imports.
+- 6 tiles gained optional `onStatus(status)` reporting (green/amber/red/unknown):
+  PusherHeartbeatTile, PortfolioHealthPill, CostBasisSyncTile, BracketReaperPill,
+  PositionTruthDiffPill, ScannerQualityPanel.
+
+BUG FIXES (in this pass):
+- ScannerQualityPanel: stop showing alarming "0% · 0/19372". Denominator is now the
+  scorable set (accepted + scanner_quality rejections); when zero → neutral
+  "SIGNAL PASS · IDLE / no signals yet" instead of red 0%.
+- PositionTruthDiffPill: switched from safeGet (no timeout) to fetch + AbortController
+  with a hard 4s client timeout so a stalled IB socket can't pile up the 5s poll.
+
+Verification (fork container, no live IB): frontend compiled (warnings only,
+pre-existing); all cluster data-testids mount without crash. Live visual/data
+verification deferred to DGX. Delivered as patch https://paste.rs/R8bjK.
+
+NEXT: build the full-width multi_tf Regime Strip into the freed status-strip band.
+Open: font 0-vs-8 fix (operator hasn't picked slashed-zero vs IBM Plex Mono yet).

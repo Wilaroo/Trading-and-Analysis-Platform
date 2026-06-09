@@ -19,7 +19,7 @@
  * If the backend hasn't been updated yet (heartbeat block missing), the
  * tile gracefully degrades to "—" placeholders without errors.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Activity, Zap, Clock, Send, BarChart3 } from 'lucide-react';
 import { usePusherHealth } from '../../../hooks/usePusherHealth';
 
@@ -47,8 +47,12 @@ const RATE_LABEL = {
   no_pushes: 'no pushes',
 };
 
-export const PusherHeartbeatTile = () => {
+export const PusherHeartbeatTile = ({ onStatus }) => {
   const data = usePusherHealth();
+  const _health = data?.health;
+  useEffect(() => {
+    onStatus?.(['green', 'amber', 'red'].includes(_health) ? _health : 'unknown');
+  }, [onStatus, _health]);
   if (!data) return null;
 
   const palette = HEALTH_COLOR[data.health] || HEALTH_COLOR.unknown;
