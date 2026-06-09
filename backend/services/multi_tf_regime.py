@@ -7,8 +7,8 @@ isolated from data-fetching so it is fully unit-testable with injected bars.
 Lanes (per the agreed design):
   LONG  (anchor)  — daily   — 20 SMA / 50 SMA / 200 SMA + price structure
   MID             — 1 hour  — 20 EMA / 50 EMA + structure
-  SHORT           — 5 mins  — 9 EMA / 21 EMA + structure   (21 EMA per operator)
-  MICRO (trigger) — 1 min   — 9 EMA / 21 EMA + structure
+  SHORT           — 5 mins  — 9 EMA / 21 EMA + VWAP   (21 EMA + VWAP per operator)
+  MICRO (trigger) — 1 min   — 9 EMA / 21 EMA + VWAP
 
 Each lane -> 0-100 score -> bias (UP >=60 / DOWN <=40 / NEUTRAL otherwise).
 Intraday lanes are blended (MID 0.5 / SHORT 0.3 / MICRO 0.2, renormalized over
@@ -80,6 +80,22 @@ def _ohlc(bars: List[Dict]):
     return closes, highs, lows
 
 
+def _vwap(bars: List[Dict]) -> float:
+    """Volume-weighted average price over the provided bar window (rolling).
+    Typical price = (H+L+C)/3. Falls back to last close when volume is absent."""
+    num = den = 0.0
+    for b in bars:
+        h = b.get("high", b.get("h", 0))
+        l = b.get("low", b.get("l", 0))
+        c = b.get("close", b.get("c", 0))
+        v = b.get("volume", b.get("v", 0)) or 0
+        num += ((h + l + c) / 3) * v
+        den += v
+    if den:
+        return num / den
+    return bars[-1].get("close", bars[-1].get("c", 0)) if bars else 0.0
+
+
 def lane_bias(score: Optional[float]) -> str:
     if score is None:
         return "UNKNOWN"
@@ -106,8 +122,13 @@ def score_long_lane(daily_bars: List[Dict]) -> Optional[float]:
     return round(s, 1)
 
 
-def score_intraday_lane(bars: List[Dict], fast: int = 9, slow: int = 21) -> Optional[float]:
-    """Intraday lane — fast/slow EMA + structure (short/micro use 9/21 EMA)."""
+def score_intraday_lane(bars: List[Dict], fast: int = 9, slow: int = 21,
+                        use_vwap: bool = False) -> Optional[float]:
+    """Intraday lane — fast/slow EMA + (VWAP for short/micro, else structure).
+
+    SHORT (5m) and MICRO (1m) use VWAP as the 4th component (operator spec:
+    "VWAP, EMA9/21"); MID (1h) keeps structure since session VWAP is less
+    meaningful across multi-day 1h bars."""
     if not bars or len(bars) < slow:
         return None
     closes, highs, lows = _ohlc(bars)
@@ -117,7 +138,10 @@ def score_intraday_lane(bars: List[Dict], fast: int = 9, slow: int = 21) -> Opti
     s += _band(p, ef, 30)       # price vs fast EMA
     s += _band(p, es, 25)       # price vs slow EMA
     s += _band(ef, es, 15)      # fast vs slow EMA alignment
-    s += _structure(highs[-20:], lows[-20:]) * 30 / 100
+    if use_vwap:
+        s += _band(p, _vwap(bars), 30)   # price vs VWAP
+    else:
+        s += _structure(highs[-20:], lows[-20:]) * 30 / 100
     return round(s, 1)
 
 

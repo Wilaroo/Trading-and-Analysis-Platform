@@ -64,6 +64,15 @@ def test_intraday_lane_insufficient_returns_none():
     assert score_intraday_lane(_ramp(100, 0.3, 10), slow=21) is None
 
 
+def test_intraday_lane_vwap_uptrend_and_downtrend():
+    # With VWAP enabled (short/micro spec), a rising tape ends above its
+    # rolling VWAP -> UP; a falling tape ends below -> DOWN.
+    up = score_intraday_lane(_ramp(100, 0.3, 60), fast=9, slow=21, use_vwap=True)
+    dn = score_intraday_lane(_ramp(100, -0.3, 60), fast=9, slow=21, use_vwap=True)
+    assert lane_bias(up) == "UP"
+    assert lane_bias(dn) == "DOWN"
+
+
 # --- intraday blend ---------------------------------------------------------
 def test_blend_intraday_weights_and_renorm():
     # mid 0.5, short 0.3, micro 0.2

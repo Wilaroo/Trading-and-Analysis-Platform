@@ -6,8 +6,8 @@ being averaged into a flat NEUTRAL → CAUTIOUS → no-trade. Fixes the operator
 core complaint (today's SPY tape: daily ▲67.8 vs intraday ▼ → frozen).
 
 ### Design (operator-approved)
-- 4 lanes, SPY-anchored: LONG 1d (20 SMA/50/200 + structure), MID 1h (20/50 EMA),
-  SHORT 5m (9/21 EMA), MICRO 1m (9/21 EMA). Operator spec: long=20 SMA, short=21 EMA.
+- 4 lanes, SPY-anchored: LONG 1d (20 SMA/50/200 + structure), MID 1h (20/50 EMA + structure),
+  SHORT 5m (9/21 EMA + VWAP), MICRO 1m (9/21 EMA + VWAP). Operator spec: long=20 SMA, short=21 EMA + VWAP.
 - Intraday blend MID .5 / SHORT .3 / MICRO .2 (renormalized). LONG anchor + intraday
   → CONTEXT: ALIGNED_UP / PULLBACK_IN_UPTREND / MIXED / BOUNCE_IN_DOWNTREND / ALIGNED_DOWN.
 - Context sets trading mode PER DIRECTION (long vs short scored separately):
@@ -29,7 +29,8 @@ core complaint (today's SPY tape: daily ▲67.8 vs intraday ▼ → frozen).
 - test_v315_engine_multi_tf_wiring.py (2): engine assembles PULLBACK; degrades w/o intraday.
 
 ### Delivery
-- Patch: https://paste.rs/NwroS  (`curl -s https://paste.rs/NwroS | git apply`)
+- Patch (full v314→v315 delta, verified clean on v314 tree): https://paste.rs/4GshD
+  (`curl -s https://paste.rs/4GshD | git apply`)
 - Needs intraday bars for full effect: run `backfill_regime_universe.py --intraday`
   (without intraday, context degrades to the daily anchor — safe).
 - Decision 1 = B: CAUTIOUS thresholds left strict (50/35) by design.

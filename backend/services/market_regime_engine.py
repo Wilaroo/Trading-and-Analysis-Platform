@@ -931,10 +931,11 @@ class MarketRegimeEngine:
             m1 = await self._get_tf_bars("SPY", "1 min", 120)
 
             long_s = score_long_lane(daily)
-            # Mid (1h) uses 20/50 EMA; short/micro use 9/21 EMA (operator spec).
-            mid_s = score_intraday_lane(h1, fast=20, slow=50)
-            short_s = score_intraday_lane(m5, fast=9, slow=21)
-            micro_s = score_intraday_lane(m1, fast=9, slow=21)
+            # Mid (1h) uses 20/50 EMA + structure. Short (5m) / micro (1m) use
+            # 9/21 EMA + VWAP (operator spec).
+            mid_s = score_intraday_lane(h1, fast=20, slow=50, use_vwap=False)
+            short_s = score_intraday_lane(m5, fast=9, slow=21, use_vwap=True)
+            micro_s = score_intraday_lane(m1, fast=9, slow=21, use_vwap=True)
             return build_multi_tf(long_s, mid_s, short_s, micro_s)
         except Exception as e:
             print(f"multi-tf calc error: {e}")
