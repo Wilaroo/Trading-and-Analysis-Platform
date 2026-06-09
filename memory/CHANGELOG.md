@@ -1,4 +1,6 @@
-## 2026-06-09 — v314: Market-regime data integrity (FTD dedup + breadth self.db) — PATCH READY (user-apply pending)
+## 2026-06-09 — v314: Market-regime data integrity (FTD dedup + breadth self.db) — ✅ VERIFIED LIVE ON DGX
+# Live verify (15:22 UTC): FTD count 25→2 HEALTHY (score 15→45); breadth real
+# (spy -2.58 / qqq -4.8 / iwm -3.55, full sector map); composite 48.4→52.9; 8/8 pytest.
 
 Fixes the two remaining v314 issues observed on the DGX live regime endpoint
 (`/api/market-regime/current`): FTD distribution_day_count stuck at 25/CRITICAL
