@@ -786,6 +786,78 @@ class IBDirectService:
             )
             return None
 
+    async def get_historical_data(
+        self,
+        symbol: str,
+        duration: str = "1 Y",
+        bar_size: str = "1 day",
+        what_to_show: str = "TRADES",
+        use_rth: bool = True,
+        timeout: float = 60.0,
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical bars over the LIVE ib_async socket (reqHistoricalDataAsync).
+
+        The legacy ib_service historical path is dead on this deploy (worker
+        disconnected), so IB-direct is the only working source. VIX is a CBOE
+        index — a Stock contract returns 0 bars, so it's qualified as
+        Index('VIX','CBOE'). Returns chronological [{date, open, high, low,
+        close, volume}, ...]; empty list on miss/not-subscribed/error.
+        """
+        if not self._connected or not self._ib:
+            return []
+        try:
+            from ib_async import Stock, Index
+        except ImportError:
+            return []
+        try:
+            sym_u = symbol.upper()
+            # Index / market-internals instruments need an IND contract on their
+            # native exchange — a Stock contract silently returns 0 bars.
+            _ALIAS = {
+                "TICK": "TICK-NYSE", "TICKQ": "TICK-NASD", "TICKA": "TICK-AMEX",
+                "TRIN": "TRIN-NYSE", "TRINQ": "TRIN-NASD",
+            }
+            _INDEX = {
+                "VIX": ("VIX", "CBOE"),
+                "TICK-NYSE": ("TICK-NYSE", "NYSE"),
+                "TICK-NASD": ("TICK-NASD", "NASDAQ"),
+                "TICK-AMEX": ("TICK-AMEX", "AMEX"),
+                "TRIN-NYSE": ("TRIN-NYSE", "NYSE"),
+                "TRIN-NASD": ("TRIN-NASD", "NASDAQ"),
+                "AD-NYSE": ("AD-NYSE", "NYSE"),
+            }
+            sym_u = _ALIAS.get(sym_u, sym_u)
+            if sym_u in _INDEX:
+                isym, iexch = _INDEX[sym_u]
+                contract = Index(isym, iexch)
+            else:
+                contract = Stock(sym_u, "SMART", "USD")
+            qualified = await self._ib.qualifyContractsAsync(contract)
+            if not qualified:
+                return []
+            bars = await asyncio.wait_for(
+                self._ib.reqHistoricalDataAsync(
+                    qualified[0], endDateTime="", durationStr=duration,
+                    barSizeSetting=bar_size, whatToShow=what_to_show,
+                    useRTH=use_rth, formatDate=1,
+                ),
+                timeout=timeout,
+            )
+            out = []
+            for b in (bars or []):
+                d = getattr(b, "date", None)
+                out.append({
+                    "date": d.isoformat() if hasattr(d, "isoformat") else str(d),
+                    "open": float(b.open), "high": float(b.high),
+                    "low": float(b.low), "close": float(b.close),
+                    "volume": float(getattr(b, "volume", 0) or 0),
+                })
+            return out
+        except Exception as exc:
+            logger.debug("[get_historical_data] %s %s/%s failed: %s",
+                         symbol, duration, bar_size, exc)
+            return []
+
 
 
     # ── v19.34.40 — Native MKT-close for EOD / manual / safety flatten ──

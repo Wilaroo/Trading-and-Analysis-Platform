@@ -25,6 +25,7 @@ import { PipelineHUDV5 } from './panels/PipelineHUDV5';
 import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { TopMoversHeatmap } from './v5/TopMoversHeatmap';
+import { RegimeStrip } from './v5/RegimeStrip';
 import { OpsStatusCluster } from './v5/OpsStatusCluster';
 import { EdgePerformanceCluster } from './v5/EdgePerformanceCluster';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
@@ -32,7 +33,6 @@ import { DeepFeedV5 } from './v5/DeepFeedV5';
 import { DayRollupBannerV5 } from './v5/DayRollupBannerV5';
 import { EodCountdownBannerV5 } from './v5/EodCountdownBannerV5';
 import { HealthChip } from './v5/HealthChip';
-import { BracketsPathPill } from './v5/BracketsPathPill';  // v19.34.28 L4b
 import { FreshnessInspector } from './v5/FreshnessInspector';
 import { CommandPalette } from './v5/CommandPalette';
 import { PanelErrorBoundary } from './v5/PanelErrorBoundary';
@@ -47,8 +47,6 @@ import { useSafety, SafetyBannerV5, FlattenAllButtonV5, SafetyHudChip, AwaitingQ
 import { DrawerSplitHandle, useDrawerSplit } from './v5/DrawerSplitHandle';
 import SentComIntelligencePanel from '../NIA/SentComIntelligencePanel';
 import { DeadLetterBadge } from './v5/DeadLetterBadge';
-import { ConnectivityCheck } from './v5/ConnectivityCheck';
-import { ScannerCoverageAuditPanel } from './v5/ScannerCoverageAuditPanel';
 import { PusherDeadBanner } from './v5/PusherDeadBanner';
 import { EodPreviewBanner } from './v5/EodPreviewBanner';
 // v316e — Cost-Basis/Bracket-Reaper/Position-Truth-Diff tiles now bundled in OpsStatusCluster.
@@ -63,18 +61,8 @@ import SystemBanner from './v5/SystemBanner';
 // confuse PAPER (amber) for LIVE (red) when switching IB accounts.
 // v19.34.39 (2026-05-07) — `AccountModeBadge` import removed. See note
 // at the chip-render site below for the consolidation rationale.
-// v19.31.14 (2026-05-04) — Boot-reconcile status pill. Self-hides
-// after 10 min, only renders when AUTO_RECONCILE_AT_BOOT ran.
-import BootReconcilePill from './v5/BootReconcilePill';
-import DriftGuardPill from './v5/DriftGuardPill';
-import CancelQueueSelfHealPill from './v5/CancelQueueSelfHealPill';
-import LLMRulesPill from './v5/LLMRulesPill';
-// v19.34.101 (Feb 2026) — Order-policy rulebook pill. Surfaces the live
-// per-style execution rulebook (TIF, scale-outs, trail anchor, EOD
-// behavior) from GET /api/trading-bot/order-policies so the operator
-// can audit at-a-glance what the bot WILL do for any horizon before
-// we wire the executor side in the next pass.
-import OrderPoliciesHelpPill from './v5/OrderPoliciesHelpPill';
+// v316h — BootReconcile/DriftGuard/CancelQueue/LLMRules/OrderPolicies
+// pills moved into the Ops Status + Edge & Performance popovers.
 import { LiveDataChip } from './v5/LiveDataChip';
 import { CarouselCountdownChip } from './v5/CarouselCountdownChip';
 import { useTickerModal } from '../../hooks/useTickerModal';
@@ -535,44 +523,15 @@ export const SentComV5View = ({
               <kbd className="font-bold text-zinc-400">⌘K</kbd>
               <span className="opacity-60">search</span>
             </button>
+            {/* v316h — HUD top strip trimmed to the 6 core "can I trust the
+                bot right now?" chips. The 6 pipeline-diagnostic chips moved
+                into the Ops Status popover; the 2 risk/policy chips moved into
+                the Edge & Performance popover (both in the status strip below).
+                Self-hiding event pills (boot-reconcile / drift-guard /
+                cancel-queue) now live in Ops Status too. */}
             <HealthChip onOpenInspector={() => setInspectorOpen(true)} />
-            <BracketsPathPill />
-            <ConnectivityCheck />
-            <ScannerCoverageAuditPanel />
-            {/* v19.34.13 (2026-05-06) — `<PusherHealthChip />` removed
-                here. Operator feedback after v19.34.12: the chip
-                duplicates the larger `<PusherHeartbeatTile />` panel
-                in the status strip below (line ~444). One source of
-                truth is enough; the heartbeat tile shows push rate +
-                RPC + last-push age in richer detail. */}
             <DeadLetterBadge />
             <FlattenAllButtonV5 safety={safety} inline />
-            {/* v19.34.39 (2026-05-07) — `<AccountModeBadge />` removed.
-                Its three unique features (SHADOW state, "next fill" mode
-                forecast, IB-connected indicator) were ported into
-                `<AccountGuardChipV5 />` so the HUD has ONE chip telling
-                the operator everything about account state. The guard
-                chip is the safety-enforcement-coupled chip — its color
-                directly mirrors whether the bot can fire (green/red) vs
-                halted (mismatch) vs standby (sky). */}
-            <BootReconcilePill />
-            {/* v19.34.55 — drift-guard saves pill (only renders when
-                skip_count_today > 0). Hover → recent skip list. */}
-            <DriftGuardPill />
-            {/* v19.34.65c — Cancel-queue self-heal pill. Renders only
-                when the v19.34.65 / v19.34.65b stale-drop guards have
-                fired ≥ 1 time this session. Each entry = one ended
-                IB cancel-loop. Hover for reason + recent breakdown. */}
-            <CancelQueueSelfHealPill />
-            {/* v19.34.64 — LLM rules pill: live equity-tied caps the
-                chat-AI enforces. 11/13 · risk $2.5K · DLP -0.4%. Hover
-                for full rules list + breach detection. */}
-            <LLMRulesPill />
-            {/* v19.34.101 — Per-style execution rulebook (TIF, scale-outs,
-                trail anchor, EOD behavior). Hover for the full 6-horizon
-                policy table. Single source of truth =
-                services/order_policy_registry.py. */}
-            <OrderPoliciesHelpPill />
             <AccountGuardChipV5 safety={safety} />
             {/* v19.34.27 — IB direct (clientId=11) brokerage-permission
                 chip. Distinguishes 'logged in elsewhere' / socket-down /
@@ -589,6 +548,14 @@ export const SentComV5View = ({
         isOpen={inspectorOpen}
         onClose={() => setInspectorOpen(false)}
       />
+
+      {/* v316f — Multi-timeframe Regime band (full width). Reads
+          /api/market-regime/summary.multi_tf: 4 lanes (1D/1H/5m/1m),
+          context, long/short modes, $TICK internals, per-index +
+          divergence. Leads the status strip so market context reads first. */}
+      <PanelErrorBoundary label="regime-strip" compact>
+        <RegimeStrip />
+      </PanelErrorBoundary>
 
       {/* Phase 3 TopMoversTile + Pusher Heartbeat + Strategy Mix —
           collapsed into a single horizontal status strip 2026-04-28c

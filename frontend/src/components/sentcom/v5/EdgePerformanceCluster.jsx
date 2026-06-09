@@ -17,6 +17,9 @@ import { TrendingUp, ChevronDown } from 'lucide-react';
 import { PnLByStyleCard } from './PnLByStyleCard';
 import { StrategyMixCard } from './StrategyMixCard';
 import { ShadowVsRealTile } from './ShadowVsRealTile';
+// v316h — risk/policy guardrail chips folded in from the HUD top strip.
+import LLMRulesPill from './LLMRulesPill';
+import OrderPoliciesHelpPill from './OrderPoliciesHelpPill';
 
 const Group = ({ title, children }) => (
   <div data-testid={`edge-group-${title.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -59,6 +62,12 @@ export const EdgePerformanceCluster = () => {
         <Group title="P&L by Style"><PnLByStyleCard /></Group>
         <Group title="Strategy Mix"><StrategyMixCard /></Group>
         <Group title="Shadow vs Real"><ShadowVsRealTile /></Group>
+        <Group title="Guardrails">
+          <div className="flex flex-wrap items-center gap-1.5 p-2">
+            <LLMRulesPill />
+            <OrderPoliciesHelpPill />
+          </div>
+        </Group>
       </div>
     </div>
   );

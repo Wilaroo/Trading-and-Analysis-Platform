@@ -135,8 +135,16 @@ def _adjusted_stale_days(tf: str, market_state: str) -> int:
     span multi-day windows that absorb a normal weekend gap).
     """
     base = STALE_DAYS.get(tf, 7)
-    if tf in ("1 day", "1 week"):
-        return base
+    # v19.34.311 — daily/weekly now ALSO get the weekend/overnight buffer.
+    # They were previously excluded on the (incorrect) assumption that their
+    # multi-day base thresholds already absorb a weekend. They don't: a
+    # Friday daily bar is the NEWEST bar that can exist until Monday's close
+    # is collected, yet by Monday evening it's already ~3.97 days old — which
+    # trips the hard 3-day daily threshold and false-flags EVERY Monday even
+    # on a perfectly-current dataset. Applying the same weekend(+3)/overnight
+    # (+1) buffer used for intraday fixes this across all timeframes. A real
+    # multi-day collection gap (> base + buffer) still flags, and the
+    # independent overall_freshness check remains a backstop.
     if market_state == "weekend":
         return base + 3
     if market_state == "overnight":
