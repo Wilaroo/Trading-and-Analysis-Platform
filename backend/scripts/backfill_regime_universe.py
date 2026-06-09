@@ -86,6 +86,8 @@ def _http_fetch(symbol, bar_size, duration):
 def _upsert_bars(coll, symbol, bar_size, bars):
     stored = 0
     for bar in bars:
+        if not isinstance(bar, dict):
+            continue  # some symbols (e.g. VIX index) can return non-dict rows
         d = bar.get("date") or bar.get("time")
         if not d:
             continue
