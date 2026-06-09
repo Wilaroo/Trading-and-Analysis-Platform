@@ -29,6 +29,48 @@ import math
 logger = logging.getLogger(__name__)
 
 
+def _safe_insert_result(col, doc: Dict) -> None:
+    """Insert a backtest-result document, trimming heavy raw-trade arrays if it
+    exceeds MongoDB's 16MB BSON limit.
+
+    Multi-strategy / market-wide results can accumulate hundreds of thousands of
+    per-trade dicts (observed 38MB), which raises "BSON document too large" and
+    silently loses the ENTIRE validation report (see Phase 4 batch-validation
+    failure). We keep all summary metrics and only cap the raw `trades` logs on
+    oversize docs.
+    """
+    if col is None:
+        return
+    try:
+        col.insert_one(doc)
+        return
+    except Exception as e:
+        if "too large" not in str(e).lower():
+            raise
+
+    def _cap_trades(d, limit):
+        if isinstance(d.get("trades"), list) and len(d["trades"]) > limit:
+            d["trades_truncated"] = len(d["trades"])
+            d["trades"] = d["trades"][:limit]
+        for sr in d.get("strategy_results", []) or []:
+            if isinstance(sr, dict) and isinstance(sr.get("trades"), list) and len(sr["trades"]) > limit:
+                sr["trades_truncated"] = len(sr["trades"])
+                sr["trades"] = sr["trades"][:limit]
+
+    logger.warning("[BACKTEST] Result doc exceeds BSON limit — trimming raw trade logs and retrying insert")
+    _cap_trades(doc, 200)
+    try:
+        col.insert_one(doc)
+        return
+    except Exception:
+        # Last resort: drop raw trade arrays entirely; all summary metrics survive.
+        doc.pop("trades", None)
+        for sr in doc.get("strategy_results", []) or []:
+            if isinstance(sr, dict):
+                sr.pop("trades", None)
+        col.insert_one(doc)
+
+
 # ============================================================================
 # Data Classes
 # ============================================================================
@@ -593,7 +635,7 @@ class AdvancedBacktestEngine:
         
         # Store in MongoDB
         if self._backtest_results_col is not None:
-            self._backtest_results_col.insert_one(result.to_dict())
+            _safe_insert_result(self._backtest_results_col, result.to_dict())
         
         return result
 
@@ -766,7 +808,7 @@ class AdvancedBacktestEngine:
         
         # Store result
         if self._backtest_results_col is not None:
-            self._backtest_results_col.insert_one(result.to_dict())
+            _safe_insert_result(self._backtest_results_col, result.to_dict())
         
         return result
 
@@ -956,7 +998,7 @@ class AdvancedBacktestEngine:
         
         # Store result
         if self._backtest_results_col is not None:
-            self._backtest_results_col.insert_one(result.to_dict())
+            _safe_insert_result(self._backtest_results_col, result.to_dict())
         
         return result
     

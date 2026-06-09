@@ -30,6 +30,14 @@ TFT_TIMEFRAMES = ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]
 FEATURES_PER_TF = 12  # Features extracted per timeframe
 TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 60
 
+# Triple-barrier hyperparameters (ATR multiples) — env-overridable via
+# TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD (single source: triple_barrier_config).
+from services.ai_modules.triple_barrier_config import (
+    DEFAULT_PT as TB_PT_MULT,
+    DEFAULT_SL as TB_SL_MULT,
+    DEFAULT_ATR_PERIOD as TB_ATR_PERIOD,
+)
+
 
 def _try_import_torch():
     try:
@@ -370,7 +378,7 @@ class TFTModel:
             from services.ai_modules.event_intervals import (
                 build_event_intervals_from_triple_barrier,
             )
-            atr_series = _atr(daily_highs, daily_lows, daily_closes, period=14)
+            atr_series = _atr(daily_highs, daily_lows, daily_closes, period=TB_ATR_PERIOD)
 
             # Build triple-barrier targets per usable feature row
             targets_raw = []
@@ -388,8 +396,8 @@ class TFTModel:
                 tb = triple_barrier_label_single(
                     daily_highs, daily_lows, daily_closes,
                     entry_idx=current_idx,
-                    pt_atr_mult=2.0,
-                    sl_atr_mult=1.0,
+                    pt_atr_mult=TB_PT_MULT,
+                    sl_atr_mult=TB_SL_MULT,
                     max_bars=5,  # 5-bar horizon matches prior design
                     atr_value=float(atr_val),
                 )
@@ -409,8 +417,8 @@ class TFTModel:
             local_intervals = build_event_intervals_from_triple_barrier(
                 daily_highs, daily_lows, daily_closes,
                 entry_indices=np.array(kept_entry_indices, dtype=np.int64),
-                pt_atr_mult=2.0, sl_atr_mult=1.0,
-                max_bars=5, atr_period=14,
+                pt_atr_mult=TB_PT_MULT, sl_atr_mult=TB_SL_MULT,
+                max_bars=5, atr_period=TB_ATR_PERIOD,
             )
             per_symbol_intervals.append(local_intervals)
             per_symbol_n_bars.append(int(len(daily_closes)))
@@ -718,10 +726,10 @@ class TFTModel:
             "device": str(self._device),
             "label_scheme": "triple_barrier_atr",
             "label_params": {
-                "pt_atr_mult": 2.0,
-                "sl_atr_mult": 1.0,
+                "pt_atr_mult": TB_PT_MULT,
+                "sl_atr_mult": TB_SL_MULT,
                 "max_bars": 5,
-                "atr_period": 14,
+                "atr_period": TB_ATR_PERIOD,
             },
             "class_weights": class_w_np.tolist(),
             "sample_weight_mean": float(sample_w_np.mean()) if len(sample_w_np) else 1.0,

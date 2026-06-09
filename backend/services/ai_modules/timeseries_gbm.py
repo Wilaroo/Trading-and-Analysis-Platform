@@ -32,6 +32,14 @@ from .timeseries_features import (
 
 logger = logging.getLogger(__name__)
 
+# Triple-barrier hyperparameters (ATR multiples) — env-overridable via
+# TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD (single source: triple_barrier_config).
+from .triple_barrier_config import (
+    DEFAULT_PT as TB_PT_MULT,
+    DEFAULT_SL as TB_SL_MULT,
+    DEFAULT_ATR_PERIOD as TB_ATR_PERIOD,
+)
+
 
 # Per-process flag-state log (fires exactly once per worker subprocess).
 _WORKER_FLAGS_LOGGED = False
@@ -67,7 +75,7 @@ def _extract_symbol_worker(args):
     """
     if len(args) == 4:
         symbol, bars, lookback, forecast_horizon = args
-        pt_mult, sl_mult, atr_period = 2.0, 1.0, 14
+        pt_mult, sl_mult, atr_period = TB_PT_MULT, TB_SL_MULT, TB_ATR_PERIOD
     elif len(args) == 7:
         symbol, bars, lookback, forecast_horizon, pt_mult, sl_mult, atr_period = args
     else:
@@ -773,10 +781,10 @@ class TimeSeriesGBM:
                     raw_labels = triple_barrier_labels(
                         highs_f, lows_f, closes_f,
                         entry_indices=entry_indices,
-                        pt_atr_mult=2.0,
-                        sl_atr_mult=1.0,
+                        pt_atr_mult=TB_PT_MULT,
+                        sl_atr_mult=TB_SL_MULT,
                         max_bars=self.forecast_horizon,
-                        atr_period=14,
+                        atr_period=TB_ATR_PERIOD,
                     )
                     symbol_targets_np = np.array(
                         [label_to_class_index(int(lbl)) for lbl in raw_labels],

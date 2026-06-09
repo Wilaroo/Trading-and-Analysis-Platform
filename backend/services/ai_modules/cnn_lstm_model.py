@@ -30,10 +30,14 @@ logger = logging.getLogger(__name__)
 SEQUENCE_LENGTH = 5  # Number of chart windows to look back
 DIRECTIONS = ["down", "flat", "up"]  # Triple-barrier class order: -1/0/+1
 
-# Triple-barrier hyperparameters (ATR multiples)
-TB_PT_MULT = 2.0   # 2 × ATR profit target
-TB_SL_MULT = 1.0   # 1 × ATR stop loss
-TB_ATR_PERIOD = 14  # Lookback for ATR estimation
+# Triple-barrier hyperparameters (ATR multiples) — env-overridable via
+# TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD. Single source of truth lives in
+# triple_barrier_config so every training path rebalances together.
+from services.ai_modules.triple_barrier_config import (
+    DEFAULT_PT as TB_PT_MULT,
+    DEFAULT_SL as TB_SL_MULT,
+    DEFAULT_ATR_PERIOD as TB_ATR_PERIOD,
+)
 
 
 def _try_import_torch():
