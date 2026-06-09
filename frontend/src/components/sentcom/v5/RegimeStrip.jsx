@@ -41,22 +41,32 @@ const MODE_TINT = {
   defensive: { fg: '#fda4af', bg: 'rgba(244,63,94,0.16)', label: 'DEFENSIVE' },
 };
 
-const LANE_LABELS = { long: '1D', mid: '1H', short: '5m', micro: '1m' };
+// Semantic horizon labels + the human-readable lookback span each lane
+// analyzes (derived from the engine's bar windows: 220 daily / 120 hourly /
+// 120×5m / 120×1m). Spans are easy to retune here without touching the engine.
+const LANE_META = {
+  long:  { term: 'LONG TERM',  span: '~1yr', tf: '1-day bars · 20/50/200 SMA' },
+  mid:   { term: 'MID TERM',   span: '~18d', tf: '1-hour bars · 20/50 EMA' },
+  short: { term: 'SHORT TERM', span: '~2d',  tf: '5-min bars · 9/21 EMA + VWAP' },
+  micro: { term: 'MICRO',      span: '~2h',  tf: '1-min bars · 9/21 EMA + VWAP' },
+};
 const fmtScore = (s) => (s == null || Number.isNaN(Number(s)) ? '—' : Number(s).toFixed(0));
 
 const Lane = ({ k, lane }) => {
   if (!lane) return null;
+  const m = LANE_META[k] || { term: k, span: '', tf: lane.timeframe };
   const t = biasTint(lane.bias);
   return (
     <div
-      data-testid={`regime-lane-${LANE_LABELS[k]?.toLowerCase()}`}
-      title={`${LANE_LABELS[k]} (${lane.timeframe}) · score ${fmtScore(lane.score)} · ${lane.bias}`}
-      className="flex flex-col items-center justify-center rounded px-2 py-0.5 min-w-[48px]"
+      data-testid={`regime-lane-${k}`}
+      title={`${m.term} · ${m.span} · ${m.tf} · score ${fmtScore(lane.score)} · ${lane.bias}`}
+      className="flex flex-col items-center justify-center rounded px-2 py-0.5 min-w-[64px]"
       style={{ backgroundColor: t.bg, color: t.fg }}
     >
-      <span className="v5-mono text-[10px] uppercase tracking-wide leading-tight opacity-80">
-        {LANE_LABELS[k]}
+      <span className="v5-mono text-[9px] uppercase tracking-wide leading-tight opacity-80 whitespace-nowrap">
+        {m.term}
       </span>
+      <span className="v5-mono text-[9px] leading-tight opacity-60">{m.span}</span>
       <span className="v5-mono text-[12px] font-bold leading-tight">
         {biasArrow(lane.bias)} {fmtScore(lane.score)}
       </span>
