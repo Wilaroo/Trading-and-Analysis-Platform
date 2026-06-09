@@ -24,6 +24,13 @@ import { PositionTruthDiffPill } from './PositionTruthDiffPill';
 import { BracketReaperPill } from './BracketReaperPill';
 import { CostBasisSyncTile } from './CostBasisSyncTile';
 import { ScannerQualityPanel } from './ScannerQualityPanel';
+// v316h — pipeline diagnostics folded in from the HUD top strip.
+import { BracketsPathPill } from './BracketsPathPill';
+import { ConnectivityCheck } from './ConnectivityCheck';
+import { ScannerCoverageAuditPanel } from './ScannerCoverageAuditPanel';
+import BootReconcilePill from './BootReconcilePill';
+import DriftGuardPill from './DriftGuardPill';
+import CancelQueueSelfHealPill from './CancelQueueSelfHealPill';
 
 const RANK = { red: 3, amber: 2, unknown: 1, green: 0 };
 const DOT = { red: 'bg-rose-500', amber: 'bg-amber-400', unknown: 'bg-zinc-500', green: 'bg-emerald-400' };
@@ -115,6 +122,16 @@ export const OpsStatusCluster = () => {
         </Group>
         <Group title="Signal Funnel">
           <ScannerQualityPanel onStatus={(s) => report('scanner', s)} />
+        </Group>
+        <Group title="Pipeline Diagnostics">
+          <div className="flex flex-wrap items-center gap-1.5 p-2">
+            <BracketsPathPill />
+            <ConnectivityCheck />
+            <ScannerCoverageAuditPanel />
+            <BootReconcilePill />
+            <DriftGuardPill />
+            <CancelQueueSelfHealPill />
+          </div>
         </Group>
       </div>
     </div>

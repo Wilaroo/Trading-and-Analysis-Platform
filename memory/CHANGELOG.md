@@ -1,3 +1,31 @@
+## 2026-06-09 — v316g: multi_tf ENGINE wiring + ib_direct historical — ✅ VERIFIED LIVE ON DGX
+
+ROOT CAUSE of the empty RegimeStrip during RTH: the v315/v316 *engine* code
+(`_calculate_multi_tf` + `_get_tf_bars` in market_regime_engine.py, and
+`get_historical_data` in ib_direct_service.py) never landed on the DGX — only the
+helper module `multi_tf_regime.py` had been applied. So `/api/market-regime/current`
+returned `multi_tf: null`, and the strip rendered the "daily-anchor only" degrade.
+
+- Patch https://paste.rs/cYsqy (engine +101/-1, ib_direct +72; built as
+  cf3f1ec7^..HEAD / d01d59f9^..HEAD deltas so it applies on the DGX's older tree).
+- LIVE VERIFY post-apply+restart: context=ALIGNED_UP; lanes long 64.9 / mid 51.9 /
+  short 88.8 / micro 65.0; internals(TICK) 64.8; per_index SPY 60.6 / QQQ 60.5 /
+  IWM 85.5. Health green 8/8. Strip now fully populates.
+
+## 2026-06-09 — v316h: HUD top-strip consolidation (declutter 14→6 chips) — PATCH PENDING
+
+Operator: "can we put some of these into Ops Status or Edge & Performance?" Reused
+the two existing status-strip popover clusters instead of new popovers.
+- CORE pinned in HUD (6): HealthChip, DeadLetterBadge, FlattenAllButtonV5,
+  AccountGuardChipV5, IbLiveChipV5, SafetyHudChip (+ ⌘K).
+- → Ops Status popover (new "Pipeline Diagnostics" group): BracketsPathPill,
+  ConnectivityCheck, ScannerCoverageAuditPanel, BootReconcilePill, DriftGuardPill,
+  CancelQueueSelfHealPill.
+- → Edge & Performance popover (new "Guardrails" group): LLMRulesPill,
+  OrderPoliciesHelpPill.
+
+---
+
 ## 2026-06-09 — v316f: Command Center RegimeStrip + position-cap unify(25) + slashed-zero font — PATCH READY (user-apply pending)
 
 Patch: https://paste.rs/iagua  (`curl -s https://paste.rs/iagua | git apply` → restart backend + `yarn build`).
