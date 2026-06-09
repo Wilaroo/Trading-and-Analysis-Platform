@@ -811,8 +811,25 @@ class IBDirectService:
             return []
         try:
             sym_u = symbol.upper()
-            if sym_u == "VIX":
-                contract = Index("VIX", "CBOE")
+            # Index / market-internals instruments need an IND contract on their
+            # native exchange — a Stock contract silently returns 0 bars.
+            _ALIAS = {
+                "TICK": "TICK-NYSE", "TICKQ": "TICK-NASD", "TICKA": "TICK-AMEX",
+                "TRIN": "TRIN-NYSE", "TRINQ": "TRIN-NASD",
+            }
+            _INDEX = {
+                "VIX": ("VIX", "CBOE"),
+                "TICK-NYSE": ("TICK-NYSE", "NYSE"),
+                "TICK-NASD": ("TICK-NASD", "NASDAQ"),
+                "TICK-AMEX": ("TICK-AMEX", "AMEX"),
+                "TRIN-NYSE": ("TRIN-NYSE", "NYSE"),
+                "TRIN-NASD": ("TRIN-NASD", "NASDAQ"),
+                "AD-NYSE": ("AD-NYSE", "NYSE"),
+            }
+            sym_u = _ALIAS.get(sym_u, sym_u)
+            if sym_u in _INDEX:
+                isym, iexch = _INDEX[sym_u]
+                contract = Index(isym, iexch)
             else:
                 contract = Stock(sym_u, "SMART", "USD")
             qualified = await self._ib.qualifyContractsAsync(contract)

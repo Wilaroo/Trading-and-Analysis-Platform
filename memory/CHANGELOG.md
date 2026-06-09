@@ -1,3 +1,19 @@
+## 2026-06-09 — VIX history landed + TICK internals exploration (v316c)
+
+- VIX backfill SUCCESS: 5025 daily bars 2006→2026 (max 82.69 GFC, median 17.29,
+  latest 23.33 = ~78th pct), source=ib_direct, stored to ib_historical_data.
+- v316c: extended ib_direct_service.get_historical_data index map to TICK family
+  (TICK-NYSE/NASD/AMEX, TRIN, AD) + aliases TICK/TICKQ/TICKA. Patch paste.rs/FHthB.
+- Probing IB for TICK historical availability (1day + 1min). IB TICK history is
+  often limited -> if empty, pivot to a live TICK subscription aggregated to 1-min
+  bars (like the live_tick pipeline).
+- Proposed design: TICK as a market-INTERNALS confirmation on SHORT/MICRO lanes
+  (cumulative session TICK trend + smoothed TICK confirm/contradict + ±1000
+  climax/exhaustion flag), NOT a 5th equal-weight price lane. Pending probe results.
+
+### Next: probe results -> build internals; then Command Center regime strip.
+
+---
 ## 2026-06-09 — v316b: IB-direct historical fetch + VIX (CBOE index) history — PATCH READY (user-apply pending)
 
 Root cause nailed: legacy ib_service historical path is DEAD on this deploy
