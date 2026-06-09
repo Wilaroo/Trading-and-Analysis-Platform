@@ -144,7 +144,9 @@ get_system_stats() {
     echo -e "  Load: ${DIM}${load}${NC}"
 
     # Training processes
-    local n_procs=$(pgrep -fc training_subprocess 2>/dev/null || echo 0)
+    # v19.34.311 — sanitize n_procs (pgrep -fc can emit empty/multiline → integer-expr error)
+    local n_procs=$(pgrep -fc training_subprocess 2>/dev/null | head -n1)
+    [[ "$n_procs" =~ ^[0-9]+$ ]] || n_procs=0
     local proc_color=$GREEN
     if [ "$n_procs" -gt 1 ]; then proc_color=$RED; fi
     echo -e "  Training procs: ${proc_color}${n_procs}${NC}"

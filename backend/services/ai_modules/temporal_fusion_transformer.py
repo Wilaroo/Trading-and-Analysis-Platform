@@ -30,6 +30,12 @@ TFT_TIMEFRAMES = ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]
 FEATURES_PER_TF = 12  # Features extracted per timeframe
 TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 60
 
+# v19.34.311 — Validation forward-pass chunk size. Running the full val set
+# (450k+ rows) through the model in ONE forward call builds multi-GB activation
+# tensors per epoch, which OOM-kills the subprocess on the DGX Spark's unified
+# memory. Chunking keeps the transient footprint flat.
+VAL_CHUNK = 16384
+
 
 def _try_import_torch():
     try:
@@ -193,50 +199,68 @@ class TFTModel:
 
     def extract_multi_tf_features(self, symbol: str, bars_by_tf: Dict[str, List[Dict]]) -> Optional[np.ndarray]:
         """
-        Extract features for a single symbol across multiple timeframes.
-        
-        Args:
-            symbol: Stock symbol
-            bars_by_tf: Dict mapping timeframe to list of bars for this symbol
-            
+        Extract features for a single symbol across multiple timeframes —
+        DAILY-ANCHORED and TIMESTAMP-ALIGNED. (v19.34.311 — collapse root-cause fix.)
+
+        For each daily bar (the prediction anchor at date D), the intraday-
+        timeframe feature block is the most recent intraday bar AS OF date D
+        (as-of join, no look-ahead). Missing/short timeframes are zero-filled.
+
+        This replaces the previous end-index concatenation, which had two fatal
+        bugs that caused the majority-class collapse (val_acc ≈ baseline):
+          1. It paired position-matched rows across timeframes, so a daily bar
+             from years ago could sit on the same row as a 1-min bar from today.
+          2. Whenever any intraday timeframe was shorter than the daily history
+             (i.e. ALWAYS), it returned the *recent* daily rows while the caller's
+             label loop assumed row i ↔ daily bar (20 + i) — so the features and
+             their triple-barrier labels were misaligned → effectively random
+             targets → the model could only learn "predict the majority class".
+
         Returns:
-            np.ndarray of shape (n_samples, TOTAL_INPUT_DIM) or None
+            np.ndarray of shape (n_daily_rows, TOTAL_INPUT_DIM) aligned so that
+            row i corresponds to daily bar (i + 20), or None.
         """
-        # Need at least 1 day and one intraday timeframe
-        if "1 day" not in bars_by_tf or len(bars_by_tf["1 day"]) < 30:
+        daily_bars = bars_by_tf.get("1 day")
+        if not daily_bars or len(daily_bars) < 30:
             return None
 
-        # Extract per-timeframe features (12 per TF)
-        tf_features = {}
-        min_samples = float("inf")
+        def _to_epoch(d) -> float:
+            if isinstance(d, bool):
+                return float("nan")
+            if isinstance(d, (int, float)):
+                return float(d)
+            if isinstance(d, datetime):
+                return d.timestamp()
+            if isinstance(d, str):
+                try:
+                    return datetime.fromisoformat(d.replace("Z", "+00:00")).timestamp()
+                except Exception:
+                    pass
+            try:
+                return float(np.datetime64(d).astype("datetime64[s]").astype("int64"))
+            except Exception:
+                return float("nan")
 
-        for tf in TFT_TIMEFRAMES:
-            bars = bars_by_tf.get(tf, [])
-            if len(bars) < 20:
-                # Pad with zeros if timeframe not available
-                tf_features[tf] = None
-                continue
-
+        def _tf_feature_matrix(bars):
+            """Return (feats[n-20, 12], epochs[n-20]) for a timeframe, or (None, None)."""
+            if not bars or len(bars) < 21:
+                return None, None
             closes = np.array([b["close"] for b in bars], dtype=np.float32)
             highs = np.array([b["high"] for b in bars], dtype=np.float32)
             lows = np.array([b["low"] for b in bars], dtype=np.float32)
             volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
-
             n = len(closes)
             feats = np.zeros((n - 20, FEATURES_PER_TF), dtype=np.float32)
-
             for i in range(20, n):
                 idx = i - 20
-                # Returns
-                feats[idx, 0] = (closes[i] / closes[i - 1] - 1) * 100  # 1-bar return
-                feats[idx, 1] = (closes[i] / closes[max(0, i - 5)] - 1) * 100  # 5-bar return
-                feats[idx, 2] = (closes[i] / closes[max(0, i - 10)] - 1) * 100  # 10-bar return
-                feats[idx, 3] = (closes[i] / closes[max(0, i - 20)] - 1) * 100  # 20-bar return
-
+                # Returns (all scale-free %)
+                feats[idx, 0] = (closes[i] / closes[i - 1] - 1) * 100
+                feats[idx, 1] = (closes[i] / closes[max(0, i - 5)] - 1) * 100
+                feats[idx, 2] = (closes[i] / closes[max(0, i - 10)] - 1) * 100
+                feats[idx, 3] = (closes[i] / closes[max(0, i - 20)] - 1) * 100
                 # Volatility
                 ret_window = np.diff(np.log(closes[max(0, i - 10):i + 1]))
                 feats[idx, 4] = np.std(ret_window) * 100 if len(ret_window) > 1 else 0
-
                 # RSI-14
                 window = closes[max(0, i - 14):i + 1]
                 deltas = np.diff(window)
@@ -245,45 +269,52 @@ class TFTModel:
                 avg_gain = np.mean(gains) if len(gains) > 0 else 0
                 avg_loss = np.mean(losses) if len(losses) > 0 else 0.001
                 feats[idx, 5] = 100 - (100 / (1 + avg_gain / avg_loss)) if avg_loss > 0 else 50
-
-                # High-Low range
-                feats[idx, 6] = (highs[i] - lows[i]) / closes[i] * 100
-
+                # High-Low range %
+                feats[idx, 6] = (highs[i] - lows[i]) / closes[i] * 100 if closes[i] > 0 else 0
                 # Close position in range
                 hl_range = highs[i] - lows[i]
                 feats[idx, 7] = (closes[i] - lows[i]) / hl_range if hl_range > 0 else 0.5
-
                 # Volume ratio
                 vol_5 = np.mean(volumes[max(0, i - 5):i + 1])
                 vol_20 = np.mean(volumes[max(0, i - 20):i + 1])
                 feats[idx, 8] = vol_5 / vol_20 if vol_20 > 0 else 1.0
-
-                # SMA distance
+                # SMA distance %
                 sma20 = np.mean(closes[max(0, i - 20):i + 1])
-                feats[idx, 9] = (closes[i] / sma20 - 1) * 100
-
-                # Momentum
-                feats[idx, 10] = closes[i] - closes[max(0, i - 10)]
-
-                # Trend strength (ADX-like)
+                feats[idx, 9] = (closes[i] / sma20 - 1) * 100 if sma20 > 0 else 0
+                # feat 10: SCALE-FREE 50-bar return (was raw price delta
+                # closes[i]-closes[i-10], which dwarfed every other feature for
+                # high-priced names and injected noise under the global scaler).
+                feats[idx, 10] = (closes[i] / closes[max(0, i - 50)] - 1) * 100
+                # Trend strength (ADX-like, scale-free)
                 feats[idx, 11] = abs(feats[idx, 3]) / (feats[idx, 4] + 0.01)
+            epochs = np.array([_to_epoch(b.get("date")) for b in bars[20:]], dtype=np.float64)
+            return feats, epochs
 
-            tf_features[tf] = feats
-            min_samples = min(min_samples, len(feats))
-
-        if min_samples == float("inf") or min_samples < 10:
+        daily_feats, daily_epochs = _tf_feature_matrix(daily_bars)
+        if daily_feats is None or len(daily_feats) < 10:
             return None
 
-        # Align all timeframes to the same number of samples (use last N from each)
-        aligned = []
-        for tf in TFT_TIMEFRAMES:
-            if tf_features[tf] is None:
-                aligned.append(np.zeros((min_samples, FEATURES_PER_TF), dtype=np.float32))
-            else:
-                aligned.append(tf_features[tf][-min_samples:])
+        n_rows = len(daily_feats)
+        out = np.zeros((n_rows, TOTAL_INPUT_DIM), dtype=np.float32)
+        daily_epochs_ok = bool(np.all(np.isfinite(daily_epochs)))
 
-        # Concatenate: (n_samples, 5 * 12 = 60)
-        return np.hstack(aligned)
+        for p, tf in enumerate(TFT_TIMEFRAMES):
+            col0 = p * FEATURES_PER_TF
+            col1 = col0 + FEATURES_PER_TF
+            if tf == "1 day":
+                out[:, col0:col1] = daily_feats
+                continue
+            tf_feats, tf_epochs = _tf_feature_matrix(bars_by_tf.get(tf, []))
+            if tf_feats is None:
+                continue  # timeframe unavailable for this symbol → leave zeros
+            if (not daily_epochs_ok) or (not np.all(np.isfinite(tf_epochs))):
+                continue  # cannot time-align safely → leave zeros (no look-ahead)
+            # As-of join: latest intraday bar with epoch <= the daily anchor epoch.
+            pos = np.searchsorted(tf_epochs, daily_epochs, side="right") - 1
+            valid = pos >= 0
+            if np.any(valid):
+                out[valid, col0:col1] = tf_feats[pos[valid]]
+        return out
 
     async def train(self, db=None, max_symbols: int = 500, epochs: int = 50, batch_size: int = 512) -> Dict[str, Any]:
         """
@@ -434,6 +465,18 @@ class TFTModel:
 
         logger.info(f"[TFT] Training data: {X.shape[0]:,} samples from {symbols_used} symbols, {X.shape[1]} features")
 
+        # v19.34.311 — Multi-timeframe coverage diagnostic — fraction of rows with any
+        # non-zero value per timeframe block (reveals real intraday coverage).
+        try:
+            _cov = []
+            for _p, _tf in enumerate(TFT_TIMEFRAMES):
+                _blk = X[:, _p * FEATURES_PER_TF:(_p + 1) * FEATURES_PER_TF]
+                _frac = float(np.mean(np.any(_blk != 0.0, axis=1))) if len(X) else 0.0
+                _cov.append(f"{_tf}={_frac:.1%}")
+            logger.info(f"[TFT] Timeframe coverage (non-zero rows): {', '.join(_cov)}")
+        except Exception:
+            pass
+
         # Class balance diagnostic — detects majority-class collapse.
         # Triple-barrier targets: 0=down (SL hit), 1=flat (time exit), 2=up (PT hit).
         # Healthy distribution has flat often dominating (30-60%) with down/up balanced.
@@ -553,12 +596,19 @@ class TFTModel:
 
             scheduler.step()
 
-            # Validate
+            # v19.34.311 — Validate CHUNKED to avoid a multi-GB activation spike on
+            # unified memory (the all-at-once forward over the full val set was
+            # OOM-killing the subprocess; SIGKILL, no traceback).
             self._model.eval()
+            correct = 0
             with torch.no_grad():
-                val_dir, val_conf, _, _ = self._model(X_val_t)
-                val_pred = torch.argmax(val_dir, dim=-1)
-                val_acc = (val_pred == y_val_t).float().mean().item()
+                for vs in range(0, len(X_val_t), VAL_CHUNK):
+                    vd, _, _, _ = self._model(X_val_t[vs:vs + VAL_CHUNK])
+                    vp = torch.argmax(vd, dim=-1)
+                    correct += (vp == y_val_t[vs:vs + VAL_CHUNK]).sum().item()
+            val_acc = correct / len(X_val_t) if len(X_val_t) else 0.0
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             if epoch % 10 == 0:
                 logger.info(f"[TFT] Epoch {epoch}/{epochs} — loss: {total_loss / n_batches:.4f}, val_acc: {val_acc:.4f}")
