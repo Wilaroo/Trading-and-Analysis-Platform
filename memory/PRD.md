@@ -495,3 +495,34 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - **C (v310)** SMB: (C-1 always-on) persist `smb_5var_score` in `LiveAlert.to_dict()`; (C-2 env-gated `SMB_CHECKLIST_TIMEFRAME_AWARE`, DEFAULT OFF) timeframe-aware checklist thresholds + 50-SMA swing MTF confluence; (C-3 operator follow-up) drop the C→50 decompress via `TQS_SETUP_DECOMPRESS=false` after verifying real scores flow.
 - Tests: 11/11 new (test_v308/309/310) + v305/smb_profiles/l4c regression green. NO testing_agent (DGX mandate).
 - STILL PENDING (operator): rotate Atlas DB password (P0 security, old creds in git history).
+
+
+---
+## 2026-06-09 — Command Center regime + caps + HUD (v316f/g/h) — ✅ SHIPPED & LIVE ON DGX
+- **v316f** (paste.rs/iagua): RegimeStrip.jsx (4-lane multi-tf band: context/lanes/long-short
+  modes/$TICK/per-index/divergence) + `/summary` surfaces `multi_tf` + slashed-zero font
+  (`.font-mono-data` font-feature "zero") + position cap unify → 25 (safety kill-switch
+  5→25, LLMRules advisory floor 10→25). Operator set bot.max_open_positions=25 via POST
+  /risk-params → `diag_risk_truth.py` confirms EFFECTIVE=25. Daily-loss left at 1%/~$2k
+  (operator choice B).
+- **v316g** (paste.rs/cYsqy): ROOT-CAUSE fix — the v315/v316 multi_tf ENGINE code
+  (`_calculate_multi_tf`+`_get_tf_bars` in market_regime_engine.py, `get_historical_data`
+  in ib_direct_service.py) had never landed on the DGX (only the helper module had). Strip
+  was empty because `/current` returned multi_tf=null. VERIFIED LIVE: context=ALIGNED_UP,
+  lanes 64.9/51.9/88.8/65.0, internals 64.8, per_index SPY60.6/QQQ60.5/IWM85.5. Intraday
+  lanes fed by `live_tick` bars (queue historical returns no-data by design).
+- **v316h** (paste.rs/mNomy): HUD top strip decluttered 14→6 core chips. Diagnostics
+  (Brackets-Path/Connectivity/Scanner-Coverage/Boot-Reconcile/Drift-Guard/Cancel-Queue)
+  folded into Ops Status popover "Pipeline Diagnostics" group; risk chips (LLM-Rules/
+  Order-Policies) into Edge & Performance "Guardrails" group. Applied + yarn-built clean.
+
+### Standing operator reminders (unchanged, P0/P1)
+- 🔴 Rotate Atlas DB password (old creds in git history).
+- 🟡 Retrain with TB_PT_MULT=1.5 / TB_SL_MULT=1.0.
+- 🟡 v311 Monday-freshness buffer (paste.rs/L2rc2) — applied this session; verify the
+  weekend-aware test is green after restart.
+
+### Next P1
+- M0 laddered server-side scale-out (multi-leg OCA).
+- Optional: NEW effective-limits Guardrails chip (Pos 25 · Loss $5k/1%) surfacing the
+  reconciler truth at a glance.
