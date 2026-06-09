@@ -30,7 +30,7 @@ TFT_TIMEFRAMES = ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]
 FEATURES_PER_TF = 12  # Features extracted per timeframe
 TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 60
 
-# Validation forward-pass chunk size. The full val set (450k+ rows) run through
+# v19.34.311 — Validation forward-pass chunk size. The full val set (450k+ rows) run through
 # the model in ONE forward call builds multi-GB activation tensors per epoch,
 # which OOM-kills the subprocess on the DGX Spark's unified memory. Chunking
 # keeps the transient footprint flat.
@@ -208,7 +208,7 @@ class TFTModel:
     def extract_multi_tf_features(self, symbol: str, bars_by_tf: Dict[str, List[Dict]]) -> Optional[np.ndarray]:
         """
         Extract features for a single symbol across multiple timeframes —
-        DAILY-ANCHORED and TIMESTAMP-ALIGNED.
+        DAILY-ANCHORED and TIMESTAMP-ALIGNED. (v19.34.311 — collapse root-cause fix.)
 
         For each daily bar (the prediction anchor at date D), the intraday-
         timeframe feature block is the most recent intraday bar AS OF date D
@@ -473,7 +473,7 @@ class TFTModel:
 
         logger.info(f"[TFT] Training data: {X.shape[0]:,} samples from {symbols_used} symbols, {X.shape[1]} features")
 
-        # Multi-timeframe coverage diagnostic — fraction of rows with any non-zero
+        # v19.34.311 — Multi-timeframe coverage diagnostic — fraction of rows with any
         # value per timeframe block. After the alignment fix this reveals whether
         # intraday data is actually present (all-zero intraday blocks → the model
         # is effectively daily-only, which is fine but worth knowing).
@@ -606,7 +606,7 @@ class TFTModel:
 
             scheduler.step()
 
-            # Validate — CHUNKED forward to avoid a multi-GB activation spike on
+            # v19.34.311 — Validate CHUNKED to avoid a multi-GB activation spike on
             # unified memory. Running the full val set (450k+ rows) through the
             # model in one forward call was OOM-killing the subprocess (SIGKILL,
             # no traceback). empty_cache() after keeps fragmentation flat.

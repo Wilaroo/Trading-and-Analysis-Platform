@@ -144,6 +144,7 @@ get_system_stats() {
     echo -e "  Load: ${DIM}${load}${NC}"
 
     # Training processes
+    # v19.34.311 — sanitize n_procs (pgrep -fc can emit empty/multiline → "integer expression expected")
     local n_procs=$(pgrep -fc training_subprocess 2>/dev/null | head -n1)
     [[ "$n_procs" =~ ^[0-9]+$ ]] || n_procs=0
     local proc_color=$GREEN

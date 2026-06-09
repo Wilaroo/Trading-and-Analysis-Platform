@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 SEQUENCE_LENGTH = 5  # Number of chart windows to look back
 DIRECTIONS = ["down", "flat", "up"]  # Triple-barrier class order: -1/0/+1
 
-# Validation forward-pass chunk size — see temporal_fusion_transformer.py. The
+# v19.34.311 — Validation forward-pass chunk size — see temporal_fusion_transformer.py. The
 # sequence dimension makes the all-at-once val forward even heavier here, so we
 # chunk it to avoid OOM-killing the subprocess on unified memory.
 VAL_CHUNK = 8192
@@ -233,7 +233,7 @@ class CNNLSTMModel:
 
             # Fill remaining features with derived indicators
             feat[14] = (closes[i] - lows[i]) / (highs[i] - lows[i]) if (highs[i] - lows[i]) > 0 else 0.5
-            # feat 15: SCALE-FREE 50-bar return (was raw $ distance from SMA20,
+            # feat 15: v19.34.311 — SCALE-FREE 50-bar return (was raw $ distance from
             # closes[i]-mean(...), which dwarfed other features for high-priced
             # names under the single global scaler).
             feat[15] = (closes[i] / closes[max(0, i - 50)] - 1) * 100  # 50-bar return
@@ -500,7 +500,7 @@ class CNNLSTMModel:
 
             scheduler.step()
 
-            # Validate — CHUNKED forward (sequence dim makes this the heaviest
+            # v19.34.311 — Validate CHUNKED (sequence dim makes this the heaviest
             # all-at-once op; was OOM-killing the subprocess on unified memory).
             self._model.eval()
             correct = 0

@@ -83,7 +83,7 @@ async def _monitor_training_process(task: _TrainingProcess):
             if result_doc:
                 _last_result = result_doc.get("result")
 
-            # Honest status. A SIGKILL/segfault (e.g. OOM kill, exit_code < 0)
+            # v19.34.311 — Honest status. A SIGKILL/segfault (e.g. OOM kill, exit_code < 0)
             # cannot be caught by the subprocess's try/except, so it never writes
             # a failure status — leaving the dashboard stuck on the last RUNNING
             # phase forever. Detect an abnormal exit with no successful result and
