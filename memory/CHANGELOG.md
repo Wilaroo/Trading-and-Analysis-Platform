@@ -1,3 +1,43 @@
+## 2026-06-09 — v314: Market-regime data integrity (FTD dedup + breadth self.db) — PATCH READY (user-apply pending)
+
+Fixes the two remaining v314 issues observed on the DGX live regime endpoint
+(`/api/market-regime/current`): FTD distribution_day_count stuck at 25/CRITICAL
+and breadth block flatlined to all-zero.
+
+### Bug B — FTD count stuck at 25 (CRITICAL → score floored)
+- Root cause: legacy now()-stamped same-day duplicates persisted in
+  `market_regime_ftd` reload on restart; the prior `_update_ftd_state` bar-date
+  fix only stops NEW dupes, it doesn't collapse the persisted pollution.
+- Fix: `FTDSignalBlock.calculate()` now collapses `distribution_days` to
+  one-per-trading-day (by date[:10]) BEFORE counting. Self-heals on the first
+  regime calc after restart (deduped state is re-persisted via `_store_regime`).
+
+### Bug C — Breadth all-zero (sectors/index change_pct = 0)
+- Root cause: `_daily_change_from_bars` read the module-level `get_database()`
+  handle (returns None in the IB-only runtime) → returned {} → breadth flatlined.
+  `_load_ftd_state` already proved `self.db` is the valid handle.
+- Fix: `_daily_change_from_bars` now prefers `self.db`, falls back to
+  get_database(), then the IB service (same source the trend block uses).
+
+### Tests — 8/8 pass (test_v314_regime_data_integrity.py)
+- 5 FTD dedup tests (incl. legacy 25-dupe collapse-on-calculate).
+- 3 NEW breadth regression tests (injected fake DB proves quote/sector
+  change_pct is non-zero, not the old silent 0).
+
+### Delivery (DGX mandate: no testing_agent, no git push)
+- Engine patch:  https://paste.rs/NKei7  (apply: `curl -s https://paste.rs/NKei7 | git apply`)
+- Full test file: https://paste.rs/AdwEI  (save to backend/tests/test_v314_regime_data_integrity.py)
+- After apply → restart backend → first regime refresh self-heals FTD + populates breadth.
+
+### Still pending (from ask_human, deferred until v314 verified live)
+- DECISION 1: lower/env-tune CAUTIOUS gate thresholds (GO 50 / REDUCE 35).
+- DECISION 2: multi-timeframe regime architecture (daily anchor + 1h/5m/1m +
+  PULLBACK_IN_UPTREND context so daily-up/intraday-pullback isn't forced CAUTIOUS).
+- v311 Monday freshness gate (paste.rs/L2rc2), Atlas password rotation,
+  retrain with TB_PT_MULT=1.5 / TB_SL_MULT=1.0.
+
+---
+
 ## 2026-06-08 — v19.34.308–310: IB boot hard-block probe (A) + fundamental absent→neutral-50 (B) + SMB timeframe-aware checklist & smb_5var persistence (C) — PATCH READY (user-apply pending)
 
 Consolidated patch covers v308/v309/v310. Validated: 11/11 new pytest

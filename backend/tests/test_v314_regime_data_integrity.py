@@ -3,10 +3,14 @@ v314 tests — Market regime data-integrity fixes (Step 1):
   Bug B: FTD distribution-day counting must dedupe by the BAR's trading date,
          not wall-clock now(), so repeated calculate()/refresh calls don't
          re-count the same down-day (was inflating the count to 25 = CRITICAL).
+  Bug C: Breadth flatlined to all-zero in the IB-only deployment because the
+         quote/sector fallbacks read the module-level get_database() handle
+         (returns None in this runtime) instead of the injected self.db handle
+         that FTD persistence already proves valid.
 """
 import asyncio
 
-from services.market_regime_engine import FTDSignalBlock
+from services.market_regime_engine import FTDSignalBlock, MarketRegimeEngine
 
 
 def _bar(date, close, volume):
@@ -78,3 +82,78 @@ def test_legacy_now_stamped_dupes_collapse_on_calculate():
     # 25 same-day dupes → 1 distinct (06-09) + the 06-05 bar = 2 distinct days
     assert blk.signals["distribution_day_count"] <= 2
     assert blk.signals["distribution_status"] == "HEALTHY"
+
+
+# ---------------------------------------------------------------------------
+# Bug C — Breadth must use the injected self.db handle (IB-only deployment).
+# A fake DB stands in for ib_historical_data so we can prove the daily-change
+# fallbacks return REAL numbers instead of the old silent zeros.
+# ---------------------------------------------------------------------------
+class _FakeCursor:
+    def __init__(self, docs):
+        self._docs = docs
+
+    def sort(self, key, direction):
+        self._docs = sorted(
+            self._docs, key=lambda d: d.get(key, ""), reverse=(direction == -1)
+        )
+        return self
+
+    def limit(self, n):
+        return self._docs[:n]
+
+
+class _FakeCollection:
+    def __init__(self, docs):
+        self._docs = docs
+
+    def find(self, flt, projection=None):
+        rows = [
+            d for d in self._docs
+            if d.get("symbol") == flt.get("symbol")
+            and d.get("bar_size") == flt.get("bar_size")
+        ]
+        return _FakeCursor(rows)
+
+
+class _FakeDB:
+    def __init__(self, docs):
+        self._coll = _FakeCollection(docs)
+
+    def __getitem__(self, name):
+        return self._coll
+
+
+def _two_day_docs(symbol, last_close, prev_close):
+    return [
+        {"symbol": symbol, "bar_size": "1 day", "date": "2026-06-05", "close": prev_close},
+        {"symbol": symbol, "bar_size": "1 day", "date": "2026-06-09", "close": last_close},
+    ]
+
+
+def test_daily_change_from_bars_uses_injected_db():
+    eng = MarketRegimeEngine(
+        alpaca_service=None, ib_service=None, db=_FakeDB(_two_day_docs("SPY", 101.0, 100.0))
+    )
+    res = asyncio.run(eng._daily_change_from_bars("SPY"))
+    assert res, "expected non-empty result from injected db (was {} via None get_database)"
+    assert res["change_pct"] == 1.0
+    assert res["price"] == 101.0
+
+
+def test_get_quote_breadth_nonzero_ib_only():
+    eng = MarketRegimeEngine(
+        alpaca_service=None, ib_service=None, db=_FakeDB(_two_day_docs("SPY", 99.0, 100.0))
+    )
+    q = asyncio.run(eng._get_quote("SPY"))
+    assert q["change_pct"] == -1.0, "breadth quote must not silently flatline to 0"
+
+
+def test_get_sector_data_breadth_nonzero():
+    docs = []
+    for etf in ["XLK", "XLF", "XLE"]:
+        docs += _two_day_docs(etf, 102.0, 100.0)  # +2% each
+    eng = MarketRegimeEngine(alpaca_service=None, ib_service=None, db=_FakeDB(docs))
+    sd = asyncio.run(eng._get_sector_data())
+    assert sd.get("XLK", {}).get("change_pct") == 2.0
+    assert any(v["change_pct"] != 0 for v in sd.values()), "sector breadth all-zero regression"
