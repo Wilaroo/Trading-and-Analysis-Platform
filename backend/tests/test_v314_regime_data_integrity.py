@@ -61,3 +61,20 @@ def test_new_distinct_down_day_increments_count():
     blk._update_ftd_state(bars)
     days = sorted(d["date"][:10] for d in blk.distribution_days)
     assert days == ["2026-06-05", "2026-06-08"], days
+
+
+def test_legacy_now_stamped_dupes_collapse_on_calculate():
+    """Legacy state had ~25 same-day now()-stamped dupes → CRITICAL. The dedup
+    in calculate() must collapse them to one-per-day so the count is sane."""
+    blk = FTDSignalBlock()
+    # 25 duplicate entries all on the SAME day (pre-fix pollution)
+    blk.distribution_days = [
+        {"date": f"2026-06-09T{h:02d}:{m:02d}:00+00:00", "change_pct": -2.58, "volume_ratio": 1.91}
+        for h in range(13, 16) for m in range(0, 54, 6)
+    ][:25]
+    assert len(blk.distribution_days) == 25
+    bars = _bars_with_one_distribution_day()  # contributes a distinct 2026-06-05
+    score = asyncio.run(blk.calculate(bars, stored_state=None))
+    # 25 same-day dupes → 1 distinct (06-09) + the 06-05 bar = 2 distinct days
+    assert blk.signals["distribution_day_count"] <= 2
+    assert blk.signals["distribution_status"] == "HEALTHY"

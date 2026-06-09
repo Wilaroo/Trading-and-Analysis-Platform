@@ -420,7 +420,19 @@ class FTDSignalBlock(SignalBlock):
         
         # Analyze recent bars for FTD signals
         self._update_ftd_state(spy_bars)
-        
+
+        # Collapse duplicate distribution entries to one-per-trading-day. Defends
+        # against legacy now()-stamped duplicates persisted before the dedup fix
+        # (which had inflated the count to 25 → "CRITICAL" and floored the score).
+        _seen_days = set()
+        _deduped = []
+        for _d in self.distribution_days:
+            _day = str(_d.get("date", ""))[:10]
+            if _day and _day not in _seen_days:
+                _seen_days.add(_day)
+                _deduped.append(_d)
+        self.distribution_days = _deduped[-25:]
+
         score = 0
         
         # FTD confirmed (50 pts)
@@ -1017,33 +1029,54 @@ class MarketRegimeEngine:
     async def _daily_change_from_bars(self, symbol: str) -> Dict:
         """Compute (price, change_pct) from the two most recent cached daily bars.
 
-        IB-only fallback used when Alpaca is disabled. Reads `ib_historical_data`
-        directly (no 20-bar minimum) so quote/sector breadth no longer flatlines
-        to zero in an IB-only deployment.
+        IB-only fallback used when Alpaca is disabled. Uses `self.db` (the handle
+        the engine is actually constructed with) first — the module-level
+        get_database() returns None in this runtime, which is why breadth
+        previously flatlined to zero — then get_database(), then the IB service.
         """
+        # Prefer the injected handle (proven valid by FTD persistence).
+        db = self.db
+        if db is None:
+            try:
+                from database import get_database
+                db = get_database()
+            except Exception:
+                db = None
+
+        if db is not None:
+            try:
+                def _q():
+                    return list(db["ib_historical_data"].find(
+                        {"symbol": symbol, "bar_size": "1 day"},
+                        {"_id": 0, "close": 1, "date": 1}
+                    ).sort("date", -1).limit(2))
+                rows = await asyncio.to_thread(_q)
+                if len(rows) >= 2:
+                    last_close = rows[0].get("close") or 0
+                    prev_close = rows[1].get("close") or 0
+                    if prev_close:
+                        return {
+                            "price": last_close,
+                            "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
+                        }
+            except Exception as e:
+                print(f"daily-change-from-bars mongo error for {symbol}: {e}")
+
+        # IB fallback (same source the trend block already uses successfully).
         try:
-            from database import get_database
-            db = get_database()
-            if db is None:
-                return {}
-
-            def _q():
-                return list(db["ib_historical_data"].find(
-                    {"symbol": symbol, "bar_size": "1 day"},
-                    {"_id": 0, "close": 1, "date": 1}
-                ).sort("date", -1).limit(2))
-
-            rows = await asyncio.to_thread(_q)
-            if len(rows) >= 2:
-                last_close = rows[0].get("close") or 0
-                prev_close = rows[1].get("close") or 0
-                if prev_close:
-                    return {
-                        "price": last_close,
-                        "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
-                    }
+            if self.ib_service:
+                bars = await self.ib_service.get_historical_data(symbol, "1D", 3)
+                if bars and len(bars) >= 2:
+                    last_close = bars[-1].get("close") or 0
+                    prev_close = bars[-2].get("close") or 0
+                    if prev_close:
+                        return {
+                            "price": last_close,
+                            "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
+                        }
         except Exception as e:
-            print(f"daily-change-from-bars error for {symbol}: {e}")
+            print(f"daily-change-from-bars IB error for {symbol}: {e}")
+
         return {}
 
     async def _get_quote(self, symbol: str) -> Dict:
