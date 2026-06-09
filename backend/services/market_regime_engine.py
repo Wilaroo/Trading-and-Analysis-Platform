@@ -1004,6 +1004,35 @@ class MarketRegimeEngine:
             print(f"tf-bars error {symbol} {bar_size}: {e}")
         return []
 
+    async def compute_symbol_multi_tf(self, symbol: str) -> Dict:
+        """Per-stock multi-timeframe regime (#1 / c2 foundation).
+
+        Runs the SAME lane scoring as the index regime, but on ONE symbol's
+        own bars — no index blend, no TICK internals (those are market-wide).
+        Returns the build_multi_tf shape (context / lanes / tf_alignment /
+        modes / recommendation) so a per-ticker RegimeStrip can render a trend
+        stack and the gate can read a candidate's OWN regime alignment.
+        Degrades gracefully (cold/missing lanes → context UNKNOWN)."""
+        try:
+            from services.multi_tf_regime import (
+                score_long_lane, score_intraday_lane, build_multi_tf)
+            daily = await self._get_tf_bars(symbol, "1 day", 220)
+            h1 = await self._get_tf_bars(symbol, "1 hour", 120)
+            m5 = await self._get_tf_bars(symbol, "5 mins", 120)
+            m1 = await self._get_tf_bars(symbol, "1 min", 120)
+            mtf = build_multi_tf(
+                score_long_lane(daily),
+                score_intraday_lane(h1, fast=20, slow=50, use_vwap=False),
+                score_intraday_lane(m5, fast=9, slow=21, use_vwap=True),
+                score_intraday_lane(m1, fast=9, slow=21, use_vwap=True),
+            )
+            mtf["symbol"] = symbol
+            return mtf
+        except Exception as e:
+            print(f"symbol multi-tf error {symbol}: {e}")
+            return {"context": "UNKNOWN", "error": str(e), "symbol": symbol}
+
+
 
     def _calculate_confidence(self) -> float:
         """Calculate confidence based on signal block agreement."""
