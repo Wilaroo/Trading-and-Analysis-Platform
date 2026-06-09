@@ -71,7 +71,7 @@ INTRADAY_PLAN = {"1 hour": "2 M", "5 mins": "10 D", "1 min": "3 D"}
 
 
 def _http_fetch(symbol, bar_size, duration):
-    q = urllib.parse.urlencode({"duration": duration, "bar_size": bar_size})
+    q = urllib.parse.urlencode({"duration": duration, "bar_size": bar_size, "prefer_ib": "true"})
     url = f"{BASE}/api/ib/historical/{urllib.parse.quote(symbol)}?{q}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     try:
@@ -97,6 +97,7 @@ def _upsert_bars(coll, symbol, bar_size, bars):
                 "open": bar.get("open"), "high": bar.get("high"),
                 "low": bar.get("low"), "close": bar.get("close"),
                 "volume": bar.get("volume"),
+                "source": "ib",
                 "collected_at": datetime.now(timezone.utc).isoformat(),
             }},
             upsert=True,

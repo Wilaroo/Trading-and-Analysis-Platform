@@ -1625,7 +1625,8 @@ async def unsubscribe_market_data(request: SubscribeRequest):
 async def get_historical_data(
     symbol: str,
     duration: str = "1 D",
-    bar_size: str = "5 mins"
+    bar_size: str = "5 mins",
+    prefer_ib: bool = False
 ):
     """
     Get historical bar data for a symbol.
@@ -1633,6 +1634,10 @@ async def get_historical_data(
     
     For intraday bars (< 1 day), uses Alpaca for real-time data.
     For daily+ bars, prefers ib_historical_data collection (faster, no API call).
+
+    prefer_ib=True enforces the strict IB-only data pipeline: skips the Alpaca
+    branch and the intraday MongoDB fallback so bars come straight from IB
+    (used by the regime backfill so the regime engine never ingests Alpaca data).
     """
     cache = get_data_cache()
     symbol = symbol.upper()
@@ -1695,7 +1700,7 @@ async def get_historical_data(
             print(f"MongoDB historical data error for {symbol}: {e}")
     
     # Try Alpaca (for intraday or if MongoDB didn't have data)
-    if _alpaca_service:
+    if _alpaca_service and not prefer_ib:
         try:
             alpaca_timeframe = _convert_ib_to_alpaca_timeframe(bar_size)
             alpaca_limit = _convert_ib_duration_to_limit(duration, bar_size)
@@ -1729,7 +1734,7 @@ async def get_historical_data(
             print(f"Alpaca historical data error for {symbol}: {e}")
     
     # For intraday: also try MongoDB ib_historical_data with matching bar_size
-    if not is_daily_or_higher:
+    if not is_daily_or_higher and not prefer_ib:
         try:
             from database import get_database
             db_ref = get_database()

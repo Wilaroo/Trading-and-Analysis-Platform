@@ -1,3 +1,19 @@
+## 2026-06-09 — v316: Strict IB-only regime data + VIX index-contract fix — PATCH READY (user-apply pending)
+
+- _do_get_historical_data now uses Index("VIX","CBOE") for VIX (was Stock -> 0 bars).
+  whatToShow=TRADES confirmed correct for CBOE index history. Realtime/quote paths
+  already used the index contract; this fixes the historical + the volume_vix block
+  defaulting to 20 (now reads live ~21.8).
+- GET /api/ib/historical gains prefer_ib=true: skips Alpaca branch + intraday Mongo
+  fallback so regime bars are strictly IB-sourced (honors IB-only mandate).
+- backfill_regime_universe.py (v3): sends prefer_ib=true, tags bars source="ib".
+  Re-running --intraday overwrites the prior Alpaca-sourced recent window with IB.
+- Patches: backend https://paste.rs/oOkqc | backfill https://paste.rs/BXrEO
+- v315 verified live earlier: context=PULLBACK_IN_UPTREND, modes long=normal/short=cautious.
+
+### Next: surface multi_tf on Command Center (4-lane strip + context + per-direction stance).
+
+---
 ## 2026-06-09 — v315: Multi-Timeframe Regime + per-direction gate mode — PATCH READY (user-apply pending)
 
 Gives the regime engine human-like multi-timeframe context so a daily uptrend

@@ -718,7 +718,7 @@ class IBWorkerThread(threading.Thread):
             return IBResponse(success=False, error="Not connected to IB")
         
         try:
-            from ib_insync import Stock
+            from ib_insync import Stock, Index
             
             symbol = params.get("symbol")
             duration = params.get("duration", "1 D")
@@ -729,7 +729,12 @@ class IBWorkerThread(threading.Thread):
             # Process event loop before heavy operation
             self.ib.sleep(0.1)
             
-            contract = Stock(symbol.upper(), "SMART", "USD")
+            # VIX is a CBOE index, not a stock — a Stock contract returns 0 bars.
+            sym_u = symbol.upper()
+            if sym_u == "VIX":
+                contract = Index("VIX", "CBOE")
+            else:
+                contract = Stock(sym_u, "SMART", "USD")
             self.ib.qualifyContracts(contract)
             
             logger.info(f"Contract qualified for {symbol}, making reqHistoricalData call...")
