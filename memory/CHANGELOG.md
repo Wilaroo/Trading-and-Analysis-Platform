@@ -1,3 +1,35 @@
+## 2026-06-09 — v316j (c1): multi_tf regime → confidence-gate directional SCORING — PATCH READY
+
+Patch: https://paste.rs/fL453  (backend-only → `git apply` + `./start_backend.sh --force`)
+Tests: 14/14 green (10 new + 4 v315 regression).
+
+WHY: v315 wired multi_tf into the trading MODE, but the directional-confirmation
+SCORING block still used the legacy daily composite — that's why the decision log
+showed "Regime NEUTRAL (54.5) — no directional confirmation" even though
+multi_tf.context = ALIGNED_UP. This closes that gap.
+
+CHANGE (`confidence_gate.py`):
+- New pure helper `_score_regime_direction(regime_data, regime_state, regime_score,
+  direction) → (points, size_mult, reasons)`; evaluate() now calls it.
+- Prefers multi_tf.context with conviction-scaled bonuses (tf_alignment.ratio):
+  ALIGNED_UP/long & ALIGNED_DOWN/short → up to +18 (min +4); counter-trend
+  (short in ALIGNED_UP / long in ALIGNED_DOWN) → −25 + size×0.5 (effectively
+  blocks GO, still evaluated+logged for learning). PULLBACK_IN_UPTREND/long &
+  BOUNCE_IN_DOWNTREND/short → +10 (buy-the-dip/sell-the-rip); against → −8 mild.
+  MIXED → ±0 with a small +4 intraday-bias lean. Tunable module constants
+  (MTF_ALIGNED_BONUS_MAX/MIN, MTF_COUNTER_PENALTY, etc.).
+- Falls back to the exact legacy daily-composite path when multi_tf is
+  absent/UNKNOWN/cold (lanes_counted=0).
+- Decision log now reads e.g. "Regime ALIGNED_UP (4/4 lanes, 100%) confirms LONG (+18)".
+
+NOTE: take-rate stays gated by the collapsed TFT/CNN-LSTM until the v313 `dl`
+retrain (running) clears 52% — this fix lets regime-aligned setups *accumulate*
+the points they were missing, but models must recover for GO to fire.
+
+### Regime-first funnel progress: c1 ✅ | next c2 (per-stock regime alignment, needs #1) | c3 (RS leadership, T7)
+
+---
+
 ## 2026-06-09 — v316g: multi_tf ENGINE wiring + ib_direct historical — ✅ VERIFIED LIVE ON DGX
 
 ROOT CAUSE of the empty RegimeStrip during RTH: the v315/v316 *engine* code

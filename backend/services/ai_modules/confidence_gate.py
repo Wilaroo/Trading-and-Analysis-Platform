@@ -48,6 +48,25 @@ MAX_DECISION_LOG = 200
 # regime_expectancy_calibrator.REDUCE_MULT.
 REGIME_SUPPRESSION_REDUCE_MULT = 0.4
 
+# ── c1 (v316j): Multi-timeframe regime → directional confirmation SCORING ──
+# v315 wired multi_tf into the trading MODE (sizing/thresholds); this wires it
+# into the confidence-SCORE so an ALIGNED_UP regime actually *adds* points to
+# longs and *blocks* counter-trend shorts (and vice-versa), replacing the old
+# daily-composite "Regime NEUTRAL — no directional confirmation" dead-end.
+# Tunable. Counter-trend penalty is a SCORE penalty (still evaluated + logged
+# for learning), not a hard force-skip. Bonuses scale with regime conviction
+# (tf_alignment.ratio). Falls back to the legacy composite path when multi_tf
+# is absent/UNKNOWN (e.g. intraday bars cold).
+MTF_ALIGNED_BONUS_MAX = 18      # full-conviction with-trend bonus (replaces legacy +20)
+MTF_ALIGNED_BONUS_MIN = 4       # floor when a with-trend regime is barely leaning
+MTF_PULLBACK_BONUS_MAX = 10     # buy-the-dip / sell-the-rip with the primary trend
+MTF_PULLBACK_BONUS_MIN = 3
+MTF_COUNTER_PENALTY = 25        # against an ALIGNED regime → effectively blocks GO
+MTF_COUNTER_SIZE_MULT = 0.5
+MTF_MILD_PENALTY = 8            # fading a pullback/bounce against the primary trend
+MTF_MILD_SIZE_MULT = 0.8
+MTF_MIXED_LEAN_BONUS = 4        # small lean from intraday bias in a MIXED regime
+
 # Setup -> directional sub-model FAMILY routing for live consensus voting.
 # Keyed by CANONICAL setup names (setup_taxonomy.canonicalize). Hoisted to module
 # level so it is a single, testable source. resolve_model_bases() falls back to the
@@ -480,33 +499,13 @@ class ConfidenceGate:
         # Update trading mode FIRST so thresholds are mode-aware for this evaluation
         self._update_trading_mode(regime_state, ai_regime, regime_score, regime_data, direction)
 
-        # Regime contribution — graduated scale
-        if regime_state == "CONFIRMED_UP" and direction == "long":
-            confidence_points += 20
-            reasoning.append(f"Regime BULLISH (score {regime_score}) — strongly aligned with long (+20)")
-        elif regime_state == "CONFIRMED_UP" and direction == "short":
-            confidence_points -= 10  # Floor: max -10 for regime
-            position_multiplier *= 0.7
-            reasoning.append("Regime BULLISH — against short entry (-10, size -30%)")
-        elif regime_state == "CONFIRMED_DOWN" and direction == "long":
-            confidence_points -= 10  # Floor: max -10 for regime
-            position_multiplier *= 0.7
-            reasoning.append(f"Regime BEARISH (score {regime_score}) — against long entry (-10, size -30%)")
-        elif regime_state == "CONFIRMED_DOWN" and direction == "short":
-            confidence_points += 15
-            reasoning.append("Regime BEARISH — aligned with short entry (+15)")
-        elif regime_state in ("HOLD", "NEUTRAL"):
-            # Neutral regime — moderate boost if score leans our way
-            if regime_score >= 60 and direction == "long":
-                confidence_points += 10
-                reasoning.append(f"Regime leans bullish (score {regime_score}) — moderate alignment (+10)")
-            elif regime_score <= 40 and direction == "short":
-                confidence_points += 10
-                reasoning.append(f"Regime leans bearish (score {regime_score}) — moderate alignment (+10)")
-            else:
-                reasoning.append(f"Regime NEUTRAL (score {regime_score}) — no directional confirmation")
-        else:
-            reasoning.append(f"Regime state '{regime_state}' (score {regime_score})")
+        # Regime contribution — multi-timeframe aware (c1/v316j), legacy fallback.
+        # Pure, unit-testable scoring in _score_regime_direction().
+        _rg_pts, _rg_mult, _rg_reasons = self._score_regime_direction(
+            regime_data, regime_state, regime_score, direction)
+        confidence_points += _rg_pts
+        position_multiplier *= _rg_mult
+        reasoning.extend(_rg_reasons)
 
         # AI regime classification removed — no longer logged in reasoning
 
@@ -1666,6 +1665,111 @@ class ConfidenceGate:
         except Exception as e:
             logger.debug(f"CNN-LSTM signal failed (non-critical): {e}")
             return result
+
+    def _score_regime_direction(self, regime_data, regime_state, regime_score, direction):
+        """Regime → directional confirmation SCORING (c1/v316j).
+
+        Pure function: returns (points_delta, position_size_multiplier,
+        reasoning_lines). Prefers the multi_tf engine CONTEXT
+        (ALIGNED_UP/PULLBACK_IN_UPTREND/MIXED/BOUNCE_IN_DOWNTREND/ALIGNED_DOWN)
+        with conviction-scaled bonuses (tf_alignment.ratio) and a hard
+        counter-trend penalty against ALIGNED regimes. Falls back to the legacy
+        daily-composite mapping when multi_tf is absent/UNKNOWN. The counter-trend
+        penalty is a SCORE penalty (still evaluated + logged for learning), not a
+        force-skip.
+        """
+        points = 0
+        mult = 1.0
+        reasons = []
+
+        mtf = (regime_data or {}).get("multi_tf") if regime_data else None
+        ctx = mtf.get("context") if mtf else None
+        align = (mtf.get("tf_alignment") or {}) if mtf else {}
+        lanes = int(align.get("lanes_counted") or 0)
+        ratio = max(0.0, min(1.0, float(align.get("ratio") or 0.0)))
+
+        if mtf and ctx and ctx != "UNKNOWN" and lanes > 0:
+            conv = f"{ratio:.0%}"
+            aligned_bonus = max(MTF_ALIGNED_BONUS_MIN, round(MTF_ALIGNED_BONUS_MAX * ratio))
+            pullback_bonus = max(MTF_PULLBACK_BONUS_MIN, round(MTF_PULLBACK_BONUS_MAX * ratio))
+
+            if ctx == "ALIGNED_UP":
+                if direction == "long":
+                    points += aligned_bonus
+                    reasons.append(f"Regime ALIGNED_UP ({align.get('up', 0)}/{lanes} lanes, {conv}) confirms LONG (+{aligned_bonus})")
+                else:
+                    points -= MTF_COUNTER_PENALTY
+                    mult *= MTF_COUNTER_SIZE_MULT
+                    reasons.append(f"⛔ Regime ALIGNED_UP — SHORT is counter-trend (-{MTF_COUNTER_PENALTY}, size x{MTF_COUNTER_SIZE_MULT})")
+                return points, mult, reasons
+            if ctx == "ALIGNED_DOWN":
+                if direction == "short":
+                    points += aligned_bonus
+                    reasons.append(f"Regime ALIGNED_DOWN ({align.get('down', 0)}/{lanes} lanes, {conv}) confirms SHORT (+{aligned_bonus})")
+                else:
+                    points -= MTF_COUNTER_PENALTY
+                    mult *= MTF_COUNTER_SIZE_MULT
+                    reasons.append(f"⛔ Regime ALIGNED_DOWN — LONG is counter-trend (-{MTF_COUNTER_PENALTY}, size x{MTF_COUNTER_SIZE_MULT})")
+                return points, mult, reasons
+            if ctx == "PULLBACK_IN_UPTREND":
+                if direction == "long":
+                    points += pullback_bonus
+                    reasons.append(f"Regime PULLBACK_IN_UPTREND — LONG with primary uptrend (buy-the-dip) (+{pullback_bonus})")
+                else:
+                    points -= MTF_MILD_PENALTY
+                    mult *= MTF_MILD_SIZE_MULT
+                    reasons.append(f"Regime PULLBACK_IN_UPTREND — SHORT fades a dip in an uptrend (-{MTF_MILD_PENALTY}, size x{MTF_MILD_SIZE_MULT})")
+                return points, mult, reasons
+            if ctx == "BOUNCE_IN_DOWNTREND":
+                if direction == "short":
+                    points += pullback_bonus
+                    reasons.append(f"Regime BOUNCE_IN_DOWNTREND — SHORT with primary downtrend (sell-the-rip) (+{pullback_bonus})")
+                else:
+                    points -= MTF_MILD_PENALTY
+                    mult *= MTF_MILD_SIZE_MULT
+                    reasons.append(f"Regime BOUNCE_IN_DOWNTREND — LONG buys a bounce in a downtrend (-{MTF_MILD_PENALTY}, size x{MTF_MILD_SIZE_MULT})")
+                return points, mult, reasons
+            if ctx == "MIXED":
+                ib = (mtf.get("intraday_bias") or "NEUTRAL")
+                if ib == "UP" and direction == "long":
+                    points += MTF_MIXED_LEAN_BONUS
+                    reasons.append(f"Regime MIXED — slight intraday-up lean supports LONG (+{MTF_MIXED_LEAN_BONUS})")
+                elif ib == "DOWN" and direction == "short":
+                    points += MTF_MIXED_LEAN_BONUS
+                    reasons.append(f"Regime MIXED — slight intraday-down lean supports SHORT (+{MTF_MIXED_LEAN_BONUS})")
+                else:
+                    reasons.append("Regime MIXED — no clear multi-TF directional edge")
+                return points, mult, reasons
+            # Unrecognized context → fall through to legacy below.
+
+        # ── Legacy daily-composite path (multi_tf absent / UNKNOWN) ──
+        if regime_state == "CONFIRMED_UP" and direction == "long":
+            points += 20
+            reasons.append(f"Regime BULLISH (score {regime_score}) — strongly aligned with long (+20)")
+        elif regime_state == "CONFIRMED_UP" and direction == "short":
+            points -= 10
+            mult *= 0.7
+            reasons.append("Regime BULLISH — against short entry (-10, size -30%)")
+        elif regime_state == "CONFIRMED_DOWN" and direction == "long":
+            points -= 10
+            mult *= 0.7
+            reasons.append(f"Regime BEARISH (score {regime_score}) — against long entry (-10, size -30%)")
+        elif regime_state == "CONFIRMED_DOWN" and direction == "short":
+            points += 15
+            reasons.append("Regime BEARISH — aligned with short entry (+15)")
+        elif regime_state in ("HOLD", "NEUTRAL"):
+            if regime_score >= 60 and direction == "long":
+                points += 10
+                reasons.append(f"Regime leans bullish (score {regime_score}) — moderate alignment (+10)")
+            elif regime_score <= 40 and direction == "short":
+                points += 10
+                reasons.append(f"Regime leans bearish (score {regime_score}) — moderate alignment (+10)")
+            else:
+                reasons.append(f"Regime NEUTRAL (score {regime_score}) — no directional confirmation")
+        else:
+            reasons.append(f"Regime state '{regime_state}' (score {regime_score})")
+        return points, mult, reasons
+
 
     def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int,
                              regime_data: Dict = None, direction: str = "long"):
