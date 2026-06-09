@@ -28,7 +28,8 @@
  */
 import React, { useEffect, useState } from 'react';
 import { GitCompare } from 'lucide-react';
-import { safeGet } from '../../../utils/api';
+// v316e — switched to fetch+AbortController (no more safeGet) so a
+// stalled IB socket can't hang the 5s-cadence poll.
 
 const COLOR = {
   sync: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
@@ -36,24 +37,41 @@ const COLOR = {
   unknown: 'bg-zinc-700/30 text-zinc-400 border-zinc-700/50',
 };
 
-export const PositionTruthDiffPill = () => {
+export const PositionTruthDiffPill = ({ onStatus }) => {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
 
   useEffect(() => {
     let alive = true;
+    const API = process.env.REACT_APP_BACKEND_URL || '';
+    // v316e — hard 4s client timeout so a stalled IB socket can't pile
+    // up 5s-cadence requests (the no-timeout hang the operator hit).
     const fetchOnce = async () => {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 4000);
       try {
-        const d = await safeGet('/api/trading-bot/positions/truth-diff');
+        const r = await fetch(`${API}/api/trading-bot/positions/truth-diff`, {
+          signal: ctrl.signal,
+          headers: { Accept: 'application/json' },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
         if (alive) { setData(d); setErr(null); }
       } catch (e) {
-        if (alive) setErr(e?.message || String(e));
+        if (alive) setErr(e?.name === 'AbortError' ? 'timeout' : (e?.message || String(e)));
+      } finally {
+        clearTimeout(to);
       }
     };
     fetchOnce();
     const t = setInterval(fetchOnce, 5000);
     return () => { alive = false; clearInterval(t); };
   }, []);
+
+  useEffect(() => {
+    if (err || !data) { onStatus?.('unknown'); return; }
+    onStatus?.(data.in_sync ? 'green' : 'red');
+  }, [onStatus, err, data]);
 
   if (err || !data) {
     return (

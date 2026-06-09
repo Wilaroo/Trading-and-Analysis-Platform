@@ -28,7 +28,7 @@ const fmtRelative = (iso) => {
   } catch { return 'unknown'; }
 };
 
-export const CostBasisSyncTile = () => {
+export const CostBasisSyncTile = ({ onStatus }) => {
   const [audit, setAudit] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(null);
@@ -91,6 +91,9 @@ export const CostBasisSyncTile = () => {
       : null);
 
   const isClean = driftCount === 0;
+  useEffect(() => {
+    onStatus?.(audit?.success === false ? 'unknown' : (isClean ? 'green' : 'amber'));
+  }, [onStatus, isClean, audit]);
   const palette = isClean
     ? 'text-emerald-300 border-emerald-500/30'
     : 'text-amber-300 border-amber-500/30';
