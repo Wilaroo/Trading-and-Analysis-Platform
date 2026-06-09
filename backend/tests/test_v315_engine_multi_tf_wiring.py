@@ -24,13 +24,9 @@ def test_engine_calculate_multi_tf_pullback():
     up_daily = _ramp(100, 0.5, 220)      # daily uptrend
     dn_intraday = _ramp(120, -0.3, 80)   # intraday selloff
 
-    async def fake_hist(symbol, limit=200):
-        return up_daily
-
     async def fake_tf(symbol, bar_size, limit=120):
-        return dn_intraday  # 1h/5m/1m all down
+        return up_daily if bar_size == "1 day" else dn_intraday
 
-    eng._get_historical_bars = fake_hist
     eng._get_tf_bars = fake_tf
 
     out = asyncio.run(eng._calculate_multi_tf())
@@ -46,13 +42,9 @@ def test_engine_multi_tf_degrades_without_intraday():
     eng = MarketRegimeEngine(db=None)
     up_daily = _ramp(100, 0.5, 220)
 
-    async def fake_hist(symbol, limit=200):
-        return up_daily
-
     async def fake_tf(symbol, bar_size, limit=120):
-        return []  # nothing backfilled yet
+        return up_daily if bar_size == "1 day" else []  # nothing intraday yet
 
-    eng._get_historical_bars = fake_hist
     eng._get_tf_bars = fake_tf
 
     out = asyncio.run(eng._calculate_multi_tf())

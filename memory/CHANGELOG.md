@@ -1,3 +1,24 @@
+## 2026-06-09 — v316d: Multi-index regime (SPY/QQQ/IWM) + TICK internals — PATCH READY (user-apply pending)
+
+Answers "is regime SPY-only?": the new multi_tf lanes WERE SPY-only; now blended.
+
+- A(a): each lane (1d/1h/5m/1m) blends SPY/QQQ/IWM 0.5/0.3/0.2 (weighted_blend,
+  renormalized). per_index breakdown surfaced. index_divergence flags
+  TECH_WEAK/STRONG, SMALLCAP_WEAK/STRONG (>=15pt intraday gap vs SPY).
+- B1(c): per-index TICK — NYSE $TICK -> SPY+IWM (0.7), Nasdaq $TICKQ -> QQQ (0.3),
+  combined. Fetched LIVE over ib-direct (TICK-NYSE/TICK-NASD 1 D/1 min). Probe
+  confirmed IB serves TICK historical (daily+1min) for all three.
+- B2(c): score_internals (EMA10 smoothed + session cumulative + climax). 
+  apply_internals_adjustment confirms/contradicts intraday (pull toward neutral on
+  contradiction, mild reinforce on agreement, bounded). Climax (NYSE ±1000 /
+  NASD ±1200) caps an aggressive mode -> normal + caution note.
+- Tests: 34 pass (blend, internals, divergence, climax-cap, engine wiring) + 22
+  existing regime tests, no regression.
+- Patch: https://paste.rs/J6Z3T
+
+### Next: Command Center regime strip (4-lane + context + per-index + internals + divergence).
+
+---
 ## 2026-06-09 — VIX history landed + TICK internals exploration (v316c)
 
 - VIX backfill SUCCESS: 5025 daily bars 2006→2026 (max 82.69 GFC, median 17.29,

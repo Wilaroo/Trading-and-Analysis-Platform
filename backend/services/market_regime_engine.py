@@ -913,30 +913,61 @@ class MarketRegimeEngine:
         }
     
     async def _calculate_multi_tf(self) -> Dict:
-        """Score the four timeframe lanes (SPY-anchored) and classify context.
+        """Multi-index (SPY/QQQ/IWM) multi-timeframe regime + TICK internals.
 
-        Long lane (daily) reuses the proven _get_historical_bars path (IB
-        fallback covered). Intraday lanes read cached bars from
-        ib_historical_data via _get_tf_bars; if a timeframe isn't backfilled
-        yet its lane is None and the classifier degrades gracefully.
-        """
+        A(a): each lane blends SPY/QQQ/IWM (0.5/0.3/0.2). B1(c): per-index TICK
+        — NYSE ($TICK) covers SPY+IWM, Nasdaq ($TICKQ) covers QQQ — fetched live
+        over the ib-direct socket (the only working historical path here). B2(c):
+        internals confirm/contradict the intraday read + flag climaxes. Degrades
+        gracefully (any missing lane/feed simply drops out of the blend)."""
         try:
             from services.multi_tf_regime import (
-                score_long_lane, score_intraday_lane, build_multi_tf,
+                score_long_lane, score_intraday_lane, blend_intraday,
+                weighted_blend, score_internals, combine_internals,
+                index_divergence, build_multi_tf, INDEX_WEIGHTS,
             )
 
-            daily = await self._get_historical_bars("SPY", 220)
-            h1 = await self._get_tf_bars("SPY", "1 hour", 120)
-            m5 = await self._get_tf_bars("SPY", "5 mins", 120)
-            m1 = await self._get_tf_bars("SPY", "1 min", 120)
+            symbols = ["SPY", "QQQ", "IWM"]
+            per = {}
+            for sym in symbols:
+                daily = await self._get_tf_bars(sym, "1 day", 220)
+                h1 = await self._get_tf_bars(sym, "1 hour", 120)
+                m5 = await self._get_tf_bars(sym, "5 mins", 120)
+                m1 = await self._get_tf_bars(sym, "1 min", 120)
+                L = score_long_lane(daily)
+                M = score_intraday_lane(h1, fast=20, slow=50, use_vwap=False)
+                S = score_intraday_lane(m5, fast=9, slow=21, use_vwap=True)
+                Mi = score_intraday_lane(m1, fast=9, slow=21, use_vwap=True)
+                per[sym] = {"long": L, "mid": M, "short": S, "micro": Mi,
+                            "intraday": blend_intraday(M, S, Mi)}
 
-            long_s = score_long_lane(daily)
-            # Mid (1h) uses 20/50 EMA + structure. Short (5m) / micro (1m) use
-            # 9/21 EMA + VWAP (operator spec).
-            mid_s = score_intraday_lane(h1, fast=20, slow=50, use_vwap=False)
-            short_s = score_intraday_lane(m5, fast=9, slow=21, use_vwap=True)
-            micro_s = score_intraday_lane(m1, fast=9, slow=21, use_vwap=True)
-            return build_multi_tf(long_s, mid_s, short_s, micro_s)
+            long_s = weighted_blend({s: per[s]["long"] for s in symbols}, INDEX_WEIGHTS)
+            mid_s = weighted_blend({s: per[s]["mid"] for s in symbols}, INDEX_WEIGHTS)
+            short_s = weighted_blend({s: per[s]["short"] for s in symbols}, INDEX_WEIGHTS)
+            micro_s = weighted_blend({s: per[s]["micro"] for s in symbols}, INDEX_WEIGHTS)
+
+            divergence = index_divergence(
+                per["SPY"]["intraday"], per["QQQ"]["intraday"], per["IWM"]["intraday"])
+
+            # Per-index TICK internals via the live ib-direct socket.
+            internals = None
+            try:
+                from services.ib_direct_service import get_ib_direct_service
+                ibd = get_ib_direct_service()
+                if ibd and ibd.is_connected():
+                    nyse_bars = await ibd.get_historical_data("TICK-NYSE", "1 D", "1 min")
+                    nasd_bars = await ibd.get_historical_data("TICK-NASD", "1 D", "1 min")
+                    internals = combine_internals(
+                        score_internals(nyse_bars, "NYSE"),
+                        score_internals(nasd_bars, "NASD"))
+            except Exception as ie:
+                print(f"multi-tf internals error: {ie}")
+
+            per_index = {s: {"long": per[s]["long"], "intraday": per[s]["intraday"]}
+                         for s in symbols}
+            return build_multi_tf(long_s, mid_s, short_s, micro_s,
+                                  internals=internals, divergence=divergence,
+                                  per_index=per_index)
         except Exception as e:
             print(f"multi-tf calc error: {e}")
             return {"context": "UNKNOWN", "error": str(e)}
