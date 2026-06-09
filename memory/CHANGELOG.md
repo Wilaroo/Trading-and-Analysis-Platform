@@ -32,7 +32,9 @@ core complaint (today's SPY tape: daily ▲67.8 vs intraday ▼ → frozen).
 - Patch (full v314→v315 delta, verified clean on v314 tree): https://paste.rs/4GshD
   (`curl -s https://paste.rs/4GshD | git apply`)
 - Needs intraday bars for full effect: run `backfill_regime_universe.py --intraday`
-  (without intraday, context degrades to the daily anchor — safe).
+  (v2 of the script fetches IB-DIRECT via GET /api/ib/historical — queue-free, since
+  the historical_data_requests queue is drained behind a ~500k universe collection).
+  Without intraday, context degrades to the daily anchor (safe). Script: paste.rs/H49r0.
 - Decision 1 = B: CAUTIOUS thresholds left strict (50/35) by design.
 
 ### Next
