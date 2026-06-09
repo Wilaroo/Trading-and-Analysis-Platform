@@ -1,3 +1,26 @@
+## 2026-06-09 — v316b: IB-direct historical fetch + VIX (CBOE index) history — PATCH READY (user-apply pending)
+
+Root cause nailed: legacy ib_service historical path is DEAD on this deploy
+(ib_insync worker disconnected — same reason fundamentals route via ib-direct).
+The live working socket is ib_direct_service (ib_async). Added a real historical
+fetch there.
+
+- ib_direct_service.get_historical_data(): reqHistoricalDataAsync over the live
+  socket; VIX qualified as Index('VIX','CBOE') (whatToShow=TRADES). Returns
+  chronological OHLCV. This is now the only working IB historical path.
+- GET /api/system/ib-direct/historical/{symbol} endpoint.
+- scripts/backfill_vix_history.py: pulls ~20Y daily VIX → ib_historical_data
+  (source=ib_direct) + prints percentile of today's close vs all sessions
+  (COVID/tariff/geopolitical regime context the operator requested).
+- Patches: backend https://paste.rs/k40Bl | vix script https://paste.rs/SWYEG
+
+Intraday provenance RESOLVED: lanes read source=live_tick bars = IB realtime
+ticks aggregated (IB-sourced). The queue/pusher does NOT fulfill ad-hoc historical
+(returns no data). VIX live already correct (21.68) via pushed index data.
+
+### Next: Command Center regime strip (4-lane + context + per-direction stance).
+
+---
 ## 2026-06-09 — v316: Strict IB-only regime data + VIX index-contract fix — PATCH READY (user-apply pending)
 
 - _do_get_historical_data now uses Index("VIX","CBOE") for VIX (was Stock -> 0 bars).
