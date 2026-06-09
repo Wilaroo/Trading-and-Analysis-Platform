@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 SEQUENCE_LENGTH = 5  # Number of chart windows to look back
 DIRECTIONS = ["down", "flat", "up"]  # Triple-barrier class order: -1/0/+1
 
+# Validation forward-pass chunk size — see temporal_fusion_transformer.py. The
+# sequence dimension makes the all-at-once val forward even heavier here, so we
+# chunk it to avoid OOM-killing the subprocess on unified memory.
+VAL_CHUNK = 8192
+
 # Triple-barrier hyperparameters (ATR multiples) — env-overridable via
 # TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD. Single source of truth lives in
 # triple_barrier_config so every training path rebalances together.
@@ -228,7 +233,10 @@ class CNNLSTMModel:
 
             # Fill remaining features with derived indicators
             feat[14] = (closes[i] - lows[i]) / (highs[i] - lows[i]) if (highs[i] - lows[i]) > 0 else 0.5
-            feat[15] = closes[i] - np.mean(closes[max(0, i - 20):i + 1])  # distance from SMA20
+            # feat 15: SCALE-FREE 50-bar return (was raw $ distance from SMA20,
+            # closes[i]-mean(...), which dwarfed other features for high-priced
+            # names under the single global scaler).
+            feat[15] = (closes[i] / closes[max(0, i - 50)] - 1) * 100  # 50-bar return
 
             all_bar_features.append(feat)
 
@@ -492,12 +500,18 @@ class CNNLSTMModel:
 
             scheduler.step()
 
-            # Validate
+            # Validate — CHUNKED forward (sequence dim makes this the heaviest
+            # all-at-once op; was OOM-killing the subprocess on unified memory).
             self._model.eval()
+            correct = 0
             with torch.no_grad():
-                val_dir, _val_win, _ = self._model(X_val_t)
-                val_pred = torch.argmax(val_dir, dim=-1)
-                val_acc = (val_pred == y_val_t).float().mean().item()
+                for vs in range(0, len(X_val_t), VAL_CHUNK):
+                    vd, _, _ = self._model(X_val_t[vs:vs + VAL_CHUNK])
+                    vp = torch.argmax(vd, dim=-1)
+                    correct += (vp == y_val_t[vs:vs + VAL_CHUNK]).sum().item()
+            val_acc = correct / len(X_val_t) if len(X_val_t) else 0.0
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             if epoch % 5 == 0:
                 logger.info(f"[CNN-LSTM] Epoch {epoch}/{epochs} — loss: {total_loss / n_batches:.4f}, val_acc: {val_acc:.4f}")

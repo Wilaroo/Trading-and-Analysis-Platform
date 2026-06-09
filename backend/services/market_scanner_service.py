@@ -56,7 +56,7 @@ class ScanFilters:
     
     # Price filters
     min_price: float = 5.0
-    max_price: float = 500.0
+    max_price: float = 1000.0
     
     # Market cap filter (optional)
     min_market_cap: Optional[float] = None  # e.g., 1_000_000_000 for $1B+

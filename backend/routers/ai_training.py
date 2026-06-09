@@ -82,8 +82,41 @@ async def _monitor_training_process(task: _TrainingProcess):
             )
             if result_doc:
                 _last_result = result_doc.get("result")
+
+            # Honest status. A SIGKILL/segfault (e.g. OOM kill, exit_code < 0)
+            # cannot be caught by the subprocess's try/except, so it never writes
+            # a failure status — leaving the dashboard stuck on the last RUNNING
+            # phase forever. Detect an abnormal exit with no successful result and
+            # mark the pipeline FAILED so the UI reflects reality immediately.
+            succeeded = bool(isinstance(_last_result, dict) and not _last_result.get("error"))
+            if exit_code is not None and exit_code != 0 and not succeeded:
+                if exit_code < 0:
+                    sig = -exit_code
+                    if sig == 9:
+                        err_msg = ("Training process was OOM-killed (SIGKILL/-9): ran out of "
+                                   "unified memory. Lower batch size / symbol cap and retry.")
+                    else:
+                        err_msg = (f"Training process terminated by signal {sig} "
+                                   f"(no traceback — killed by the OS, not a Python error).")
+                else:
+                    err_msg = (f"Training process exited abnormally (code {exit_code}). "
+                               f"See training_subprocess.log.")
+                logger.error(f"[TRAINING] {err_msg}")
+                await asyncio.to_thread(
+                    mongo_db["training_pipeline_status"].update_one,
+                    {"_id": "pipeline"},
+                    {"$set": {
+                        "phase": "error",
+                        "status": "failed",
+                        "error": err_msg,
+                        "current_model": "",
+                        "current_phase_progress": 0,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }},
+                    upsert=True,
+                )
     except Exception as e:
-        logger.warning(f"[TRAINING] Failed to read result: {e}")
+        logger.warning(f"[TRAINING] Failed to read result / write failure status: {e}")
 
     try:
         from services.focus_mode_manager import focus_mode_manager

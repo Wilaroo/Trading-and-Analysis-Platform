@@ -24508,3 +24508,47 @@ verification deferred to DGX. Delivered as patch https://paste.rs/R8bjK.
 
 NEXT: build the full-width multi_tf Regime Strip into the freed status-strip band.
 Open: font 0-vs-8 fix (operator hasn't picked slashed-zero vs IBM Plex Mono yet).
+
+---
+
+## 2026-06-09 — DL retraining: crash fix + TFT collapse root-cause fix
+
+ROOT CAUSE of TFT crash: OOM-kill (SIGKILL), NOT a Python exception. The
+subprocess try/except logs a full traceback on any error; the log had none →
+killed by signal. On the DGX Spark's unified memory, the per-epoch validation
+forward over the ENTIRE val set (~450k rows) built multi-GB activation tensors,
+tripping the kernel OOM killer (~epoch 30 due to allocator fragmentation).
+
+ROOT CAUSE of TFT collapse (val_acc ≈ majority baseline ~46%, flat loss):
+`extract_multi_tf_features` concatenated timeframes by END-INDEX. Two bugs:
+  1. Position-matched rows mixed a daily bar from years ago with a 1-min bar
+     from today on the same row.
+  2. When any intraday TF was shorter than daily history (always), it returned
+     the RECENT daily rows while the caller's label loop assumed row i ↔ daily
+     bar (20+i) → features and triple-barrier labels MISALIGNED → effectively
+     random targets → model could only predict the majority class.
+
+FIXES (patch https://paste.rs/FE8cq):
+- temporal_fusion_transformer.py: rewrote extract_multi_tf_features to be
+  DAILY-ANCHORED + TIMESTAMP-ALIGNED (as-of join, no look-ahead; zero-fill when
+  intraday history doesn't reach a daily date). feat[10] raw price delta →
+  scale-free 50-bar return. Chunked validation forward (VAL_CHUNK=16384) +
+  empty_cache. Added per-timeframe coverage diagnostic log.
+- cnn_lstm_model.py: feat[15] raw $ → scale-free 50-bar return. Chunked
+  validation forward (VAL_CHUNK=8192) + empty_cache (twin OOM fix).
+- ai_training.py _monitor_training_process: on abnormal subprocess exit
+  (code!=0 / signal) with no success result, write phase="error"/status="failed"
+  to training_pipeline_status (OOM hint for -9). No more phantom RUNNING.
+- market_scanner_service.py ScanFilters.max_price 500 → 1000 (per operator:
+  widen tradeable/scanned universe to $5–$1000; symbol count stays 500).
+- monitor_training.sh: sanitize n_procs (fixes "integer expression expected").
+
+TESTS: backend/tests/test_tft_alignment.py — 4 tests pass (shape/daily-axis
+alignment, scale-free across price levels, as-of join no-look-ahead, None guards).
+Validated locally with synthetic data (no torch/DB needed). Full train run +
+edge verification deferred to DGX overnight run.
+
+NEXT: operator applies patch, restarts backend, re-runs `dl` force-retrain.
+Watch for: (a) no OOM, run completes 50 epochs; (b) "[TFT] Timeframe coverage"
+line; (c) val_acc edge ABOVE majority baseline (collapse fixed) — if still flat,
+intraday coverage is ~0% and signal is daily-only/low-SNR (next lever: features).
