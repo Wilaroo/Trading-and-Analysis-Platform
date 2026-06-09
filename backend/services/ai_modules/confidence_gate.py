@@ -478,7 +478,7 @@ class ConfidenceGate:
             ai_regime = ai_regime_result
 
         # Update trading mode FIRST so thresholds are mode-aware for this evaluation
-        self._update_trading_mode(regime_state, ai_regime, regime_score)
+        self._update_trading_mode(regime_state, ai_regime, regime_score, regime_data, direction)
 
         # Regime contribution — graduated scale
         if regime_state == "CONFIRMED_UP" and direction == "long":
@@ -1667,12 +1667,37 @@ class ConfidenceGate:
             logger.debug(f"CNN-LSTM signal failed (non-critical): {e}")
             return result
 
-    def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int):
+    def _update_trading_mode(self, regime_state: str, ai_regime: str, regime_score: int,
+                             regime_data: Dict = None, direction: str = "long"):
         """
-        Update SentCom's overall trading mode based on Market Regime Engine.
-        AI regime (classify_regime) removed — it duplicated the market regime with stale data.
-        VAE regime still contributes via Layer 10 confidence gate scoring.
+        Update SentCom's overall trading mode.
+
+        Multi-timeframe context (v315) takes precedence when available: a single
+        daily-composite read can't tell a buyable pullback in an uptrend from a
+        genuine bear regime. The multi_tf classifier sets the mode PER DIRECTION
+        (e.g. PULLBACK_IN_UPTREND → NORMAL for longs, CAUTIOUS for shorts) so the
+        gate stops forcing CAUTIOUS on every sub-neutral daily score.
+
+        Falls back to the legacy daily-composite mapping when multi_tf is absent
+        (e.g. intraday bars not yet backfilled → context UNKNOWN).
         """
+        mtf = (regime_data or {}).get("multi_tf") if regime_data else None
+        ctx = mtf.get("context") if mtf else None
+        if mtf and ctx and ctx != "UNKNOWN" and direction in ("long", "short"):
+            modes = mtf.get("modes", {})
+            mode_str = modes.get(direction)
+            if mode_str in (TradingMode.AGGRESSIVE, TradingMode.NORMAL,
+                            TradingMode.CAUTIOUS, TradingMode.DEFENSIVE):
+                self._trading_mode = mode_str
+                align = mtf.get("tf_alignment", {})
+                self._mode_reason = (
+                    f"{ctx} — {direction} mode {mode_str} "
+                    f"(TF align {align.get('dominant', '?')} "
+                    f"{int(align.get('ratio', 0) * 100)}%)"
+                )
+                return
+
+        # --- Legacy daily-composite fallback ---
         if regime_state == "CONFIRMED_DOWN":
             self._trading_mode = TradingMode.DEFENSIVE
             self._mode_reason = f"Bear regime confirmed (score: {regime_score})"

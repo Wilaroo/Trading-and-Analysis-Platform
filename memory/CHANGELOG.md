@@ -1,3 +1,44 @@
+## 2026-06-09 — v315: Multi-Timeframe Regime + per-direction gate mode — PATCH READY (user-apply pending)
+
+Gives the regime engine human-like multi-timeframe context so a daily uptrend
+with an intraday pullback is traded as a buyable dip (NORMAL longs) instead of
+being averaged into a flat NEUTRAL → CAUTIOUS → no-trade. Fixes the operator's
+core complaint (today's SPY tape: daily ▲67.8 vs intraday ▼ → frozen).
+
+### Design (operator-approved)
+- 4 lanes, SPY-anchored: LONG 1d (20 SMA/50/200 + structure), MID 1h (20/50 EMA),
+  SHORT 5m (9/21 EMA), MICRO 1m (9/21 EMA). Operator spec: long=20 SMA, short=21 EMA.
+- Intraday blend MID .5 / SHORT .3 / MICRO .2 (renormalized). LONG anchor + intraday
+  → CONTEXT: ALIGNED_UP / PULLBACK_IN_UPTREND / MIXED / BOUNCE_IN_DOWNTREND / ALIGNED_DOWN.
+- Context sets trading mode PER DIRECTION (long vs short scored separately):
+    PULLBACK_IN_UPTREND → long NORMAL (buy dip), short CAUTIOUS
+    BOUNCE_IN_DOWNTREND → short NORMAL (sell rip), long CAUTIOUS
+    ALIGNED_UP → long AGGR/NORMAL, short DEFENSIVE; ALIGNED_DOWN mirror.
+- `tf_alignment` (dominant bias + agreement ratio) surfaced for UI/observability.
+
+### Files
+- NEW services/multi_tf_regime.py — pure, dependency-free lane/context logic.
+- market_regime_engine.py — _calculate_multi_tf() + _get_tf_bars() (self.db handle);
+  additive `multi_tf` block in /api/market-regime/current + stored in market_regime_state.
+- confidence_gate.py — _update_trading_mode() now prefers multi_tf.modes[direction];
+  legacy daily-composite mapping kept as fallback when context UNKNOWN.
+
+### Tests — 18/18 pass + 41 existing regime tests green (no regression)
+- test_multi_tf_regime.py (12): lanes, blend, context, mode table, alignment.
+- test_v315_gate_multi_tf_mode.py (4): per-direction mode + legacy fallback.
+- test_v315_engine_multi_tf_wiring.py (2): engine assembles PULLBACK; degrades w/o intraday.
+
+### Delivery
+- Patch: https://paste.rs/NwroS  (`curl -s https://paste.rs/NwroS | git apply`)
+- Needs intraday bars for full effect: run `backfill_regime_universe.py --intraday`
+  (without intraday, context degrades to the daily anchor — safe).
+- Decision 1 = B: CAUTIOUS thresholds left strict (50/35) by design.
+
+### Next
+- Verify live on DGX; then surface multi_tf (4-lane strip + context) on Command Center.
+
+---
+
 ## 2026-06-09 — v314: Market-regime data integrity (FTD dedup + breadth self.db) — ✅ VERIFIED LIVE ON DGX
 # Live verify (15:22 UTC): FTD count 25→2 HEALTHY (score 15→45); breadth real
 # (spy -2.58 / qqq -4.8 / iwm -3.55, full sector map); composite 48.4→52.9; 8/8 pytest.

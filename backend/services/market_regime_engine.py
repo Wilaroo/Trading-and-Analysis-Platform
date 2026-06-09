@@ -886,7 +886,12 @@ class MarketRegimeEngine:
         
         # Generate recommendation
         recommendation = self._generate_recommendation(new_state, composite_score)
-        
+
+        # Multi-timeframe context (additive — preserves all existing fields).
+        # Anchors on SPY across 1d/1h/5m/1m; degrades gracefully to anchor-only
+        # when intraday bars are not yet backfilled.
+        multi_tf = await self._calculate_multi_tf()
+
         return {
             "state": new_state.value,
             "previous_state": self.previous_state.value if self.previous_state else None,
@@ -901,11 +906,73 @@ class MarketRegimeEngine:
                 "ftd": self.ftd_block.to_dict(),
                 "volume_vix": self.volume_vix_block.to_dict()
             },
+            "multi_tf": multi_tf,
             "recommendation": recommendation,
             "trading_implications": self._get_trading_implications(new_state),
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
     
+    async def _calculate_multi_tf(self) -> Dict:
+        """Score the four timeframe lanes (SPY-anchored) and classify context.
+
+        Long lane (daily) reuses the proven _get_historical_bars path (IB
+        fallback covered). Intraday lanes read cached bars from
+        ib_historical_data via _get_tf_bars; if a timeframe isn't backfilled
+        yet its lane is None and the classifier degrades gracefully.
+        """
+        try:
+            from services.multi_tf_regime import (
+                score_long_lane, score_intraday_lane, build_multi_tf,
+            )
+
+            daily = await self._get_historical_bars("SPY", 220)
+            h1 = await self._get_tf_bars("SPY", "1 hour", 120)
+            m5 = await self._get_tf_bars("SPY", "5 mins", 120)
+            m1 = await self._get_tf_bars("SPY", "1 min", 120)
+
+            long_s = score_long_lane(daily)
+            # Mid (1h) uses 20/50 EMA; short/micro use 9/21 EMA (operator spec).
+            mid_s = score_intraday_lane(h1, fast=20, slow=50)
+            short_s = score_intraday_lane(m5, fast=9, slow=21)
+            micro_s = score_intraday_lane(m1, fast=9, slow=21)
+            return build_multi_tf(long_s, mid_s, short_s, micro_s)
+        except Exception as e:
+            print(f"multi-tf calc error: {e}")
+            return {"context": "UNKNOWN", "error": str(e)}
+
+    async def _get_tf_bars(self, symbol: str, bar_size: str, limit: int = 120) -> List[Dict]:
+        """Read cached intraday bars for a timeframe from ib_historical_data.
+
+        Uses the injected self.db handle (the module-level get_database() returns
+        None in the IB-only runtime — same fix as the breadth path). Returns
+        chronological OHLCV; empty list when the timeframe isn't backfilled yet."""
+        db = self.db
+        if db is None:
+            try:
+                from database import get_database
+                db = get_database()
+            except Exception:
+                db = None
+        if db is None:
+            return []
+        try:
+            def _q():
+                return list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": bar_size},
+                    {"_id": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "date": 1}
+                ).sort("date", -1).limit(limit))
+            rows = await asyncio.to_thread(_q)
+            if rows:
+                return [{
+                    "open": r.get("open"), "high": r.get("high"),
+                    "low": r.get("low"), "close": r.get("close"),
+                    "volume": r.get("volume"),
+                } for r in reversed(rows)]
+        except Exception as e:
+            print(f"tf-bars error {symbol} {bar_size}: {e}")
+        return []
+
+
     def _calculate_confidence(self) -> float:
         """Calculate confidence based on signal block agreement."""
         scores = [
@@ -1183,6 +1250,7 @@ class MarketRegimeEngine:
                 "risk_level": regime.get("risk_level"),
                 "confidence": regime.get("confidence"),
                 "signal_blocks": regime.get("signal_blocks"),
+                "multi_tf": regime.get("multi_tf"),
                 "state_changed": regime.get("state_changed"),
                 "previous_state": regime.get("previous_state")
             }

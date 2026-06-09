@@ -27,11 +27,35 @@ import sys
 import argparse
 from datetime import datetime, timezone
 
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Make `services...` importable when run from backend/.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, _BACKEND_DIR)
 
-from dotenv import load_dotenv
-load_dotenv()
+
+def _load_env():
+    """Load MONGO_URL/DB_NAME without depending on python-dotenv being present
+    in whatever interpreter runs this (system python3 may lack it)."""
+    if os.environ.get("MONGO_URL") and os.environ.get("DB_NAME"):
+        return
+    try:
+        from dotenv import load_dotenv  # optional
+        load_dotenv()
+        if os.environ.get("MONGO_URL") and os.environ.get("DB_NAME"):
+            return
+    except Exception:
+        pass
+    env_path = os.path.join(_BACKEND_DIR, ".env")
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+_load_env()
 
 from pymongo import MongoClient
 from services.historical_data_queue_service import init_historical_data_queue_service
