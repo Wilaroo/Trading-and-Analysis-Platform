@@ -506,15 +506,23 @@ class FTDSignalBlock(SignalBlock):
         daily_change_pct = ((today_close - yesterday_close) / yesterday_close) * 100
         volume_increased = today_volume > yesterday_volume
         
-        # Check for distribution day
+        # Check for distribution day — dedupe by the BAR's trading date, not
+        # wall-clock now(). Previously this stamped datetime.now() and appended
+        # on EVERY calculate() call, so a single down-day was re-counted on each
+        # refresh and inflated the distribution count (observed 25 duplicates →
+        # "CRITICAL" → score floored to 15).
         if daily_change_pct <= -self.DISTRIBUTION_MIN_LOSS and volume_increased:
-            self.distribution_days.append({
-                "date": datetime.now(timezone.utc).isoformat(),
-                "change_pct": round(daily_change_pct, 2),
-                "volume_ratio": round(today_volume / yesterday_volume, 2) if yesterday_volume > 0 else 1
-            })
-            # Keep only last 25 trading days
-            self.distribution_days = self.distribution_days[-25:]
+            bar_date = today.get("timestamp") or today.get("date")
+            bar_day = str(bar_date)[:10] if bar_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            already_logged = any(str(d.get("date", ""))[:10] == bar_day for d in self.distribution_days)
+            if not already_logged:
+                self.distribution_days.append({
+                    "date": f"{bar_day}T00:00:00+00:00",
+                    "change_pct": round(daily_change_pct, 2),
+                    "volume_ratio": round(today_volume / yesterday_volume, 2) if yesterday_volume > 0 else 1
+                })
+                # Keep only the last 25 distinct distribution days
+                self.distribution_days = self.distribution_days[-25:]
         
         # State machine logic
         if self.ftd_state == FTDState.CORRECTION:
@@ -1006,8 +1014,46 @@ class MarketRegimeEngine:
         
         return []
     
+    async def _daily_change_from_bars(self, symbol: str) -> Dict:
+        """Compute (price, change_pct) from the two most recent cached daily bars.
+
+        IB-only fallback used when Alpaca is disabled. Reads `ib_historical_data`
+        directly (no 20-bar minimum) so quote/sector breadth no longer flatlines
+        to zero in an IB-only deployment.
+        """
+        try:
+            from database import get_database
+            db = get_database()
+            if db is None:
+                return {}
+
+            def _q():
+                return list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "close": 1, "date": 1}
+                ).sort("date", -1).limit(2))
+
+            rows = await asyncio.to_thread(_q)
+            if len(rows) >= 2:
+                last_close = rows[0].get("close") or 0
+                prev_close = rows[1].get("close") or 0
+                if prev_close:
+                    return {
+                        "price": last_close,
+                        "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
+                    }
+        except Exception as e:
+            print(f"daily-change-from-bars error for {symbol}: {e}")
+        return {}
+
     async def _get_quote(self, symbol: str) -> Dict:
-        """Get current quote with change percentage."""
+        """Get current quote with change percentage.
+
+        IB-only deployment: Alpaca is disabled, so when it's unavailable we derive
+        change_pct from the cached daily bars instead of returning zeros (which
+        silently flatlined the breadth block). A realtime overlay is layered in
+        Step 2 so the current day's change goes live like the charts.
+        """
         try:
             if self.alpaca_service:
                 quote = await self.alpaca_service.get_quote(symbol)
@@ -1019,7 +1065,12 @@ class MarketRegimeEngine:
                     }
         except Exception as e:
             print(f"Quote error for {symbol}: {e}")
-        
+
+        # IB-only fallback: derive daily change from cached bars.
+        derived = await self._daily_change_from_bars(symbol)
+        if derived:
+            return {"price": derived["price"], "change_pct": derived["change_pct"], "rvol": 1.0}
+
         return {"price": 0, "change_pct": 0, "rvol": 1.0}
     
     async def _get_vix_data(self) -> Dict:
@@ -1039,10 +1090,15 @@ class MarketRegimeEngine:
         return {"price": 20, "change_pct": 0}
     
     async def _get_sector_data(self) -> Dict[str, Dict]:
-        """Get sector ETF data for breadth analysis."""
+        """Get sector ETF data for breadth analysis.
+
+        IB-only deployment: when Alpaca batch quotes are unavailable, derive each
+        sector's daily change from cached bars so breadth reflects real sector
+        rotation instead of all-zeros.
+        """
         sector_etfs = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB"]
         sector_data = {}
-        
+
         try:
             if self.alpaca_service:
                 quotes = await self.alpaca_service.get_quotes_batch(sector_etfs)
@@ -1052,9 +1108,16 @@ class MarketRegimeEngine:
                             "price": quote.get("price", quote.get("last", 0)),
                             "change_pct": quote.get("change_pct", quote.get("changePercent", 0))
                         }
+                    return sector_data
         except Exception as e:
             print(f"Sector data error: {e}")
-        
+
+        # IB-only fallback: derive each sector's daily change from cached bars.
+        for etf in sector_etfs:
+            derived = await self._daily_change_from_bars(etf)
+            if derived:
+                sector_data[etf] = {"price": derived["price"], "change_pct": derived["change_pct"]}
+
         return sector_data
     
     async def _get_vold_ratio(self) -> float:
