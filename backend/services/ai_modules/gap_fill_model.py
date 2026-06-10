@@ -145,11 +145,13 @@ def compute_gap_fill_target(
     max_bars: int = 78,
 ) -> Optional[int]:
     """
-    Compute gap fill target.
+    Compute gap fill target within a bounded window.
 
     intraday_lows/highs: Intraday bars after the gap (chronological, oldest first)
     prev_close: Previous day's closing price
     gap_direction: 1.0 for gap up, -1.0 for gap down
+    max_bars: how many bars ahead to consider a "fill" (the EARLY window in the
+        v19.34.314 P-TARGET redesign — ~first 45 min, not the full session).
 
     Returns: 1 (GAP_FILL) if price touches prev_close within max_bars, else 0.
     """
@@ -173,10 +175,38 @@ def compute_gap_fill_target(
     return 0
 
 
+def find_session_open_indices(bar_dates) -> list:
+    """Return the indices where a new trading day begins (the YYYY-MM-DD date
+    changes vs the previous bar). `bar_dates` is a chronological (oldest-first)
+    list of date strings/datetimes. The bar at each returned index is the
+    session OPEN; `index-1` is the prior session's last bar (its close is the
+    overnight reference). Used by the P-TARGET overnight-gap sampler."""
+    out = []
+    prev_day = None
+    for i, d in enumerate(bar_dates):
+        day = str(d)[:10]
+        if not day:
+            continue
+        if day != prev_day:
+            out.append(i)
+            prev_day = day
+    return out
+
+
+# v19.34.314 — P-TARGET redesign.
+# The OLD design evaluated EVERY intrabar gap (≥0.2%, gap = |open[i]-close[i-1]|)
+# and checked "fill" across a FULL session (up to 390 bars). Because a 0.2% level
+# is almost always revisited within a whole session, the target collapsed to a
+# broken ~98% fill rate → a useless, class-collapsed model. The NEW design samples
+# ONLY the overnight OPEN gap (today's session open vs the prior session's close,
+# ≥0.5%) and checks fill within an EARLY window (~first 45 min), which produces a
+# balanced, actionable target. Multi-day "daily"/"weekly" gap variants are RETIRED
+# (a gap that fills sometime over 20 days / 12 weeks is not a tradeable intraday
+# signal).
+OVERNIGHT_GAP_MIN_PCT = 0.005  # only model overnight gaps ≥ 0.5%
+
 GAP_MODEL_CONFIGS = {
-    "1 min":   {"max_bars": 390, "model_name": "gap_fill_1min"},   # Full day
-    "5 mins":  {"max_bars": 78,  "model_name": "gap_fill_5min"},   # ~6.5 hours
-    "15 mins": {"max_bars": 26,  "model_name": "gap_fill_15min"},  # ~6.5 hours
-    "1 day":   {"max_bars": 20,  "model_name": "gap_fill_daily"},  # 20 trading days lookback
-    "1 week":  {"max_bars": 12,  "model_name": "gap_fill_weekly"}, # 12 weeks lookback
+    "1 min":   {"early_window_bars": 45, "model_name": "gap_fill_1min"},   # ~first 45 min
+    "5 mins":  {"early_window_bars": 9,  "model_name": "gap_fill_5min"},   # ~first 45 min
+    "15 mins": {"early_window_bars": 3,  "model_name": "gap_fill_15min"},  # ~first 45 min
 }

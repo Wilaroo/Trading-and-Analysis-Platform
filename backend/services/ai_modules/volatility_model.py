@@ -138,23 +138,28 @@ def compute_vol_target(
     current_idx: index of the current bar (end of lookback window)
     """
     n = len(closes)
-    if current_idx + forecast_horizon >= n or current_idx < 20:
+    fh = forecast_horizon
+    if current_idx + fh >= n or current_idx < fh or fh < 2:
         return None
 
-    # Trailing 20-bar realized vol
-    trailing = closes[current_idx - 19: current_idx + 1]
+    # v19.34.312: EQUAL-LENGTH trailing vs forward windows (both fh returns).
+    # The old target compared a 20-bar trailing vol to an fh-bar forward vol —
+    # a length mismatch that made forward>trailing ~85% of the time, so the
+    # model collapsed to always-HIGH_VOL (recall_down=0.00). Same-length
+    # windows give a fair "is volatility expanding?" target (~50/50).
+    trailing = closes[current_idx - fh: current_idx + 1]
     trailing_rets = np.diff(trailing) / trailing[:-1]
     trailing_rets = trailing_rets[np.isfinite(trailing_rets)]
     trailing_vol = np.std(trailing_rets) if len(trailing_rets) > 1 else 0
 
-    # Forward realized vol
-    forward = closes[current_idx: current_idx + forecast_horizon + 1]
+    # Forward realized vol (same fh-return window)
+    forward = closes[current_idx: current_idx + fh + 1]
     forward_rets = np.diff(forward) / forward[:-1]
     forward_rets = forward_rets[np.isfinite(forward_rets)]
     forward_vol = np.std(forward_rets) if len(forward_rets) > 1 else 0
 
     if trailing_vol == 0:
-        return 0
+        return None  # degenerate (flat) window — drop rather than force a class
 
     return 1 if forward_vol > trailing_vol else 0
 
@@ -177,32 +182,27 @@ def compute_vol_targets_batch(
     from numpy.lib.stride_tricks import sliding_window_view
 
     n = len(closes)
-    n_valid = n - start_idx - forecast_horizon
-    if n_valid <= 0 or start_idx < 20:
+    fh = forecast_horizon
+    n_valid = n - start_idx - fh
+    if n_valid <= 0 or start_idx < fh or fh < 2:
         return np.array([], dtype=np.float32)
 
-    # Trailing 20-bar realized vol for each position i in [start_idx, start_idx + n_valid)
-    # trailing window for bar i = closes[i-19:i+1] (20 elements)
-    trail_wins = sliding_window_view(closes, 20)  # (n-19, 20)
-    # trail_wins[k] = closes[k:k+20], last element = closes[k+19]
-    # For bar i, k = i - 19 → trail_wins[i-19]
+    # v19.34.312: EQUAL-LENGTH windows. One (fh+1)-length sliding vol array is
+    # used for BOTH the trailing and forward windows (fair comparison), fixing
+    # the length-mismatch that biased the old target to ~85% HIGH_VOL.
+    # vol_all[k] = std of returns over closes[k : k+fh+1].
+    wins = sliding_window_view(closes, fh + 1)  # (n-fh, fh+1)
     with np.errstate(divide='ignore', invalid='ignore'):
-        trail_rets = np.diff(trail_wins, axis=1) / np.where(trail_wins[:, :-1] != 0, trail_wins[:, :-1], 1.0)
-    trail_rets = np.where(np.isfinite(trail_rets), trail_rets, 0.0)
-    trail_vol_all = np.std(trail_rets, axis=1)  # (n-19,)
+        rets = np.diff(wins, axis=1) / np.where(wins[:, :-1] != 0, wins[:, :-1], 1.0)
+    rets = np.where(np.isfinite(rets), rets, 0.0)
+    vol_all = np.std(rets, axis=1)  # (n-fh,)
 
-    # Forward (fh+1)-bar realized vol for each position
-    fwd_wins = sliding_window_view(closes, forecast_horizon + 1)  # (n-fh, fh+1)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        fwd_rets = np.diff(fwd_wins, axis=1) / np.where(fwd_wins[:, :-1] != 0, fwd_wins[:, :-1], 1.0)
-    fwd_rets = np.where(np.isfinite(fwd_rets), fwd_rets, 0.0)
-    fwd_vol_all = np.std(fwd_rets, axis=1)  # (n-fh,)
+    # For bar i: forward window starts at i -> vol_all[i];
+    #            trailing window = closes[i-fh:i+1] starts at i-fh -> vol_all[i-fh].
+    fwd_slice = vol_all[start_idx: start_idx + n_valid]
+    trail_slice = vol_all[start_idx - fh: start_idx - fh + n_valid]
 
-    # Select slices for our output range [start_idx, start_idx + n_valid)
-    trail_slice = trail_vol_all[start_idx - 19: start_idx - 19 + n_valid]  # trailing vols
-    fwd_slice = fwd_vol_all[start_idx: start_idx + n_valid]  # forward vols
-
-    actual_n = min(len(trail_slice), len(fwd_slice))
+    actual_n = min(len(trail_slice), len(fwd_slice), n_valid)
     if actual_n <= 0:
         return np.array([], dtype=np.float32)
 
@@ -211,7 +211,7 @@ def compute_vol_targets_batch(
 
     targets = np.where(trail_slice > 0,
                        np.where(fwd_slice > trail_slice, 1.0, 0.0),
-                       0.0).astype(np.float32)
+                       -1.0).astype(np.float32)
     return targets
 
 

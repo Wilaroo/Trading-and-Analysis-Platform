@@ -296,7 +296,8 @@ class LearningLoopService:
         confirmation_signals: List[str] = None,
         expected_hold_minutes: int = 30,
         catalyst_tag: str = "",
-        gap_pct: float = 0.0
+        gap_pct: float = 0.0,
+        gate_decision_id: str = None
     ) -> TradeOutcome:
         """
         Record complete trade outcome for learning.
@@ -394,6 +395,7 @@ class LearningLoopService:
                 setup_type=setup_type,
                 outcome=outcome,
                 pnl=pnl,
+                decision_id=gate_decision_id,  # v19.34.311b: exact attribution
             )
         except Exception as e:
             logger.debug(f"Could not update confidence gate outcome (non-critical): {e}")

@@ -34,6 +34,8 @@ and maintains a decision log for the UI.
 
 import asyncio
 import logging
+import os
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from collections import deque
@@ -42,6 +44,16 @@ logger = logging.getLogger(__name__)
 
 # Maximum decisions to keep in memory
 MAX_DECISION_LOG = 200
+
+# ── P-WIRE shadow mode (regime-conditional model selection) — v19.34.313 ─────
+# When enabled, every live model prediction additionally runs the generic base
+# direction model AND its regime-specialized variant side-by-side on the SAME
+# bars, logging the comparison inside live_prediction → confidence_gate_log
+# (keyed by decision_id). This NEVER affects execution — it is read-only signal
+# accumulation so we can prove (over ~5000 decisions) whether the regime-matched
+# specialized models produce a better edge than the generic ones. Disable with
+# PWIRE_SHADOW=0.
+PWIRE_SHADOW_ENABLED = os.environ.get("PWIRE_SHADOW", "1") not in ("0", "false", "False")
 
 # T6: position multiplier applied when an ACTIVE regime suppression soft-benches a
 # setup (data-driven per-setup×regime expectancy gate). Kept in sync with
@@ -432,6 +444,7 @@ class ConfidenceGate:
         entry_price: float = 0,
         stop_price: float = 0,
         regime_engine=None,
+        alert_id: str = None,
     ) -> Dict[str, Any]:
         """
         Core evaluation: Should SentCom take this trade?
@@ -1053,6 +1066,8 @@ class ConfidenceGate:
 
         result = {
             "decision": decision,
+            "decision_id": str(uuid.uuid4()),  # v19.34.311b: stable key for exact
+            "alert_id": alert_id,               # close-time outcome attribution
             "confidence_score": confidence_score,
             "scoring_version": "additive_v1",  # Track scoring system version for migration
             "regime_state": regime_state,
@@ -1399,6 +1414,7 @@ class ConfidenceGate:
             # Use the most recent bars from ib_historical_data
             def _fetch_and_predict():
                 try:
+                    bar_size_used = "5 mins"
                     bars = list(ts_ai._db["ib_historical_data"].find(
                         {"symbol": symbol, "bar_size": "5 mins"},
                         {"_id": 0}
@@ -1406,32 +1422,41 @@ class ConfidenceGate:
                     
                     if len(bars) < 50:
                         # Try daily bars as fallback
+                        bar_size_used = "1 day"
                         bars = list(ts_ai._db["ib_historical_data"].find(
                             {"symbol": symbol, "bar_size": "1 day"},
                             {"_id": 0}
                         ).sort("date", -1).limit(200))
                     
                     if len(bars) < 50:
-                        return None
+                        return None, None
                     
                     # Reverse to chronological order (oldest first)
                     bars.reverse()
                     
                     # Call predict_for_setup — this is the core ML inference
                     prediction = ts_ai.predict_for_setup(symbol, bars, setup_type)
-                    return prediction
+                    # v19.34.313 P-WIRE shadow mode (read-only, never affects execution)
+                    shadow = self._compute_regime_shadow(
+                        ts_ai, symbol, setup_type, bars, bar_size_used, prediction
+                    )
+                    return prediction, shadow
                 except Exception as e:
                     logger.debug(f"Live prediction fetch/predict failed for {symbol}: {e}")
-                    return None
+                    return None, None
             
             # Run in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            prediction = await loop.run_in_executor(None, _fetch_and_predict)
+            prediction, shadow = await loop.run_in_executor(None, _fetch_and_predict)
             
             if prediction is None:
                 return result
             
             result["has_prediction"] = True
+            if shadow is not None:
+                # Rides inside live_prediction → persisted to confidence_gate_log
+                # under the decision_id (no schema/flow changes needed).
+                result["regime_shadow"] = shadow
             result["direction"] = prediction.get("direction", "flat")
             result["confidence"] = prediction.get("confidence", 0.0)
             result["prob_up"] = prediction.get("probability_up", 0.5)
@@ -1451,6 +1476,85 @@ class ConfidenceGate:
         except Exception as e:
             logger.debug(f"Live prediction failed (non-critical): {e}")
             return result
+
+    def _compute_regime_shadow(self, ts_ai, symbol, setup_type, bars, bar_size, primary_prediction):
+        """P-WIRE shadow mode (v19.34.313) — read-only, NEVER affects execution.
+
+        Runs the generic base direction model and its regime-specialized variant
+        side-by-side on the SAME bar snapshot, returning a comparison record that
+        rides inside live_prediction → persisted to confidence_gate_log under the
+        decision_id. Evaluated later vs bot_trades ground truth to prove whether
+        regime-matched models beat the generic ones. Runs inside the prediction
+        thread-pool executor (synchronous, DB-backed) so it never blocks the loop.
+        """
+        if not PWIRE_SHADOW_ENABLED:
+            return None
+        try:
+            import hashlib
+            tf = {
+                "1 min": "1min", "5 mins": "5min", "15 mins": "15min",
+                "30 mins": "30min", "1 hour": "1hour", "1 day": "daily",
+                "1 week": "weekly",
+            }.get(bar_size)
+            if tf is None:
+                return None
+
+            regime = ts_ai.classify_current_regime()
+            if not regime:
+                return None
+
+            generic_name = f"direction_predictor_{tf}"
+            regime_name = f"direction_predictor_{tf}_{regime}"
+            generic = ts_ai.predict_with_named_model(symbol, bars, generic_name)
+            regime_pred = ts_ai.predict_with_named_model(symbol, bars, regime_name)
+
+            # Input fingerprint — proves both legs saw the same bar snapshot
+            last = bars[-1] if bars else {}
+            input_hash = hashlib.sha1(
+                f"{symbol}|{bar_size}|{len(bars)}|{last.get('date','')}|"
+                f"{last.get('close','')}".encode()
+            ).hexdigest()[:16]
+
+            def _leg(p, name):
+                if not p:
+                    return {"available": False, "model_name": name}
+                pu = float(p.get("probability_up", 0.5))
+                pd = float(p.get("probability_down", 0.5))
+                return {
+                    "available": True,
+                    "model_name": name,
+                    "model_used": p.get("model_used"),
+                    "direction": p.get("direction"),
+                    "prob_up": round(pu, 6),
+                    "prob_down": round(pd, 6),
+                    "confidence": round(float(p.get("confidence", 0.0)), 6),
+                    "ev_proxy": round(pu - pd, 6),
+                    "feature_count": p.get("feature_count"),
+                    "model_metrics": p.get("model_metrics") or {},
+                }
+
+            g_leg = _leg(generic, generic_name)
+            r_leg = _leg(regime_pred, regime_name)
+            agree = bool(
+                g_leg.get("available") and r_leg.get("available")
+                and g_leg.get("direction") == r_leg.get("direction")
+            )
+            return {
+                "shadow_version": "pwire_v1",
+                "regime": regime,
+                "bar_size": bar_size,
+                "input_hash": input_hash,
+                "generic_base": g_leg,
+                "regime_specialized": r_leg,
+                "regime_model_available": r_leg.get("available", False),
+                "directions_agree": agree,
+                # The model that actually drove the live decision (context only).
+                "decision_model": (primary_prediction or {}).get("model_used"),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.debug(f"Regime shadow compute failed for {symbol}: {e}")
+            return None
 
     async def _get_cnn_signal(self, symbol: str, setup_type: str, direction: str) -> Dict[str, Any]:
         """
@@ -1882,36 +1986,70 @@ class ConfidenceGate:
         }
 
     async def record_trade_outcome(
-        self, symbol: str, setup_type: str, outcome: str, pnl: float = 0
+        self, symbol: str, setup_type: str, outcome: str, pnl: float = 0,
+        decision_id: str = None,
     ) -> bool:
         """
         GAP 5: Close the feedback loop by recording trade outcomes against gate decisions.
-        
-        Called by the learning loop when a trade is closed. Finds the most recent
-        gate decision for this symbol+setup and updates it with the outcome.
-        
-        This data enables the future Confidence Gate Tuner (P2) to auto-calibrate
-        GO/REDUCE/SKIP thresholds by analyzing which decisions led to wins/losses.
-        
+
+        Called by the learning loop when a trade is closed. Prefers an EXACT match
+        on the originating decision_id (v19.34.311b — carried onto the trade's
+        entry_context.confidence_gate). Falls back to a fuzzy
+        {symbol, setup_type, decision∈GO/REDUCE} match (most-recent untracked) only
+        when no decision_id is available.
+
+        This data enables the Confidence Gate calibrator to learn which decisions
+        led to wins/losses.
+
         Args:
             symbol: Trade symbol
             setup_type: Setup type used
             outcome: "win", "loss", or "scratch"
             pnl: Actual P&L of the trade
-            
+            decision_id: Originating gate decision id (exact-match key)
+
         Returns:
             True if a matching gate decision was found and updated
         """
         if self._db is None:
             return False
-            
+
+        # v19.34.311 (GAP-5 fix, 2026-06-10): normalize outcome vocabulary at
+        # this single boundary. The primary genuine-close path
+        # (position_manager -> learning_loop_service.record_trade_outcome)
+        # passes "won"/"lost"/"breakeven", while trade_journal passes
+        # "win"/"loss"/"scratch". gate_calibrator counts ONLY "win"/"loss", so
+        # the dominant feed was silently bucketed as scratches -> every score
+        # bucket read ~0% win-rate -> calibrator fell back to a STRICTER
+        # threshold than the defaults. Canonicalize here so the loop learns.
+        _o = str(outcome or "").strip().lower()
+        if _o in ("win", "won", "w"):
+            outcome = "win"
+        elif _o in ("loss", "lost", "lose", "l"):
+            outcome = "loss"
+        else:  # breakeven / scratch / be / flat / unknown
+            outcome = "scratch"
+
+        # v19.34.311b: exact attribution by decision_id when available, else a
+        # GO/REDUCE-only fuzzy fallback. Restricting the fuzzy path to taken
+        # decisions stops SKIP re-evals from absorbing a real trade's outcome
+        # (the root cause of the inverted gate-tracked P&L subset).
+        if decision_id:
+            match = {"decision_id": decision_id, "outcome_tracked": False}
+            sort = None
+        else:
+            match = {
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "outcome_tracked": False,
+                "decision": {"$in": ["GO", "REDUCE"]},
+            }
+            sort = [("timestamp", -1)]  # Most recent decision first
+
         try:
+            kwargs = {"sort": sort} if sort else {}
             result = self._db["confidence_gate_log"].find_one_and_update(
-                {
-                    "symbol": symbol,
-                    "setup_type": setup_type,
-                    "outcome_tracked": False,
-                },
+                match,
                 {
                     "$set": {
                         "outcome_tracked": True,
@@ -1920,7 +2058,7 @@ class ConfidenceGate:
                         "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
                     }
                 },
-                sort=[("timestamp", -1)],  # Most recent decision first
+                **kwargs,
             )
             if result:
                 logger.debug(

@@ -2925,7 +2925,89 @@ class TimeSeriesAIService:
         # 4. No mapping — return raw (caller will fall back to general model)
         return raw
 
-    def predict_for_setup(self, symbol: str, bars: list, setup_type: str) -> Optional[Dict]:
+    def _get_shadow_model(self, model_name: str):
+        """v19.34.313 P-WIRE: load & cache a TimeSeriesGBM by exact name for shadow
+        inference. Loaded with the DB to fetch weights, then detached
+        (_db=None) so shadow predictions never write to timeseries_predictions
+        or pollute verification stats. Caches misses (None) too so an absent
+        model isn't re-queried every decision. Returns None if not trained."""
+        if not hasattr(self, "_shadow_models"):
+            self._shadow_models = {}
+        if model_name in self._shadow_models:
+            return self._shadow_models[model_name]
+        model = None
+        try:
+            if self._db is not None and self._ml_available:
+                from services.ai_modules.timeseries_gbm import TimeSeriesGBM
+                gbm = TimeSeriesGBM(model_name=model_name)
+                gbm.set_db(self._db)  # triggers _load_model()
+                if gbm._model is not None:
+                    gbm._db = None  # detach → predict() won't log
+                    model = gbm
+        except Exception as e:
+            logger.debug(f"Shadow model load failed for {model_name}: {e}")
+        self._shadow_models[model_name] = model
+        return model
+
+    def predict_with_named_model(self, symbol: str, bars: list, model_name: str) -> Optional[Dict]:
+        """P-WIRE: run one named model's .predict() on the given bars.
+        Self-contained — uses the model's own base-feature extraction with no
+        live Layer-3 caches, so it is valid for offline/shadow comparison.
+        Returns a dict mirroring predict_for_setup's shape, or None."""
+        model = self._get_shadow_model(model_name)
+        if model is None or model._model is None:
+            return None
+        try:
+            pred = model.predict(bars, symbol=symbol)
+            if pred is None:
+                return None
+            d = pred.to_dict() if hasattr(pred, "to_dict") else pred
+            d["model_used"] = model_name
+            d["model_type"] = "named_shadow"
+            d["model_metrics"] = (
+                model._metrics.to_dict() if getattr(model, "_metrics", None) else {}
+            )
+            return d
+        except Exception as e:
+            logger.debug(f"Named-model prediction failed for {model_name}: {e}")
+            return None
+
+    def classify_current_regime(self, ttl_seconds: int = 300) -> Optional[str]:
+        """P-WIRE: classify the current market regime from SPY daily bars.
+        Short-TTL cached (regime is slow-moving). Returns one of
+        bull_trend/bear_trend/range_bound/high_vol, or None on failure."""
+        import time as _time
+        now = _time.monotonic()
+        cached = getattr(self, "_regime_classify_cache", None)
+        if cached is not None and (now - cached[1]) < ttl_seconds:
+            return cached[0]
+        regime = None
+        try:
+            if self._db is not None:
+                import numpy as np
+                from services.ai_modules.regime_conditional_model import classify_regime
+                pipeline = [
+                    {"$match": {"symbol": "SPY", "bar_size": "1 day"}},
+                    {"$addFields": {"date_key": {"$substr": [{"$toString": "$date"}, 0, 10]}}},
+                    {"$sort": {"date": -1}},
+                    {"$group": {"_id": "$date_key", "close": {"$first": "$close"},
+                                "high": {"$first": "$high"}, "low": {"$first": "$low"}}},
+                    {"$sort": {"_id": -1}},
+                    {"$limit": 30},
+                ]
+                bars = list(self._db["ib_historical_data"].aggregate(pipeline, allowDiskUse=True))
+                if len(bars) >= 25:
+                    regime = classify_regime(
+                        np.array([b["close"] for b in bars], dtype=float),
+                        np.array([b["high"] for b in bars], dtype=float),
+                        np.array([b["low"] for b in bars], dtype=float),
+                    )
+        except Exception as e:
+            logger.debug(f"Regime classification failed: {e}")
+        self._regime_classify_cache = (regime, now)
+        return regime
+
+    def predict_for_setup(self, symbol: str, bars: list, setup_type: str, model_name_override: Optional[str] = None) -> Optional[Dict]:
         """
         Make a prediction using the setup-specific model if available,
         otherwise fall back to the general model.
@@ -2945,6 +3027,11 @@ class TimeSeriesAIService:
         are using the generic model vs their own.
         """
         import numpy as np
+        # v19.34.313 P-WIRE shadow mode: route to an explicit named model (e.g.
+        # a regime variant) without touching live setup-model resolution.
+        # Additive — default None preserves byte-for-byte existing behavior.
+        if model_name_override:
+            return self.predict_with_named_model(symbol, bars, model_name_override)
         effective_type = self._resolve_setup_model_key(setup_type, self._setup_models.keys())
         
         # Try setup-specific model first

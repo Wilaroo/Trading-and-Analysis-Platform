@@ -682,6 +682,7 @@ class OpportunityEvaluator:
                         entry_price=alert.get('trigger_price', current_price),
                         stop_price=alert.get('stop_price', 0),
                         regime_engine=bot._market_regime_engine,
+                        alert_id=alert.get('id') or alert.get('alert_id'),
                     )
 
                     gate_decision = confidence_gate_result.get("decision", "GO")
@@ -2451,6 +2452,7 @@ class OpportunityEvaluator:
         if confidence_gate_result:
             ctx["confidence_gate"] = {
                 "decision": confidence_gate_result.get("decision", ""),
+                "decision_id": confidence_gate_result.get("decision_id", ""),  # v19.34.311b: exact attribution key
                 "confidence_score": confidence_gate_result.get("confidence_score", 0),
                 "position_multiplier": confidence_gate_result.get("position_multiplier", 1.0),
                 "trading_mode": confidence_gate_result.get("trading_mode", ""),

@@ -281,6 +281,23 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 6.9 Gate Outcome Reconcile (v19.34.311b) - Daily at 4:25 PM ET, just
+            # BEFORE gate calibration. Backfills confidence_gate_log outcomes from
+            # CLEAN closed bot_trades (decision_id attribution + hygiene filter) so
+            # the calibrator sees a trustworthy, high-coverage corpus.
+            self._scheduler.add_job(
+                _wrap_async(self._run_gate_outcome_reconcile),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=16,
+                    minute=25,
+                    timezone='US/Eastern'
+                ),
+                id='gate_outcome_reconcile',
+                name='Confidence Gate Outcome Reconcile',
+                replace_existing=True
+            )
+
             # 7b. Regime Expectancy Refresh - Daily at 4:35 PM ET (T6, after gate
             # calibration). Recomputes the per-setup×regime suppression table from
             # fresh trade outcomes so the gate adapts as the regime turns.
@@ -788,6 +805,39 @@ class TradingScheduler:
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
             logger.info(f"IB collection resume check completed in {result.duration_seconds:.1f}s: {result.result_summary}")
+
+    async def _run_gate_outcome_reconcile(self):
+        """v19.34.311b — Backfill confidence_gate_log outcomes from clean closed
+        bot_trades (decision_id attribution + hygiene filter). Runs just before
+        gate calibration so the calibrator sees a high-coverage, trustworthy corpus."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="gate_outcome_reconcile",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            from services.ai_modules.gate_outcome_reconciler import init_gate_outcome_reconciler
+            rec = init_gate_outcome_reconciler(db=self._db)
+            stats = rec.reconcile(dry_run=False)
+            result.success = True
+            result.result_summary = (
+                f"reconciled: scanned={stats.get('scanned')} clean={stats.get('clean')} "
+                f"backfilled={stats.get('backfilled')}"
+            )
+            logger.info(f"Gate outcome reconcile: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"Reconcile failed: {e}"
+            logger.error(f"Gate outcome reconcile failed: {e}")
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
 
     async def _run_gate_calibration(self):
         """Run confidence gate auto-calibration using trade outcomes."""

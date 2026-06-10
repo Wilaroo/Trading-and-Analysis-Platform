@@ -313,11 +313,13 @@ class TradeJournalService:
                 from services.ai_modules.confidence_gate import get_confidence_gate
                 gate = get_confidence_gate()
                 gate_outcome = "win" if ll_outcome == "won" else ("loss" if ll_outcome == "lost" else "scratch")
+                _gate_ctx = (ai_ctx or {}).get("confidence_gate") if isinstance((ai_ctx or {}).get("confidence_gate"), dict) else {}
                 await gate.record_trade_outcome(
                     symbol=symbol,
                     setup_type=setup_type,
                     outcome=gate_outcome,
                     pnl=pnl,
+                    decision_id=_gate_ctx.get("decision_id"),  # v19.34.311b: exact attribution
                 )
             except Exception as e:
                 logger.debug(f"Confidence gate outcome update skipped: {e}")
