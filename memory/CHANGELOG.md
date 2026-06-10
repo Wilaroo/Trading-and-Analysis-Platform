@@ -1,3 +1,38 @@
+## 2026-06-11 — v19.34.319 (P0): gap-fill NO-PEEK leakage fix — PATCH READY
+
+Patch: https://paste.rs/hIfcL  (backend-only → `git apply` + `./start_backend.sh --force`,
+then retrain gap_fill phase). Tests: 16/16 (8 new test_gap_nopeek_v319.py + 8 v314 regression).
+
+WHY: gap_leakage_audit.py (v318) confirmed SEVERE look-ahead leakage — of all fills,
+76.2% (15m) / 49.6% (5m) / 15.5% (1m) land in the SESSION-OPEN bar i, which the v314
+sampler included in BOTH the feature row (bar i's own H/L/C via the 50-bar window
+ending at i + compute_gap_features reading bar i's close/volume) AND the fill window
+([i, i+w]). So an open-bar fill was trivially readable → inflated ~94.6% headline acc.
+
+FIX (`training_pipeline.py` Phase 5.5 — DECIDE AT THE OPEN):
+- a) base/MRF feature + context window now ENDS at bar i-1 (win_idx/row_idx i-49 → i-50);
+     bar i's range never enters the feature row.
+- b) the two bar-i-derived gap features are NEUTRALIZED — today_close_bar1=today_open
+     (premarket_momentum→0) and today_volume_bar1=0.0 (gap_volume_ratio→0); only the
+     KNOWN open price feeds gap_size_pct/gap_direction.
+- c) fill target evaluated over [i+1, i+early_window], EXCLUDING the open bar.
+- bounds tightened to i>=50 and i+1+early_window<=len(bars).
+- `gap_fill_model.py`: docstring/contract notes for the no-peek caller responsibility.
+- NEW `scripts/gap_nopeek_verify.py`: read-only DGX replay of the EXACT v319 post-open
+  target → prints honest fill% per TF (goal: balanced 25-75%).
+
+EXPECTED AFTER RETRAIN: gap accuracy drops from ~94.6% to a tradeable edge (near the
+~38-49% no-peek base rate band); a model still scoring ~90%+ would signal a remaining leak.
+
+DEPLOY:
+  curl -s https://paste.rs/hIfcL | git apply
+  cd backend && ./start_backend.sh --force
+  # verify honest balance (no retrain): PYTHONPATH=. ../.venv/bin/python scripts/gap_nopeek_verify.py
+  # retrain only the gap phase:
+  #   POST /api/ai-training/start  {"force_retrain": true, "phases": ["gap_fill"]}
+  # watch for the new "2-class eval … DOWN R=" line (v317) + "promoted" on the 3 gap models.
+
+
 ## 2026-06-11 — v19.34.318 (NIA Section B + gap leakage tool) — PATCH READY
 
 Patch: https://paste.rs/leUgM  (frontend deletions + new backend script)

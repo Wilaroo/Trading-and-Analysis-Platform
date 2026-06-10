@@ -526,3 +526,15 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - M0 laddered server-side scale-out (multi-leg OCA).
 - Optional: NEW effective-limits Guardrails chip (Pos 25 · Loss $5k/1%) surfacing the
   reconciler truth at a glance.
+
+---
+## 2026-06-11 — v19.34.319 gap-fill NO-PEEK fix — PATCH READY (operator-apply pending)
+- Closed the gap-fill look-ahead leak (audit: 76.2%/49.6%/15.5% of 15m/5m/1m fills in the
+  open bar). Training now decides AT THE OPEN: features end at bar i-1, bar-i gap features
+  neutralized, target over [i+1, i+w]. Patch https://paste.rs/hIfcL. 16/16 pytest.
+- After apply+restart: `scripts/gap_nopeek_verify.py` (balance check, no retrain) →
+  retrain `{"force_retrain": true, "phases": ["gap_fill"]}`. Expect acc to drop ~94.6% → tradeable.
+- NEXT (P1, gated on operator eyeballing honest gap acc): embargo gap at train/val boundary
+  (`timeseries_gbm.py:~1079`); Phase-8 FFD feature mismatch (`training_pipeline.py:~3070`).
+- Standing P0 (manual): rotate Atlas DB password (old creds in git history).
+- PARKED: P-WIRE phase 2 wiring (needs ~5000 shadow decisions).

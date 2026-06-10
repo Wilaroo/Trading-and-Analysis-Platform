@@ -2419,7 +2419,7 @@ async def run_training_pipeline(
             _phase_memory_cleanup("Phase 5")
             status.update(phase="gap_fill")
             _p_elapsed = _time.monotonic() - _pipeline_start
-            logger.info(f"=== Phase 5.5: Training Overnight Gap-Fill Models (P-TARGET v19.34.314) === [{int(_p_elapsed//60)}m elapsed]")
+            logger.info(f"=== Phase 5.5: Training Overnight Gap-Fill Models (P-TARGET v19.34.314 + NO-PEEK v19.34.319) === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.gap_fill_model import (
                 GAP_MODEL_CONFIGS, GAP_FEATURE_NAMES, OVERNIGHT_GAP_MIN_PCT,
                 compute_gap_features, compute_gap_fill_target,
@@ -2505,11 +2505,20 @@ async def run_training_pipeline(
 
                             rows_X = []
                             rows_y = []
+                            # v319 NO-PEEK: decide strictly AT THE OPEN of bar i.
+                            # The feature row + gap context end at bar i-1 (prior
+                            # session's last bar); ONLY today's open price is known.
+                            # The fill target is evaluated over [i+1, i+early_window],
+                            # EXCLUDING the open bar i. This removes the v314 leak
+                            # (bar i's own H/L/C + first-bar close/volume let the model
+                            # trivially read an open-bar fill → inflated ~94.6% acc;
+                            # leak audit: 15m 76.2% / 5m 49.6% of fills land in bar i).
                             for k in range(1, len(session_opens)):
                                 i = session_opens[k]
                                 prev_session_start = session_opens[k - 1]
-                                # need base/MRF context + a full early window ahead
-                                if i < 50 or i + early_window >= len(bars):
+                                # need base/MRF context ending at i-1 + a full
+                                # post-open early window [i+1, i+early_window]
+                                if i < 50 or i + 1 + early_window > len(bars):
                                     continue
                                 prev_close = closes[i - 1]
                                 today_open = opens[i]
@@ -2520,8 +2529,9 @@ async def run_training_pipeline(
                                     continue
                                 gap_direction = 1.0 if gap > 0 else -1.0
 
-                                win_idx = i - 49
-                                row_idx = i - 49
+                                # feature window ENDS at bar i-1 (no bar-i peek)
+                                win_idx = i - 50
+                                row_idx = i - 50
                                 if win_idx < 0 or win_idx >= len(c_wins_mrf):
                                     continue
                                 if row_idx < 0 or row_idx >= len(base_matrix):
@@ -2534,8 +2544,11 @@ async def run_training_pipeline(
 
                                 gap_feats = compute_gap_features(
                                     today_open=float(today_open),
-                                    today_close_bar1=float(closes[i]),
-                                    today_volume_bar1=float(volumes[i]),
+                                    # v319 NO-PEEK: bar i is not formed yet at the
+                                    # open — neutralize the two bar-i-derived features
+                                    # (premarket_momentum→0, gap_volume_ratio→0).
+                                    today_close_bar1=float(today_open),
+                                    today_volume_bar1=0.0,
                                     prev_day_open=prev_day_open,
                                     prev_day_high=prev_day_high,
                                     prev_day_low=prev_day_low,
@@ -2546,12 +2559,13 @@ async def run_training_pipeline(
                                     daily_volumes=v_wins_mrf[win_idx],
                                 )
 
-                                # Target: did the gap fill within the EARLY window?
+                                # Target (v319 NO-PEEK): did the gap fill within the
+                                # EARLY window AFTER the open bar, i.e. [i+1, i+early_window]?
                                 target = compute_gap_fill_target(
                                     prev_close=float(prev_close),
                                     gap_direction=gap_direction,
-                                    intraday_highs=highs[i:i + early_window],
-                                    intraday_lows=lows[i:i + early_window],
+                                    intraday_highs=highs[i + 1:i + 1 + early_window],
+                                    intraday_lows=lows[i + 1:i + 1 + early_window],
                                     max_bars=early_window,
                                 )
                                 if target is None:
