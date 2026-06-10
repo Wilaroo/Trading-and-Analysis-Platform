@@ -3151,6 +3151,8 @@ class PositionManager:
             outcome = "won" if trade.realized_pnl > 0 else ("lost" if trade.realized_pnl < 0 else "breakeven")
             _ec = getattr(trade, "entry_context", None)
             _ec = _ec if isinstance(_ec, dict) else {}
+            _gate_ctx = _ec.get("confidence_gate") if isinstance(_ec.get("confidence_gate"), dict) else {}
+            _decision_id = _gate_ctx.get("decision_id")  # v19.34.311b: exact gate attribution
             asyncio.create_task(bot._learning_loop.record_trade_outcome(
                 trade_id=trade.id,
                 alert_id=trade.alert_id or trade.id,
@@ -3170,6 +3172,7 @@ class PositionManager:
                 confirmation_signals=getattr(trade, 'confirmation_signals', []),
                 catalyst_tag=_ec.get("catalyst_tag", ""),
                 gap_pct=_ec.get("gap_pct", 0.0),
+                gate_decision_id=_decision_id,
             ))
         except Exception as e:
             logger.warning(f"[v298] Failed to record trade to learning loop: {e}")

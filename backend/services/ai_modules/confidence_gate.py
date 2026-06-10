@@ -34,6 +34,7 @@ and maintains a decision log for the UI.
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from collections import deque
@@ -432,6 +433,7 @@ class ConfidenceGate:
         entry_price: float = 0,
         stop_price: float = 0,
         regime_engine=None,
+        alert_id: str = None,
     ) -> Dict[str, Any]:
         """
         Core evaluation: Should SentCom take this trade?
@@ -1053,6 +1055,8 @@ class ConfidenceGate:
 
         result = {
             "decision": decision,
+            "decision_id": str(uuid.uuid4()),  # v19.34.311b: stable key for exact
+            "alert_id": alert_id,               # close-time outcome attribution
             "confidence_score": confidence_score,
             "scoring_version": "additive_v1",  # Track scoring system version for migration
             "regime_state": regime_state,
@@ -1882,23 +1886,28 @@ class ConfidenceGate:
         }
 
     async def record_trade_outcome(
-        self, symbol: str, setup_type: str, outcome: str, pnl: float = 0
+        self, symbol: str, setup_type: str, outcome: str, pnl: float = 0,
+        decision_id: str = None,
     ) -> bool:
         """
         GAP 5: Close the feedback loop by recording trade outcomes against gate decisions.
-        
-        Called by the learning loop when a trade is closed. Finds the most recent
-        gate decision for this symbol+setup and updates it with the outcome.
-        
-        This data enables the future Confidence Gate Tuner (P2) to auto-calibrate
-        GO/REDUCE/SKIP thresholds by analyzing which decisions led to wins/losses.
-        
+
+        Called by the learning loop when a trade is closed. Prefers an EXACT match
+        on the originating decision_id (v19.34.311b — carried onto the trade's
+        entry_context.confidence_gate). Falls back to a fuzzy
+        {symbol, setup_type, decision∈GO/REDUCE} match (most-recent untracked) only
+        when no decision_id is available.
+
+        This data enables the Confidence Gate calibrator to learn which decisions
+        led to wins/losses.
+
         Args:
             symbol: Trade symbol
             setup_type: Setup type used
             outcome: "win", "loss", or "scratch"
             pnl: Actual P&L of the trade
-            
+            decision_id: Originating gate decision id (exact-match key)
+
         Returns:
             True if a matching gate decision was found and updated
         """
@@ -1921,13 +1930,26 @@ class ConfidenceGate:
         else:  # breakeven / scratch / be / flat / unknown
             outcome = "scratch"
 
+        # v19.34.311b: exact attribution by decision_id when available, else a
+        # GO/REDUCE-only fuzzy fallback. Restricting the fuzzy path to taken
+        # decisions stops SKIP re-evals from absorbing a real trade's outcome
+        # (the root cause of the inverted gate-tracked P&L subset).
+        if decision_id:
+            match = {"decision_id": decision_id, "outcome_tracked": False}
+            sort = None
+        else:
+            match = {
+                "symbol": symbol,
+                "setup_type": setup_type,
+                "outcome_tracked": False,
+                "decision": {"$in": ["GO", "REDUCE"]},
+            }
+            sort = [("timestamp", -1)]  # Most recent decision first
+
         try:
+            kwargs = {"sort": sort} if sort else {}
             result = self._db["confidence_gate_log"].find_one_and_update(
-                {
-                    "symbol": symbol,
-                    "setup_type": setup_type,
-                    "outcome_tracked": False,
-                },
+                match,
                 {
                     "$set": {
                         "outcome_tracked": True,
@@ -1936,7 +1958,7 @@ class ConfidenceGate:
                         "outcome_recorded_at": datetime.now(timezone.utc).isoformat(),
                     }
                 },
-                sort=[("timestamp", -1)],  # Most recent decision first
+                **kwargs,
             )
             if result:
                 logger.debug(
