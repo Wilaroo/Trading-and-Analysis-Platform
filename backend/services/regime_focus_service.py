@@ -15,6 +15,7 @@ scanned every cycle regardless of ADV tier) and feeds gate confluence —
 it never blocks anything. Cached 5 min.
 """
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -26,6 +27,12 @@ RS_FOCUS_LONG_MIN = 80
 RS_FOCUS_SHORT_MAX = 20
 FOCUS_TOP_N = 40
 
+# v322d — liquidity floor: the focus list promotes scan cadence and feeds
+# the operator's eyes, so micro-caps with no tradeable liquidity are noise.
+# Default $20M avg daily dollar volume; env-tunable. Symbols missing an
+# `adv` field (pre-v322d docs) are excluded until the next nightly compute.
+FOCUS_MIN_ADV = float(os.environ.get("FOCUS_MIN_ADV", "20000000"))
+
 LONG_SECTOR_REGIMES = {"strong", "rotating_in"}
 SHORT_SECTOR_REGIMES = {"weak", "rotating_out"}
 
@@ -34,14 +41,17 @@ def build_focus_list(ratings: Dict[str, Dict],
                      sector_regime_by_etf: Dict[str, str],
                      modes: Optional[Dict[str, str]] = None,
                      market_context: str = "UNKNOWN",
-                     top_n: int = FOCUS_TOP_N) -> Dict:
+                     top_n: int = FOCUS_TOP_N,
+                     min_adv: float = None) -> Dict:
     """Pure: assemble the focus list from pre-fetched inputs (unit-testable).
 
-    `ratings`  — symbol → rs_leadership doc ({rs_rating, sector, sector_rs_diff}).
+    `ratings`  — symbol → rs_leadership doc ({rs_rating, sector, adv, ...}).
     `sector_regime_by_etf` — ETF → regime label string (e.g. "strong").
     `modes`    — multi_tf modes {"long": "aggressive", "short": "defensive"}.
+    `min_adv`  — liquidity floor in avg daily dollar volume (FOCUS_MIN_ADV).
     """
     modes = modes or {}
+    min_adv = FOCUS_MIN_ADV if min_adv is None else min_adv
     longs: List[Dict] = []
     shorts: List[Dict] = []
 
@@ -49,6 +59,8 @@ def build_focus_list(ratings: Dict[str, Dict],
         rs = doc.get("rs_rating")
         if rs is None:
             continue
+        if min_adv > 0 and (doc.get("adv") or 0) < min_adv:
+            continue    # v322d liquidity floor
         etf = doc.get("sector")
         sector_regime = sector_regime_by_etf.get(etf, "unknown") if etf else "unknown"
 
@@ -79,7 +91,8 @@ def build_focus_list(ratings: Dict[str, Dict],
         "shorts": shorts[:top_n],
         "universe_rated": len(ratings),
         "thresholds": {"rs_long_min": RS_FOCUS_LONG_MIN,
-                       "rs_short_max": RS_FOCUS_SHORT_MAX, "top_n": top_n},
+                       "rs_short_max": RS_FOCUS_SHORT_MAX, "top_n": top_n,
+                       "min_adv": min_adv},
     }
 
 

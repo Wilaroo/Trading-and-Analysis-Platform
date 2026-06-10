@@ -22,7 +22,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from services.rs_leadership_service import (  # noqa: E402
-    weighted_rs_score, percentile_ranks, RS_MIN_CLOSES,
+    weighted_rs_score, percentile_ranks, has_split_artifact, RS_MIN_CLOSES,
 )
 from services.regime_focus_service import (  # noqa: E402
     build_focus_list, RS_FOCUS_LONG_MIN, RS_FOCUS_SHORT_MAX,
@@ -100,18 +100,38 @@ class TestPercentileRanks:
 # ───────────────────────── 2. Focus list ─────────────────────────
 
 def _ratings():
+    A = 50_000_000  # comfortably above the $20M focus ADV floor
     return {
-        "NVDA": {"rs_rating": 95, "sector": "XLK", "sector_rs_diff": 0.1},
-        "AAPL": {"rs_rating": 85, "sector": "XLK", "sector_rs_diff": 0.02},
-        "XOM":  {"rs_rating": 15, "sector": "XLE", "sector_rs_diff": -0.05},
-        "CVX":  {"rs_rating": 8,  "sector": "XLE", "sector_rs_diff": -0.09},
-        "JPM":  {"rs_rating": 90, "sector": "XLF", "sector_rs_diff": 0.04},  # weak sector
-        "PG":   {"rs_rating": 50, "sector": "XLP", "sector_rs_diff": 0.0},   # mid RS
-        "THIN": {"rs_rating": None, "sector": "XLK", "sector_rs_diff": None},
+        "NVDA": {"rs_rating": 95, "sector": "XLK", "sector_rs_diff": 0.1, "adv": A},
+        "AAPL": {"rs_rating": 85, "sector": "XLK", "sector_rs_diff": 0.02, "adv": A},
+        "XOM":  {"rs_rating": 15, "sector": "XLE", "sector_rs_diff": -0.05, "adv": A},
+        "CVX":  {"rs_rating": 8,  "sector": "XLE", "sector_rs_diff": -0.09, "adv": A},
+        "JPM":  {"rs_rating": 90, "sector": "XLF", "sector_rs_diff": 0.04, "adv": A},  # weak sector
+        "PG":   {"rs_rating": 50, "sector": "XLP", "sector_rs_diff": 0.0, "adv": A},   # mid RS
+        "THIN": {"rs_rating": None, "sector": "XLK", "sector_rs_diff": None, "adv": A},
+        "TINY": {"rs_rating": 99, "sector": "XLK", "sector_rs_diff": 0.2, "adv": 1_000_000},  # illiquid
     }
 
 
 SECTORS = {"XLK": "strong", "XLE": "weak", "XLF": "rotating_out", "XLP": "neutral"}
+
+
+class TestSplitArtifactGuard:
+    def test_clean_series_passes(self):
+        closes = [100.0 + i * 0.5 for i in range(100)]
+        assert has_split_artifact(closes) is False
+
+    def test_reverse_split_detected(self):
+        closes = [2.0] * 50 + [120.0] * 50   # 60x jump = unadjusted 1:60 reverse split
+        assert has_split_artifact(closes) is True
+
+    def test_forward_split_detected(self):
+        closes = [400.0] * 50 + [100.0] * 50  # 4:1 forward split
+        assert has_split_artifact(closes) is True
+
+    def test_big_but_legit_move_passes(self):
+        closes = [100.0] * 50 + [250.0] * 50  # +150% gap < 3x threshold
+        assert has_split_artifact(closes) is False
 
 
 class TestBuildFocusList:
@@ -130,6 +150,13 @@ class TestBuildFocusList:
         all_syms = [r["symbol"] for r in out["longs"] + out["shorts"]]
         assert "THIN" not in all_syms and "PG" not in all_syms
 
+    def test_illiquid_excluded_by_adv_floor(self):
+        out = build_focus_list(_ratings(), SECTORS)
+        assert "TINY" not in [r["symbol"] for r in out["longs"]]
+        # floor disabled → TINY qualifies (RS 99, strong sector)
+        out2 = build_focus_list(_ratings(), SECTORS, min_adv=0)
+        assert "TINY" in [r["symbol"] for r in out2["longs"]]
+
     def test_unknown_sector_excluded(self):
         ratings = {"ZZZ": {"rs_rating": 99, "sector": None, "sector_rs_diff": None}}
         out = build_focus_list(ratings, SECTORS)
@@ -137,7 +164,7 @@ class TestBuildFocusList:
 
     def test_top_n_respected(self):
         ratings = {f"L{i}": {"rs_rating": 80 + (i % 20), "sector": "XLK",
-                             "sector_rs_diff": 0.0} for i in range(100)}
+                             "sector_rs_diff": 0.0, "adv": 5e7} for i in range(100)}
         out = build_focus_list(ratings, {"XLK": "strong"}, top_n=10)
         assert len(out["longs"]) == 10
 

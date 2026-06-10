@@ -45,6 +45,13 @@ RS_RELAXED_MIN_CLOSES = 22
 # top of the leaderboard. Skipped symbols count as `price_filtered`.
 RS_MIN_PRICE = float(os.environ.get("RS_MIN_PRICE", "3.0"))
 
+# v322d — unadjusted-split detector: a >3x (or <1/3x) close-to-close jump
+# is almost always a reverse/forward split in unadjusted bars, which fakes
+# a massive multi-month "return" (e.g. AGL +5,708%). Genuine >200%
+# overnight moves are rare enough that excluding them from a LEADERSHIP
+# list is the right trade-off. Tunable: RS_SPLIT_RATIO.
+SPLIT_ARTIFACT_RATIO = float(os.environ.get("RS_SPLIT_RATIO", "3.0"))
+
 # The 11 SPDR sector ETFs (sector-relative RS benchmark per symbol).
 SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP",
                "XLU", "XLB", "XLRE", "XLC"]
@@ -74,6 +81,20 @@ def weighted_rs_score(closes: List[float], periods=None, min_closes=None) -> Opt
     if total_w <= 0:
         return None
     return acc / total_w
+
+
+def has_split_artifact(closes: List[float], max_ratio: float = None) -> bool:
+    """Pure: True when adjacent closes jump more than max_ratio (default
+    SPLIT_ARTIFACT_RATIO) in either direction — the signature of an
+    unadjusted split corrupting multi-month return math."""
+    max_ratio = max_ratio or SPLIT_ARTIFACT_RATIO
+    for i in range(1, len(closes)):
+        prev, cur = closes[i - 1], closes[i]
+        if prev and cur and prev > 0 and cur > 0:
+            r = cur / prev
+            if r > max_ratio or r < 1.0 / max_ratio:
+                return True
+    return False
 
 
 def percentile_ranks(scores: Dict[str, float]) -> Dict[str, int]:
@@ -181,6 +202,7 @@ class RSLeadershipService:
             symbols = await self._universe_symbols(max_symbols)
             if not symbols:
                 return {"success": False, "error": "empty universe (symbol_adv_cache)"}
+            adv_map = await self._universe_adv_map()
 
             # Sector ETF benchmark scores (for sector-relative diff).
             # v322c: relaxed lags/min-closes — ETF daily windows can be
@@ -210,6 +232,7 @@ class RSLeadershipService:
             scores: Dict[str, float] = {}
             thin = 0
             price_filtered = 0
+            split_artifacts = 0
             for b_start in range(0, len(symbols), self.COMPUTE_BATCH):
                 batch = symbols[b_start:b_start + self.COMPUTE_BATCH]
                 results = await asyncio.gather(
@@ -221,6 +244,9 @@ class RSLeadershipService:
                         continue
                     if closes[-1] < RS_MIN_PRICE:
                         price_filtered += 1     # v322b junk guard
+                        continue
+                    if has_split_artifact(closes):
+                        split_artifacts += 1    # v322d unadjusted-split guard
                         continue
                     s = weighted_rs_score(closes)
                     if s is None:
@@ -242,6 +268,7 @@ class RSLeadershipService:
                     "rs_score": round(score, 5),
                     "sector": etf,
                     "sector_rs_diff": sector_rs_diff,
+                    "adv": adv_map.get(sym),    # v322d — avg $ volume for liquidity floors
                     "computed_at": now_iso,
                 }
                 try:
@@ -259,7 +286,8 @@ class RSLeadershipService:
                     {"_id": "meta"},
                     {"$set": {"computed_at": now_iso, "universe_size": len(symbols),
                               "rated": len(scores), "thin_history": thin,
-                              "price_filtered": price_filtered}},
+                              "price_filtered": price_filtered,
+                              "split_artifacts": split_artifacts}},
                     upsert=True)
                 if asyncio.iscoroutine(res):
                     await res
@@ -272,6 +300,7 @@ class RSLeadershipService:
             sector_tagged = sum(1 for s in scores if sector_map.get(s))
             summary = {"success": True, "universe": len(symbols), "rated": len(scores),
                        "thin_history": thin, "price_filtered": price_filtered,
+                       "split_artifacts": split_artifacts,
                        "sector_tagged": sector_tagged,
                        "etf_benchmarks": len(etf_scores), "elapsed_s": elapsed}
             logger.info(f"[RS-LEADERSHIP] compute complete: {summary}")
@@ -297,6 +326,26 @@ class RSLeadershipService:
         except Exception as e:
             logger.warning(f"[RS-LEADERSHIP] universe load failed: {e}")
             return []
+
+    async def _universe_adv_map(self) -> Dict[str, float]:
+        """v322d — symbol → avg dollar volume from symbol_adv_cache (for the
+        focus list's liquidity floor; the RS table itself stays complete)."""
+        out: Dict[str, float] = {}
+        try:
+            cursor = self.db["symbol_adv_cache"].find(
+                {}, {"_id": 0, "symbol": 1, "avg_dollar_volume": 1})
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=20000)
+            else:
+                docs = list(cursor)
+            for d in docs:
+                sym, adv = d.get("symbol"), d.get("avg_dollar_volume")
+                if sym and adv:
+                    out[sym.upper()] = float(adv)
+        except Exception as e:
+            logger.debug(f"[RS-LEADERSHIP] adv map load failed: {e}")
+        return out
 
     async def _universe_sector_map(self) -> Dict[str, str]:
         """v322b — bulk symbol→SPDR-ETF map from `symbol_adv_cache.sector`.
