@@ -1,3 +1,31 @@
+## 2026-06-11 — v19.34.315 (P0 HOTFIX): Phase-3 volatility 0/7 — negative-label crash — PATCH READY
+
+Patch: https://paste.rs/BoPdX  (backend-only → `git apply` + `./start_backend.sh --force`)
+Tests: 3/3 (tests/test_vol_target_filter_v315.py); 20/20 with v313/v314 suites.
+
+SYMPTOM: full overnight run (2026-06-10) — Phase 3 Volatility = 0/7, failed:7,
+each `vol_predictor_*: 'list' argument must have no negative elements`.
+ROOT CAUSE: the v19.34.312 `compute_vol_targets_batch` emits -1.0 for degenerate
+flat windows (trailing_vol==0) and documents "caller should filter out -1.0", but
+the Phase-3 caller never did (stale comment claimed "all valid"). A single -1.0
+label in the concatenated y → bincount/XGBoost rejects negative labels → the whole
+vol family dies.
+FIX (`training_pipeline.py` Phase 3): after assembling X_chunk/y_chunk, apply a
+`valid = y_chunk >= 0.0` mask to BOTH (kept aligned) before append; skip chunk if
+none valid. Surgical, scoped to the vol phase.
+
+RECOVERY (no full re-run needed — other phases already succeeded):
+  POST /api/ai-training/start  {"force_retrain": true, "phases": ["volatility"]}
+→ retrains only the 7 vol models (~40 min).
+
+SAME-RUN RESULTS (rest of pipeline, for reference):
+- ✅ P-TARGET gap fill BALANCED: 1min 27.9% / 5min 33.0% / 15min 34.1% (was ~98%), 3/3 promoted.
+  NOTE: reported gap acc ~94.6% is high vs the ~30% base rate — FLAG for leakage
+  review (compute_gap_features uses first-bar close); not a blocker.
+- ✅ sector_relative + risk_of_ruin RETIRED — never ran (grep empty).
+- ✅ regime-conditional 28/28 @57.4%; ensemble 10/10 @61%; generic 7/7 @52.8%.
+
+
 ## 2026-06-11 — v19.34.314 (P-TARGET): overnight gap-fill redesign + retire dead families — PATCH READY
 
 Patch: https://paste.rs/40n0B  (backend-only → `git apply` + `./start_backend.sh --force`)
