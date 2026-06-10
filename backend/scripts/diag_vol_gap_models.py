@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-diag_vol_gap_models.py  —  audit  (2026-06-10)   READ-ONLY
+diag_vol_gap_models.py  —  audit  (2026-06-10, rev2)   READ-ONLY
 
-Audit finding: the VOLATILITY and GAP-FILL model families are TRAINED nightly
-but NEVER consumed at inference — no code reads their predictions (the
-confidence gate has no vol/gap layer; dynamic_risk_engine / stop_manager /
-position sizing don't query them; compute_vol_specific_features is dead code).
+Audit finding: VOLATILITY (vol_predictor_*), GAP-FILL (gap_fill_*) and the
+VOL-CONDITIONED direction models (direction_predictor_*_high_vol) are TRAINED
+and PROMOTED to timeseries_models, but NEVER consumed at inference. The live
+layer (timeseries_service.MODEL_CONFIGS) loads ONLY base direction_predictor_*.
 
-This script quantifies the waste / opportunity: how many vol/gap models exist,
-their accuracy, sample counts and staleness — so we can decide to either
-(a) WIRE THEM IN as new gate layers / sizing inputs (if they have edge), or
-(b) STOP training them to reclaim nightly GPU time.
+rev2: the name field in timeseries_models is `name` (not `model_name`).
+
+This prints each dead model's accuracy + sample count so we can decide to
+WIRE IN the edge-positive ones or RETIRE the rest to reclaim nightly GPU.
 
 Run:
     cd ~/Trading-and-Analysis-Platform && \
@@ -18,7 +18,6 @@ Run:
 """
 import os
 import sys
-from collections import Counter
 
 from pymongo import MongoClient
 
@@ -30,9 +29,14 @@ except Exception:
 
 MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME")
-
-CANDIDATE_COLLECTIONS = ["timeseries_models", "volatility_models", "gap_fill_models", "dl_models"]
+COLL = "timeseries_models"
 EDGE_FLOOR = 0.52
+
+FAMILIES = {
+    "VOLATILITY (vol_predictor_*)": "^vol_predictor",
+    "GAP-FILL (gap_fill_*)": "^gap_fill",
+    "VOL-CONDITIONED DIRECTION (*_high_vol)": "_high_vol$",
+}
 
 
 def hr(t):
@@ -40,15 +44,22 @@ def hr(t):
 
 
 def _acc(doc):
-    for k in ("accuracy", "val_accuracy", "test_accuracy", "cv_accuracy"):
-        v = doc.get(k)
-        if isinstance(v, (int, float)):
-            return float(v)
-    metrics = doc.get("metrics") or {}
-    for k in ("accuracy", "val_accuracy"):
-        v = metrics.get(k)
-        if isinstance(v, (int, float)):
-            return float(v)
+    m = doc.get("metrics") or {}
+    for src in (m, doc):
+        for k in ("accuracy", "val_accuracy", "test_accuracy", "cv_accuracy", "oos_accuracy"):
+            v = src.get(k)
+            if isinstance(v, (int, float)):
+                return float(v)
+    return None
+
+
+def _samples(doc):
+    m = doc.get("metrics") or {}
+    for src in (doc, m):
+        for k in ("training_samples", "samples", "n_samples", "total_samples"):
+            v = src.get(k)
+            if isinstance(v, (int, float)):
+                return int(v)
     return None
 
 
@@ -57,47 +68,38 @@ def main():
         print("ERROR: MONGO_URL / DB_NAME not set in backend/.env")
         sys.exit(1)
     db = MongoClient(MONGO_URL, serverSelectionTimeoutMS=8000)[DB_NAME]
+    col = db[COLL]
 
-    for fam, prefix in (("VOLATILITY", "vol_predictor"), ("GAP-FILL", "gap_fill")):
-        hr(f"{fam} MODELS  (name ~ '{prefix}*')")
-        found = []
-        for coll in CANDIDATE_COLLECTIONS:
-            if coll not in db.list_collection_names():
-                continue
-            for d in db[coll].find(
-                {"model_name": {"$regex": f"^{prefix}"}},
-                {"_id": 0, "model_name": 1, "accuracy": 1, "val_accuracy": 1,
-                 "test_accuracy": 1, "metrics": 1, "samples": 1, "n_samples": 1,
-                 "trained_at": 1, "updated_at": 1},
-            ):
-                d["_coll"] = coll
-                found.append(d)
-
-        if not found:
-            print(f"  none found in {CANDIDATE_COLLECTIONS}")
+    grand_edge = grand_total = 0
+    for title, rx in FAMILIES.items():
+        hr(title)
+        docs = list(col.find({"name": {"$regex": rx}},
+                             {"_id": 0, "name": 1, "metrics": 1, "version": 1,
+                              "updated_at": 1, "saved_at": 1, "training_samples": 1}))
+        if not docs:
+            print("  none found")
             continue
-
+        print(f"  {'name':>34} {'acc':>7} {'samples':>9} {'updated':>12}")
         accs = []
-        print(f"  {'model':>22} {'coll':>18} {'acc':>7} {'samples':>9} {'trained':>12}")
-        for d in sorted(found, key=lambda x: x.get("model_name", "")):
+        for d in sorted(docs, key=lambda x: x.get("name", "")):
             a = _acc(d)
             accs.append(a if a is not None else 0.0)
-            samples = d.get("samples") or d.get("n_samples") or "?"
-            trained = str(d.get("trained_at") or d.get("updated_at") or "?")[:10]
+            s = _samples(d)
+            upd = str(d.get("updated_at") or d.get("saved_at") or "?")[:10]
             astr = f"{a:.3f}" if a is not None else "  n/a"
-            edge = " *EDGE*" if (a is not None and a >= EDGE_FLOOR) else ""
-            print(f"  {d.get('model_name','?'):>22} {d['_coll']:>18} {astr:>7} {str(samples):>9} {trained:>12}{edge}")
+            flag = " *EDGE*" if (a is not None and a >= EDGE_FLOOR) else ""
+            print(f"  {d.get('name','?'):>34} {astr:>7} {str(s if s is not None else '?'):>9} {upd:>12}{flag}")
+        n = len(docs)
+        edge = sum(1 for a in accs if a >= EDGE_FLOOR)
+        grand_total += n
+        grand_edge += edge
+        print(f"\n  total={n}  avg_acc={sum(accs)/n:.3f}  with_edge(>= {EDGE_FLOOR})={edge}/{n}")
 
-        n = len(found)
-        with_edge = sum(1 for a in accs if a >= EDGE_FLOOR)
-        avg = sum(accs) / n if n else 0
-        print(f"\n  total={n}  avg_acc={avg:.3f}  with_edge(>= {EDGE_FLOOR})={with_edge}/{n}")
-        print(f"  -> consumed at inference: NO (audit: no code reads {prefix}_* predictions)")
-        if with_edge:
-            print(f"  -> {with_edge} model(s) show edge — candidates to WIRE INTO the gate/sizing.")
-        else:
-            print("  -> no edge above floor — candidates to STOP training (reclaim GPU).")
-
+    hr("SUMMARY")
+    print(f"  dead-at-inference models: {grand_total}")
+    print(f"  with edge (>= {EDGE_FLOOR}): {grand_edge}")
+    print(f"  no edge (retire candidates): {grand_total - grand_edge}")
+    print("  consumed at inference: NONE (live layer loads only direction_predictor_*)")
     print("\nDONE.\n")
 
 
