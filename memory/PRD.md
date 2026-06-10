@@ -528,13 +528,25 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   reconciler truth at a glance.
 
 ---
-## 2026-06-11 — v19.34.319 gap-fill NO-PEEK fix — PATCH READY (operator-apply pending)
+## 2026-06-11 — v19.34.319 gap-fill NO-PEEK fix — ✅ DONE & VERIFIED (deployed on DGX)
 - Closed the gap-fill look-ahead leak (audit: 76.2%/49.6%/15.5% of 15m/5m/1m fills in the
   open bar). Training now decides AT THE OPEN: features end at bar i-1, bar-i gap features
-  neutralized, target over [i+1, i+w]. Patch https://paste.rs/hIfcL. 16/16 pytest.
-- After apply+restart: `scripts/gap_nopeek_verify.py` (balance check, no retrain) →
-  retrain `{"force_retrain": true, "phases": ["gap_fill"]}`. Expect acc to drop ~94.6% → tradeable.
-- NEXT (P1, gated on operator eyeballing honest gap acc): embargo gap at train/val boundary
-  (`timeseries_gbm.py:~1079`); Phase-8 FFD feature mismatch (`training_pipeline.py:~3070`).
-- Standing P0 (manual): rotate Atlas DB password (old creds in git history).
-- PARKED: P-WIRE phase 2 wiring (needs ~5000 shadow decisions).
+  neutralized, target over [i+1, i+w]. Patch https://paste.rs/hIfcL applied; verify script
+  showed balanced fill% (49/41/42%). 16/16 pytest.
+- Honest models promoted: gap_fill_1min acc 0.750, 5min 0.689, 15min 0.706 (down from leaky
+  0.83-0.94), healthy two-sided recall. Leaky 5min/15min + retired daily/weekly EVICTED via
+  scripts/evict_leaky_gap_models_v319.py (paste.rs/KROyI). Only 3 honest intraday gap models remain.
+
+## P1 patches READY (operator-apply pending, non-urgent — take effect on next retrain)
+- v319b embargo + v319c GBM_FORCE_PROMOTE override → COMBINED patch https://paste.rs/Brcge
+  (timeseries_gbm.py). Embargo de-biases all GBM train/val splits; force-promote is the reusable
+  lever to evict a known-invalid incumbent on future leakage fixes. 15/15 pytest.
+- v319d Phase-8 ensemble FFD match-fix → https://paste.rs/U7WVq (training_pipeline.py). Sub-models
+  now get real FFD (not zero-filled) in the meta-labeler. 4/4 pytest. FFD flag confirmed ON on DGX.
+
+## Remaining backlog (from handoff, post-audit)
+- Standing P0 (MANUAL, user action): rotate Atlas DB password (old creds in git history).
+- PARKED: P-WIRE phase 2 wiring (needs ~5000 shadow decisions from pwire_shadow_eval.py).
+- P1: per-stock multi-TF regime (market_regime_engine.py); regime-first scanning funnel (c3).
+- P2: dedicated intraday DL model; RS leadership factor (RS 80+); Wyckoff trigger; L2 probe;
+  break up server.py monolith.
