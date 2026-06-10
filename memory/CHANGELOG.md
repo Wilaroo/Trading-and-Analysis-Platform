@@ -1,3 +1,26 @@
+## 2026-06-11 — v19.34.319b (P1): train/val EMBARGO gap (GBM) — PATCH READY
+
+Patch: https://paste.rs/d9RFe  (backend-only → `git apply`; takes effect on the NEXT
+training run — fresh subprocess imports from disk, no live restart needed). Tests: 10/10
+(7 new test_embargo_split_v319b.py + 3 v317 regression).
+
+WHY: `timeseries_gbm.train_from_features` split train/val with a plain time-ordered cut
+and NO embargo. Each sample's label looks `forecast_horizon` bars forward, so the last
+`forecast_horizon` TRAIN samples have label windows overlapping the start of VALIDATION
+→ mild optimistic bias on reported accuracy (López de Prado purge/embargo gap missing).
+
+FIX (`timeseries_gbm.py`): new pure helper `_embargo_size(split_idx, forecast_horizon,
+env)` + applied at the split — purges `embargo` boundary samples off the END of train
+(train[:split_idx-embargo] | val[split_idx:]; the gap is left unused). Default embargo =
+the model's label horizon (gap=early_window, vol/direction=forecast_horizon). Env
+`TB_EMBARGO_BARS` overrides; clamped to ≤25% of the train block so train never starves.
+Applies to ALL GBM families. Logs `embargo gap: purging N boundary sample(s)…`.
+
+DEPLOY: apply anytime (safe — does NOT touch the running pre-patch subprocess). It will
+take effect on the next gap-only re-run / nightly retrain, so the honest v319 gap models
+also get the embargo. Reversible: `TB_EMBARGO_BARS=0`.
+
+
 ## 2026-06-11 — v19.34.319 (P0): gap-fill NO-PEEK leakage fix — PATCH READY
 
 Patch: https://paste.rs/hIfcL  (backend-only → `git apply` + `./start_backend.sh --force`,

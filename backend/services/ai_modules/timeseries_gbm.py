@@ -214,6 +214,26 @@ class ModelMetrics:
         return asdict(self)
 
 
+def _embargo_size(split_idx: int, forecast_horizon: int, env_override: Optional[str] = None) -> int:
+    """López de Prado EMBARGO: number of boundary training samples to purge so
+    their forward-looking label windows don't overlap the validation block.
+
+    Defaults to the label horizon (`forecast_horizon`); env `TB_EMBARGO_BARS`
+    overrides. Clamped to keep the train block non-empty (never more than 25% of
+    the train samples, never the whole block). Returns 0 when split_idx <= 1.
+    """
+    try:
+        embargo = int(env_override) if (env_override and str(env_override).strip()) else int(forecast_horizon)
+    except (TypeError, ValueError):
+        embargo = int(forecast_horizon)
+    embargo = max(0, embargo)
+    if split_idx <= 1:
+        return 0
+    embargo = min(embargo, split_idx - 1, int(split_idx * 0.25))
+    return max(0, embargo)
+
+
+
 class TimeSeriesGBM:
     """
     XGBoost model for directional price forecasting (GPU-accelerated).
@@ -1113,12 +1133,24 @@ class TimeSeriesGBM:
             train_params["num_class"] = num_classes
             train_params["eval_metric"] = "mlogloss"
 
-        # Split train/validation (time-ordered)
+        # Split train/validation (time-ordered) with a LÓPEZ DE PRADO EMBARGO gap.
+        # v319b: each sample's label looks `forecast_horizon` bars forward, so the
+        # last `embargo` training samples have label windows that overlap the start
+        # of the validation block → mild optimistic leakage at the boundary. Purge
+        # those `embargo` samples off the END of train (the gap is left unused).
         split_idx = int(len(X) * (1 - validation_split))
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        embargo = _embargo_size(split_idx, self.forecast_horizon, os.environ.get("TB_EMBARGO_BARS"))
+        train_end = split_idx - embargo
+        if embargo > 0:
+            logger.info(
+                f"[{self.model_name}] embargo gap: purging {embargo} boundary "
+                f"sample(s) — train[:{train_end}] | val[{split_idx}:] "
+                f"(horizon={self.forecast_horizon})"
+            )
+        X_train, X_val = X[:train_end], X[split_idx:]
+        y_train, y_val = y[:train_end], y[split_idx:]
         if sample_weights is not None:
-            w_train = np.asarray(sample_weights[:split_idx], dtype=np.float32)
+            w_train = np.asarray(sample_weights[:train_end], dtype=np.float32)
             w_val = np.asarray(sample_weights[split_idx:], dtype=np.float32)
         else:
             w_train = w_val = None
