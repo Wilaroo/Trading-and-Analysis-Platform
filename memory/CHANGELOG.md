@@ -1,6 +1,9 @@
 ## 2026-06-10 — v19.34.322: REGIME-FIRST FUNNEL COMPLETE (c2 + sector scoring + c3/T7 + scan steering) — PATCH READY
 
-Patch: **https://paste.rs/RVbeU** (14 files, git unified diff — `git apply` + restart backend + `yarn build`).
+Patch: ~~https://paste.rs/RVbeU~~ (git diff — FAILED on DGX tree drift at market_regime_engine.py).
+**USE THE ANCHOR PATCHER INSTEAD: https://paste.rs/j4NHJ** (`python3 v322_patcher.py` from repo
+root; `--check` for dry-run). 22 actions: 5 new files + 17 anchored block edits across 9 files;
+idempotent; py_compile gate with auto-rollback. Round-trip validated byte-identical in container.
 Container validation: 43/43 new tests + 42 regression (v316j gate / v321 / v320 CPCV) green;
 backend boots clean; all 3 new endpoints live-smoke-tested; webpack compiles.
 
