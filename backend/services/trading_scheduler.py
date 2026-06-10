@@ -298,6 +298,44 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 7d. EOD Daily-Bar Top-Up (v322g) - Daily at 4:35 PM ET, right
+            # after the daily bar finalises. Queues "1 day" refresh requests
+            # for the whole qualified universe (Mongo-only planning; the
+            # Windows collectors consume the queue whenever they're up +
+            # IB-connected, with full parallelism post-RTH). Replaces the
+            # manual post-close smart-backfill dependency so the 5:30 PM RS
+            # compute always reads today's bars.
+            self._scheduler.add_job(
+                _wrap_async(self._run_eod_daily_topup),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=16,
+                    minute=35,
+                    timezone='US/Eastern'
+                ),
+                id='eod_daily_topup',
+                name='EOD Daily-Bar Top-Up',
+                replace_existing=True
+            )
+
+            # 7e. ADV Cache Rebuild (v322g) - Daily at 5:10 PM ET, after the
+            # EOD top-up has had time to land and before the 5:30 PM RS
+            # compute. Recomputes ADV/ATR/tier for every symbol from the
+            # last 20 IB daily bars (pure Mongo aggregation — no IB calls)
+            # so tier classification and liquidity floors never go stale.
+            self._scheduler.add_job(
+                _wrap_async(self._run_adv_cache_rebuild),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=17,
+                    minute=10,
+                    timezone='US/Eastern'
+                ),
+                id='adv_cache_rebuild',
+                name='Nightly ADV Cache Rebuild',
+                replace_existing=True
+            )
+
             # 6.9 Gate Outcome Reconcile (v19.34.311b) - Daily at 4:25 PM ET, just
             # BEFORE gate calibration. Backfills confidence_gate_log outcomes from
             # CLEAN closed bot_trades (decision_id attribution + hygiene filter) so
@@ -767,11 +805,11 @@ class TradingScheduler:
             
             # Import services
             from services.ib_service import get_ib_service
-            from services.ib_historical_collector import get_historical_collector
+            from services.ib_historical_collector import get_ib_collector
             from services.historical_data_queue_service import get_historical_data_queue_service
             
             ib_service = get_ib_service()
-            collector = get_historical_collector()
+            collector = get_ib_collector()
             
             # Check IB connection
             ib_connected = ib_service.is_connected if ib_service else False
@@ -882,6 +920,88 @@ class TradingScheduler:
         except Exception as e:
             result.error = str(e)
             result.result_summary = f"RS leadership compute failed: {e}"
+            logger.error(result.result_summary)
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
+    async def _run_eod_daily_topup(self):
+        """v322g — queue '1 day' refresh requests for the qualified universe
+        right after the close. Planning is Mongo-only; the Windows collectors
+        consume the queue whenever they're up + IB-connected. Ensures the
+        5:30 PM RS compute reads today's just-finalised daily bars."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="eod_daily_topup",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled EOD daily-bar top-up...")
+            from services.ib_historical_collector import get_ib_collector
+            collector = get_ib_collector()
+            if collector._db is None and self._db is not None:
+                collector.set_db(self._db)
+            summary = await collector.smart_backfill(bar_size_filter=["1 day"])
+            if summary.get("deferred"):
+                result.success = True  # not a failure — CPU relief active
+                result.result_summary = summary.get("reason", "deferred")
+            else:
+                result.success = bool(summary.get("success"))
+                result.result_summary = (
+                    f"queued={summary.get('queued', 0)} daily-bar requests, "
+                    f"fresh={summary.get('skipped_fresh', 0)}, "
+                    f"already_queued={summary.get('skipped_already_queued', 0)}"
+                    if result.success else summary.get("error", "unknown error"))
+            result.metadata = summary
+            logger.info(f"EOD daily-bar top-up: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"EOD daily-bar top-up failed: {e}"
+            logger.error(result.result_summary)
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
+    async def _run_adv_cache_rebuild(self):
+        """v322g — nightly ADV/ATR/tier recompute from the last 20 IB daily
+        bars (pure Mongo aggregation, no IB calls). Keeps tier classification
+        and liquidity floors current for the scanner + RS focus list."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="adv_cache_rebuild",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled ADV cache rebuild...")
+            from services.ib_historical_collector import get_ib_collector
+            collector = get_ib_collector()
+            if collector._db is None and self._db is not None:
+                collector.set_db(self._db)
+            summary = await collector.rebuild_adv_from_ib_data()
+            result.success = bool(summary.get("success"))
+            ts = summary.get("tier_summary", {}) or {}
+            result.result_summary = (
+                f"updated={summary.get('symbols_updated', 0)} symbols "
+                f"(intraday={ts.get('intraday')}, swing={ts.get('swing')}, "
+                f"investment={ts.get('investment')})"
+                if result.success else summary.get("error", "unknown error"))
+            result.metadata = {k: v for k, v in summary.items() if k != "symbols"}
+            logger.info(f"ADV cache rebuild: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"ADV cache rebuild failed: {e}"
             logger.error(result.result_summary)
         finally:
             end_time = datetime.now(timezone.utc)
