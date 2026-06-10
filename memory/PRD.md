@@ -537,12 +537,18 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   0.83-0.94), healthy two-sided recall. Leaky 5min/15min + retired daily/weekly EVICTED via
   scripts/evict_leaky_gap_models_v319.py (paste.rs/KROyI). Only 3 honest intraday gap models remain.
 
-## P1 patches READY (operator-apply pending, non-urgent — take effect on next retrain)
-- v319b embargo + v319c GBM_FORCE_PROMOTE override → COMBINED patch https://paste.rs/Brcge
-  (timeseries_gbm.py). Embargo de-biases all GBM train/val splits; force-promote is the reusable
-  lever to evict a known-invalid incumbent on future leakage fixes. 15/15 pytest.
-- v319d Phase-8 ensemble FFD match-fix → https://paste.rs/U7WVq (training_pipeline.py). Sub-models
-  now get real FFD (not zero-filled) in the meta-labeler. 4/4 pytest. FFD flag confirmed ON on DGX.
+## P1 patches — ✅ ALL DEPLOYED & GREEN on DGX (2026-06-11)
+- v319d Phase-8 ensemble FFD match-fix → applied via https://paste.rs/U7WVq (training_pipeline.py).
+  Sub-models now get real FFD (not zero-filled) in the meta-labeler. 4/4 pytest on DGX. Takes
+  effect next ensemble/full retrain. FFD flag confirmed ON.
+- v319b embargo + v319c GBM_FORCE_PROMOTE override → timeseries_gbm.py. The Brcge git-patch
+  failed (DGX file had ~8-line drift above the class) so deployed via a line-number-proof
+  STRING PATCHER https://paste.rs/GrkS1 (idempotent, py_compiles before write). +68 lines,
+  12/12 pytest on DGX. Embargo de-biases all GBM train/val splits (logs `embargo gap: purging
+  N boundary sample(s)…` on next full run); force-promote is the reusable lever to evict a
+  known-invalid incumbent on future leakage fixes (env GBM_FORCE_PROMOTE).
+  NOTE for future agents: prefer string patchers over git-diff patches for timeseries_gbm.py /
+  large monolith files — line numbers drift between the container fork and the live DGX tree.
 
 ## Remaining backlog (from handoff, post-audit)
 - Standing P0 (MANUAL, user action): rotate Atlas DB password (old creds in git history).
