@@ -1965,19 +1965,29 @@ async def run_training_pipeline(
                             regime_rows = regime_matrix[:n_usable]
                             y_chunk = targets[:n_usable]
 
-                            # Filter out any targets that would have been None in original
-                            # (original returned None when current_idx < 20 or out of bounds,
-                            #  but start_idx=50 ensures current_idx >= 50 > 20, so all valid)
-
                             # Assemble feature matrix: [base | vol | regime]
                             X_chunk = np.empty((n_usable, n_base + n_vol + n_regime), dtype=np.float32)
                             X_chunk[:, :n_base] = base_rows
                             X_chunk[:, n_base:n_base + n_vol] = vol_rows
                             X_chunk[:, n_base + n_vol:] = regime_rows
 
-                            if n_usable > 0:
-                                all_X.append(X_chunk)
-                                all_y.append(y_chunk)
+                            # v19.34.315 — drop INVALID (-1.0) vol targets. The
+                            # v19.34.312 batch target fn emits -1.0 for degenerate
+                            # flat windows (trailing_vol == 0). Leaving them in feeds
+                            # negative labels into bincount/XGBoost →
+                            # "'list' argument must have no negative elements" and
+                            # kills the ENTIRE Phase-3 vol family (0/7). Filter the
+                            # X/y rows together so they stay aligned.
+                            valid = y_chunk >= 0.0
+                            n_valid = int(valid.sum())
+                            if n_valid == 0:
+                                continue
+                            if n_valid < n_usable:
+                                X_chunk = X_chunk[valid]
+                                y_chunk = y_chunk[valid]
+
+                            all_X.append(X_chunk)
+                            all_y.append(y_chunk)
 
                         del batch_bars
                         gc.collect()

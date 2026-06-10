@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   Brain, Play, Square, RefreshCw, TrendingUp,
-  Activity, Shield, Clock, Target, BarChart3, Layers, AlertTriangle,
+  Activity, Shield, Clock, Target, Layers, AlertTriangle,
   CheckCircle2, Circle, ChevronDown, ChevronRight, Zap, Eye, Cpu, Monitor, GitBranch,
   Crosshair, Wrench
 } from 'lucide-react';
@@ -20,9 +20,7 @@ const CATEGORY_ICONS = {
   setup_specific: Target,
   volatility: Activity,
   exit_timing: Clock,
-  sector_relative: BarChart3,
   gap_fill: Zap,
-  risk_of_ruin: Shield,
   ensemble: Layers,
   regime_conditional: GitBranch,
   cnn_visual: Eye,
@@ -33,24 +31,23 @@ const CATEGORY_COLORS = {
   setup_specific: 'text-violet-400',
   volatility: 'text-amber-400',
   exit_timing: 'text-emerald-400',
-  sector_relative: 'text-blue-400',
   gap_fill: 'text-orange-400',
-  risk_of_ruin: 'text-red-400',
   ensemble: 'text-pink-400',
   regime_conditional: 'text-teal-400',
   cnn_visual: 'text-fuchsia-400',
 };
 
-// All training phases in execution order
+// All training phases in execution order.
+// v19.34.316 — sector_relative (P5) and risk_of_ruin (P6) RETIRED (dead at
+// inference + class-collapsed; see v19.34.314). gap_fill redesigned to the
+// overnight open-gap target (3 intraday models).
 const ALL_PHASES = [
   { key: 'generic_directional', label: 'Generic Directional', num: '1', expected: 7 },
   { key: 'setup_specific', label: 'Setup-Specific (Long)', num: '2', expected: 17 },
   { key: 'short_setup_specific', label: 'Setup-Specific (Short)', num: '2.5', expected: 17 },
   { key: 'volatility_prediction', label: 'Volatility Prediction', num: '3', expected: 7 },
   { key: 'exit_timing', label: 'Exit Timing', num: '4', expected: 10 },
-  { key: 'sector_relative', label: 'Sector-Relative', num: '5', expected: 3 },
-  { key: 'gap_fill', label: 'Gap Fill Probability', num: '5.5', expected: 3 },
-  { key: 'risk_of_ruin', label: 'Risk-of-Ruin', num: '6', expected: 6 },
+  { key: 'gap_fill', label: 'Overnight Gap Fill', num: '5.5', expected: 3 },
   { key: 'regime_conditional', label: 'Regime-Conditional', num: '7', expected: 28 },
   { key: 'ensemble_meta', label: 'Ensemble Meta-Learner', num: '8', expected: 10 },
   { key: 'cnn_patterns', label: 'CNN Chart Patterns', num: '9', expected: 34 },

@@ -1081,21 +1081,9 @@ def get_model_inventory():
                 "group": "support",
                 "models": [],
             },
-            "sector_relative": {
-                "label": "Sector-Relative",
-                "description": "Outperform/underperform vs sector ETF",
-                "group": "support",
-                "models": [],
-            },
             "gap_fill": {
-                "label": "Gap Fill Probability",
-                "description": "Gap fill vs continuation prediction",
-                "group": "support",
-                "models": [],
-            },
-            "risk_of_ruin": {
-                "label": "Risk-of-Ruin",
-                "description": "Stop-loss hit probability",
+                "label": "Overnight Gap Fill",
+                "description": "Overnight open-gap fill probability (early-window, intraday)",
                 "group": "support",
                 "models": [],
             },
@@ -1155,15 +1143,37 @@ def get_model_inventory():
                     **(trained_models.get(name, {})),
                 })
 
+        # v19.34.316 — sector_relative + risk_of_ruin RETIRED from the default
+        # inventory (dead at inference + class-collapsed). Re-add only when the
+        # training default is also re-enabled via INCLUDE_RETIRED_FAMILIES=1.
+        _include_retired = os.environ.get("INCLUDE_RETIRED_FAMILIES", "0") == "1"
+        if _include_retired:
+            categories["sector_relative"] = {
+                "label": "Sector-Relative",
+                "description": "Outperform/underperform vs sector ETF",
+                "group": "support",
+                "models": [],
+            }
+            categories["risk_of_ruin"] = {
+                "label": "Risk-of-Ruin",
+                "description": "Stop-loss hit probability",
+                "group": "support",
+                "models": [],
+            }
+
         # New model categories
-        for config_map, category_key in [
+        _new_categories = [
             (VOL_MODEL_CONFIGS, "volatility"),
             (EXIT_MODEL_CONFIGS, "exit_timing"),
-            (SECTOR_MODEL_CONFIGS, "sector_relative"),
             (GAP_MODEL_CONFIGS, "gap_fill"),
-            (RISK_MODEL_CONFIGS, "risk_of_ruin"),
             (ENSEMBLE_MODEL_CONFIGS, "ensemble"),
-        ]:
+        ]
+        if _include_retired:
+            _new_categories += [
+                (SECTOR_MODEL_CONFIGS, "sector_relative"),
+                (RISK_MODEL_CONFIGS, "risk_of_ruin"),
+            ]
+        for config_map, category_key in _new_categories:
             for key, cfg in config_map.items():
                 name = cfg["model_name"]
                 categories[category_key]["models"].append({
