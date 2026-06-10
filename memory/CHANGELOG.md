@@ -24583,3 +24583,30 @@ Verified patcher on a DGX-accurate reconstruction (no-config-import header).
 NEXT PROJECT (agreed): dedicated INTRADAY model anchored on 5m/15m (94M 5-min
 bars / 4293 symbols / 2.4yr available) for genuine short-horizon trade signals —
 the bot currently has ZERO intraday predictive models.
+
+## 2026-06-10 — Confidence-Gate integrity + Model-family audit (v19.34.311–312)
+SHIPPED & VERIFIED ON DGX:
+- v19.34.311  Gate outcome-LABEL normalization. position_manager path wrote
+  "won"/"lost"/"breakeven" but gate_calibrator counts only "win"/"loss" → the
+  dominant outcome feed was invisible → calibrator would set STRICTER-than-default
+  thresholds. Canonicalize at the gate boundary. (tests: test_gate_outcome_normalization.py)
+- v19.34.311b Gate outcome ATTRIBUTION + COVERAGE + hygiene. Stamp decision_id at
+  entry → carry onto trade.entry_context.confidence_gate → exact-match at close;
+  fuzzy fallback restricted to GO/REDUCE (SKIP could absorb a real trade's PnL).
+  New gate_outcome_reconciler (clean-trade hygiene filter; daily 16:25 ET) lifts
+  coverage from ~9% toward ~100%. (tests: test_gate_attribution_v311b.py — 24/24 on DGX)
+- v19.34.312  ABSOLUTE class-collapse promotion gate in TimeSeriesGBM._save_model:
+  min(recall_up,recall_down)<0.10 → NOT promoted (rejected_class_collapse), even on
+  first-train. Stops collapsed models (gap_fill 0.98 acc/recall_dn 0.00, vol always
+  HIGH_VOL) shipping as fake "edge". (tests: test_gbm_collapse_gate.py — 3/3)
+- v19.34.312  Volatility target rebalance: equal-length fh-windows ("is vol
+  expanding?") → 85/15 → ~50/50. (tests: test_vol_target_rebalance.py — 6/6)
+
+KEY INVESTIGATION RESULTS:
+- Gate "too conservative" premise RETIRED: recent take-rate ~33% (GO15+REDUCE18),
+  mode now 84% NORMAL (the 63% defensive was an early-June regime artifact).
+- Win-rate is the WRONG calibration metric (full bot_trades: ~12-32% WR, +$302k);
+  but that PnL is build-phase-contaminated (oversized/phantom/unmanaged) — NOT clean
+  edge. Auto-calibration kept OFF until a CLEAN corpus accrues; use EV>0 not win-rate.
+- Model-family audit (110 promoted models): 59 DEAD at inference, 46 class-collapsed.
+  Full table → /app/memory/AUDIT_model_families_2026-06-10.md

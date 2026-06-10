@@ -3699,3 +3699,25 @@ All P1 hardening shipped (v88, v89, v90, v91, v92, v93, v94). Pipeline is self-h
 - 🟢 (P3) Chart bubble click → fire focus symbol.
 - 🟢 (P3) SEC EDGAR 8-K integration.
 - 🟢 (P3) Break up `server.py` and `trading_bot.py` monoliths.
+
+## 2026-06-10 — Model-family fix roadmap (post-audit; prioritized)
+Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 collapsed)
+- 🟡 P-LIVE-1 (ensemble): VERIFY FIRST — argmax-recall "collapse" is likely the wrong
+  lens for the gate's graded p_win meta-labeler (gate force-skips p_win<0.5 yet
+  take-rate is 33% → p_win spans 0.5). Run scripts/diag_ensemble_pwin_live.py.
+  If p_win discriminates → false alarm (do NOT class-weight, breaks 0.5/0.75 thresholds).
+  If squashed → rebuild meta-label target + recalibrate thresholds.
+- 🔴 P-LIVE-2: 2/7 base direction_predictor collapsed → P0 gate auto-rejects on next
+  retrain; optional one-time quarantine of currently-promoted collapsed ones.
+- 🟢 P-WIRE: regime-conditional model SELECTION. ~18 healthy two-sided regime models
+  (acc 0.56–0.78) are DEAD — live layer loads only base direction_predictor_{tf}
+  (+ regime FEATURES + heuristic adjust). MUST be earned by an apples-to-apples
+  OFFLINE backtest (generic vs regime-specialized on the SAME recent bars; training
+  accuracies are on different regime subsets, not comparable). Build: additive
+  model_name_override on predict_for_setup → offline compare harness → if it wins,
+  wire regime→model selection via gate's classify_regime (shadow-gated).
+- 🟡 P-TARGET(gap): session-gap redesign — only day-open gap ≥0.5%, fill within EARLY
+  window (first ~30m) vs gap-and-go. RETIRE daily/weekly gap_fill (not meaningful).
+- 🟡 P-RETIRE/fix: risk_of_ruin (6/6 collapsed), sector_relative (3/3), exit_timing (0.455 dead).
+- Separation discipline CONFIRMED: training pipeline (clean historical CV) must NOT
+  ingest live trade PnL; learning loop adapts posture via SHADOW mode only.
