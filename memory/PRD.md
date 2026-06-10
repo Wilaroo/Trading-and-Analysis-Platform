@@ -1,5 +1,12 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 FORKED 2026-06-11 — NEXT AGENT: read `/app/memory/NEXT_SESSION_TIER1_PLAN.md` FIRST.**
+> All v319/b/c/d ML-integrity fixes are DEPLOYED + committed (DGX main @ d96def40). Full
+> leakage audit done (clean). Next task = **Tier 1a: wire Purged CPCV (`purged_cpcv.py`,
+> already exists, DL-only) into the GBM models** for true OOS + PBO. Pending DGX ops (run
+> AFTER Tier 1a): retired-model eviction (paste.rs/wL0HT) + full retrain. DGX patcher
+> workflow ONLY — no testing_agent, no git from bash. Respond in English.
+
 > **⚠️ AGENTS — READ THIS BLOCK BEFORE ANY CODE CHANGE.**
 >
 > Open `/app/AGENTS.md` and read **§0 TL;DR** + any sections relevant
