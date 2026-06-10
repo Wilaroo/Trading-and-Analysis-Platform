@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """
-patch_gate_outcome_label.py  (2026-06-10)
+patch_gate_outcome_label.py  —  v19.34.311  (2026-06-10)
 
 Idempotent patcher for the GAP-5 outcome-label bug in
 services/ai_modules/confidence_gate.py.
 
 The primary genuine-close path passes "won"/"lost"/"breakeven" into the gate,
-but gate_calibrator only counts "win"/"loss" -> the dominant feed is recorded
-yet invisible to calibration. This inserts a canonicalization block at the top
-of ConfidenceGate.record_trade_outcome so {won,win}->win, {lost,loss}->loss,
+but gate_calibrator only counts "win"/"loss" -> the dominant outcome feed is
+recorded yet invisible to calibration, so every score bucket reads ~0% win-rate
+and the auto-calibrator falls back to a STRICTER threshold than the static
+defaults. This inserts a canonicalization block at the top of
+ConfidenceGate.record_trade_outcome so {won,win}->win, {lost,loss}->loss,
 everything else->scratch, regardless of caller vocabulary.
 
-Run on the DGX:
-    cd /app/backend && python scripts/patch_gate_outcome_label.py
-    (then) sudo supervisorctl restart backend
+NOT a safety-critical close path (this is a learning-loop write — Journey 1
+step 6, not the close spine), so an in-place edit is appropriate here.
+
+Run on the DGX (per AGENTS.md §2):
+    cd ~/Trading-and-Analysis-Platform/backend && \
+      .venv/bin/python scripts/patch_gate_outcome_label.py
+    (then)  cd .. && ./start_backend.sh --force
 """
 import os
 import sys
 
-TARGET = os.path.join(
+TARGET = os.path.abspath(os.path.join(
     os.path.dirname(__file__), "..", "services", "ai_modules", "confidence_gate.py"
-)
-TARGET = os.path.abspath(TARGET)
+))
 
 ANCHOR = """        if self._db is None:
             return False
@@ -37,8 +42,8 @@ ANCHOR = """        if self._db is None:
 REPLACEMENT = """        if self._db is None:
             return False
 
-        # GAP-5 fix (2026-06-10): normalize outcome vocabulary at this single
-        # boundary. The primary genuine-close path
+        # v19.34.311 (GAP-5 fix, 2026-06-10): normalize outcome vocabulary at
+        # this single boundary. The primary genuine-close path
         # (position_manager -> learning_loop_service.record_trade_outcome)
         # passes "won"/"lost"/"breakeven", while trade_journal passes
         # "win"/"loss"/"scratch". gate_calibrator counts ONLY "win"/"loss", so
@@ -61,7 +66,7 @@ REPLACEMENT = """        if self._db is None:
                     "outcome_tracked": False,
                 },"""
 
-MARKER = "GAP-5 fix (2026-06-10): normalize outcome vocabulary"
+MARKER = "v19.34.311 (GAP-5 fix, 2026-06-10): normalize outcome vocabulary"
 
 
 def main():
@@ -69,21 +74,21 @@ def main():
         src = f.read()
 
     if MARKER in src:
-        print(f"[skip] Already patched: {TARGET}")
+        print(f"[skip] Already patched (v19.34.311): {TARGET}")
         return 0
 
     if ANCHOR not in src:
-        print("[ERROR] Anchor block not found — the file may already differ from")
-        print("        the expected source. Aborting (no changes made).")
-        print("        Manually add the canonicalization block at the top of")
+        print("[ERROR] Anchor block not found — the file already differs from the")
+        print("        expected source. Aborting (no changes made). Manually add the")
+        print("        canonicalization block at the top of")
         print("        ConfidenceGate.record_trade_outcome instead.")
         return 1
 
     src = src.replace(ANCHOR, REPLACEMENT, 1)
     with open(TARGET, "w") as f:
         f.write(src)
-    print(f"[ok] Patched {TARGET}")
-    print("     Now run: sudo supervisorctl restart backend")
+    print(f"[ok] Patched (v19.34.311): {TARGET}")
+    print("     Now run:  cd .. && ./start_backend.sh --force")
     return 0
 
 

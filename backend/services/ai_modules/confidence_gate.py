@@ -1905,8 +1905,8 @@ class ConfidenceGate:
         if self._db is None:
             return False
 
-        # GAP-5 fix (2026-06-10): normalize outcome vocabulary at this single
-        # boundary. The primary genuine-close path
+        # v19.34.311 (GAP-5 fix, 2026-06-10): normalize outcome vocabulary at
+        # this single boundary. The primary genuine-close path
         # (position_manager -> learning_loop_service.record_trade_outcome)
         # passes "won"/"lost"/"breakeven", while trade_journal passes
         # "win"/"loss"/"scratch". gate_calibrator counts ONLY "win"/"loss", so

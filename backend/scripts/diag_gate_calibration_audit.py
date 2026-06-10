@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-diag_gate_calibration_audit.py  (2026-06-10)
+diag_gate_calibration_audit.py  —  v19.34.311  (2026-06-10)
 
 Investigation deliverable for the gate-conservatism work:
   B) Is the auto-calibration loop actually learning, and why is it stricter
@@ -13,9 +13,13 @@ READ-ONLY by default. Pass `--apply-relabel` to perform the one-time historical
 relabel of confidence_gate_log.trade_outcome (won->win, lost->loss,
 breakeven->scratch) so the calibrator can finally see the existing outcomes.
 
-Run on the DGX:
-    cd /app/backend && python scripts/diag_gate_calibration_audit.py
-    cd /app/backend && python scripts/diag_gate_calibration_audit.py --apply-relabel
+Reads MONGO_URL / DB_NAME from backend/.env (DB is `tradecommand`).
+
+Run on the DGX (per AGENTS.md §2 — use the venv python, not `python`):
+    cd ~/Trading-and-Analysis-Platform/backend && \
+      .venv/bin/python scripts/diag_gate_calibration_audit.py
+    (then, once reviewed)
+    .venv/bin/python scripts/diag_gate_calibration_audit.py --apply-relabel
 """
 import os
 import re
@@ -87,7 +91,7 @@ def main():
     print(f"  outcome_tracked=True : {tracked:,}")
     print(f"  outcome_tracked!=True: {untracked:,}")
     label_dist = Counter()
-    for d in col.find({"outcome_tracked": True}, {"trade_outcome": 1}):
+    for d in col.find({"outcome_tracked": True}, {"_id": 0, "trade_outcome": 1}):
         label_dist[str(d.get("trade_outcome"))] += 1
     print("  trade_outcome distribution (tracked docs):")
     for k, v in label_dist.most_common():
@@ -116,7 +120,7 @@ def main():
     # ---- (B3) trading-mode distribution ----
     hr("B3) TRADING-MODE DISTRIBUTION  (why 63% cautious/defensive?)")
     mode_dist = Counter()
-    for d in col.find({}, {"trading_mode": 1}).limit(20000):
+    for d in col.find({}, {"_id": 0, "trading_mode": 1}).limit(20000):
         mode_dist[str(d.get("trading_mode", "?"))] += 1
     seen = sum(mode_dist.values())
     for k, v in mode_dist.most_common():
@@ -129,7 +133,7 @@ def main():
     active = Counter()
     decision_dist = Counter()
     score_vals = []
-    for d in col.find({}, {"reasoning": 1, "decision": 1, "confidence_score": 1}).sort("timestamp", -1).limit(sample_n):
+    for d in col.find({}, {"_id": 0, "reasoning": 1, "decision": 1, "confidence_score": 1}).sort("timestamp", -1).limit(sample_n):
         decision_dist[str(d.get("decision"))] += 1
         sc = d.get("confidence_score")
         if isinstance(sc, (int, float)):
