@@ -29,9 +29,19 @@ FOCUS_TOP_N = 40
 
 # v322d — liquidity floor: the focus list promotes scan cadence and feeds
 # the operator's eyes, so micro-caps with no tradeable liquidity are noise.
-# Default $20M avg daily dollar volume; env-tunable. Symbols missing an
-# `adv` field (pre-v322d docs) are excluded until the next nightly compute.
-FOCUS_MIN_ADV = float(os.environ.get("FOCUS_MIN_ADV", "20000000"))
+# Pulls the CANONICAL swing-tier ADV threshold from symbol_universe
+# (single source of truth, 2026-04-28e/f) — no drift. FOCUS_MIN_ADV env
+# is an explicit override. Symbols missing an `adv` field (pre-v322d docs)
+# are excluded until the next nightly compute.
+def _default_min_adv() -> float:
+    env = os.environ.get("FOCUS_MIN_ADV")
+    if env:
+        return float(env)
+    try:
+        from services.symbol_universe import get_adv_thresholds
+        return float(get_adv_thresholds()["swing"])
+    except Exception:
+        return 10_000_000.0
 
 LONG_SECTOR_REGIMES = {"strong", "rotating_in"}
 SHORT_SECTOR_REGIMES = {"weak", "rotating_out"}
@@ -48,10 +58,11 @@ def build_focus_list(ratings: Dict[str, Dict],
     `ratings`  — symbol → rs_leadership doc ({rs_rating, sector, adv, ...}).
     `sector_regime_by_etf` — ETF → regime label string (e.g. "strong").
     `modes`    — multi_tf modes {"long": "aggressive", "short": "defensive"}.
-    `min_adv`  — liquidity floor in avg daily dollar volume (FOCUS_MIN_ADV).
+    `min_adv`  — liquidity floor in avg daily dollar volume; defaults to the
+                 canonical swing-tier ADV from symbol_universe.
     """
     modes = modes or {}
-    min_adv = FOCUS_MIN_ADV if min_adv is None else min_adv
+    min_adv = _default_min_adv() if min_adv is None else min_adv
     longs: List[Dict] = []
     shorts: List[Dict] = []
 
