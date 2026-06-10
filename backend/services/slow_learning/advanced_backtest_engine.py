@@ -29,6 +29,109 @@ import math
 logger = logging.getLogger(__name__)
 
 
+import os
+
+# ════════════════════════════════════════════════════════════════════════════
+# v320b Tier-1b — Execution-cost model (slippage, commission, next-bar-open
+# fills, gap-through stop fills). Env knobs:
+#   BT_COSTS=0                 -> legacy frictionless behaviour (A/B compare)
+#   BT_SLIPPAGE_BPS            -> adverse market-order slippage (default 2.0)
+#   BT_COMMISSION_PER_SHARE    -> per-share, per-side (default 0.005, IBKR-like)
+#   BT_COMMISSION_MIN          -> per-order minimum (default 1.00)
+#   BT_NEXT_BAR_FILLS=0        -> fill on signal-bar close (legacy timing)
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _bt_cost_cfg() -> Dict[str, Any]:
+    """Execution-cost knobs, read once per simulation call."""
+    def _off(name, default="1"):
+        return str(os.environ.get(name, default)).strip().lower() in ("0", "false", "off", "no")
+
+    def _f(name, default):
+        try:
+            return float(os.environ.get(name, default))
+        except (TypeError, ValueError):
+            return float(default)
+
+    enabled = not _off("BT_COSTS")
+    return {
+        "enabled": enabled,
+        "slippage_bps": _f("BT_SLIPPAGE_BPS", 2.0) if enabled else 0.0,
+        "commission_per_share": _f("BT_COMMISSION_PER_SHARE", 0.005) if enabled else 0.0,
+        "commission_min": _f("BT_COMMISSION_MIN", 1.0) if enabled else 0.0,
+        "next_bar_fills": enabled and not _off("BT_NEXT_BAR_FILLS"),
+    }
+
+
+def _slip(price: float, is_buy: bool, bps: float) -> float:
+    """Market-order fill with ADVERSE slippage: buys fill higher, sells lower."""
+    if price <= 0 or bps <= 0:
+        return price
+    return price * (1 + bps / 10000.0) if is_buy else price * (1 - bps / 10000.0)
+
+
+def _commission(shares: int, cfg: Dict[str, Any]) -> float:
+    """One SIDE of IBKR-style per-share commission with a per-order minimum."""
+    if shares <= 0 or cfg["commission_per_share"] <= 0:
+        return 0.0
+    return max(cfg["commission_min"], shares * cfg["commission_per_share"])
+
+
+def _stop_fill(stop_price: float, bar_open: float, is_short: bool) -> float:
+    """Stop fill honoring gaps: if the bar OPENS through the stop you get the
+    open (worse), never the stop price."""
+    if bar_open <= 0:
+        return stop_price
+    if is_short:
+        return max(stop_price, bar_open)   # short stop = BUY above entry
+    return min(stop_price, bar_open)       # long stop = SELL below entry
+
+
+def _target_fill(target_price: float, bar_open: float, is_short: bool) -> float:
+    """Limit-order target fill: a gap THROUGH the target fills at the open
+    (better than the limit). Otherwise the exact limit price."""
+    if bar_open <= 0:
+        return target_price
+    if is_short:
+        return min(target_price, bar_open)  # short target = BUY below entry
+    return max(target_price, bar_open)      # long target = SELL above entry
+
+
+def _fill_pending_entry(pending, bar_open, timestamp, symbol, strategy, exec_cfg):
+    """v320b — construct a BacktestTrade filled at the CURRENT bar's open
+    (i.e. the bar AFTER the signal bar) with adverse slippage applied.
+    Stops/targets are computed from the ACTUAL fill price. Returns None when
+    the open is unusable or the position rounds to zero shares."""
+    is_short = pending["direction"] == "short"
+    fill = _slip(bar_open, is_buy=not is_short, bps=exec_cfg["slippage_bps"])
+    if fill <= 0:
+        return None
+    shares = int(pending["position_value"] / fill)
+    if shares <= 0:
+        return None
+    if is_short:
+        stop_price = fill * (1 + strategy.stop_pct / 100)
+        target_price = fill * (1 - strategy.target_pct / 100)
+    else:
+        stop_price = fill * (1 - strategy.stop_pct / 100)
+        target_price = fill * (1 + strategy.target_pct / 100)
+    return BacktestTrade(
+        id=f"t_{uuid.uuid4().hex[:8]}",
+        symbol=symbol,
+        strategy_name=strategy.name,
+        setup_type=strategy.setup_type,
+        direction=pending["direction"],
+        entry_date=timestamp[:10],
+        entry_time=timestamp[11:19] if len(timestamp) > 10 else "",
+        entry_price=fill,
+        shares=shares,
+        stop_price=stop_price,
+        target_price=target_price,
+        bars_held=0,
+        slippage_cost=abs(fill - bar_open) * shares,
+    )
+
+
 # ============================================================================
 # Data Classes
 # ============================================================================
@@ -153,6 +256,9 @@ class BacktestTrade:
     max_adverse_excursion: float = 0.0
     tqs_score: float = 0.0
     market_regime: str = ""
+    # v320b execution costs (0.0 under BT_COSTS=0 / legacy docs)
+    commission: float = 0.0
+    slippage_cost: float = 0.0
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -1197,6 +1303,9 @@ class AdvancedBacktestEngine:
         in_position = False
         current_trade: BacktestTrade = None
 
+        exec_cfg = _bt_cost_cfg()
+        pending_entry = None
+
         # Determine strategy direction ONCE (all trades in this call share it)
         is_short = strategy.setup_type.lower().startswith("short_")
         trade_direction = "short" if is_short else "long"
@@ -1207,6 +1316,18 @@ class AdvancedBacktestEngine:
             timestamp = bar.get("timestamp", "")
             high = bar.get("high", bar.get("h", current_price))
             low = bar.get("low", bar.get("l", current_price))
+            bar_open = bar.get("open", bar.get("o", current_price))
+            # gap_open <= 0 disables gap-aware fills (legacy exact stop/target under BT_COSTS=0)
+            gap_open = bar_open if exec_cfg["enabled"] else 0.0
+
+            # v320b: fill any PENDING entry at THIS bar's open (+ adverse slippage)
+            if pending_entry is not None and not in_position:
+                current_trade = _fill_pending_entry(
+                    pending_entry, bar_open, timestamp, symbol, strategy, exec_cfg
+                )
+                if current_trade is not None:
+                    in_position = True
+                pending_entry = None
 
             # Track equity — P&L direction-aware
             equity = capital
@@ -1233,31 +1354,37 @@ class AdvancedBacktestEngine:
 
                 if is_short:
                     # Short: stop is ABOVE entry, target is BELOW entry
+                    # v320b: gap-aware stop fills + market-order slippage
                     if high >= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, True),
+                            is_buy=True, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif low <= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, True)
                         exit_reason = "target"
                     elif current_trade.bars_held >= strategy.max_bars_to_hold:
-                        exit_price = current_price
+                        exit_price = _slip(current_price, is_buy=True, bps=exec_cfg["slippage_bps"])
                         exit_reason = "time"
                     elif i == len(bars) - 1:
-                        exit_price = current_price
+                        exit_price = _slip(current_price, is_buy=True, bps=exec_cfg["slippage_bps"])
                         exit_reason = "end_of_data"
                 else:
                     # Long: stop is BELOW entry, target is ABOVE entry
+                    # v320b: gap-aware stop fills + market-order slippage
                     if low <= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, False),
+                            is_buy=False, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif high >= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, False)
                         exit_reason = "target"
                     elif current_trade.bars_held >= strategy.max_bars_to_hold:
-                        exit_price = current_price
+                        exit_price = _slip(current_price, is_buy=False, bps=exec_cfg["slippage_bps"])
                         exit_reason = "time"
                     elif i == len(bars) - 1:
-                        exit_price = current_price
+                        exit_price = _slip(current_price, is_buy=False, bps=exec_cfg["slippage_bps"])
                         exit_reason = "end_of_data"
 
                 if exit_price:
@@ -1275,6 +1402,12 @@ class AdvancedBacktestEngine:
                         current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
                         current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100
                         risk = current_trade.entry_price - current_trade.stop_price
+
+                    # v320b: round-trip commission (entry + exit)
+                    _comm = _commission(current_trade.shares, exec_cfg) * 2.0
+                    if _comm > 0:
+                        current_trade.commission = _comm
+                        current_trade.pnl -= _comm
 
                     if risk > 0:
                         current_trade.r_multiple = current_trade.pnl / (risk * current_trade.shares)
@@ -1312,6 +1445,10 @@ class AdvancedBacktestEngine:
 
                 if enter:
                     position_value = capital * (strategy.position_size_pct / 100)
+                    if exec_cfg["next_bar_fills"]:
+                        # v320b: signal fires on THIS bar — queue fill at NEXT bar's open
+                        pending_entry = {"direction": trade_direction, "position_value": position_value}
+                        continue
                     shares = int(position_value / current_price)
 
                     if shares > 0:
@@ -1386,6 +1523,8 @@ class AdvancedBacktestEngine:
         gate = self._confidence_gate
 
         gate_stats = {"evaluated": 0, "go": 0, "reduce": 0, "skip": 0}
+        exec_cfg = _bt_cost_cfg()
+        pending_entry = None
 
         # ── Direction resolved ONCE per strategy — mirrors _simulate_strategy_with_ai
         is_short = strategy.setup_type.lower().startswith("short_")
@@ -1396,6 +1535,18 @@ class AdvancedBacktestEngine:
             timestamp = bar.get("timestamp", "")
             high = bar.get("high", bar.get("h", current_price))
             low = bar.get("low", bar.get("l", current_price))
+            bar_open = bar.get("open", bar.get("o", current_price))
+            # gap_open <= 0 disables gap-aware fills (legacy exact stop/target under BT_COSTS=0)
+            gap_open = bar_open if exec_cfg["enabled"] else 0.0
+
+            # v320b: fill any PENDING entry at THIS bar's open (+ adverse slippage)
+            if pending_entry is not None and not in_position:
+                current_trade = _fill_pending_entry(
+                    pending_entry, bar_open, timestamp, symbol, strategy, exec_cfg
+                )
+                if current_trade is not None:
+                    in_position = True
+                pending_entry = None
 
             # Track equity — direction-aware unrealized P&L
             equity = capital
@@ -1422,27 +1573,33 @@ class AdvancedBacktestEngine:
 
                 if is_short:
                     # SHORT: stop ABOVE entry (hit when high rises), target BELOW (hit when low falls)
+                    # v320b: gap-aware stop fills + market-order slippage
                     if high >= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, True),
+                            is_buy=True, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif low <= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, True)
                         exit_reason = "target"
                 else:
                     # LONG: stop BELOW entry (hit when low falls), target ABOVE (hit when high rises)
+                    # v320b: gap-aware stop fills + market-order slippage
                     if low <= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, False),
+                            is_buy=False, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif high >= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, False)
                         exit_reason = "target"
 
-                # Time / end-of-data exits apply to both directions
+                # Time / end-of-data exits apply to both directions (v320b: market-order slippage)
                 if exit_price is None and current_trade.bars_held >= strategy.max_bars_to_hold:
-                    exit_price = current_price
+                    exit_price = _slip(current_price, is_buy=is_short, bps=exec_cfg["slippage_bps"])
                     exit_reason = "time"
                 elif exit_price is None and i == len(bars) - 1:
-                    exit_price = current_price
+                    exit_price = _slip(current_price, is_buy=is_short, bps=exec_cfg["slippage_bps"])
                     exit_reason = "end_of_data"
 
                 if exit_price:
@@ -1460,6 +1617,12 @@ class AdvancedBacktestEngine:
                         current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
                         current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100 if current_trade.entry_price > 0 else 0
                         risk_per_share = current_trade.entry_price - current_trade.stop_price
+
+                    # v320b: round-trip commission (entry + exit)
+                    _comm = _commission(current_trade.shares, exec_cfg) * 2.0
+                    if _comm > 0:
+                        current_trade.commission = _comm
+                        current_trade.pnl -= _comm
 
                     if risk_per_share > 0:
                         current_trade.r_multiple = current_trade.pnl / (risk_per_share * current_trade.shares)
@@ -1499,6 +1662,10 @@ class AdvancedBacktestEngine:
                         if decision in ("GO", "REDUCE"):
                             gate_stats["go" if decision == "GO" else "reduce"] += 1
                             position_value = capital * (strategy.position_size_pct / 100) * position_multiplier
+                            if exec_cfg["next_bar_fills"]:
+                                # v320b: fill at NEXT bar's open
+                                pending_entry = {"direction": trade_direction, "position_value": position_value}
+                                continue
                             shares = int(position_value / current_price)
 
                             if shares > 0:
@@ -2292,6 +2459,8 @@ class AdvancedBacktestEngine:
         """
         trades: List[BacktestTrade] = []
         equity_curve: List[Dict] = []
+        exec_cfg = _bt_cost_cfg()
+        pending_entry = None
         
         capital = starting_capital
         in_position = False
@@ -2302,6 +2471,18 @@ class AdvancedBacktestEngine:
             timestamp = bar.get("timestamp", "")
             high = bar.get("high", bar.get("h", current_price))
             low = bar.get("low", bar.get("l", current_price))
+            bar_open = bar.get("open", bar.get("o", current_price))
+            # gap_open <= 0 disables gap-aware fills (legacy exact stop/target under BT_COSTS=0)
+            gap_open = bar_open if exec_cfg["enabled"] else 0.0
+
+            # v320b: fill any PENDING entry at THIS bar's open (+ adverse slippage)
+            if pending_entry is not None and not in_position:
+                current_trade = _fill_pending_entry(
+                    pending_entry, bar_open, timestamp, symbol, strategy, exec_cfg
+                )
+                if current_trade is not None:
+                    in_position = True
+                pending_entry = None
             
             # Track equity
             equity = capital
@@ -2334,29 +2515,35 @@ class AdvancedBacktestEngine:
                 
                 if is_short_trade:
                     # Short trade: stop hit when price goes UP, target hit when DOWN
+                    # v320b: gap-aware stop fills + market-order slippage
                     if high >= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, True),
+                            is_buy=True, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif low <= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, True)
                         exit_reason = "target"
                 else:
                     # Long trade: stop hit when price goes DOWN, target hit when UP
+                    # v320b: gap-aware stop fills + market-order slippage
                     if low <= current_trade.stop_price:
-                        exit_price = current_trade.stop_price
+                        exit_price = _slip(
+                            _stop_fill(current_trade.stop_price, gap_open, False),
+                            is_buy=False, bps=exec_cfg["slippage_bps"])
                         exit_reason = "stop"
                     elif high >= current_trade.target_price:
-                        exit_price = current_trade.target_price
+                        exit_price = _target_fill(current_trade.target_price, gap_open, False)
                         exit_reason = "target"
                 
-                # Time-based exit
+                # Time-based exit (v320b: market-order slippage)
                 if not exit_price and current_trade.bars_held >= strategy.max_bars_to_hold:
-                    exit_price = current_price
+                    exit_price = _slip(current_price, is_buy=is_short_trade, bps=exec_cfg["slippage_bps"])
                     exit_reason = "time"
                 
-                # End of data
+                # End of data (v320b: market-order slippage)
                 if not exit_price and i == len(bars) - 1:
-                    exit_price = current_price
+                    exit_price = _slip(current_price, is_buy=is_short_trade, bps=exec_cfg["slippage_bps"])
                     exit_reason = "end_of_data"
                 
                 if exit_price:
@@ -2372,6 +2559,12 @@ class AdvancedBacktestEngine:
                     else:
                         current_trade.pnl = (exit_price - current_trade.entry_price) * current_trade.shares
                         current_trade.pnl_percent = (exit_price / current_trade.entry_price - 1) * 100 if current_trade.entry_price > 0 else 0
+
+                    # v320b: round-trip commission (entry + exit)
+                    _comm = _commission(current_trade.shares, exec_cfg) * 2.0
+                    if _comm > 0:
+                        current_trade.commission = _comm
+                        current_trade.pnl -= _comm
                     
                     risk = abs(current_trade.entry_price - current_trade.stop_price)
                     if risk > 0:
@@ -2402,6 +2595,10 @@ class AdvancedBacktestEngine:
                     
                     # Calculate position size
                     position_value = capital * (strategy.position_size_pct / 100)
+                    if exec_cfg["next_bar_fills"]:
+                        # v320b: fill at NEXT bar's open
+                        pending_entry = {"direction": direction, "position_value": position_value}
+                        continue
                     shares = int(position_value / current_price)
                     
                     if shares > 0:

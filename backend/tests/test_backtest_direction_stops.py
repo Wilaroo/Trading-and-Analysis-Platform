@@ -22,6 +22,14 @@ from services.slow_learning.advanced_backtest_engine import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _legacy_frictionless_mode(monkeypatch):
+    """v320b adds execution costs (slippage / commission / next-bar-open fills)
+    ON BY DEFAULT. These tests pin the DIRECTION/STOP logic, not the cost
+    model, so they run in legacy frictionless mode."""
+    monkeypatch.setenv("BT_COSTS", "0")
+
+
 # ---------- Helpers ----------
 
 def _bar(ts, o, h, l, c, v=1_000_000):
