@@ -1,3 +1,51 @@
+## 2026-06-11 — v19.34.322f/g/e: Tier-3 3:30 PM window + EOD AUTO-CHAIN + paced deep sector backfill
+
+**v322f+g patcher: https://paste.rs/CyqKv — APPLIED + COMMITTED on DGX (7352bf4d, pushed to GitHub).**
+**v322e patcher: https://paste.rs/LyCWm — PENDING user apply.**
+
+### v322f — Tier 3 (Investment) afternoon scan 3:45 → 3:30 PM ET (operator request)
+`enhanced_scanner.py` `_investment_scan_times = [(11, 0), (15, 30)]` + docstrings.
+
+### v322g — EOD auto-chain (removes the manual nightly backfill dependency)
+Operator Q&A established the real data flow: pusher = 500 lines (Quote Booster, rotation
+service v17 cohorts), turbo collectors are MANUAL (not always-on), tick persister builds
+1m/5m/15m/1h but explicitly NOT daily bars, and `symbol_adv_cache` had NO scheduled refresh.
+So RS@17:30 depended on the operator manually running post-close smart-backfill. Now:
+- **16:35 ET `eod_daily_topup`** — `smart_backfill(bar_size_filter=["1 day"])` queues ONLY
+  the just-finalised daily session for the qualified universe (new `bar_size_filter` param
+  threaded through `_smart_backfill_sync`; idle Windows collectors consume the queue with
+  full post-RTH parallelism).
+- **17:10 ET `adv_cache_rebuild`** — `rebuild_adv_from_ib_data()` nightly (Mongo-only
+  aggregation; ADV/ATR/tiers no longer drift until a manual rebuild).
+- **17:30 ET** RS compute reads fresh bars + fresh ADV (pre-existing).
+- **🐛 LATENT BUG FIX**: the 2:15 AM `ib_collection_resume` job imported
+  `get_historical_collector` which does NOT exist anywhere → ImportError EVERY night since
+  it shipped. Fixed to `get_ib_collector`.
+- Tests: `backend/tests/test_v322g_eod_chain.py` (5 green; filter-only queueing, fresh-skip,
+  no-filter regression, scheduler wiring + import fix, async signature).
+- Nightly requirement now: backend running through ~17:35 ET Mon–Fri. Browser NOT needed.
+
+### v322e — Sector coverage long tail (paced full-chain deep backfill)
+The static map covers ~500 names; the other ~3,000 rated symbols only got sector tags
+lazily, so leaders dropped off the Regime Focus List with `sector=unknown`. New:
+- `sector_tag_service.order_backfill_targets()` (pure: RS-rated first, best rating first).
+- `SectorTagService.deep_backfill_untagged()` — paced walk (default 250ms/lookup ≈ 4/sec on
+  Client 11) over every `symbol_adv_cache` doc lacking a valid SPDR tag through the FULL
+  chain (static → Mongo → IB reqContractDetails → Finnhub), persists hits, circuit-breaks
+  after 25 consecutive misses with IB disconnected, auto re-runs RS compute on completion
+  so `sector_rs_diff` + focus list refresh immediately. Progress state via
+  `deep_backfill_status()`.
+- Endpoints: `POST /api/scanner/sector-backfill/deep?max_symbols=4000&pace_ms=250` (bg task),
+  `GET /api/scanner/sector-backfill/status` (progress + universe/rated coverage counts).
+- Tests: `backend/tests/test_v322e_sector_backfill.py` (6 green).
+
+### Session context
+- Answered operator's 7 funnel-architecture questions (tiers preserved/promotion-only, why
+  RS, universe-percentile not SPY/QQQ-relative, IBD formula, cron-needs-backend-not-browser,
+  backlog priority, UI/AI population) + corrected two stale-changelog claims (500-line
+  pusher not 14; collectors manual not always-on).
+- Full pipeline retrain (`force_retrain: true`) queued next — operator restarting app first.
+
 ## 2026-06-10 — v19.34.322: REGIME-FIRST FUNNEL COMPLETE (c2 + sector scoring + c3/T7 + scan steering) — PATCH READY
 
 Patch: ~~https://paste.rs/RVbeU~~ (git diff — FAILED on DGX tree drift at market_regime_engine.py).

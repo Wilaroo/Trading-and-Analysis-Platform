@@ -2110,3 +2110,62 @@ async def get_regime_focus_list(force: bool = False):
     except Exception as e:
         raise HTTPException(500, f"Focus list failed: {e}")
 
+
+@router.post("/sector-backfill/deep")
+async def start_deep_sector_backfill(max_symbols: int = 4000, pace_ms: int = 250,
+                                     recompute_rs: bool = True):
+    """v322e — paced FULL-CHAIN sector backfill (background task).
+
+    Walks every `symbol_adv_cache` doc still missing a valid SPDR sector
+    tag — RS-leadership rated names first — through the full resolver
+    chain (static map → Mongo → IB reqContractDetails on Client 11 →
+    Finnhub) and persists hits. On completion re-runs the RS compute so
+    `sector_rs_diff` and the Regime Focus List pick up the new tags.
+    Poll GET /api/scanner/sector-backfill/status for progress."""
+    try:
+        import asyncio as _asyncio
+        from services.sector_tag_service import get_sector_tag_service
+        db = _funnel_db()
+        if db is None:
+            raise HTTPException(503, "Mongo not initialized yet — retry in a few seconds")
+        svc = get_sector_tag_service(db=db)
+        if svc.deep_backfill_status().get("running"):
+            return {"success": False, "message": "deep backfill already running — "
+                    "poll GET /api/scanner/sector-backfill/status"}
+        _asyncio.create_task(svc.deep_backfill_untagged(
+            db=db, max_symbols=max(1, max_symbols),
+            pace_s=max(0, pace_ms) / 1000.0, recompute_rs=recompute_rs))
+        return {"success": True, "message": "deep sector backfill started in background — "
+                "poll GET /api/scanner/sector-backfill/status"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Deep sector backfill failed to start: {e}")
+
+
+@router.get("/sector-backfill/status")
+async def get_deep_sector_backfill_status():
+    """v322e — deep-backfill progress + current sector coverage counts."""
+    try:
+        from services.sector_tag_service import get_sector_tag_service, SECTOR_ETFS
+        db = _funnel_db()
+        svc = get_sector_tag_service(db=db)
+        coverage = None
+        if db is not None:
+            try:
+                valid = list(SECTOR_ETFS.keys())
+                total = db["symbol_adv_cache"].count_documents({})
+                tagged = db["symbol_adv_cache"].count_documents({"sector": {"$in": valid}})
+                rated_tagged = db["rs_leadership"].count_documents(
+                    {"symbol": {"$exists": True}, "sector": {"$in": valid}})
+                rated_total = db["rs_leadership"].count_documents(
+                    {"symbol": {"$exists": True}})
+                coverage = {"universe_total": total, "universe_tagged": tagged,
+                            "rated_total": rated_total, "rated_tagged": rated_tagged}
+            except Exception:
+                pass
+        return {"success": True, "state": svc.deep_backfill_status(),
+                "coverage": coverage}
+    except Exception as e:
+        raise HTTPException(500, f"Backfill status failed: {e}")
+
