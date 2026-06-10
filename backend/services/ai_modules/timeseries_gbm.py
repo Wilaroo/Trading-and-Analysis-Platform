@@ -214,6 +214,25 @@ class ModelMetrics:
         return asdict(self)
 
 
+def _force_promote_enabled(model_name: str, env_val: Optional[str]) -> bool:
+    """v319c — one-shot operator override (env `GBM_FORCE_PROMOTE`) to evict a
+    KNOWN-INVALID active model (e.g. a leaky pre-fix model whose inflated macro-F1
+    blocks an honest, legitimately-lower replacement). Matches "1"/"true"/"all"/"*"
+    (every model) or a comma-list of exact model names. Default off (empty → False).
+
+    NOTE: this bypasses ONLY the relative-vs-active comparison; the ABSOLUTE
+    class-collapse gate (min per-class recall ≥ GBM_ABS_MIN_RECALL) still applies,
+    so a genuinely-collapsed model can never be force-promoted.
+    """
+    if not env_val:
+        return False
+    v = str(env_val).strip().lower()
+    if v in ("1", "true", "all", "*", "yes", "on"):
+        return True
+    names = {n.strip() for n in str(env_val).split(",") if n.strip()}
+    return model_name in names
+
+
 def _embargo_size(split_idx: int, forecast_horizon: int, env_override: Optional[str] = None) -> int:
     """López de Prado EMBARGO: number of boundary training samples to purge so
     their forward-looking label windows don't overlap the validation block.
@@ -644,6 +663,24 @@ class TimeSeriesGBM:
                             f"new macro-F1 {new_macro_f1:.4f} < "
                             f"{MACRO_F1_FLOOR:.2f}×active {cur_macro_f1:.4f}"
                         )
+
+                if not should_promote:
+                    # v319c: one-shot override to evict a KNOWN-INVALID incumbent
+                    # (e.g. a leaky pre-fix model whose inflated macro-F1 blocks an
+                    # honest, legitimately-lower replacement). Bypasses ONLY this
+                    # relative-vs-active comparison; the ABSOLUTE class-collapse gate
+                    # above already rejected genuine collapse, so this can't promote
+                    # a degenerate model. Default off; reversible (unset the env).
+                    if _force_promote_enabled(self.model_name, os.environ.get("GBM_FORCE_PROMOTE")):
+                        logger.warning(
+                            f"Model protection OVERRIDE (GBM_FORCE_PROMOTE): promoting "
+                            f"{self.model_name} {self._version} despite '{demotion_reason}' "
+                            f"(new macro-F1 {new_macro_f1:.4f} vs active {cur_macro_f1:.4f}, "
+                            f"UP R {new_recall_up:.3f}/DOWN R {new_recall_down:.3f}). "
+                            f"Operator asserted the active model is invalid."
+                        )
+                        should_promote = True
+                        demotion_reason = None
 
                 if not should_promote:
                     logger.warning(

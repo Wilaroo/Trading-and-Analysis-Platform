@@ -1,24 +1,42 @@
-## 2026-06-11 — v19.34.319b (P1): train/val EMBARGO gap (GBM) — PATCH READY
+## 2026-06-11 — v19.34.319b + 319c (P1): train/val EMBARGO gap + force-promote override — PATCH READY
 
-Patch: https://paste.rs/d9RFe  (backend-only → `git apply`; takes effect on the NEXT
-training run — fresh subprocess imports from disk, no live restart needed). Tests: 10/10
-(7 new test_embargo_split_v319b.py + 3 v317 regression).
+COMBINED patch (supersedes the earlier d9RFe / au9Pc): https://paste.rs/Brcge
+(backend-only → `git apply`; takes effect on the NEXT training run — fresh subprocess
+imports from disk, no live restart needed). Tests: 15/15 (7 embargo + 5 force-promote + 3 v317).
 
+— v319b EMBARGO —
 WHY: `timeseries_gbm.train_from_features` split train/val with a plain time-ordered cut
 and NO embargo. Each sample's label looks `forecast_horizon` bars forward, so the last
 `forecast_horizon` TRAIN samples have label windows overlapping the start of VALIDATION
-→ mild optimistic bias on reported accuracy (López de Prado purge/embargo gap missing).
+→ mild optimistic bias (López de Prado purge/embargo gap missing).
+FIX: new pure helper `_embargo_size(split_idx, forecast_horizon, env)` + applied at the
+split — purges `embargo` boundary samples off the END of train (train[:split_idx-embargo]
+| val[split_idx:]). Default = the model's label horizon (gap=early_window,
+vol/direction=forecast_horizon). Env `TB_EMBARGO_BARS` overrides; clamped to ≤25% of the
+train block. Applies to ALL GBM families. Logs `embargo gap: purging N boundary sample(s)…`.
 
-FIX (`timeseries_gbm.py`): new pure helper `_embargo_size(split_idx, forecast_horizon,
-env)` + applied at the split — purges `embargo` boundary samples off the END of train
-(train[:split_idx-embargo] | val[split_idx:]; the gap is left unused). Default embargo =
-the model's label horizon (gap=early_window, vol/direction=forecast_horizon). Env
-`TB_EMBARGO_BARS` overrides; clamped to ≤25% of the train block so train never starves.
-Applies to ALL GBM families. Logs `embargo gap: purging N boundary sample(s)…`.
+— v319c FORCE-PROMOTE OVERRIDE —
+WHY: the v319 no-peek gap re-run trained HONEST models (1min acc 0.750 R_up 0.495/R_down
+0.851 → promoted; 5min acc 0.689; 15min acc 0.707) but the relative MACRO_F1_FLOOR (0.92×)
+gate kept the OLD LEAKY incumbents ACTIVE for 5min/15min (their inflated macro-F1
+0.82/0.89 can't be beaten by the honest, legitimately-lower models). This is the general
+"I fixed the target → honest metric is lower → still must replace the invalid incumbent"
+problem and will recur on every future leakage/labeling fix.
+FIX: new pure helper `_force_promote_enabled(model_name, env)` + a guarded override in
+`_save_model` that, when `GBM_FORCE_PROMOTE` matches, bypasses ONLY the relative-vs-active
+comparison. The ABSOLUTE class-collapse gate (min per-class recall ≥ GBM_ABS_MIN_RECALL)
+still runs first, so a degenerate model can never be force-promoted. Env: "1"/"all"/"*"
+or a comma-list of model names. Default off; reversible. Logs `Model protection OVERRIDE`.
 
-DEPLOY: apply anytime (safe — does NOT touch the running pre-patch subprocess). It will
-take effect on the next gap-only re-run / nightly retrain, so the honest v319 gap models
-also get the embargo. Reversible: `TB_EMBARGO_BARS=0`.
+— IMMEDIATE gap eviction (no patch / no restart needed) —
+For the CURRENT leaky 5min/15min incumbents, the simplest unblock is to delete their
+active docs from `timeseries_models` and re-run the gap phase (no incumbent → honest
+promotes; passes the absolute gate). Script (dry-run default): https://paste.rs/aF2bo
+  PYTHONPATH=. ../.venv/bin/python /tmp/evict_leaky_gap_models_v319.py            # dry-run
+  PYTHONPATH=. ../.venv/bin/python /tmp/evict_leaky_gap_models_v319.py --commit   # delete
+  → then POST /api/ai-training/start {"force_retrain": true, "phases": ["gap_fill"]}
+The Brcge patch is the durable fix (embargo de-bias for all future retrains + reusable
+force-promote for future leakage fixes); apply it whenever convenient.
 
 
 ## 2026-06-11 — v19.34.319 (P0): gap-fill NO-PEEK leakage fix — PATCH READY
