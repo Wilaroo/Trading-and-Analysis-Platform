@@ -24552,3 +24552,34 @@ NEXT: operator applies patch, restarts backend, re-runs `dl` force-retrain.
 Watch for: (a) no OOM, run completes 50 epochs; (b) "[TFT] Timeframe coverage"
 line; (c) val_acc edge ABOVE majority baseline (collapse fixed) — if still flat,
 intraday coverage is ~0% and signal is daily-only/low-SNR (next lever: features).
+
+---
+
+## 2026-06-09 — v19.34.312: TFT intraday-dense window + drop 1-min (Path A)
+
+DATA AUDIT (operator's DB): 250M bars. Per-timeframe depth:
+  5m=94M/4293sym/2024+, 1m=64M/3376sym/2026-02+, 1h=32M/4959sym/2020+,
+  15m=32M/4092sym/2023.9+, 1d=14M/9413sym/2001+.
+Root cause of weak edge (v311 run: TFT 47.4% / CNN 47.5%, ~+1.8-2% over baseline):
+the TFT anchored on the full ~20-25yr DAILY axis while intraday only reaches
+~2020(1h)/~2024(5m/15m) → ~90% of rows had EMPTY multi-TF blocks (coverage
+1m=0.2%, 5m=2.7%, 15m=10.5%, 1h=21.2%). Year-ratio matched coverage exactly.
+NOT data-starved — data exists, just outside the training window.
+
+FIX (patcher https://paste.rs/kaiYr, TFT only):
+- Drop "1 min" (4mo/0.2% = noise). TFT_TIMEFRAMES → 5m/15m/1h/1d. Input 60→48.
+- Fix model instantiation: TFT() hardcoded n_timeframes=5 → TFT(n_timeframes=
+  len(TFT_TIMEFRAMES), features_per_tf=FEATURES_PER_TF) (else 48-vs-60 crash).
+- Configurable training window via TFT_MIN_DATE env (default 2020-03-27 = start
+  of hourly history). Applied as a date filter in the label loop (keeps full
+  feature lookback + intraday as-of context; only windows the training rows).
+- CNN-LSTM intentionally NOT windowed (daily-only; windowing would just shrink
+  data for an already-overfitting model).
+Expected: coverage 1h≈100%, samples ~2.5M→~750K, edge should rise past +1.8%.
+MUST force-retrain (dim change makes old 60-dim TFT models incompatible).
+Tests: backend/tests/test_tft_alignment.py (5 pass) incl. 4-TF/48-dim + date helper.
+Verified patcher on a DGX-accurate reconstruction (no-config-import header).
+
+NEXT PROJECT (agreed): dedicated INTRADAY model anchored on 5m/15m (94M 5-min
+bars / 4293 symbols / 2.4yr available) for genuine short-horizon trade signals —
+the bot currently has ZERO intraday predictive models.

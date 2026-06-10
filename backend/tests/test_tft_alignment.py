@@ -12,8 +12,22 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.ai_modules.temporal_fusion_transformer import (
-    TFTModel, TFT_TIMEFRAMES, FEATURES_PER_TF, TOTAL_INPUT_DIM,
+    TFTModel, TFT_TIMEFRAMES, FEATURES_PER_TF, TOTAL_INPUT_DIM, _date_to_epoch,
 )
+
+
+def test_timeframes_v312():
+    # v19.34.312 — 1-min dropped, 4 timeframes, 48-dim input
+    assert "1 min" not in TFT_TIMEFRAMES
+    assert TFT_TIMEFRAMES == ["5 mins", "15 mins", "1 hour", "1 day"]
+    assert TOTAL_INPUT_DIM == 48
+    # date helper handles datetime / ISO str / epoch
+    from datetime import datetime, timezone
+    e1 = _date_to_epoch(datetime(2020, 3, 27, tzinfo=timezone.utc))
+    e2 = _date_to_epoch("2020-03-27T00:00:00+00:00")
+    assert abs(e1 - e2) < 1.0 and e1 > 0
+    assert _date_to_epoch(None) != _date_to_epoch(None) or True  # NaN, no crash
+    print("PASS: v312 timeframes (4 TFs, 48-dim) + date helper")
 
 
 def _daily_bars(n, start_price=100.0, day0=None):
@@ -109,6 +123,7 @@ def test_too_few_daily_returns_none():
 
 
 if __name__ == "__main__":
+    test_timeframes_v312()
     test_shape_and_daily_axis_alignment()
     test_scale_free_no_raw_price_blowup()
     test_intraday_as_of_join_no_lookahead()

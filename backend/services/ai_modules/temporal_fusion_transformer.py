@@ -19,22 +19,52 @@ Prediction: Returns direction + confidence, used as additive voter in Confidence
 """
 
 import logging
+import os
 import numpy as np
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Timeframes used by TFT (ordered from fastest to slowest)
-TFT_TIMEFRAMES = ["1 min", "5 mins", "15 mins", "1 hour", "1 day"]
+# Timeframes used by TFT (ordered from fastest to slowest).
+# v19.34.312 — dropped "1 min": only ~4 months of history (0.2% coverage) made it
+# pure noise. Kept 5m/15m/1h/1d, densely populated by the 2020+ training window.
+TFT_TIMEFRAMES = ["5 mins", "15 mins", "1 hour", "1 day"]
 FEATURES_PER_TF = 12  # Features extracted per timeframe
-TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 60
+TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 48 (4 timeframes × 12)
 
 # v19.34.311 — Validation forward-pass chunk size. The full val set (450k+ rows) run through
 # the model in ONE forward call builds multi-GB activation tensors per epoch,
 # which OOM-kills the subprocess on the DGX Spark's unified memory. Chunking
 # keeps the transient footprint flat.
 VAL_CHUNK = 16384
+
+# v19.34.312 — Training window. The daily axis spans ~20yr but intraday history only
+# reaches ~2020 (1h) / ~2024 (5m/15m), so older daily rows have empty multi-TF blocks.
+# Restricting training to the intraday-dense era (default 2020-03-27, the start of
+# hourly history) makes the multi-timeframe features actually populated. Override via
+# the TFT_MIN_DATE env var ("" / "none" / "off" disables windowing).
+TFT_MIN_DATE_DEFAULT = "2020-03-27"
+
+
+def _date_to_epoch(d) -> float:
+    """Convert a bar 'date' (datetime / ISO str / epoch) to UTC epoch seconds; NaN if unknown."""
+    if d is None or isinstance(d, bool):
+        return float("nan")
+    if isinstance(d, (int, float)):
+        return float(d)
+    if isinstance(d, datetime):
+        return d.timestamp()
+    if isinstance(d, str):
+        try:
+            return datetime.fromisoformat(d.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            pass
+    try:
+        return float(np.datetime64(d).astype("datetime64[s]").astype("int64"))
+    except Exception:
+        return float("nan")
+
 
 # Triple-barrier hyperparameters (ATR multiples) — env-overridable via
 # TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD (single source: triple_barrier_config).
@@ -200,7 +230,7 @@ class TFTModel:
 
                 return direction, confidence, tf_weights, attn_weights
 
-        self._model = TFT().to(self._device)
+        self._model = TFT(n_timeframes=len(TFT_TIMEFRAMES), features_per_tf=FEATURES_PER_TF).to(self._device)  # v19.34.312
         n_params = sum(p.numel() for p in self._model.parameters())
         logger.info(f"TFT model built on {self._device} ({n_params:,} params)")
         return self._model
@@ -324,7 +354,7 @@ class TFTModel:
                 out[valid, col0:col1] = tf_feats[pos[valid]]
         return out
 
-    async def train(self, db=None, max_symbols: int = 500, epochs: int = 50, batch_size: int = 512) -> Dict[str, Any]:
+    async def train(self, db=None, max_symbols: int = 500, epochs: int = 50, batch_size: int = 512, min_date: Optional[str] = None) -> Dict[str, Any]:
         """
         Train TFT on multi-timeframe data from MongoDB.
         """
@@ -339,6 +369,20 @@ class TFTModel:
             return {"success": False, "error": "No database connection"}
 
         logger.info("[TFT] Starting multi-timeframe training...")
+
+        # v19.34.312 — resolve training window (intraday-dense era). Older daily rows
+        # (pre-intraday history) have empty multi-TF blocks and dilute the signal.
+        _win = min_date if min_date is not None else os.environ.get("TFT_MIN_DATE", TFT_MIN_DATE_DEFAULT)
+        min_epoch = None
+        if _win and str(_win).strip().lower() not in ("", "none", "off", "0"):
+            _me = _date_to_epoch(str(_win).strip())
+            if np.isfinite(_me):
+                min_epoch = _me
+                logger.info(f"[TFT] Training window: samples on/after {_win} (intraday-dense era)")
+            else:
+                logger.warning(f"[TFT] Could not parse TFT_MIN_DATE={_win!r}; using full history")
+        if min_epoch is None:
+            logger.info("[TFT] Training window: full history (windowing disabled)")
 
         # Get symbols that have data across multiple timeframes
         pipeline = [
@@ -420,6 +464,11 @@ class TFTModel:
                 if current_idx >= len(atr_series):
                     keep_mask.append(False)
                     continue
+                # v19.34.312 — restrict training samples to the intraday-dense window
+                if min_epoch is not None and current_idx < len(daily_bars):
+                    if _date_to_epoch(daily_bars[current_idx].get("date")) < min_epoch:
+                        keep_mask.append(False)
+                        continue
                 atr_val = atr_series[current_idx]
                 if not np.isfinite(atr_val) or atr_val <= 0:
                     keep_mask.append(False)
