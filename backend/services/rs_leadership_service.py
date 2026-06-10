@@ -21,6 +21,7 @@ the focus list, never penalized).
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -32,6 +33,11 @@ logger = logging.getLogger(__name__)
 RS_PERIODS = [(63, 2.0), (126, 1.0), (189, 1.0), (252, 1.0)]
 RS_MIN_CLOSES = 64          # need at least the 63d lag + today
 RS_MAX_DAILY_BARS = 260     # load window per symbol
+
+# v322b — junk guard: sub-$3 names produce split/penny artifacts
+# (5,000%+ "returns" from unadjusted reverse splits) that pollute the
+# top of the leaderboard. Skipped symbols count as `price_filtered`.
+RS_MIN_PRICE = float(os.environ.get("RS_MIN_PRICE", "3.0"))
 
 # The 11 SPDR sector ETFs (sector-relative RS benchmark per symbol).
 SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP",
@@ -164,16 +170,24 @@ class RSLeadershipService:
                 if s is not None:
                     etf_scores[etf] = s
 
-            # Sector tag per symbol (static map, instant).
+            # Sector tag per symbol — v322b: bulk-read the Mongo-backfilled
+            # `symbol_adv_cache.sector` field (IB reqContractDetails / Finnhub
+            # persisted) for full-universe coverage, then overlay the static
+            # most-liquid map for anything still missing.
+            sector_map: Dict[str, str] = await self._universe_sector_map()
             try:
                 from services.sector_tag_service import get_sector_tag_service
                 tag_svc = get_sector_tag_service(db=self.db)
-                sector_map = tag_svc.tag_many(symbols)
+                static_map = tag_svc.tag_many(symbols)
+                for sym, etf in (static_map or {}).items():
+                    if etf and sym not in sector_map:
+                        sector_map[sym] = etf
             except Exception:
-                sector_map = {}
+                pass
 
             scores: Dict[str, float] = {}
             thin = 0
+            price_filtered = 0
             for b_start in range(0, len(symbols), self.COMPUTE_BATCH):
                 batch = symbols[b_start:b_start + self.COMPUTE_BATCH]
                 results = await asyncio.gather(
@@ -182,6 +196,9 @@ class RSLeadershipService:
                 for sym, closes in zip(batch, results):
                     if isinstance(closes, Exception) or not closes:
                         thin += 1
+                        continue
+                    if closes[-1] < RS_MIN_PRICE:
+                        price_filtered += 1     # v322b junk guard
                         continue
                     s = weighted_rs_score(closes)
                     if s is None:
@@ -219,7 +236,8 @@ class RSLeadershipService:
                 res = self.db[self.COLLECTION].update_one(
                     {"_id": "meta"},
                     {"$set": {"computed_at": now_iso, "universe_size": len(symbols),
-                              "rated": len(scores), "thin_history": thin}},
+                              "rated": len(scores), "thin_history": thin,
+                              "price_filtered": price_filtered}},
                     upsert=True)
                 if asyncio.iscoroutine(res):
                     await res
@@ -229,9 +247,11 @@ class RSLeadershipService:
             # Force in-memory reload on next read.
             self._loaded_at = None
             elapsed = round(time.monotonic() - started, 1)
+            sector_tagged = sum(1 for s in scores if sector_map.get(s))
             summary = {"success": True, "universe": len(symbols), "rated": len(scores),
-                       "thin_history": thin, "etf_benchmarks": len(etf_scores),
-                       "elapsed_s": elapsed}
+                       "thin_history": thin, "price_filtered": price_filtered,
+                       "sector_tagged": sector_tagged,
+                       "etf_benchmarks": len(etf_scores), "elapsed_s": elapsed}
             logger.info(f"[RS-LEADERSHIP] compute complete: {summary}")
             return summary
         except Exception as e:
@@ -255,6 +275,31 @@ class RSLeadershipService:
         except Exception as e:
             logger.warning(f"[RS-LEADERSHIP] universe load failed: {e}")
             return []
+
+    async def _universe_sector_map(self) -> Dict[str, str]:
+        """v322b — bulk symbol→SPDR-ETF map from `symbol_adv_cache.sector`.
+
+        That field is backfilled by sector_tag_service (IB reqContractDetails
+        → Finnhub → static), so it covers far more of the universe than the
+        static most-liquid map alone."""
+        out: Dict[str, str] = {}
+        try:
+            cursor = self.db["symbol_adv_cache"].find(
+                {"sector": {"$nin": [None, ""]}},
+                {"_id": 0, "symbol": 1, "sector": 1})
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=20000)
+            else:
+                docs = list(cursor)
+            valid = set(SECTOR_ETFS)
+            for d in docs:
+                sym, sec = d.get("symbol"), d.get("sector")
+                if sym and sec in valid:
+                    out[sym.upper()] = sec
+        except Exception as e:
+            logger.debug(f"[RS-LEADERSHIP] sector map load failed: {e}")
+        return out
 
     async def _load_daily_closes(self, symbol: str) -> List[float]:
         """Chronological daily closes (oldest→newest), deduped by date."""
