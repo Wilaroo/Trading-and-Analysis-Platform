@@ -1032,6 +1032,27 @@ class MarketRegimeEngine:
             print(f"symbol multi-tf error {symbol}: {e}")
             return {"context": "UNKNOWN", "error": str(e), "symbol": symbol}
 
+    async def compute_symbol_multi_tf_cached(self, symbol: str, ttl_s: int = 300) -> Dict:
+        """TTL-cached wrapper around compute_symbol_multi_tf (v322 / c2).
+
+        The raw call does 4 Mongo bar queries per symbol — the cache makes it
+        safe for the confidence gate to consult on every alert evaluation.
+        Bounded (~600 symbols) with oldest-first eviction."""
+        sym = symbol.upper()
+        if not hasattr(self, "_symbol_mtf_cache"):
+            self._symbol_mtf_cache = {}
+        now = datetime.now(timezone.utc).timestamp()
+        hit = self._symbol_mtf_cache.get(sym)
+        if hit and (now - hit[0]) < ttl_s:
+            return hit[1]
+        res = await self.compute_symbol_multi_tf(sym)
+        if len(self._symbol_mtf_cache) > 600:
+            for old_key in sorted(self._symbol_mtf_cache,
+                                  key=lambda k: self._symbol_mtf_cache[k][0])[:100]:
+                self._symbol_mtf_cache.pop(old_key, None)
+        self._symbol_mtf_cache[sym] = (now, res)
+        return res
+
 
 
     def _calculate_confidence(self) -> float:

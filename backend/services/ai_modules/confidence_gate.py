@@ -79,6 +79,32 @@ MTF_MILD_PENALTY = 8            # fading a pullback/bounce against the primary t
 MTF_MILD_SIZE_MULT = 0.8
 MTF_MIXED_LEAN_BONUS = 4        # small lean from intraday bias in a MIXED regime
 
+# ── v322 FUNNEL — sector regime + symbol multi-TF + RS leadership confluence ──
+# Completes the regime-first funnel at decision time (c2 + sector scoring + c3).
+# Three independent SOFT confluence signals, each pure + unit-testable:
+#   • _score_sector_regime  — home-sector SPDR regime vs trade direction
+#   • _score_symbol_mtf     — the SYMBOL's OWN 4-lane multi-TF context (c2)
+#   • _score_rs_leadership  — multi-month RS rating 1..99 (c3/T7)
+# Net contribution clamped to ±FUNNEL_MAX_ABS_POINTS so the market-regime
+# block (c1) stays dominant. Counter-alignment is a SCORE penalty (still
+# evaluated + logged for learning), never a force-skip. Disable: FUNNEL_V322=0.
+FUNNEL_V322_ENABLED = os.environ.get("FUNNEL_V322", "1") not in ("0", "false", "False")
+FUNNEL_MAX_ABS_POINTS = 15      # clamp on the summed funnel contribution
+FUNNEL_FETCH_TIMEOUT_S = 4.0    # fail-open budget for the parallel sub-fetches
+SECTOR_STRONG_BONUS = 6         # long in STRONG sector / short in WEAK sector
+SECTOR_ROTATE_BONUS = 4         # long in ROTATING_IN / short in ROTATING_OUT
+SECTOR_AGAINST_PENALTY = 6      # long in WEAK / short in STRONG
+SECTOR_ROTATE_PENALTY = 4       # long in ROTATING_OUT / short in ROTATING_IN
+SYMTF_ALIGNED_BONUS_MAX = 10    # symbol's own trend stack fully agrees
+SYMTF_ALIGNED_BONUS_MIN = 3
+SYMTF_COUNTER_PENALTY = 8       # trading against the symbol's own aligned trend
+SYMTF_COUNTER_SIZE_MULT = 0.85
+SYMTF_PULLBACK_BONUS = 5        # symbol pulling back inside its primary trend
+SYMTF_MILD_PENALTY = 3
+RS_STRONG_BONUS = 6             # RS ≥ 90 long / ≤ 10 short
+RS_GOOD_BONUS = 4               # RS ≥ 80 long / ≤ 20 short
+RS_WRONG_SIDE_PENALTY = 4       # longing a laggard / shorting a leader
+
 # Setup -> directional sub-model FAMILY routing for live consensus voting.
 # Keyed by CANONICAL setup names (setup_taxonomy.canonicalize). Hoisted to module
 # level so it is a single, testable source. resolve_model_bases() falls back to the
@@ -519,6 +545,24 @@ class ConfidenceGate:
         confidence_points += _rg_pts
         position_multiplier *= _rg_mult
         reasoning.extend(_rg_reasons)
+
+        # --- 1b. FUNNEL v322 — sector regime + symbol multi-TF + RS leadership ---
+        # Completes the regime-first funnel at decision time: does the stock's
+        # home SECTOR, its OWN multi-TF trend stack, and its multi-month RS
+        # leadership all agree with this trade's direction? SOFT confluence —
+        # clamped to ±FUNNEL_MAX_ABS_POINTS, fail-open on any data gap.
+        funnel_v322 = None
+        if FUNNEL_V322_ENABLED:
+            try:
+                funnel_v322 = await asyncio.wait_for(
+                    self._compute_funnel_signals(symbol, direction, regime_engine),
+                    timeout=FUNNEL_FETCH_TIMEOUT_S)
+            except Exception as e:
+                logger.debug(f"funnel v322 skipped for {symbol}: {e}")
+            if funnel_v322:
+                confidence_points += funnel_v322["points"]
+                position_multiplier *= funnel_v322["size_mult"]
+                reasoning.extend(funnel_v322["reasons"])
 
         # AI regime classification removed — no longer logged in reasoning
 
@@ -1086,6 +1130,7 @@ class ConfidenceGate:
             "vae_regime_signal": vae_signal if vae_signal.get("has_prediction") else None,
             "cnn_lstm_signal": cnn_lstm_signal if cnn_lstm_signal.get("has_prediction") else None,
             "ensemble_meta_signal": ensemble_meta if ensemble_meta.get("has_prediction") else None,
+            "funnel_v322": funnel_v322,
             "symbol": symbol,
             "setup_type": setup_type,
             "direction": direction,
@@ -1769,6 +1814,159 @@ class ConfidenceGate:
         except Exception as e:
             logger.debug(f"CNN-LSTM signal failed (non-critical): {e}")
             return result
+
+    # ── v322 funnel scorers (pure, unit-testable) ────────────────────────
+
+    @staticmethod
+    def _score_sector_regime(sector_regime: str, direction: str):
+        """Home-sector SPDR regime vs trade direction → (points, reasons)."""
+        sr = (sector_regime or "unknown").lower()
+        if sr in ("unknown", "neutral", ""):
+            return 0, []
+        if direction == "long":
+            if sr == "strong":
+                return SECTOR_STRONG_BONUS, [f"Sector STRONG — long with sector leadership (+{SECTOR_STRONG_BONUS})"]
+            if sr == "rotating_in":
+                return SECTOR_ROTATE_BONUS, [f"Sector ROTATING IN — money flowing into this sector (+{SECTOR_ROTATE_BONUS})"]
+            if sr == "weak":
+                return -SECTOR_AGAINST_PENALTY, [f"Sector WEAK — long against a weak sector (-{SECTOR_AGAINST_PENALTY})"]
+            if sr == "rotating_out":
+                return -SECTOR_ROTATE_PENALTY, [f"Sector ROTATING OUT — money leaving this sector (-{SECTOR_ROTATE_PENALTY})"]
+        else:
+            if sr == "weak":
+                return SECTOR_STRONG_BONUS, [f"Sector WEAK — short with sector weakness (+{SECTOR_STRONG_BONUS})"]
+            if sr == "rotating_out":
+                return SECTOR_ROTATE_BONUS, [f"Sector ROTATING OUT — short with outflows (+{SECTOR_ROTATE_BONUS})"]
+            if sr == "strong":
+                return -SECTOR_AGAINST_PENALTY, [f"Sector STRONG — short against a strong sector (-{SECTOR_AGAINST_PENALTY})"]
+            if sr == "rotating_in":
+                return -SECTOR_ROTATE_PENALTY, [f"Sector ROTATING IN — short against inflows (-{SECTOR_ROTATE_PENALTY})"]
+        return 0, []
+
+    @staticmethod
+    def _score_symbol_mtf(sym_mtf, direction: str):
+        """The SYMBOL's own multi-TF context (c2) → (points, size_mult, reasons).
+
+        Same context taxonomy as the market c1 scorer but at lower magnitude —
+        the symbol's trend stack CONFIRMS, the market regime DOMINATES."""
+        points, mult, reasons = 0, 1.0, []
+        if not sym_mtf:
+            return points, mult, reasons
+        ctx = sym_mtf.get("context")
+        align = sym_mtf.get("tf_alignment") or {}
+        lanes = int(align.get("lanes_counted") or 0)
+        ratio = max(0.0, min(1.0, float(align.get("ratio") or 0.0)))
+        if not ctx or ctx == "UNKNOWN" or lanes <= 0:
+            return points, mult, reasons
+        bonus = max(SYMTF_ALIGNED_BONUS_MIN, round(SYMTF_ALIGNED_BONUS_MAX * ratio))
+        if ctx == "ALIGNED_UP":
+            if direction == "long":
+                points += bonus
+                reasons.append(f"Symbol trend ALIGNED_UP ({ratio:.0%}) confirms LONG (+{bonus})")
+            else:
+                points -= SYMTF_COUNTER_PENALTY
+                mult *= SYMTF_COUNTER_SIZE_MULT
+                reasons.append(f"Symbol trend ALIGNED_UP — SHORT fights the stock's own trend (-{SYMTF_COUNTER_PENALTY}, size x{SYMTF_COUNTER_SIZE_MULT})")
+        elif ctx == "ALIGNED_DOWN":
+            if direction == "short":
+                points += bonus
+                reasons.append(f"Symbol trend ALIGNED_DOWN ({ratio:.0%}) confirms SHORT (+{bonus})")
+            else:
+                points -= SYMTF_COUNTER_PENALTY
+                mult *= SYMTF_COUNTER_SIZE_MULT
+                reasons.append(f"Symbol trend ALIGNED_DOWN — LONG fights the stock's own trend (-{SYMTF_COUNTER_PENALTY}, size x{SYMTF_COUNTER_SIZE_MULT})")
+        elif ctx == "PULLBACK_IN_UPTREND":
+            if direction == "long":
+                points += SYMTF_PULLBACK_BONUS
+                reasons.append(f"Symbol pulling back inside ITS uptrend — buyable dip (+{SYMTF_PULLBACK_BONUS})")
+            else:
+                points -= SYMTF_MILD_PENALTY
+                reasons.append(f"Symbol only pulling back inside ITS uptrend (-{SYMTF_MILD_PENALTY})")
+        elif ctx == "BOUNCE_IN_DOWNTREND":
+            if direction == "short":
+                points += SYMTF_PULLBACK_BONUS
+                reasons.append(f"Symbol bouncing inside ITS downtrend — shortable rip (+{SYMTF_PULLBACK_BONUS})")
+            else:
+                points -= SYMTF_MILD_PENALTY
+                reasons.append(f"Symbol only bouncing inside ITS downtrend (-{SYMTF_MILD_PENALTY})")
+        return points, mult, reasons
+
+    @staticmethod
+    def _score_rs_leadership(rs_doc, direction: str):
+        """Multi-month RS rating (c3/T7) → (points, reasons). None-safe."""
+        if not rs_doc or rs_doc.get("rs_rating") is None:
+            return 0, []
+        rs = int(rs_doc["rs_rating"])
+        if direction == "long":
+            if rs >= 90:
+                return RS_STRONG_BONUS, [f"RS {rs} — elite leadership name (+{RS_STRONG_BONUS})"]
+            if rs >= 80:
+                return RS_GOOD_BONUS, [f"RS {rs} — leadership name (+{RS_GOOD_BONUS})"]
+            if rs <= 20:
+                return -RS_WRONG_SIDE_PENALTY, [f"RS {rs} — longing a multi-month laggard (-{RS_WRONG_SIDE_PENALTY})"]
+        else:
+            if rs <= 10:
+                return RS_STRONG_BONUS, [f"RS {rs} — weakest-of-universe short (+{RS_STRONG_BONUS})"]
+            if rs <= 20:
+                return RS_GOOD_BONUS, [f"RS {rs} — laggard short (+{RS_GOOD_BONUS})"]
+            if rs >= 80:
+                return -RS_WRONG_SIDE_PENALTY, [f"RS {rs} — shorting a leadership name (-{RS_WRONG_SIDE_PENALTY})"]
+        return 0, []
+
+    async def _compute_funnel_signals(self, symbol: str, direction: str, regime_engine):
+        """Fetch + score the three v322 funnel signals in parallel (fail-open).
+
+        Returns {points (clamped), size_mult, reasons, sector_regime,
+        symbol_mtf_context, rs_rating} — persisted to confidence_gate_log
+        under `funnel_v322` for calibration/forensics."""
+        async def _sector():
+            try:
+                from services.sector_regime_classifier import get_sector_regime_classifier
+                sec = get_sector_regime_classifier(db=self._db)
+                label = await sec.classify_for_symbol(symbol)
+                return label.value
+            except Exception:
+                return "unknown"
+
+        async def _sym_mtf():
+            try:
+                if regime_engine is not None and hasattr(regime_engine, "compute_symbol_multi_tf_cached"):
+                    return await regime_engine.compute_symbol_multi_tf_cached(symbol)
+            except Exception:
+                pass
+            return None
+
+        async def _rs():
+            try:
+                from services.rs_leadership_service import get_rs_leadership_service
+                svc = get_rs_leadership_service(db=self._db)
+                return await svc.get_rating(symbol)
+            except Exception:
+                return None
+
+        sector_regime, sym_mtf, rs_doc = await asyncio.gather(
+            _sector(), _sym_mtf(), _rs())
+
+        sec_pts, sec_rsn = self._score_sector_regime(sector_regime, direction)
+        sym_pts, sym_mult, sym_rsn = self._score_symbol_mtf(sym_mtf, direction)
+        rs_pts, rs_rsn = self._score_rs_leadership(rs_doc, direction)
+
+        raw = sec_pts + sym_pts + rs_pts
+        clamped = max(-FUNNEL_MAX_ABS_POINTS, min(FUNNEL_MAX_ABS_POINTS, raw))
+        reasons = sec_rsn + sym_rsn + rs_rsn
+        if clamped != raw:
+            reasons.append(f"Funnel confluence clamped {raw:+d} → {clamped:+d}")
+        return {
+            "points": clamped,
+            "points_raw": raw,
+            "size_mult": sym_mult,
+            "reasons": reasons,
+            "sector_regime": sector_regime,
+            "symbol_mtf_context": (sym_mtf or {}).get("context") if sym_mtf else None,
+            "symbol_mtf_ratio": ((sym_mtf or {}).get("tf_alignment") or {}).get("ratio") if sym_mtf else None,
+            "rs_rating": (rs_doc or {}).get("rs_rating") if rs_doc else None,
+            "breakdown": {"sector": sec_pts, "symbol_mtf": sym_pts, "rs": rs_pts},
+        }
 
     def _score_regime_direction(self, regime_data, regime_state, regime_score, direction):
         """Regime → directional confirmation SCORING (c1/v316j).

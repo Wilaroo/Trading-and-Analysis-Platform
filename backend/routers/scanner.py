@@ -2033,3 +2033,70 @@ async def ml_feature_preview(symbol: str):
         },
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ===================== v322 — Regime-First Funnel endpoints =====================
+
+@router.get("/rs-leadership")
+async def get_rs_leadership(top: int = 50, direction: str = "long", symbol: Optional[str] = None):
+    """v322 (c3/T7) — multi-month RS leadership ratings.
+
+    `symbol=X` → that symbol's rating doc. Otherwise the top-N ranked
+    slice (desc for `direction=long`, asc for `direction=short`)."""
+    try:
+        from services.rs_leadership_service import get_rs_leadership_service
+        svc = get_rs_leadership_service(
+            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
+        await svc.ensure_loaded()
+        if symbol:
+            doc = svc.get_rating_cached(symbol.upper())
+            return {"success": True, "symbol": symbol.upper(), "rating": doc,
+                    "stats": svc.stats()}
+        rows = svc.top_ratings(direction=direction, limit=max(1, min(top, 500)))
+        return {"success": True, "direction": direction, "count": len(rows),
+                "ratings": rows, "stats": svc.stats()}
+    except Exception as e:
+        raise HTTPException(500, f"RS leadership read failed: {e}")
+
+
+@router.post("/rs-leadership/compute")
+async def trigger_rs_leadership_compute():
+    """v322 — manually trigger the nightly RS compute (runs in background).
+
+    The scheduler runs this automatically at 17:30 ET Mon–Fri; this endpoint
+    exists for the first-ever populate + operator re-runs."""
+    try:
+        import asyncio as _asyncio
+        from services.rs_leadership_service import get_rs_leadership_service
+        svc = get_rs_leadership_service(
+            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
+        if svc.db is None:
+            raise HTTPException(503, "Scanner service / DB not initialized")
+        if svc._computing:
+            return {"success": False, "message": "compute already running"}
+        _asyncio.create_task(svc.compute_all())
+        return {"success": True, "message": "RS leadership compute started in background — "
+                "poll GET /api/scanner/rs-leadership for results"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"RS leadership compute failed to start: {e}")
+
+
+@router.get("/regime-focus-list")
+async def get_regime_focus_list(force: bool = False):
+    """v322 — the Regime Focus List: top-down funnel candidates.
+
+    Market regime (multi-TF modes) → sector regime → RS leadership →
+    ranked LONG focus (RS≥80 leaders in strong/rotating-in sectors) +
+    SHORT focus (RS≤20 laggards in weak/rotating-out sectors).
+    Cached 5 min; `force=true` rebuilds."""
+    try:
+        from services.regime_focus_service import get_regime_focus_service
+        svc = get_regime_focus_service(
+            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
+        focus = await svc.get_focus_list(force=force)
+        return {"success": True, **focus}
+    except Exception as e:
+        raise HTTPException(500, f"Focus list failed: {e}")
+

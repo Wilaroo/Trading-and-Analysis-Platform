@@ -16,6 +16,12 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 
+# v322 — flat-price windows make mplfinance emit thousands of
+# "identical low and high ylims" UserWarnings per training run,
+# drowning the operator's live pipeline logs. Purely cosmetic.
+import warnings
+warnings.filterwarnings("ignore", message=".*identical low and high ylims.*")
+
 logger = logging.getLogger(__name__)
 
 # Chart style matching the trading platform's dark theme

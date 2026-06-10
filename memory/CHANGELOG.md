@@ -1,4 +1,53 @@
-## 2026-06 — v321: PRE-RETRAIN BATCH (Tier 2b + 3b shadow + 3a-lite) — PATCHERS READY
+## 2026-06-10 — v19.34.322: REGIME-FIRST FUNNEL COMPLETE (c2 + sector scoring + c3/T7 + scan steering) — PATCH READY
+
+Patch: **https://paste.rs/RVbeU** (14 files, git unified diff — `git apply` + restart backend + `yarn build`).
+Container validation: 43/43 new tests + 42 regression (v316j gate / v321 / v320 CPCV) green;
+backend boots clean; all 3 new endpoints live-smoke-tested; webpack compiles.
+
+Completes the operator's top-down funnel: Market regime → Sector regime → Stock regime →
+long/short bias → setups/trades. SOFT throughout (prioritization + gate scoring, never hard
+walls — preserves ML training-data flow per the 2026-04-30 doctrine).
+
+### Scope
+- **c2 — symbol regime wired** (was dead code): `compute_symbol_multi_tf_cached()` (5-min TTL,
+  ~600-symbol LRU) in market_regime_engine.py; gate consults the stock's OWN 4-lane trend stack.
+  New endpoint `GET /api/market-regime/symbol/{sym}`.
+- **Sector regime → gate scoring** (was computed-then-ignored): long in STRONG +6 / ROTATING_IN
+  +4 / WEAK −6 / ROTATING_OUT −4; shorts inverse.
+- **c3/T7 — RS Leadership**: NEW `services/rs_leadership_service.py` — IBD-style weighted
+  multi-period RS (63d×2 + 126d + 189d + 252d, adaptive ≥64 closes) → 1..99 percentile across
+  the `symbol_adv_cache` universe + sector-relative diff vs home SPDR ETF. Mongo `rs_leadership`,
+  nightly scheduler job 17:30 ET (`rs_leadership_compute`), manual
+  `POST /api/scanner/rs-leadership/compute`, read `GET /api/scanner/rs-leadership`.
+- **Regime Focus List**: NEW `services/regime_focus_service.py` — RS≥80 leaders in
+  strong/rotating-in sectors (longs) + RS≤20 laggards in weak/rotating-out sectors (shorts),
+  annotated with multi-TF market modes. `GET /api/scanner/regime-focus-list` (5-min cache).
+- **Scan cadence steering** (promotion-only): focus-list symbols scanned EVERY cycle regardless
+  of ADV tier (`_get_symbols_for_cycle`); non-focus symbols keep tier cadence (no demotion).
+- **Gate funnel block** (`confidence_gate.py`): 3 pure scorers (`_score_sector_regime`,
+  `_score_symbol_mtf` ±10 scaled by lane ratio, `_score_rs_leadership` ±6) summed + clamped to
+  ±15 (`FUNNEL_MAX_ABS_POINTS`) so market c1 stays dominant; 4s fail-open fetch budget;
+  full breakdown persisted to `confidence_gate_log.funnel_v322`. Kill switch: `FUNNEL_V322=0`.
+- **Alert stamps**: `LiveAlert.rs_rating` + `LiveAlert.focus_side` (+ 🎯 reasoning line).
+- **UI**: NEW `RegimeFocusPanel.jsx` — collapsible LONGS/SHORTS chip band under RegimeStrip
+  (hides itself until first RS compute populates).
+- **P7 BUG FIX** (training_pipeline.py): regime-conditional skip check compared
+  `len(X_list)` (SYMBOL-CHUNK count) against MIN_REGIME_SAMPLES=100 — i.e. demanded ≥100
+  contributing symbols per regime, silently skipping rare regimes (explains 0/28 in Test Mode
+  and ~18/28 in past full runs). Now counts actual samples. **Apply BEFORE the full retrain.**
+- **Log hygiene**: mplfinance "identical ylims" warning spam suppressed in chart_image_generator.
+
+### Deploy (DGX)
+```bash
+curl -sS -o /tmp/v322.patch https://paste.rs/RVbeU
+cd ~/Trading-and-Analysis-Platform && git apply --check /tmp/v322.patch && git apply /tmp/v322.patch
+cd backend && PYTHONPATH=. ../.venv/bin/python -m pytest tests/test_v322_regime_funnel.py -q
+# restart backend, then: PYTHONPATH=. ../.venv/bin/python scripts/verify_v322.py
+# first-ever RS populate: curl -sS -X POST http://localhost:8001/api/scanner/rs-leadership/compute
+cd ../frontend && yarn build
+```
+
+
 
 DELIVERABLES (all verified byte-identical on paste.rs):
   NEW services/ai_modules/frozen_holdout.py   https://paste.rs/D4sCI

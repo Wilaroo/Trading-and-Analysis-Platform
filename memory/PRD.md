@@ -559,9 +559,19 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   NOTE for future agents: prefer string patchers over git-diff patches for timeseries_gbm.py /
   large monolith files — line numbers drift between the container fork and the live DGX tree.
 
+---
+## 2026-06-10 — v322 Regime-First Funnel SHIPPED (container-validated, patch paste.rs/RVbeU)
+- c2 (symbol regime → gate), sector regime → gate scoring, c3/T7 RS Leadership +
+  Regime Focus List, focus-list scan-cadence promotion, P7 regime-conditional
+  sample-count bug fix, mplfinance log-spam suppression. 43 new tests.
+- "P1: per-stock multi-TF regime; regime-first scanning funnel (c3)" and
+  "P2: RS leadership factor (RS 80+)" from the backlog below are now DONE.
+- Remaining backlog updates: apply v322 on DGX BEFORE the full retrain (P7 fix
+  affects the 28 regime-conditional models P-WIRE phase 2 depends on).
+
 ## Remaining backlog (from handoff, post-audit)
 - Standing P0 (MANUAL, user action): rotate Atlas DB password (old creds in git history).
 - PARKED: P-WIRE phase 2 wiring (needs ~5000 shadow decisions from pwire_shadow_eval.py).
-- P1: per-stock multi-TF regime (market_regime_engine.py); regime-first scanning funnel (c3).
-- P2: dedicated intraday DL model; RS leadership factor (RS 80+); Wyckoff trigger; L2 probe;
+- P1: ~~per-stock multi-TF regime (market_regime_engine.py); regime-first scanning funnel (c3)~~ ✅ v322.
+- P2: dedicated intraday DL model; ~~RS leadership factor (RS 80+)~~ ✅ v322; Wyckoff trigger; L2 probe;
   break up server.py monolith.

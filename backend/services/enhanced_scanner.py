@@ -584,6 +584,13 @@ class LiveAlert:
     # stay 'unknown' (alerts still fire — soft gate, not a hard reject).
     sector_regime: str = "unknown"
 
+    # NEW: v322 regime-first funnel stamps (soft metadata, never gate alerts).
+    # `rs_rating` — multi-month RS leadership percentile 1..99 (None = thin
+    # history / not yet computed). `focus_side` — "long"/"short" when the
+    # symbol is on the current Regime Focus List, "" otherwise.
+    rs_rating: Optional[int] = None
+    focus_side: str = ""
+
     # NEW: Unified in-play qualification (Feb 2026, fourth commit).
     # Scanner + AI assistant now share a single definition. Score
     # 0-100; reasons/disqualifiers explain the call. SOFT by default
@@ -3004,6 +3011,24 @@ class EnhancedBackgroundScanner:
         self._cycle_context = ctx
         self._cycle_context_at = ctx["captured_at_monotonic"]
 
+        # v322 — refresh the Regime Focus List (5-min TTL inside the service)
+        # and snapshot its symbols for the sync cadence-promotion path in
+        # `_get_symbols_for_cycle`. Also warms the RS-leadership in-memory
+        # cache so `_apply_setup_context` can stamp `rs_rating` synchronously.
+        try:
+            from services.regime_focus_service import get_regime_focus_service
+            focus_svc = get_regime_focus_service(db=self.db)
+            await focus_svc.get_focus_list()
+            self._focus_symbols = focus_svc.get_focus_symbols_cached()
+        except Exception as e:
+            logger.debug(f"_refresh_cycle_context: focus list skipped: {e}")
+            self._focus_symbols = getattr(self, "_focus_symbols", {}) or {}
+        try:
+            from services.rs_leadership_service import get_rs_leadership_service
+            await get_rs_leadership_service(db=self.db).ensure_loaded()
+        except Exception as e:
+            logger.debug(f"_refresh_cycle_context: rs leadership skipped: {e}")
+
     def _get_cycle_context(self) -> Optional[Dict[str, Any]]:
         """Return the current cycle context if it's still fresh.
 
@@ -3256,12 +3281,20 @@ class EnhancedBackgroundScanner:
             self._rebuild_tier_cache(all_qualified)
         
         symbols_this_cycle = []
+        # v322 — Regime Focus List promotion: focus symbols are scanned EVERY
+        # cycle regardless of ADV tier (the funnel hunts in regime-favored
+        # territory at intraday cadence). Promotion-only — non-focus symbols
+        # keep their tier cadence so ML training data flow is unchanged.
+        focus = getattr(self, "_focus_symbols", {}) or {}
         
         for symbol in all_qualified:
             tier = self._tier_cache.get(symbol, self._classify_symbol_tier(symbol))
             
             if tier == "intraday":
                 # Always scan intraday symbols
+                symbols_this_cycle.append(symbol)
+            elif symbol in focus:
+                # v322 focus-list promotion → every-cycle cadence
                 symbols_this_cycle.append(symbol)
             elif tier == "swing":
                 # Scan swing symbols every N-th cycle
@@ -6446,6 +6479,25 @@ class EnhancedBackgroundScanner:
                 alert.sector_regime = sector_label.value
         except Exception as e:
             logger.debug(f"_apply_sector_regime({symbol}) failed: {e}")
+
+        # v322 — RS leadership + Regime Focus List stamps (pure metadata,
+        # soft funnel signals; never change priority here — the confidence
+        # gate scores them at decision time).
+        try:
+            from services.rs_leadership_service import get_rs_leadership_service
+            _rs_doc = get_rs_leadership_service(db=self.db).get_rating_cached(symbol)
+            if _rs_doc and _rs_doc.get("rs_rating") is not None:
+                alert.rs_rating = int(_rs_doc["rs_rating"])
+        except Exception:
+            pass
+        try:
+            alert.focus_side = (getattr(self, "_focus_symbols", {}) or {}).get(symbol, "")
+            if alert.focus_side:
+                alert.reasoning.append(
+                    f"🎯 Regime Focus List ({alert.focus_side.upper()}"
+                    f"{f', RS {alert.rs_rating}' if alert.rs_rating is not None else ''})")
+        except Exception:
+            pass
 
         # v19.34.239 — DYNAMIC trigger_probability (always-on).
         # Every detector stamps a hardcoded per-setup `trigger_probability`
