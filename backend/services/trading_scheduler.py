@@ -281,6 +281,23 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 7c. RS Leadership Compute (v322) - Daily at 5:30 PM ET after the
+            # nightly daily-bar collection has had time to land. Recomputes the
+            # multi-month RS rating (1..99) for the whole qualified universe;
+            # the Regime Focus List + gate confluence read from this table.
+            self._scheduler.add_job(
+                _wrap_async(self._run_rs_leadership_compute),
+                CronTrigger(
+                    day_of_week='mon-fri',
+                    hour=17,
+                    minute=30,
+                    timezone='US/Eastern'
+                ),
+                id='rs_leadership_compute',
+                name='RS Leadership Nightly Compute',
+                replace_existing=True
+            )
+
             # 6.9 Gate Outcome Reconcile (v19.34.311b) - Daily at 4:25 PM ET, just
             # BEFORE gate calibration. Backfills confidence_gate_log outcomes from
             # CLEAN closed bot_trades (decision_id attribution + hygiene filter) so
@@ -833,6 +850,39 @@ class TradingScheduler:
             result.error = str(e)
             result.result_summary = f"Reconcile failed: {e}"
             logger.error(f"Gate outcome reconcile failed: {e}")
+        finally:
+            end_time = datetime.now(timezone.utc)
+            result.completed_at = end_time.isoformat()
+            result.duration_seconds = (end_time - start_time).total_seconds()
+            self._log_task_result(result)
+
+    async def _run_rs_leadership_compute(self):
+        """v322 — nightly multi-month RS rating compute for the whole universe."""
+        start_time = datetime.now(timezone.utc)
+        result = ScheduledTaskResult(
+            task_type="rs_leadership_compute",
+            success=False,
+            started_at=start_time.isoformat(),
+            completed_at="",
+            duration_seconds=0,
+            result_summary=""
+        )
+        try:
+            logger.info("Running scheduled RS leadership compute...")
+            from services.rs_leadership_service import get_rs_leadership_service
+            svc = get_rs_leadership_service(db=self._db)
+            summary = await svc.compute_all()
+            result.success = bool(summary.get("success"))
+            result.result_summary = (
+                f"RS rated {summary.get('rated', 0)}/{summary.get('universe', 0)} symbols "
+                f"({summary.get('thin_history', 0)} thin) in {summary.get('elapsed_s', '?')}s"
+                if result.success else summary.get("error", "unknown error"))
+            result.metadata = summary
+            logger.info(f"RS leadership compute: {result.result_summary}")
+        except Exception as e:
+            result.error = str(e)
+            result.result_summary = f"RS leadership compute failed: {e}"
+            logger.error(result.result_summary)
         finally:
             end_time = datetime.now(timezone.utc)
             result.completed_at = end_time.isoformat()

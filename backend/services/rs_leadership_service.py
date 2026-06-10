@@ -1,0 +1,407 @@
+"""
+RS Leadership Service — v19.34.322 (c3 / T7 of the regime-first funnel).
+
+IBD-style multi-period Relative Strength rating for every symbol in the
+qualified universe (`symbol_adv_cache`), plus a sector-relative RS diff
+vs the symbol's home SPDR ETF.
+
+    score   = Σ w_i × (close / close_lag_i − 1) / Σ w_i
+              over lags [63d ×2, 126d, 189d, 252d] (adaptive — only the
+              lags the symbol has history for; ≥64 daily closes required)
+    rating  = percentile rank of score across the universe, 1..99
+
+Persisted nightly to Mongo `rs_leadership` (one doc per symbol + a meta
+doc) by the TradingScheduler job; loaded into an in-memory dict with a
+15-min TTL for synchronous reads by the scanner / confidence gate.
+
+SOFT signal by design (2026-04-30 doctrine): RS never hard-gates an
+alert — it adds confluence points at the gate and ranks the Regime
+Focus List. Symbols with thin history get rating=None (excluded from
+the focus list, never penalized).
+"""
+import asyncio
+import logging
+import os
+import time
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# (lag in trading days, weight) — IBD RS formula shape: most recent
+# quarter double-weighted. Adaptive: missing lags just drop out.
+RS_PERIODS = [(63, 2.0), (126, 1.0), (189, 1.0), (252, 1.0)]
+RS_MIN_CLOSES = 64          # need at least the 63d lag + today
+RS_MAX_DAILY_BARS = 260     # load window per symbol
+
+# v322c — relaxed variant for the SPDR ETF benchmarks: some rigs keep a
+# shallower daily window for the index/sector ETFs than for the trading
+# universe; a 1-month lag keeps the sector-relative diff usable there.
+RS_RELAXED_PERIODS = [(21, 1.0), (63, 2.0), (126, 1.0), (189, 1.0), (252, 1.0)]
+RS_RELAXED_MIN_CLOSES = 22
+
+# v322b — junk guard: sub-$3 names produce split/penny artifacts
+# (5,000%+ "returns" from unadjusted reverse splits) that pollute the
+# top of the leaderboard. Skipped symbols count as `price_filtered`.
+RS_MIN_PRICE = float(os.environ.get("RS_MIN_PRICE", "3.0"))
+
+# v322d — unadjusted-split detector: a >3x (or <1/3x) close-to-close jump
+# is almost always a reverse/forward split in unadjusted bars, which fakes
+# a massive multi-month "return" (e.g. AGL +5,708%). Genuine >200%
+# overnight moves are rare enough that excluding them from a LEADERSHIP
+# list is the right trade-off. Tunable: RS_SPLIT_RATIO.
+SPLIT_ARTIFACT_RATIO = float(os.environ.get("RS_SPLIT_RATIO", "3.0"))
+
+# The 11 SPDR sector ETFs (sector-relative RS benchmark per symbol).
+SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP",
+               "XLU", "XLB", "XLRE", "XLC"]
+
+
+def weighted_rs_score(closes: List[float], periods=None, min_closes=None) -> Optional[float]:
+    """Pure: weighted multi-period return from a chronological close series.
+
+    `closes` oldest→newest. Returns None when history is too thin
+    (< min_closes, default RS_MIN_CLOSES) or prices are degenerate.
+    """
+    periods = periods or RS_PERIODS
+    min_closes = min_closes or RS_MIN_CLOSES
+    if not closes or len(closes) < min_closes:
+        return None
+    last = closes[-1]
+    if not last or last <= 0:
+        return None
+    acc = 0.0
+    total_w = 0.0
+    for lag, w in periods:
+        if len(closes) > lag:
+            base = closes[-1 - lag]
+            if base and base > 0:
+                acc += w * (last / base - 1.0)
+                total_w += w
+    if total_w <= 0:
+        return None
+    return acc / total_w
+
+
+def has_split_artifact(closes: List[float], max_ratio: float = None) -> bool:
+    """Pure: True when adjacent closes jump more than max_ratio (default
+    SPLIT_ARTIFACT_RATIO) in either direction — the signature of an
+    unadjusted split corrupting multi-month return math."""
+    max_ratio = max_ratio or SPLIT_ARTIFACT_RATIO
+    for i in range(1, len(closes)):
+        prev, cur = closes[i - 1], closes[i]
+        if prev and cur and prev > 0 and cur > 0:
+            r = cur / prev
+            if r > max_ratio or r < 1.0 / max_ratio:
+                return True
+    return False
+
+
+def percentile_ranks(scores: Dict[str, float]) -> Dict[str, int]:
+    """Pure: map raw scores → 1..99 percentile rating across the universe."""
+    if not scores:
+        return {}
+    items = sorted(scores.items(), key=lambda kv: kv[1])
+    n = len(items)
+    out: Dict[str, int] = {}
+    if n == 1:
+        out[items[0][0]] = 50
+        return out
+    for idx, (sym, _s) in enumerate(items):
+        out[sym] = int(round(1 + 98 * idx / (n - 1)))
+    return out
+
+
+class RSLeadershipService:
+    """Nightly compute + cached read of RS leadership ratings."""
+
+    COLLECTION = "rs_leadership"
+    RELOAD_TTL_S = 900          # in-memory cache reload interval
+    COMPUTE_BATCH = 50          # parallel Mongo loads per batch
+
+    def __init__(self, db=None):
+        self.db = db
+        self._ratings: Dict[str, Dict] = {}
+        self._loaded_at: Optional[float] = None
+        self._computing = False
+
+    def _ensure_db(self):
+        """v322c — fall back to the app-wide Mongo handle when the scanner
+        service hasn't injected one yet (e.g., right after boot)."""
+        if self.db is None:
+            try:
+                from database import get_database
+                self.db = get_database()
+            except Exception:
+                pass
+        return self.db
+
+    # ── reads ───────────────────────────────────────────────────────────
+
+    def get_rating_cached(self, symbol: str) -> Optional[Dict]:
+        """Sync read from the in-memory dict (None when unknown/not loaded)."""
+        return self._ratings.get(symbol.upper())
+
+    async def ensure_loaded(self) -> None:
+        """(Re)load the in-memory ratings dict from Mongo when stale."""
+        now = time.monotonic()
+        if self._loaded_at is not None and (now - self._loaded_at) < self.RELOAD_TTL_S:
+            return
+        if self._ensure_db() is None:
+            # v322c — don't latch emptiness for the full TTL; retry in 30s.
+            self._loaded_at = now - (self.RELOAD_TTL_S - 30)
+            return
+        try:
+            cursor = self.db[self.COLLECTION].find(
+                {"symbol": {"$exists": True}}, {"_id": 0})
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=20000)
+            else:
+                docs = list(cursor)
+            self._ratings = {d["symbol"]: d for d in docs if d.get("symbol")}
+            self._loaded_at = now
+            logger.info(f"[RS-LEADERSHIP] loaded {len(self._ratings)} ratings from Mongo")
+        except Exception as e:
+            logger.warning(f"[RS-LEADERSHIP] load failed: {e}")
+            self._loaded_at = now  # don't hammer on failure
+
+    async def get_rating(self, symbol: str) -> Optional[Dict]:
+        await self.ensure_loaded()
+        return self.get_rating_cached(symbol)
+
+    def top_ratings(self, direction: str = "long", limit: int = 50) -> List[Dict]:
+        """Sync ranked slice of the loaded ratings (desc for long, asc for short)."""
+        rows = [r for r in self._ratings.values() if r.get("rs_rating") is not None]
+        rows.sort(key=lambda r: r["rs_rating"], reverse=(direction != "short"))
+        return rows[:limit]
+
+    def stats(self) -> Dict:
+        return {
+            "loaded": len(self._ratings),
+            "loaded_at_age_s": (None if self._loaded_at is None
+                                else round(time.monotonic() - self._loaded_at, 1)),
+            "computing": self._computing,
+        }
+
+    # ── nightly compute ─────────────────────────────────────────────────
+
+    async def compute_all(self, max_symbols: int = 6000) -> Dict:
+        """Compute RS ratings for the whole qualified universe and persist.
+
+        Designed for the nightly scheduler job (17:30 ET) — Mongo reads
+        only, no IB calls. Returns a summary dict.
+        """
+        if self._ensure_db() is None:
+            return {"success": False, "error": "no db"}
+        if self._computing:
+            return {"success": False, "error": "compute already running"}
+        self._computing = True
+        started = time.monotonic()
+        try:
+            symbols = await self._universe_symbols(max_symbols)
+            if not symbols:
+                return {"success": False, "error": "empty universe (symbol_adv_cache)"}
+            adv_map = await self._universe_adv_map()
+
+            # Sector ETF benchmark scores (for sector-relative diff).
+            # v322c: relaxed lags/min-closes — ETF daily windows can be
+            # shallower than the trading universe on some rigs.
+            etf_scores: Dict[str, float] = {}
+            for etf in SECTOR_ETFS:
+                closes = await self._load_daily_closes(etf)
+                s = weighted_rs_score(closes, RS_RELAXED_PERIODS, RS_RELAXED_MIN_CLOSES)
+                if s is not None:
+                    etf_scores[etf] = s
+
+            # Sector tag per symbol — v322b: bulk-read the Mongo-backfilled
+            # `symbol_adv_cache.sector` field (IB reqContractDetails / Finnhub
+            # persisted) for full-universe coverage, then overlay the static
+            # most-liquid map for anything still missing.
+            sector_map: Dict[str, str] = await self._universe_sector_map()
+            try:
+                from services.sector_tag_service import get_sector_tag_service
+                tag_svc = get_sector_tag_service(db=self.db)
+                static_map = tag_svc.tag_many(symbols)
+                for sym, etf in (static_map or {}).items():
+                    if etf and sym not in sector_map:
+                        sector_map[sym] = etf
+            except Exception:
+                pass
+
+            scores: Dict[str, float] = {}
+            thin = 0
+            price_filtered = 0
+            split_artifacts = 0
+            for b_start in range(0, len(symbols), self.COMPUTE_BATCH):
+                batch = symbols[b_start:b_start + self.COMPUTE_BATCH]
+                results = await asyncio.gather(
+                    *[self._load_daily_closes(s) for s in batch],
+                    return_exceptions=True)
+                for sym, closes in zip(batch, results):
+                    if isinstance(closes, Exception) or not closes:
+                        thin += 1
+                        continue
+                    if closes[-1] < RS_MIN_PRICE:
+                        price_filtered += 1     # v322b junk guard
+                        continue
+                    if has_split_artifact(closes):
+                        split_artifacts += 1    # v322d unadjusted-split guard
+                        continue
+                    s = weighted_rs_score(closes)
+                    if s is None:
+                        thin += 1
+                    else:
+                        scores[sym] = s
+                await asyncio.sleep(0)  # yield the event loop between batches
+
+            ranks = percentile_ranks(scores)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            upserts = 0
+            for sym, score in scores.items():
+                etf = sector_map.get(sym)
+                sector_rs_diff = (round(score - etf_scores[etf], 5)
+                                  if etf and etf in etf_scores else None)
+                doc = {
+                    "symbol": sym,
+                    "rs_rating": ranks.get(sym),
+                    "rs_score": round(score, 5),
+                    "sector": etf,
+                    "sector_rs_diff": sector_rs_diff,
+                    "adv": adv_map.get(sym),    # v322d — avg $ volume for liquidity floors
+                    "computed_at": now_iso,
+                }
+                try:
+                    res = self.db[self.COLLECTION].update_one(
+                        {"symbol": sym}, {"$set": doc}, upsert=True)
+                    if asyncio.iscoroutine(res):
+                        await res
+                    upserts += 1
+                except Exception as e:
+                    logger.debug(f"[RS-LEADERSHIP] upsert {sym} failed: {e}")
+
+            # Meta doc + prune symbols that fell out of the universe.
+            try:
+                res = self.db[self.COLLECTION].update_one(
+                    {"_id": "meta"},
+                    {"$set": {"computed_at": now_iso, "universe_size": len(symbols),
+                              "rated": len(scores), "thin_history": thin,
+                              "price_filtered": price_filtered,
+                              "split_artifacts": split_artifacts}},
+                    upsert=True)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                pass
+
+            # Force in-memory reload on next read.
+            self._loaded_at = None
+            elapsed = round(time.monotonic() - started, 1)
+            sector_tagged = sum(1 for s in scores if sector_map.get(s))
+            summary = {"success": True, "universe": len(symbols), "rated": len(scores),
+                       "thin_history": thin, "price_filtered": price_filtered,
+                       "split_artifacts": split_artifacts,
+                       "sector_tagged": sector_tagged,
+                       "etf_benchmarks": len(etf_scores), "elapsed_s": elapsed}
+            logger.info(f"[RS-LEADERSHIP] compute complete: {summary}")
+            return summary
+        except Exception as e:
+            logger.error(f"[RS-LEADERSHIP] compute failed: {e}")
+            return {"success": False, "error": str(e)}
+        finally:
+            self._computing = False
+
+    # ── data loaders ────────────────────────────────────────────────────
+
+    async def _universe_symbols(self, max_symbols: int) -> List[str]:
+        try:
+            cursor = self.db["symbol_adv_cache"].find(
+                {}, {"_id": 0, "symbol": 1}).limit(max_symbols)
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=max_symbols)
+            else:
+                docs = list(cursor)
+            return sorted({d["symbol"].upper() for d in docs if d.get("symbol")})
+        except Exception as e:
+            logger.warning(f"[RS-LEADERSHIP] universe load failed: {e}")
+            return []
+
+    async def _universe_adv_map(self) -> Dict[str, float]:
+        """v322d — symbol → avg dollar volume from symbol_adv_cache (for the
+        focus list's liquidity floor; the RS table itself stays complete)."""
+        out: Dict[str, float] = {}
+        try:
+            cursor = self.db["symbol_adv_cache"].find(
+                {}, {"_id": 0, "symbol": 1, "avg_dollar_volume": 1})
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=20000)
+            else:
+                docs = list(cursor)
+            for d in docs:
+                sym, adv = d.get("symbol"), d.get("avg_dollar_volume")
+                if sym and adv:
+                    out[sym.upper()] = float(adv)
+        except Exception as e:
+            logger.debug(f"[RS-LEADERSHIP] adv map load failed: {e}")
+        return out
+
+    async def _universe_sector_map(self) -> Dict[str, str]:
+        """v322b — bulk symbol→SPDR-ETF map from `symbol_adv_cache.sector`.
+
+        That field is backfilled by sector_tag_service (IB reqContractDetails
+        → Finnhub → static), so it covers far more of the universe than the
+        static most-liquid map alone."""
+        out: Dict[str, str] = {}
+        try:
+            cursor = self.db["symbol_adv_cache"].find(
+                {"sector": {"$nin": [None, ""]}},
+                {"_id": 0, "symbol": 1, "sector": 1})
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                docs = await cursor.to_list(length=20000)
+            else:
+                docs = list(cursor)
+            valid = set(SECTOR_ETFS)
+            for d in docs:
+                sym, sec = d.get("symbol"), d.get("sector")
+                if sym and sec in valid:
+                    out[sym.upper()] = sec
+        except Exception as e:
+            logger.debug(f"[RS-LEADERSHIP] sector map load failed: {e}")
+        return out
+
+    async def _load_daily_closes(self, symbol: str) -> List[float]:
+        """Chronological daily closes (oldest→newest), deduped by date."""
+        try:
+            cursor = self.db["ib_historical_data"].find(
+                {"symbol": symbol.upper(), "bar_size": "1 day"},
+                {"_id": 0, "date": 1, "close": 1},
+            ).sort("date", -1).limit(RS_MAX_DAILY_BARS)
+            to_list = getattr(cursor, "to_list", None)
+            if to_list is not None and asyncio.iscoroutinefunction(to_list):
+                bars = await cursor.to_list(length=RS_MAX_DAILY_BARS)
+            else:
+                bars = list(cursor)
+            seen: Dict[str, float] = {}
+            for b in bars:
+                dk = str(b.get("date", ""))[:10]
+                c = b.get("close")
+                if len(dk) == 10 and dk not in seen and c and c > 0:
+                    seen[dk] = float(c)
+            return [seen[k] for k in sorted(seen.keys())]
+        except Exception:
+            return []
+
+
+_rs_leadership_service: Optional[RSLeadershipService] = None
+
+
+def get_rs_leadership_service(db=None) -> RSLeadershipService:
+    global _rs_leadership_service
+    if _rs_leadership_service is None:
+        _rs_leadership_service = RSLeadershipService(db=db)
+    elif db is not None and _rs_leadership_service.db is None:
+        _rs_leadership_service.db = db
+    return _rs_leadership_service

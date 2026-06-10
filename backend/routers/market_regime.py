@@ -260,6 +260,21 @@ async def get_regime_summary():
         raise HTTPException(500, f"Error getting summary: {str(e)}")
 
 
+@router.get("/symbol/{symbol}")
+async def get_symbol_regime(symbol: str):
+    """v322 (c2) — the SYMBOL's own multi-timeframe regime.
+
+    Runs the same 4-lane scoring (1D/1H/5m/1m) as the market regime but
+    on one stock's own bars. TTL-cached (5 min). Powers per-symbol trend
+    stacks in the UI and the gate's symbol-alignment confluence."""
+    if not _market_regime_engine:
+        raise HTTPException(503, "Market Regime Engine not initialized")
+    try:
+        return await _market_regime_engine.compute_symbol_multi_tf_cached(symbol.upper())
+    except Exception as e:
+        raise HTTPException(500, f"Error computing symbol regime: {str(e)}")
+
+
 def _get_state_display(state: str) -> dict:
     """Get display properties for a state."""
     displays = {

@@ -2895,9 +2895,17 @@ async def run_training_pipeline(
                             X_list = regime_samples[regime]["X"]
                             y_list = regime_samples[regime]["y"]
 
-                            if len(X_list) < MIN_REGIME_SAMPLES:
+                            n_regime_samples = int(sum(len(y) for y in y_list))
+                            # v322 FIX: was `len(X_list) < MIN_REGIME_SAMPLES`,
+                            # but X_list holds ONE ARRAY PER (symbol, batch) —
+                            # so the old check demanded ≥100 contributing
+                            # SYMBOLS per regime, silently skipping rare
+                            # regimes (high_vol/bear_trend) that had thousands
+                            # of samples from fewer symbols. Count samples.
+                            if n_regime_samples < MIN_REGIME_SAMPLES:
                                 logger.info(
-                                    f"Skipping {base_model_name}_{regime}: only {len(X_list)} samples "
+                                    f"Skipping {base_model_name}_{regime}: only {n_regime_samples} samples "
+                                    f"from {len(X_list)} symbol-chunks "
                                     f"(need {MIN_REGIME_SAMPLES})"
                                 )
                                 continue

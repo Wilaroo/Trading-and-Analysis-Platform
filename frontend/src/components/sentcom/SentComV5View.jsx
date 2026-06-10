@@ -26,6 +26,7 @@ import { useV5Styles } from './v5/useV5Styles';
 import { ScannerCardsV5 } from './v5/ScannerCardsV5';
 import { TopMoversHeatmap } from './v5/TopMoversHeatmap';
 import { RegimeStrip } from './v5/RegimeStrip';
+import { RegimeFocusPanel } from './v5/RegimeFocusPanel';
 import { OpsStatusCluster } from './v5/OpsStatusCluster';
 import { EdgePerformanceCluster } from './v5/EdgePerformanceCluster';
 import { UnifiedStreamV5 } from './v5/UnifiedStreamV5';
@@ -555,6 +556,13 @@ export const SentComV5View = ({
           divergence. Leads the status strip so market context reads first. */}
       <PanelErrorBoundary label="regime-strip" compact>
         <RegimeStrip />
+      </PanelErrorBoundary>
+
+      {/* v322 — Regime Focus List: top-down funnel candidates (RS leaders in
+          strong sectors / laggards in weak sectors). Collapsible; hides
+          itself entirely until the nightly RS compute has populated. */}
+      <PanelErrorBoundary label="regime-focus" compact>
+        <RegimeFocusPanel onSelectSymbol={handleOpenTicker} />
       </PanelErrorBoundary>
 
       {/* Phase 3 TopMoversTile + Pusher Heartbeat + Strategy Mix —

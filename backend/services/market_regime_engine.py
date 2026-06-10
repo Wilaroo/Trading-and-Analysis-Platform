@@ -745,6 +745,89 @@ class MarketRegimeEngine:
     CONFIRMED_UP_THRESHOLD = 70
     CONFIRMED_DOWN_THRESHOLD = 30
     
+    async def _get_tf_bars_v322(self, symbol, bar_size, limit=120):
+        """v322 self-contained timeframe bar reader (ib_historical_data).
+
+        Private copy for the symbol-level regime path so the v322 patch has
+        ZERO dependencies on other engine internals (DGX tree drift proof).
+        Chronological OHLCV; [] when the timeframe isn't backfilled."""
+        import asyncio as _aio
+        db = getattr(self, "db", None)
+        if db is None:
+            try:
+                from database import get_database
+                db = get_database()
+            except Exception:
+                db = None
+        if db is None:
+            return []
+        try:
+            def _q():
+                return list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": bar_size},
+                    {"_id": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "date": 1}
+                ).sort("date", -1).limit(limit))
+            rows = await _aio.to_thread(_q)
+            if rows:
+                return [{
+                    "open": r.get("open"), "high": r.get("high"),
+                    "low": r.get("low"), "close": r.get("close"),
+                    "volume": r.get("volume"),
+                } for r in reversed(rows)]
+        except Exception as e:
+            print(f"v322 tf-bars error {symbol} {bar_size}: {e}")
+        return []
+
+    async def compute_symbol_multi_tf(self, symbol):
+        """Per-stock multi-timeframe regime (#1 / c2 foundation).
+
+        Runs the SAME lane scoring as the index regime, but on ONE symbol's
+        own bars — no index blend, no TICK internals (those are market-wide).
+        Returns the build_multi_tf shape (context / lanes / tf_alignment /
+        modes / recommendation) so a per-ticker RegimeStrip can render a trend
+        stack and the gate can read a candidate's OWN regime alignment.
+        Degrades gracefully (cold/missing lanes → context UNKNOWN)."""
+        try:
+            from services.multi_tf_regime import (
+                score_long_lane, score_intraday_lane, build_multi_tf)
+            daily = await self._get_tf_bars_v322(symbol, "1 day", 220)
+            h1 = await self._get_tf_bars_v322(symbol, "1 hour", 120)
+            m5 = await self._get_tf_bars_v322(symbol, "5 mins", 120)
+            m1 = await self._get_tf_bars_v322(symbol, "1 min", 120)
+            mtf = build_multi_tf(
+                score_long_lane(daily),
+                score_intraday_lane(h1, fast=20, slow=50, use_vwap=False),
+                score_intraday_lane(m5, fast=9, slow=21, use_vwap=True),
+                score_intraday_lane(m1, fast=9, slow=21, use_vwap=True),
+            )
+            mtf["symbol"] = symbol
+            return mtf
+        except Exception as e:
+            print(f"symbol multi-tf error {symbol}: {e}")
+            return {"context": "UNKNOWN", "error": str(e), "symbol": symbol}
+
+    async def compute_symbol_multi_tf_cached(self, symbol, ttl_s=300):
+        """TTL-cached wrapper around compute_symbol_multi_tf (v322 / c2).
+
+        The raw call does 4 Mongo bar queries per symbol — the cache makes it
+        safe for the confidence gate to consult on every alert evaluation.
+        Bounded (~600 symbols) with oldest-first eviction."""
+        import time as _time
+        sym = symbol.upper()
+        if not hasattr(self, "_symbol_mtf_cache"):
+            self._symbol_mtf_cache = {}
+        now = _time.time()
+        hit = self._symbol_mtf_cache.get(sym)
+        if hit and (now - hit[0]) < ttl_s:
+            return hit[1]
+        res = await self.compute_symbol_multi_tf(sym)
+        if len(self._symbol_mtf_cache) > 600:
+            for old_key in sorted(self._symbol_mtf_cache,
+                                  key=lambda k: self._symbol_mtf_cache[k][0])[:100]:
+                self._symbol_mtf_cache.pop(old_key, None)
+        self._symbol_mtf_cache[sym] = (now, res)
+        return res
+
     def __init__(self, alpaca_service=None, ib_service=None, db=None):
         self.alpaca_service = alpaca_service
         self.ib_service = ib_service
