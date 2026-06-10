@@ -144,6 +144,22 @@ def train_timeframe(db, timeframe: str, batch_size: int, max_bars: int):
     ]
     symbols = [doc["_id"] for doc in db.ib_historical_data.aggregate(pipeline)]
     print(f"Found {len(symbols):,} symbols with {timeframe} data")
+
+    # v321 Tier-2b: frozen forward hold-out for the standalone trainer
+    try:
+        from services.ai_modules.frozen_holdout import apply_frozen_holdout as _afh, holdout_cutoff_iso as _hco
+    except ImportError:
+        import sys as _sys
+        import os as _os2
+        _sys.path.insert(0, _os2.path.dirname(_os2.path.dirname(_os2.path.abspath(__file__))))
+        try:
+            from services.ai_modules.frozen_holdout import apply_frozen_holdout as _afh, holdout_cutoff_iso as _hco
+        except Exception:
+            _afh, _hco = None, None
+    if _afh is not None and _hco():
+        print(f"FROZEN HOLD-OUT active: training excludes bars after {_hco()}")
+    elif _afh is None:
+        print("WARNING: frozen_holdout module not importable — hold-out NOT applied")
     
     if not symbols:
         print(f"No data found for {timeframe}")
@@ -172,6 +188,8 @@ def train_timeframe(db, timeframe: str, batch_size: int, max_bars: int):
                 ).sort("date", 1).limit(max_bars)
                 
                 data = list(cursor)
+                if _afh is not None:
+                    data = _afh(data, symbol, timeframe)
                 if len(data) < 25:
                     continue
                 

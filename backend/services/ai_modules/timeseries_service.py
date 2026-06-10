@@ -1317,6 +1317,12 @@ class TimeSeriesAIService:
             model._model = trained_model
             model._num_classes = 3
             model._feature_names = list(feature_names)
+            # v321 Tier-3a-lite: training feature distribution baseline
+            try:
+                from services.ai_modules.feature_baseline import compute_feature_baseline
+                model._feature_baseline = compute_feature_baseline(X, list(feature_names))
+            except Exception:
+                model._feature_baseline = None
             model._version = f"v{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
             from .timeseries_gbm import ModelMetrics
@@ -1773,6 +1779,13 @@ class TimeSeriesAIService:
                 # Convert 'date' field to 'timestamp' for compatibility with model
                 for bar in bars:
                     bar['timestamp'] = bar.pop('date', None)
+
+                # v321 Tier-2b: FROZEN FORWARD HOLD-OUT. This loader feeds
+                # TRAINING paths only (train/universe/setup) — drop bars newer
+                # than the cutoff so models never train on the final-exam
+                # window. Inference uses different loaders.
+                from services.ai_modules.frozen_holdout import apply_frozen_holdout
+                bars = apply_frozen_holdout(bars, symbol, bar_size)
                 
                 return bars if bars else None
             except Exception as e:
@@ -2720,6 +2733,23 @@ class TimeSeriesAIService:
                 num_classes=num_classes,
                 event_intervals=_setup_iv,
             )
+
+            # v321 Tier-3b (shadow-only for setup models this round): log what
+            # the PBO gate would decide. Enforcement comes after we see the
+            # fleet-wide PBO distribution from the first CPCV retrain.
+            try:
+                from .timeseries_gbm import pbo_gate_check
+                _pv, _pr = pbo_gate_check(
+                    metrics.to_dict() if metrics else {},
+                    f"setup_{setup_type}_{bar_size}",
+                )
+                if _pv != "pass":
+                    logger.warning(
+                        f"[PBO-GATE shadow] setup model {setup_type}/{bar_size}: "
+                        f"WOULD BLOCK — {_pr}"
+                    )
+            except Exception:
+                pass
             
             # Model protection: compare against previous model for same (setup, bar_size)
             should_promote = True
@@ -2854,6 +2884,7 @@ class TimeSeriesAIService:
         """Save a setup-specific model to MongoDB using compound key (setup_type, bar_size)."""
         import asyncio
         from services.ai_modules.setup_training_config import get_model_name
+        from services.ai_modules.frozen_holdout import frozen_holdout_stamp as _setup_fh_stamp
         col = self._db["setup_type_models"]
         
         # Serialize model using XGBoost native JSON format
@@ -2877,6 +2908,8 @@ class TimeSeriesAIService:
             "symbols_used": symbols_used,
             "total_bars": sum_bars,
             "feature_names": feature_names,
+            "feature_baseline": getattr(model, "_feature_baseline", None),
+            "frozen_holdout": _setup_fh_stamp(),
             "trained_at": datetime.now(timezone.utc).isoformat(),
         }
         

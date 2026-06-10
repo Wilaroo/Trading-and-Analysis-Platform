@@ -394,6 +394,42 @@ def run_gbm_cpcv(
         logger.warning(f"[CPCV] {model_name} skipped (error: {cpcv_err})")
         return dict(_CPCV_ZERO)
 
+# ── v321 Tier-3b: PBO promotion gate ─────────────────────────────────────────
+def pbo_gate_check(metrics_dict: Dict, model_name: str = "") -> tuple:
+    """Judge a candidate model's CPCV honesty metrics before promotion.
+
+    Modes via TB_PBO_GATE: "off" | "shadow" (default) | "enforce".
+    Thresholds: TB_PBO_MAX (default 0.20), TB_CPCV_MIN_EDGE (default 0.0).
+
+    Returns (verdict, reason) with verdict in {"pass", "shadow_block", "block"}.
+    Models WITHOUT CPCV results (cpcv_n_folds == 0) always pass — there is
+    nothing to judge (e.g. CPCV disabled or tiny datasets).
+    """
+    mode = str(os.environ.get("TB_PBO_GATE", "shadow")).strip().lower()
+    if mode in ("off", "0", "false", "no"):
+        return ("pass", "gate off")
+    try:
+        pbo_max = float(os.environ.get("TB_PBO_MAX", "0.20"))
+        min_edge = float(os.environ.get("TB_CPCV_MIN_EDGE", "0.0"))
+    except (TypeError, ValueError):
+        pbo_max, min_edge = 0.20, 0.0
+    n_folds = int(metrics_dict.get("cpcv_n_folds", 0) or 0)
+    if n_folds <= 0:
+        return ("pass", "no CPCV data")
+    pbo = float(metrics_dict.get("cpcv_pbo", 0.0))
+    edge = float(metrics_dict.get("cpcv_edge_mean", 0.0))
+    fails = []
+    if pbo > pbo_max:
+        fails.append(f"PBO {pbo:.2f} > {pbo_max:.2f}")
+    if edge <= min_edge:
+        fails.append(f"OOS edge {edge:+.3f} <= {min_edge:+.3f}")
+    if not fails:
+        return ("pass", f"PBO {pbo:.2f}, edge {edge:+.3f} ({n_folds} folds)")
+    reason = " & ".join(fails)
+    if mode == "enforce":
+        return ("block", reason)
+    return ("shadow_block", reason)
+
 
 class TimeSeriesGBM:
     """
@@ -626,6 +662,7 @@ class TimeSeriesGBM:
             model_format = "xgboost_json_zlib"  # Track compression for load path
             logger.info(f"Model {self.model_name}: {len(model_bytes)/1024/1024:.1f}MB raw → {len(compressed)/1024/1024:.1f}MB compressed")
             new_accuracy = self._metrics.accuracy if self._metrics else 0
+            from services.ai_modules.frozen_holdout import frozen_holdout_stamp as _fh_stamp
             
             model_doc = {
                 "name": self.model_name,
@@ -640,6 +677,8 @@ class TimeSeriesGBM:
                 "params": {k: v for k, v in self.params.items() if not callable(v)},
                 "feature_names": self._feature_names,
                 "forecast_horizon": self.forecast_horizon,
+                "feature_baseline": getattr(self, "_feature_baseline", None),
+                "frozen_holdout": _fh_stamp(),
                 "saved_at": datetime.now(timezone.utc).isoformat()
             }
             
@@ -693,6 +732,48 @@ class TimeSeriesGBM:
                 if current_active is not None:
                     self._load_model()
                 return "rejected_class_collapse"
+
+            # ── v321 Tier-3b: PBO promotion gate (shadow by default) ────────
+            # Judges the CPCV honesty metrics (v320). Shadow mode only LOGS
+            # what it would do; TB_PBO_GATE=enforce activates real blocking.
+            _pbo_verdict, _pbo_reason = pbo_gate_check(_nm_abs, self.model_name)
+            if _pbo_verdict == "shadow_block":
+                logger.warning(
+                    f"[PBO-GATE shadow] WOULD BLOCK promotion of {self.model_name} "
+                    f"{self._version}: {_pbo_reason}. (set TB_PBO_GATE=enforce to activate)"
+                )
+                try:
+                    self._db[self.MODEL_ARCHIVE_COLLECTION].update_one(
+                        {"name": self.model_name, "version": self._version},
+                        {"$set": {"pbo_gate": {"verdict": "shadow_block", "reason": _pbo_reason}}},
+                    )
+                except Exception:
+                    pass
+            elif _pbo_verdict == "block":
+                if _force_promote_enabled(self.model_name, os.environ.get("GBM_FORCE_PROMOTE")):
+                    logger.warning(
+                        f"[PBO-GATE] OVERRIDE (GBM_FORCE_PROMOTE): {self.model_name} "
+                        f"{self._version} fails the gate ({_pbo_reason}) but the operator "
+                        f"forced promotion."
+                    )
+                else:
+                    logger.warning(
+                        f"[PBO-GATE] REJECTED {self.model_name} {self._version}: "
+                        f"{_pbo_reason}. NOT promoted; archived as rejected_pbo_gate."
+                    )
+                    try:
+                        self._db[self.MODEL_ARCHIVE_COLLECTION].update_one(
+                            {"name": self.model_name, "version": self._version},
+                            {"$set": {
+                                "rejected_reason": "pbo_gate",
+                                "pbo_gate": {"verdict": "block", "reason": _pbo_reason},
+                            }},
+                        )
+                    except Exception:
+                        pass
+                    if current_active is not None:
+                        self._load_model()
+                    return "rejected_pbo_gate"
 
             should_promote = True
             demotion_reason = None
@@ -884,7 +965,10 @@ class TimeSeriesGBM:
         """
         import os as _os
         ffd = "ffd1" if _os.environ.get("TB_USE_FFD_FEATURES", "0") == "1" else "ffd0"
-        return f"{symbol}_{bar_size}_{self.forecast_horizon}_tb3c_{ffd}"
+        # v321: embed the frozen-holdout setting so changing it invalidates
+        # cached features that were extracted from differently-truncated bars.
+        from services.ai_modules.frozen_holdout import holdout_days as _hd
+        return f"{symbol}_{bar_size}_{self.forecast_horizon}_tb3c_{ffd}_fh{_hd()}"
     
     def _save_features_to_cache(self, symbol: str, features: List[List[float]], targets: List[int], bar_size: str = "default"):
         """Save precomputed features to MongoDB for reuse across training cycles"""
@@ -1351,6 +1435,15 @@ class TimeSeriesGBM:
             num_boost_round=num_boost_round, num_classes=num_classes,
             forecast_horizon=self.forecast_horizon, model_name=self.model_name,
         )
+
+        # ── v321 Tier-3a-lite: capture training feature distribution ────────
+        # Persisted into the model doc; consumed by the future drift monitor.
+        try:
+            from services.ai_modules.feature_baseline import compute_feature_baseline
+            self._feature_baseline = compute_feature_baseline(X, feature_names)
+        except Exception as _fb_err:
+            logger.debug(f"feature baseline capture skipped: {_fb_err}")
+            self._feature_baseline = None
 
         # Split train/validation (time-ordered) with a LÓPEZ DE PRADO EMBARGO gap.
         # v319b: each sample's label looks `forecast_horizon` bars forward, so the

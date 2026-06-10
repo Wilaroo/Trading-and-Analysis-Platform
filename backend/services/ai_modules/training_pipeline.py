@@ -127,16 +127,27 @@ def _clear_disk_cache():
     logger.info("[CACHE] Cleared NVMe disk cache")
 
 
+def _fh_cache_tag() -> str:
+    """v321: frozen-holdout cache-key segment. Cached bars/features are stored
+    POST-filter, so the cutoff must be part of the cache identity — changing
+    TB_FROZEN_HOLDOUT_DAYS then auto-invalidates stale NVMe caches."""
+    try:
+        from services.ai_modules.frozen_holdout import holdout_days
+        return f"_fh{holdout_days()}"
+    except Exception:
+        return ""
+
+
 def _bar_cache_path(symbol: str, bar_size: str) -> str:
     bs_dir = f"{BAR_CACHE_DIR}/{_sanitize_bar_size(bar_size)}"
     _os.makedirs(bs_dir, exist_ok=True)
-    return f"{bs_dir}/{symbol}.pkl"
+    return f"{bs_dir}/{symbol}{_fh_cache_tag()}.pkl"
 
 
 def _feature_cache_path(symbol: str, bar_size: str) -> str:
     bs_dir = f"{FEATURE_CACHE_DIR}/{_sanitize_bar_size(bar_size)}"
     _os.makedirs(bs_dir, exist_ok=True)
-    return f"{bs_dir}/{symbol}.npy"
+    return f"{bs_dir}/{symbol}{_fh_cache_tag()}.npy"
 
 
 def _cache_bars_to_disk(symbol: str, bar_size: str, bars: List[Dict]):
@@ -1017,6 +1028,13 @@ async def load_symbol_bars(db, symbol: str, bar_size: str, max_bars: int = 0) ->
             loop.run_in_executor(TRAINING_POOL, _run_query),
             timeout=90
         )
+        # v321 Tier-2b: frozen forward hold-out — filter BEFORE caching so the
+        # NVMe cache (whose filename embeds the cutoff) stores filtered bars.
+        try:
+            from services.ai_modules.frozen_holdout import apply_frozen_holdout
+            bars = apply_frozen_holdout(bars, symbol, bar_size)
+        except Exception:
+            pass
         # Write to NVMe disk cache for reuse by later phases
         if bars:
             _cache_bars_to_disk(symbol, bar_size, bars)
