@@ -2567,7 +2567,8 @@ class IBHistoricalCollector:
 
 
     def _smart_backfill_sync(self, dry_run: bool, tier_filter: Optional[str],
-                             freshness_days: int) -> Dict[str, Any]:
+                             freshness_days: int,
+                             bar_size_filter: Optional[List[str]] = None) -> Dict[str, Any]:
         """Blocking implementation — must be wrapped in asyncio.to_thread."""
         from datetime import datetime, timedelta, timezone
         import uuid
@@ -2666,6 +2667,8 @@ class IBHistoricalCollector:
                 # unique symbols holding at least one bar at that size.
                 for _bs in ["1 min", "5 mins", "15 mins", "30 mins",
                             "1 hour", "1 day", "1 week"]:
+                    if bar_size_filter and _bs not in bar_size_filter:
+                        continue  # v322g — skip enumeration outside the filter
                     syms_with = set(self._data_col.distinct(
                         "symbol", {"bar_size": _bs}
                     ))
@@ -2692,6 +2695,15 @@ class IBHistoricalCollector:
                 for _bs, _syms_with in all_bar_sizes_with_data.items():
                     if sym in _syms_with:
                         effective_bs.add(_bs)
+                # v322g — optional bar-size narrowing. The nightly EOD
+                # daily-bar top-up calls with ["1 day"] so only the
+                # just-finalised daily session gets queued (the 5:30 PM RS
+                # compute needs it) without piling intraday refills onto
+                # the post-close queue.
+                if bar_size_filter:
+                    effective_bs &= set(bar_size_filter)
+                    if not effective_bs:
+                        continue
                 # Iterate in a stable order for repeatable plans / logs.
                 for bs in [b for b in self.BAR_SIZE_ORDER if b in effective_bs] \
                         if hasattr(self, "BAR_SIZE_ORDER") else sorted(effective_bs):
@@ -2845,7 +2857,8 @@ class IBHistoricalCollector:
 
     async def smart_backfill(self, dry_run: bool = False,
                              tier_filter: Optional[str] = None,
-                             freshness_days: int = 2) -> Dict[str, Any]:
+                             freshness_days: int = 2,
+                             bar_size_filter: Optional[List[str]] = None) -> Dict[str, Any]:
         """Async wrapper — heavy loops run in a thread so the event loop stays free.
         Persists non-dry-run results to `ib_smart_backfill_history` so the UI can
         show the last run's summary without re-running the whole plan."""
@@ -2877,7 +2890,8 @@ class IBHistoricalCollector:
                 pass
 
         result = await asyncio.to_thread(
-            self._smart_backfill_sync, dry_run, tier_filter, freshness_days
+            self._smart_backfill_sync, dry_run, tier_filter, freshness_days,
+            bar_size_filter
         )
         # Persist non-dry-run outcomes for the "Last Backfill" UI card.
         if not dry_run and result.get("success") and self._db is not None:
@@ -2887,6 +2901,7 @@ class IBHistoricalCollector:
                     "ran_at": result.get("ran_at"),
                     "tier_filter": tier_filter,
                     "freshness_days": freshness_days,
+                    "bar_size_filter": bar_size_filter,
                     "tier_counts": result.get("tier_counts"),
                     "queued": result.get("queued", 0),
                     "skipped_fresh": result.get("skipped_fresh", 0),
