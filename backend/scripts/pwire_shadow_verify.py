@@ -17,6 +17,10 @@ import argparse
 import os
 import sys
 
+# Ensure the backend/ dir (parent of scripts/) is importable so `services.*`
+# resolves when this is run directly as `scripts/pwire_shadow_verify.py`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pymongo import MongoClient
 
 

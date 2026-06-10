@@ -29,7 +29,15 @@ CHANGE (additive, read-only, NEVER affects execution):
     prob_up/down, confidence, ev_proxy (pUp−pDown), feature_count, model_metrics,
     directions_agree, decision_model. Toggle `PWIRE_SHADOW=0`.
 
-VERIFY (DGX): `.venv/bin/python scripts/pwire_shadow_verify.py` (4 checks).
+STATUS: ✅ DEPLOYED & VERIFIED ON DGX 2026-06-11. Backend restarted clean; pytest
+7/7; `pwire_shadow_verify.py` → ALL 4 CHECKS PASSED. First live divergence proof
+(symbol TFC, regime=high_vol): generic direction_predictor_5min = flat pUp=0.226
+ev=-0.047 vs regime direction_predictor_5min_high_vol = UP pUp=0.497 ev=+0.109 —
+i.e. the regime variant carries a decisive two-sided signal where the generic
+collapses to low-conviction flat. Now ACCUMULATING (eval at 0 records until the
+Windows IB pusher/Gateway is up and the bot fires live decisions).
+
+VERIFY (DGX): `PYTHONPATH=. ../.venv/bin/python scripts/pwire_shadow_verify.py` (4 checks).
 EVALUATE (after ~5000 decisions): `.venv/bin/python scripts/pwire_shadow_eval.py`
 → regime vs generic directional hit-rate + signed EV vs bot_trades, GO/NO-GO verdict.
 Once verdict = REGIME WINS, wire the variant into the live path (P-WIRE phase 2).

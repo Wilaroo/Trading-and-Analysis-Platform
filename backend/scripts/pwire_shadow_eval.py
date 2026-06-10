@@ -18,7 +18,11 @@ Usage (from /app/backend):
 """
 import argparse
 import os
+import sys
 from collections import defaultdict
+
+# Ensure backend/ is importable when run directly as scripts/pwire_shadow_eval.py
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pymongo import MongoClient
 
