@@ -20,8 +20,19 @@ Method: code-level inference-consumption grep + per-class recall (collapse) from
 | gap_fill | 5 | 0.941 | 5/5 | DEAD (redesign pending) |
 | sector_relative | 3 | 0.545 | 3/3 | DEAD |
 
+## CORRECTION (2026-06-10, after diag_ensemble_pwin_live.py)
+- The ensemble "10/10 collapsed" was a FALSE POSITIVE. Live p_win is healthy and
+  DISCRIMINATING (median 0.51, p10 0.40, p90 0.78, std 0.143, span 0.16-0.91;
+  per-ensemble medians differentiated: vwap 0.82, meanrev 0.77, gap 0.64, trend
+  0.40). argmax-recall is the WRONG lens for a graded-probability meta-labeler.
+  P-LIVE-1 = no action. Real collapse count is ~36 (not 46): the genuinely
+  collapsed families have recall_down EXACTLY 0.00 and are consumed as argmax/
+  binary (vol_predictor 7, gap_fill 5, risk_of_ruin 6, sector_relative 3, + some
+  direction/regime variants). The collapse FLAG is only valid for argmax-consumed
+  models, not graded p_win ones.
+
 ## Key findings
-1. LIVE + broken: ensemble 10/10 collapsed (+15 layer not discriminating); 2/7 core direction collapsed.
+1. LIVE: ensemble is HEALTHY (see correction above). 2/7 core direction collapsed (argmax — real).
    - Root cause = imbalanced binary target (low win base-rate → collapse to majority), same as vol/gap.
    - P0 collapse gate (v19.34.312, shipped) covers TimeSeriesGBM._save_model → rejects collapsed on retrain.
 2. Big wasted edge: ~18 regime_conditional models are HEALTHY two-sided (acc 0.52–0.78) but DEAD.
