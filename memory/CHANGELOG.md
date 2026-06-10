@@ -30,6 +30,10 @@ VERIFY (DGX, NO retrain): `PYTHONPATH=. ../.venv/bin/python scripts/gap_target_a
 goal = NEW in ~25-75% band (trainable, non-collapsed). Then the new models train
 on the next nightly cycle (or `phases=["gap_fill"]` manual run).
 
+VERIFIED ON DGX 2026-06-11: pytest 10/10; gap_target_audit balance proof —
+1min 95.4%→49.5%, 5min 92.1%→43.7%, 15min 88.6%→45.5% (all BALANCED ✅, n=2.4k/10.4k/18.6k).
+Model-family audit now COMPLETE: gap redesigned; risk_of_ruin + sector_relative retired.
+
 
 ## 2026-06-11 — v19.34.313 (P-WIRE): regime-conditional model SHADOW mode — PATCH READY
 
