@@ -43,6 +43,13 @@ def hr(t):
     print("\n" + "=" * 78 + f"\n{t}\n" + "=" * 78)
 
 
+def rd_fmt(v):
+    try:
+        return f"{float(v):.2f}"
+    except (TypeError, ValueError):
+        return "?"
+
+
 def _acc(doc):
     m = doc.get("metrics") or {}
     for src in (m, doc):
@@ -79,21 +86,25 @@ def main():
         if not docs:
             print("  none found")
             continue
-        print(f"  {'name':>34} {'acc':>7} {'samples':>9} {'updated':>12}")
+        print(f"  {'name':>34} {'acc':>6} {'rec_up':>7} {'rec_dn':>7} {'f1_up':>6} {'f1_dn':>6}")
         accs = []
         for d in sorted(docs, key=lambda x: x.get("name", "")):
             a = _acc(d)
             accs.append(a if a is not None else 0.0)
-            s = _samples(d)
-            upd = str(d.get("updated_at") or d.get("saved_at") or "?")[:10]
-            astr = f"{a:.3f}" if a is not None else "  n/a"
-            flag = " *EDGE*" if (a is not None and a >= EDGE_FLOOR) else ""
-            print(f"  {d.get('name','?'):>34} {astr:>7} {str(s if s is not None else '?'):>9} {upd:>12}{flag}")
+            m = d.get("metrics") or {}
+            ru = m.get("recall_up", 0.0); rd = m.get("recall_down", 0.0)
+            fu = m.get("f1_up", 0.0); fd = m.get("f1_down", 0.0)
+            astr = f"{a:.3f}" if a is not None else " n/a"
+            # collapse flag: one class barely predicted => high acc is imbalance
+            collapse = " <COLLAPSE?" if (min(rd, ru) < 0.15) else ""
+            print(f"  {d.get('name','?'):>34} {astr:>6} {rd_fmt(ru):>7} {rd_fmt(rd):>7} {rd_fmt(fu):>6} {rd_fmt(fd):>6}{collapse}")
         n = len(docs)
         edge = sum(1 for a in accs if a >= EDGE_FLOOR)
         grand_total += n
         grand_edge += edge
         print(f"\n  total={n}  avg_acc={sum(accs)/n:.3f}  with_edge(>= {EDGE_FLOOR})={edge}/{n}")
+        print("  NOTE: <COLLAPSE? = a class recall < 0.15 → high accuracy is likely")
+        print("        class-imbalance, NOT tradeable edge. Validate before wiring in.")
 
     hr("SUMMARY")
     print(f"  dead-at-inference models: {grand_total}")
