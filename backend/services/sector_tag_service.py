@@ -28,10 +28,31 @@ Public API:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def order_backfill_targets(untagged: Iterable[str], rated: Iterable[str],
+                           cap: int = 0) -> List[str]:
+    """v322e — pure: order deep-backfill targets. RS-rated symbols first
+    (caller passes them best-rating-first), then the remaining untagged
+    alphabetically. Deduped, uppercased, optionally capped."""
+    untagged_set = {s.upper() for s in untagged if s}
+    rated_first: List[str] = []
+    seen = set()
+    for s in rated:
+        su = (s or "").upper()
+        if su and su in untagged_set and su not in seen:
+            rated_first.append(su)
+            seen.add(su)
+    rest = sorted(untagged_set - seen)
+    out = rated_first + rest
+    return out[:cap] if cap and cap > 0 else out
 
 
 # ──────────────────────────── Sector ETFs ────────────────────────────
@@ -372,6 +393,8 @@ class SectorTagService:
     def __init__(self, db=None):
         self.db = db
         self._map: Dict[str, str] = _build_full_map()
+        # v322e — deep-backfill progress state (read by the status endpoint).
+        self._deep_state: Dict = {"running": False}
 
     # ───────── Lookup ─────────
 
@@ -587,6 +610,129 @@ class SectorTagService:
         )
         return {"total": total, "tagged": tagged, "skipped": skipped,
                 "untaggable": untaggable}
+
+    # ───────── v322e — paced deep backfill (IB reqContractDetails chain) ─────────
+
+    DEEP_BREAKER_STREAK = 25    # consecutive misses with IB down → abort
+
+    def deep_backfill_status(self) -> Dict:
+        """Sync snapshot of the deep-backfill progress for the status endpoint."""
+        return dict(self._deep_state)
+
+    def _ib_connected(self) -> bool:
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            ib = get_ib_direct_service()
+            return bool(ib is not None and getattr(ib, "_connected", False))
+        except Exception:
+            return False
+
+    async def deep_backfill_untagged(self, db=None, max_symbols: int = 4000,
+                                     pace_s: float = 0.25,
+                                     recompute_rs: bool = True) -> Dict:
+        """v322e — paced FULL-CHAIN sector backfill over the untagged universe.
+
+        Unlike :py:meth:`backfill_symbol_adv_cache` (static map only), each
+        symbol goes through :py:meth:`tag_symbol_async` — static map → Mongo
+        cache → **IB reqContractDetails (Client 11)** → Finnhub — so the
+        ~3,000+ rated names outside the static map finally get sector tags
+        and stop dropping off the Regime Focus List.
+
+        Order: RS-leadership rated symbols first (best rating first), then
+        the rest of `symbol_adv_cache`. Paced (`pace_s` sleep per network
+        lookup) to stay friendly with the Client-11 socket. Circuit breaker:
+        DEEP_BREAKER_STREAK consecutive misses while IB is disconnected
+        aborts the run with a clear hint. Progress is exposed via
+        :py:meth:`deep_backfill_status`. On completion, optionally re-runs
+        the RS compute so `rs_leadership.sector` / `sector_rs_diff` pick up
+        the new tags immediately (Mongo-only, cheap).
+        """
+        if db is None:
+            db = self.db
+        if db is None:
+            return {"success": False, "error": "db is None"}
+        if self._deep_state.get("running"):
+            return {"success": False, "error": "deep backfill already running"}
+
+        started_iso = datetime.now(timezone.utc).isoformat()
+        self._deep_state = {
+            "running": True, "started_at": started_iso, "processed": 0,
+            "tagged": 0, "untaggable": 0, "targets": 0, "last_symbol": None,
+            "aborted": None,
+        }
+        started_mono = time.monotonic()
+        try:
+            # Untagged universe (valid-ETF check in python — values like ""
+            # or stale labels count as untagged).
+            valid = set(SECTOR_ETFS.keys())
+            untagged: List[str] = []
+            for doc in db["symbol_adv_cache"].find(
+                    {}, {"_id": 0, "symbol": 1, "sector": 1}):
+                sym = doc.get("symbol")
+                if sym and doc.get("sector") not in valid:
+                    untagged.append(sym)
+
+            # Rated symbols, best rating first (leaders get tagged first).
+            rated: List[str] = []
+            try:
+                rated = [d["symbol"] for d in db["rs_leadership"].find(
+                    {"symbol": {"$exists": True}, "rs_rating": {"$ne": None}},
+                    {"_id": 0, "symbol": 1, "rs_rating": 1},
+                ).sort("rs_rating", -1)]
+            except Exception as e:
+                logger.debug(f"[v322e] rs_leadership load failed: {e}")
+
+            targets = order_backfill_targets(untagged, rated, cap=max_symbols)
+            self._deep_state["targets"] = len(targets)
+            logger.info(f"[v322e DEEP-BACKFILL] starting: {len(targets)} untagged "
+                        f"targets ({len(rated)} rated, pace={pace_s}s)")
+
+            tagged = 0
+            untaggable = 0
+            miss_streak = 0
+            for i, sym in enumerate(targets):
+                etf = await self.tag_symbol_async(sym)
+                if etf:
+                    tagged += 1
+                    miss_streak = 0
+                else:
+                    untaggable += 1
+                    miss_streak += 1
+                self._deep_state.update(
+                    processed=i + 1, tagged=tagged, untaggable=untaggable,
+                    last_symbol=sym)
+                if (miss_streak >= self.DEEP_BREAKER_STREAK
+                        and not self._ib_connected()):
+                    self._deep_state["aborted"] = (
+                        f"{miss_streak} consecutive misses with IB Client-11 "
+                        f"disconnected — connect IB Gateway and re-run")
+                    logger.warning(f"[v322e DEEP-BACKFILL] {self._deep_state['aborted']}")
+                    break
+                if pace_s > 0:
+                    await asyncio.sleep(pace_s)
+
+            rs_summary = None
+            if recompute_rs and tagged > 0 and not self._deep_state["aborted"]:
+                try:
+                    from services.rs_leadership_service import get_rs_leadership_service
+                    rs_summary = await get_rs_leadership_service(db=db).compute_all()
+                except Exception as e:
+                    rs_summary = {"success": False, "error": str(e)}
+
+            elapsed = round(time.monotonic() - started_mono, 1)
+            summary = {
+                "success": True, "targets": len(targets), "tagged": tagged,
+                "untaggable": untaggable, "aborted": self._deep_state["aborted"],
+                "elapsed_s": elapsed, "rs_recompute": rs_summary,
+            }
+            self._deep_state.update(running=False, finished_at=datetime.now(
+                timezone.utc).isoformat(), result=summary)
+            logger.info(f"[v322e DEEP-BACKFILL] done: {summary}")
+            return summary
+        except Exception as e:
+            self._deep_state.update(running=False, aborted=str(e))
+            logger.error(f"[v322e DEEP-BACKFILL] failed: {e}")
+            return {"success": False, "error": str(e)}
 
 
 # ──────────────────────────── Module-level singleton ────────────────────────────
