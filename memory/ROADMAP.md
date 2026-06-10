@@ -3,6 +3,32 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-06-11 (v322f/g/e shipped + deployed on DGX)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.322f | Tier 3 (Investment) afternoon scan 3:45 → 3:30 PM ET | shipped + committed (7352bf4d) |
+| v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped + committed (7352bf4d) |
+| v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped + committed (e9c810f9), backfill RUNNING |
+
+Operator's 7 funnel questions answered; two stale-doc claims corrected (pusher=500
+lines via rotation v17, NOT 14; turbo collectors are manual, NOT always-on).
+Deep backfill started 2026-06-10 20:01 UTC: coverage at start universe 1,348/9,412,
+rated 774/3,066 — targets=4000, rated-first, ~17-20 min run, auto RS-recompute at end.
+
+### Next session priorities (in order)
+- 🔴 **P0**: Fire the full pipeline retrain `POST /api/ai-training/start {"force_retrain": true}`
+  (operator was about to run it — verify OOS distributions + P7 regime-conditional models trained).
+- 🔴 **P0**: Tier 3b — calibrate + flip `TB_PBO_GATE=enforce` AFTER the retrain completes.
+- 🟡 **P1**: Verify v322g chain fires tonight (16:35 `eod_daily_topup`, 17:10 `adv_cache_rebuild`,
+  17:30 RS compute — check `scheduled_task_results` / backend log).
+- 🟡 **P1**: Verify deep-backfill completion (`GET /api/scanner/sector-backfill/status`) — if
+  rated_tagged < rated_total, re-run with `?max_symbols=9000`.
+- 🟡 **P1**: T6 flip to active (per-setup×regime expectancy suppressor out of shadow).
+- 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA); Tier 3a drift-monitor UI tile;
+  Tier 2a per-model probability calibration.
+- 🔴 SECURITY (user action): rotate Atlas MongoDB password (still pending).
+
 ## Session Summary - 2026-06-04 (chart depth + bad-tick guard shipped)
 
 | Version | Topic | Status |
