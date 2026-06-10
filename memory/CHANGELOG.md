@@ -1,3 +1,29 @@
+## 2026-06-11 — v19.34.318 (NIA Section B + gap leakage tool) — PATCH READY
+
+Patch: https://paste.rs/leUgM  (frontend deletions + new backend script)
+Deploy: `git apply` → `cd frontend && yarn build` (no backend restart needed — only a
+new standalone script was added). Verified: clean-apply on fresh HEAD, NIA index.jsx
+parses, zero dangling references.
+
+CHANGE:
+- Section B — deleted 5 orphaned components (−1,673 LOC dead code, all 0 imports):
+  NIA/AIModulesPanel.jsx, NIA/SetupModelsPanel.jsx, NIA/ModelScorecard.jsx,
+  NIA/ServerHealthWidget.jsx, components/PipelineProgressPanel.jsx. (The LIVE
+  sentcom/panels/AIModulesPanel.jsx is a different file — untouched.)
+- Added scripts/gap_leakage_audit.py — read-only DGX tool to quantify the gap-fill
+  look-ahead leak (fill-in-open-bar share, no-peek fill rate). Safe during training.
+
+PENDING DECISION (from the leakage audit):
+- If gap_leakage_audit shows a high "fill-in-OPEN-bar" share, the ~94.6% headline is
+  inflated. Fix = no-peek target: decide at the open → exclude bar i from BOTH the
+  feature row and the fill window (target over [i+1, i+w]). Would ship as v319.
+
+DEFERRED: P-WIRE phase 2 (wire regime-matched models into live inference) — blocked
+until the ~5000-decision shadow sample accrues AND scripts/pwire_shadow_eval.py
+returns "REGIME WINS". Wiring before the verdict violates shadow-before-live. (0 shadow
+decisions so far — IB offline.)
+
+
 ## 2026-06-11 — v19.34.317 (P0 BUG): binary models never computed recall_down → ALL rejected — PATCH READY
 
 Patch: https://paste.rs/IxjeG  (backend-only → `git apply` + `./start_backend.sh --force`)
