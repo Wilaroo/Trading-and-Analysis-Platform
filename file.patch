@@ -1,0 +1,806 @@
+diff --git a/backend/agents/__pycache__/__init__.cpython-311.pyc b/backend/agents/__pycache__/__init__.cpython-311.pyc
+index 6108898a..c900fd65 100644
+Binary files a/backend/agents/__pycache__/__init__.cpython-311.pyc and b/backend/agents/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/analyst_agent.cpython-311.pyc b/backend/agents/__pycache__/analyst_agent.cpython-311.pyc
+index f210bb67..6958f16c 100644
+Binary files a/backend/agents/__pycache__/analyst_agent.cpython-311.pyc and b/backend/agents/__pycache__/analyst_agent.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/base_agent.cpython-311.pyc b/backend/agents/__pycache__/base_agent.cpython-311.pyc
+index bca7e2d8..40429412 100644
+Binary files a/backend/agents/__pycache__/base_agent.cpython-311.pyc and b/backend/agents/__pycache__/base_agent.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/brief_me_agent.cpython-311.pyc b/backend/agents/__pycache__/brief_me_agent.cpython-311.pyc
+index 63d06f29..99e0eb30 100644
+Binary files a/backend/agents/__pycache__/brief_me_agent.cpython-311.pyc and b/backend/agents/__pycache__/brief_me_agent.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/coach_agent.cpython-311.pyc b/backend/agents/__pycache__/coach_agent.cpython-311.pyc
+index 54538dd0..f86b4ac3 100644
+Binary files a/backend/agents/__pycache__/coach_agent.cpython-311.pyc and b/backend/agents/__pycache__/coach_agent.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/llm_provider.cpython-311.pyc b/backend/agents/__pycache__/llm_provider.cpython-311.pyc
+index fdfd6f60..6b5c77db 100644
+Binary files a/backend/agents/__pycache__/llm_provider.cpython-311.pyc and b/backend/agents/__pycache__/llm_provider.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/orchestrator.cpython-311.pyc b/backend/agents/__pycache__/orchestrator.cpython-311.pyc
+index 1fd81e0c..12cfb678 100644
+Binary files a/backend/agents/__pycache__/orchestrator.cpython-311.pyc and b/backend/agents/__pycache__/orchestrator.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/router_agent.cpython-311.pyc b/backend/agents/__pycache__/router_agent.cpython-311.pyc
+index bfd64ae5..1c28ff70 100644
+Binary files a/backend/agents/__pycache__/router_agent.cpython-311.pyc and b/backend/agents/__pycache__/router_agent.cpython-311.pyc differ
+diff --git a/backend/agents/__pycache__/trade_executor_agent.cpython-311.pyc b/backend/agents/__pycache__/trade_executor_agent.cpython-311.pyc
+index efc92c28..d06fff83 100644
+Binary files a/backend/agents/__pycache__/trade_executor_agent.cpython-311.pyc and b/backend/agents/__pycache__/trade_executor_agent.cpython-311.pyc differ
+diff --git a/backend/data/__pycache__/__init__.cpython-311.pyc b/backend/data/__pycache__/__init__.cpython-311.pyc
+index 62efaba0..1b4c9c25 100644
+Binary files a/backend/data/__pycache__/__init__.cpython-311.pyc and b/backend/data/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/data/__pycache__/index_symbols.cpython-311.pyc b/backend/data/__pycache__/index_symbols.cpython-311.pyc
+index 5c710e60..32146aa5 100644
+Binary files a/backend/data/__pycache__/index_symbols.cpython-311.pyc and b/backend/data/__pycache__/index_symbols.cpython-311.pyc differ
+diff --git a/backend/data/__pycache__/strategies_data.cpython-311.pyc b/backend/data/__pycache__/strategies_data.cpython-311.pyc
+index 6a635389..77976dfc 100644
+Binary files a/backend/data/__pycache__/strategies_data.cpython-311.pyc and b/backend/data/__pycache__/strategies_data.cpython-311.pyc differ
+diff --git a/backend/models/__pycache__/__init__.cpython-311.pyc b/backend/models/__pycache__/__init__.cpython-311.pyc
+index c8b7cda9..31683144 100644
+Binary files a/backend/models/__pycache__/__init__.cpython-311.pyc and b/backend/models/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/models/__pycache__/learning_models.cpython-311.pyc b/backend/models/__pycache__/learning_models.cpython-311.pyc
+index c069178d..74ca533a 100644
+Binary files a/backend/models/__pycache__/learning_models.cpython-311.pyc and b/backend/models/__pycache__/learning_models.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/__init__.cpython-311.pyc b/backend/routers/__pycache__/__init__.cpython-311.pyc
+index 47786310..92e0a99c 100644
+Binary files a/backend/routers/__pycache__/__init__.cpython-311.pyc and b/backend/routers/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/advanced_backtest_router.cpython-311.pyc b/backend/routers/__pycache__/advanced_backtest_router.cpython-311.pyc
+index 844d0ca9..9dba60d5 100644
+Binary files a/backend/routers/__pycache__/advanced_backtest_router.cpython-311.pyc and b/backend/routers/__pycache__/advanced_backtest_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/agents.cpython-311.pyc b/backend/routers/__pycache__/agents.cpython-311.pyc
+index cc5925ac..8341263f 100644
+Binary files a/backend/routers/__pycache__/agents.cpython-311.pyc and b/backend/routers/__pycache__/agents.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/ai_modules.cpython-311.pyc b/backend/routers/__pycache__/ai_modules.cpython-311.pyc
+index 8b279703..5e2ee307 100644
+Binary files a/backend/routers/__pycache__/ai_modules.cpython-311.pyc and b/backend/routers/__pycache__/ai_modules.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/alerts.cpython-311.pyc b/backend/routers/__pycache__/alerts.cpython-311.pyc
+index 8303b0f1..36d5f3ad 100644
+Binary files a/backend/routers/__pycache__/alerts.cpython-311.pyc and b/backend/routers/__pycache__/alerts.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/alpaca.cpython-311.pyc b/backend/routers/__pycache__/alpaca.cpython-311.pyc
+index ac447415..96ac3486 100644
+Binary files a/backend/routers/__pycache__/alpaca.cpython-311.pyc and b/backend/routers/__pycache__/alpaca.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/assistant.cpython-311.pyc b/backend/routers/__pycache__/assistant.cpython-311.pyc
+index 63e7df3e..3cf601df 100644
+Binary files a/backend/routers/__pycache__/assistant.cpython-311.pyc and b/backend/routers/__pycache__/assistant.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/catalyst.cpython-311.pyc b/backend/routers/__pycache__/catalyst.cpython-311.pyc
+index cc687503..4ac8af7d 100644
+Binary files a/backend/routers/__pycache__/catalyst.cpython-311.pyc and b/backend/routers/__pycache__/catalyst.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/circuit_breaker.cpython-311.pyc b/backend/routers/__pycache__/circuit_breaker.cpython-311.pyc
+index 2e19bbb8..a7e640bd 100644
+Binary files a/backend/routers/__pycache__/circuit_breaker.cpython-311.pyc and b/backend/routers/__pycache__/circuit_breaker.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/config.cpython-311.pyc b/backend/routers/__pycache__/config.cpython-311.pyc
+index 2033aa48..8474cc57 100644
+Binary files a/backend/routers/__pycache__/config.cpython-311.pyc and b/backend/routers/__pycache__/config.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/context_awareness.cpython-311.pyc b/backend/routers/__pycache__/context_awareness.cpython-311.pyc
+index ec3ecbd2..5ae88f23 100644
+Binary files a/backend/routers/__pycache__/context_awareness.cpython-311.pyc and b/backend/routers/__pycache__/context_awareness.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/data_storage_router.cpython-311.pyc b/backend/routers/__pycache__/data_storage_router.cpython-311.pyc
+index 6490714a..d95169db 100644
+Binary files a/backend/routers/__pycache__/data_storage_router.cpython-311.pyc and b/backend/routers/__pycache__/data_storage_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/dynamic_risk_router.cpython-311.pyc b/backend/routers/__pycache__/dynamic_risk_router.cpython-311.pyc
+index adf2d139..ceb8f9ad 100644
+Binary files a/backend/routers/__pycache__/dynamic_risk_router.cpython-311.pyc and b/backend/routers/__pycache__/dynamic_risk_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/ev_tracking.cpython-311.pyc b/backend/routers/__pycache__/ev_tracking.cpython-311.pyc
+index d6b252dc..595f3e4d 100644
+Binary files a/backend/routers/__pycache__/ev_tracking.cpython-311.pyc and b/backend/routers/__pycache__/ev_tracking.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/features.cpython-311.pyc b/backend/routers/__pycache__/features.cpython-311.pyc
+index e43f32cd..7eb6f24f 100644
+Binary files a/backend/routers/__pycache__/features.cpython-311.pyc and b/backend/routers/__pycache__/features.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/hybrid_data.cpython-311.pyc b/backend/routers/__pycache__/hybrid_data.cpython-311.pyc
+index fa19bc3b..c0a07f4f 100644
+Binary files a/backend/routers/__pycache__/hybrid_data.cpython-311.pyc and b/backend/routers/__pycache__/hybrid_data.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/ib.cpython-311.pyc b/backend/routers/__pycache__/ib.cpython-311.pyc
+index a2d34746..fead4369 100644
+Binary files a/backend/routers/__pycache__/ib.cpython-311.pyc and b/backend/routers/__pycache__/ib.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/ib_collector_router.cpython-311.pyc b/backend/routers/__pycache__/ib_collector_router.cpython-311.pyc
+index 8801d5ea..80b32cf5 100644
+Binary files a/backend/routers/__pycache__/ib_collector_router.cpython-311.pyc and b/backend/routers/__pycache__/ib_collector_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/journal_router.cpython-311.pyc b/backend/routers/__pycache__/journal_router.cpython-311.pyc
+index 44261a8c..7e70b41c 100644
+Binary files a/backend/routers/__pycache__/journal_router.cpython-311.pyc and b/backend/routers/__pycache__/journal_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/knowledge.cpython-311.pyc b/backend/routers/__pycache__/knowledge.cpython-311.pyc
+index 4fc36e60..c772728c 100644
+Binary files a/backend/routers/__pycache__/knowledge.cpython-311.pyc and b/backend/routers/__pycache__/knowledge.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/learning.cpython-311.pyc b/backend/routers/__pycache__/learning.cpython-311.pyc
+index 471de010..3110e091 100644
+Binary files a/backend/routers/__pycache__/learning.cpython-311.pyc and b/backend/routers/__pycache__/learning.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/learning_connectors_router.cpython-311.pyc b/backend/routers/__pycache__/learning_connectors_router.cpython-311.pyc
+index b7e4f688..fed482be 100644
+Binary files a/backend/routers/__pycache__/learning_connectors_router.cpython-311.pyc and b/backend/routers/__pycache__/learning_connectors_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/learning_dashboard.cpython-311.pyc b/backend/routers/__pycache__/learning_dashboard.cpython-311.pyc
+index 9a621bf8..73ba8f33 100644
+Binary files a/backend/routers/__pycache__/learning_dashboard.cpython-311.pyc and b/backend/routers/__pycache__/learning_dashboard.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/live_scanner.cpython-311.pyc b/backend/routers/__pycache__/live_scanner.cpython-311.pyc
+index c2b76b4c..72b74527 100644
+Binary files a/backend/routers/__pycache__/live_scanner.cpython-311.pyc and b/backend/routers/__pycache__/live_scanner.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/market_context.cpython-311.pyc b/backend/routers/__pycache__/market_context.cpython-311.pyc
+index 36fff518..79426c43 100644
+Binary files a/backend/routers/__pycache__/market_context.cpython-311.pyc and b/backend/routers/__pycache__/market_context.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/market_intel.cpython-311.pyc b/backend/routers/__pycache__/market_intel.cpython-311.pyc
+index c09ce02d..73d3adfd 100644
+Binary files a/backend/routers/__pycache__/market_intel.cpython-311.pyc and b/backend/routers/__pycache__/market_intel.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/market_regime.cpython-311.pyc b/backend/routers/__pycache__/market_regime.cpython-311.pyc
+index 6d70a04f..390b6b91 100644
+Binary files a/backend/routers/__pycache__/market_regime.cpython-311.pyc and b/backend/routers/__pycache__/market_regime.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/market_scanner.cpython-311.pyc b/backend/routers/__pycache__/market_scanner.cpython-311.pyc
+index 0ea49d92..78239f6a 100644
+Binary files a/backend/routers/__pycache__/market_scanner.cpython-311.pyc and b/backend/routers/__pycache__/market_scanner.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/medium_learning_router.cpython-311.pyc b/backend/routers/__pycache__/medium_learning_router.cpython-311.pyc
+index da4e868c..6fee5c5f 100644
+Binary files a/backend/routers/__pycache__/medium_learning_router.cpython-311.pyc and b/backend/routers/__pycache__/medium_learning_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/notifications.cpython-311.pyc b/backend/routers/__pycache__/notifications.cpython-311.pyc
+index 9d6d8b0a..c75721b5 100644
+Binary files a/backend/routers/__pycache__/notifications.cpython-311.pyc and b/backend/routers/__pycache__/notifications.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/patterns.cpython-311.pyc b/backend/routers/__pycache__/patterns.cpython-311.pyc
+index 5e53c06a..beaec626 100644
+Binary files a/backend/routers/__pycache__/patterns.cpython-311.pyc and b/backend/routers/__pycache__/patterns.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/portfolio_awareness.cpython-311.pyc b/backend/routers/__pycache__/portfolio_awareness.cpython-311.pyc
+index 108a03ad..6668e70d 100644
+Binary files a/backend/routers/__pycache__/portfolio_awareness.cpython-311.pyc and b/backend/routers/__pycache__/portfolio_awareness.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/quality.cpython-311.pyc b/backend/routers/__pycache__/quality.cpython-311.pyc
+index 544c338b..f338ebe8 100644
+Binary files a/backend/routers/__pycache__/quality.cpython-311.pyc and b/backend/routers/__pycache__/quality.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/quick_actions.cpython-311.pyc b/backend/routers/__pycache__/quick_actions.cpython-311.pyc
+index 0a863b94..08fa40a2 100644
+Binary files a/backend/routers/__pycache__/quick_actions.cpython-311.pyc and b/backend/routers/__pycache__/quick_actions.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/rag_router.cpython-311.pyc b/backend/routers/__pycache__/rag_router.cpython-311.pyc
+index 541357a8..cdfbf717 100644
+Binary files a/backend/routers/__pycache__/rag_router.cpython-311.pyc and b/backend/routers/__pycache__/rag_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/regime_performance.cpython-311.pyc b/backend/routers/__pycache__/regime_performance.cpython-311.pyc
+index 0974846e..a4a3e0be 100644
+Binary files a/backend/routers/__pycache__/regime_performance.cpython-311.pyc and b/backend/routers/__pycache__/regime_performance.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/research.cpython-311.pyc b/backend/routers/__pycache__/research.cpython-311.pyc
+index fda0317a..340924ff 100644
+Binary files a/backend/routers/__pycache__/research.cpython-311.pyc and b/backend/routers/__pycache__/research.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/risk_router.cpython-311.pyc b/backend/routers/__pycache__/risk_router.cpython-311.pyc
+index 76f96b10..7a2173dc 100644
+Binary files a/backend/routers/__pycache__/risk_router.cpython-311.pyc and b/backend/routers/__pycache__/risk_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/rules.cpython-311.pyc b/backend/routers/__pycache__/rules.cpython-311.pyc
+index 7e3e08ab..e5fcfd41 100644
+Binary files a/backend/routers/__pycache__/rules.cpython-311.pyc and b/backend/routers/__pycache__/rules.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/scanner.cpython-311.pyc b/backend/routers/__pycache__/scanner.cpython-311.pyc
+index f669ecda..64d41c3b 100644
+Binary files a/backend/routers/__pycache__/scanner.cpython-311.pyc and b/backend/routers/__pycache__/scanner.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/scheduler.cpython-311.pyc b/backend/routers/__pycache__/scheduler.cpython-311.pyc
+index edbf9f46..0f539761 100644
+Binary files a/backend/routers/__pycache__/scheduler.cpython-311.pyc and b/backend/routers/__pycache__/scheduler.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/scheduler_router.cpython-311.pyc b/backend/routers/__pycache__/scheduler_router.cpython-311.pyc
+index 00e8bb65..36a0b319 100644
+Binary files a/backend/routers/__pycache__/scheduler_router.cpython-311.pyc and b/backend/routers/__pycache__/scheduler_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/scoring.cpython-311.pyc b/backend/routers/__pycache__/scoring.cpython-311.pyc
+index 11d9e93b..4e59fcf8 100644
+Binary files a/backend/routers/__pycache__/scoring.cpython-311.pyc and b/backend/routers/__pycache__/scoring.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/scripts.cpython-311.pyc b/backend/routers/__pycache__/scripts.cpython-311.pyc
+index 2f03befc..a82c1925 100644
+Binary files a/backend/routers/__pycache__/scripts.cpython-311.pyc and b/backend/routers/__pycache__/scripts.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/sectors.cpython-311.pyc b/backend/routers/__pycache__/sectors.cpython-311.pyc
+index efcd4730..35aca303 100644
+Binary files a/backend/routers/__pycache__/sectors.cpython-311.pyc and b/backend/routers/__pycache__/sectors.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/sentcom.cpython-311.pyc b/backend/routers/__pycache__/sentcom.cpython-311.pyc
+index f8955c24..94110b8c 100644
+Binary files a/backend/routers/__pycache__/sentcom.cpython-311.pyc and b/backend/routers/__pycache__/sentcom.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/sentiment.cpython-311.pyc b/backend/routers/__pycache__/sentiment.cpython-311.pyc
+index 086043fe..5fde159a 100644
+Binary files a/backend/routers/__pycache__/sentiment.cpython-311.pyc and b/backend/routers/__pycache__/sentiment.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/simulation_router.cpython-311.pyc b/backend/routers/__pycache__/simulation_router.cpython-311.pyc
+deleted file mode 100644
+index be2b98f6..00000000
+Binary files a/backend/routers/__pycache__/simulation_router.cpython-311.pyc and /dev/null differ
+diff --git a/backend/routers/__pycache__/simulator.cpython-311.pyc b/backend/routers/__pycache__/simulator.cpython-311.pyc
+index 523018ae..4f9ad263 100644
+Binary files a/backend/routers/__pycache__/simulator.cpython-311.pyc and b/backend/routers/__pycache__/simulator.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/slow_learning_router.cpython-311.pyc b/backend/routers/__pycache__/slow_learning_router.cpython-311.pyc
+index 1bac6ab9..fd008ae8 100644
+Binary files a/backend/routers/__pycache__/slow_learning_router.cpython-311.pyc and b/backend/routers/__pycache__/slow_learning_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/smart_stops.cpython-311.pyc b/backend/routers/__pycache__/smart_stops.cpython-311.pyc
+index 795fbc27..364135fb 100644
+Binary files a/backend/routers/__pycache__/smart_stops.cpython-311.pyc and b/backend/routers/__pycache__/smart_stops.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/smb_router.cpython-311.pyc b/backend/routers/__pycache__/smb_router.cpython-311.pyc
+index f2a11a31..b9094e24 100644
+Binary files a/backend/routers/__pycache__/smb_router.cpython-311.pyc and b/backend/routers/__pycache__/smb_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/startup_status.cpython-311.pyc b/backend/routers/__pycache__/startup_status.cpython-311.pyc
+index f16c157b..197ca1e7 100644
+Binary files a/backend/routers/__pycache__/startup_status.cpython-311.pyc and b/backend/routers/__pycache__/startup_status.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/strategies.cpython-311.pyc b/backend/routers/__pycache__/strategies.cpython-311.pyc
+index e0455c3a..e023452f 100644
+Binary files a/backend/routers/__pycache__/strategies.cpython-311.pyc and b/backend/routers/__pycache__/strategies.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/strategy_promotion_router.cpython-311.pyc b/backend/routers/__pycache__/strategy_promotion_router.cpython-311.pyc
+index 579fd06a..c68643b1 100644
+Binary files a/backend/routers/__pycache__/strategy_promotion_router.cpython-311.pyc and b/backend/routers/__pycache__/strategy_promotion_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/technicals.cpython-311.pyc b/backend/routers/__pycache__/technicals.cpython-311.pyc
+index f42afc66..b0fd4abb 100644
+Binary files a/backend/routers/__pycache__/technicals.cpython-311.pyc and b/backend/routers/__pycache__/technicals.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/tqs_router.cpython-311.pyc b/backend/routers/__pycache__/tqs_router.cpython-311.pyc
+index 80d52936..205e3059 100644
+Binary files a/backend/routers/__pycache__/tqs_router.cpython-311.pyc and b/backend/routers/__pycache__/tqs_router.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/trade_history.cpython-311.pyc b/backend/routers/__pycache__/trade_history.cpython-311.pyc
+index 7c8cdc54..7bb315d4 100644
+Binary files a/backend/routers/__pycache__/trade_history.cpython-311.pyc and b/backend/routers/__pycache__/trade_history.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/trades.cpython-311.pyc b/backend/routers/__pycache__/trades.cpython-311.pyc
+index 43b1bbeb..d817a47d 100644
+Binary files a/backend/routers/__pycache__/trades.cpython-311.pyc and b/backend/routers/__pycache__/trades.cpython-311.pyc differ
+diff --git a/backend/routers/__pycache__/trading_bot.cpython-311.pyc b/backend/routers/__pycache__/trading_bot.cpython-311.pyc
+index 558faddb..359fc294 100644
+Binary files a/backend/routers/__pycache__/trading_bot.cpython-311.pyc and b/backend/routers/__pycache__/trading_bot.cpython-311.pyc differ
+diff --git a/backend/routers/ib_modules/__pycache__/__init__.cpython-311.pyc b/backend/routers/ib_modules/__pycache__/__init__.cpython-311.pyc
+deleted file mode 100644
+index 94aa96c6..00000000
+Binary files a/backend/routers/ib_modules/__pycache__/__init__.cpython-311.pyc and /dev/null differ
+diff --git a/backend/routers/ib_modules/__pycache__/alerts.cpython-311.pyc b/backend/routers/ib_modules/__pycache__/alerts.cpython-311.pyc
+deleted file mode 100644
+index 572d8fc7..00000000
+Binary files a/backend/routers/ib_modules/__pycache__/alerts.cpython-311.pyc and /dev/null differ
+diff --git a/backend/routers/ib_modules/__pycache__/collection_mode.cpython-311.pyc b/backend/routers/ib_modules/__pycache__/collection_mode.cpython-311.pyc
+deleted file mode 100644
+index 2ea06a7c..00000000
+Binary files a/backend/routers/ib_modules/__pycache__/collection_mode.cpython-311.pyc and /dev/null differ
+diff --git a/backend/routers/ib_modules/__pycache__/historical_data.cpython-311.pyc b/backend/routers/ib_modules/__pycache__/historical_data.cpython-311.pyc
+deleted file mode 100644
+index 7c567d77..00000000
+Binary files a/backend/routers/ib_modules/__pycache__/historical_data.cpython-311.pyc and /dev/null differ
+diff --git a/backend/routers/ib_modules/__pycache__/news.cpython-311.pyc b/backend/routers/ib_modules/__pycache__/news.cpython-311.pyc
+deleted file mode 100644
+index 8eb6346e..00000000
+Binary files a/backend/routers/ib_modules/__pycache__/news.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/__init__.cpython-311.pyc b/backend/services/__pycache__/__init__.cpython-311.pyc
+index 70a43843..f87523c1 100644
+Binary files a/backend/services/__pycache__/__init__.cpython-311.pyc and b/backend/services/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/accuracy_tracker.cpython-311.pyc b/backend/services/__pycache__/accuracy_tracker.cpython-311.pyc
+deleted file mode 100644
+index f26d5154..00000000
+Binary files a/backend/services/__pycache__/accuracy_tracker.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/ai_assistant_service.cpython-311.pyc b/backend/services/__pycache__/ai_assistant_service.cpython-311.pyc
+index 69a346ad..788bf03c 100644
+Binary files a/backend/services/__pycache__/ai_assistant_service.cpython-311.pyc and b/backend/services/__pycache__/ai_assistant_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/alert_system.cpython-311.pyc b/backend/services/__pycache__/alert_system.cpython-311.pyc
+index 15192a86..67366063 100644
+Binary files a/backend/services/__pycache__/alert_system.cpython-311.pyc and b/backend/services/__pycache__/alert_system.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/alpaca_service.cpython-311.pyc b/backend/services/__pycache__/alpaca_service.cpython-311.pyc
+index 564c92c8..44a8c8d3 100644
+Binary files a/backend/services/__pycache__/alpaca_service.cpython-311.pyc and b/backend/services/__pycache__/alpaca_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/catalyst_scoring.cpython-311.pyc b/backend/services/__pycache__/catalyst_scoring.cpython-311.pyc
+index e5fa9925..d35d6faf 100644
+Binary files a/backend/services/__pycache__/catalyst_scoring.cpython-311.pyc and b/backend/services/__pycache__/catalyst_scoring.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/chart_pattern_service.cpython-311.pyc b/backend/services/__pycache__/chart_pattern_service.cpython-311.pyc
+index c66382c7..c2363161 100644
+Binary files a/backend/services/__pycache__/chart_pattern_service.cpython-311.pyc and b/backend/services/__pycache__/chart_pattern_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/circuit_breaker.cpython-311.pyc b/backend/services/__pycache__/circuit_breaker.cpython-311.pyc
+index f17b0b1a..946b1a39 100644
+Binary files a/backend/services/__pycache__/circuit_breaker.cpython-311.pyc and b/backend/services/__pycache__/circuit_breaker.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/context_awareness_service.cpython-311.pyc b/backend/services/__pycache__/context_awareness_service.cpython-311.pyc
+index 70706f17..0a04ba21 100644
+Binary files a/backend/services/__pycache__/context_awareness_service.cpython-311.pyc and b/backend/services/__pycache__/context_awareness_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/data_cache.cpython-311.pyc b/backend/services/__pycache__/data_cache.cpython-311.pyc
+index 0c9c0e31..c3220285 100644
+Binary files a/backend/services/__pycache__/data_cache.cpython-311.pyc and b/backend/services/__pycache__/data_cache.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/data_storage_manager.cpython-311.pyc b/backend/services/__pycache__/data_storage_manager.cpython-311.pyc
+index e422f5e5..59f48d9a 100644
+Binary files a/backend/services/__pycache__/data_storage_manager.cpython-311.pyc and b/backend/services/__pycache__/data_storage_manager.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/document_processor.cpython-311.pyc b/backend/services/__pycache__/document_processor.cpython-311.pyc
+index 83d0a525..0952c617 100644
+Binary files a/backend/services/__pycache__/document_processor.cpython-311.pyc and b/backend/services/__pycache__/document_processor.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/dynamic_risk_engine.cpython-311.pyc b/backend/services/__pycache__/dynamic_risk_engine.cpython-311.pyc
+index c1b84d29..ed64c098 100644
+Binary files a/backend/services/__pycache__/dynamic_risk_engine.cpython-311.pyc and b/backend/services/__pycache__/dynamic_risk_engine.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/dynamic_thresholds.cpython-311.pyc b/backend/services/__pycache__/dynamic_thresholds.cpython-311.pyc
+index c0267ec6..86e1b096 100644
+Binary files a/backend/services/__pycache__/dynamic_thresholds.cpython-311.pyc and b/backend/services/__pycache__/dynamic_thresholds.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/earnings_scoring_service.cpython-311.pyc b/backend/services/__pycache__/earnings_scoring_service.cpython-311.pyc
+index 35ce1470..ba403183 100644
+Binary files a/backend/services/__pycache__/earnings_scoring_service.cpython-311.pyc and b/backend/services/__pycache__/earnings_scoring_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/earnings_service.cpython-311.pyc b/backend/services/__pycache__/earnings_service.cpython-311.pyc
+index 189c23c1..b307ffec 100644
+Binary files a/backend/services/__pycache__/earnings_service.cpython-311.pyc and b/backend/services/__pycache__/earnings_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/enhanced_alerts.cpython-311.pyc b/backend/services/__pycache__/enhanced_alerts.cpython-311.pyc
+deleted file mode 100644
+index 769fa06d..00000000
+Binary files a/backend/services/__pycache__/enhanced_alerts.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/enhanced_scanner.cpython-311.pyc b/backend/services/__pycache__/enhanced_scanner.cpython-311.pyc
+index 72f78010..5879970f 100644
+Binary files a/backend/services/__pycache__/enhanced_scanner.cpython-311.pyc and b/backend/services/__pycache__/enhanced_scanner.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/eod_generation_service.cpython-311.pyc b/backend/services/__pycache__/eod_generation_service.cpython-311.pyc
+index 60de653a..c3e136c4 100644
+Binary files a/backend/services/__pycache__/eod_generation_service.cpython-311.pyc and b/backend/services/__pycache__/eod_generation_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/ev_tracking_service.cpython-311.pyc b/backend/services/__pycache__/ev_tracking_service.cpython-311.pyc
+index 0a243d04..fe3ffdf7 100644
+Binary files a/backend/services/__pycache__/ev_tracking_service.cpython-311.pyc and b/backend/services/__pycache__/ev_tracking_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/execution_tracker_service.cpython-311.pyc b/backend/services/__pycache__/execution_tracker_service.cpython-311.pyc
+index 444ac8a0..8c9674b6 100644
+Binary files a/backend/services/__pycache__/execution_tracker_service.cpython-311.pyc and b/backend/services/__pycache__/execution_tracker_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/feature_engine.cpython-311.pyc b/backend/services/__pycache__/feature_engine.cpython-311.pyc
+index bfa148b2..6013cb86 100644
+Binary files a/backend/services/__pycache__/feature_engine.cpython-311.pyc and b/backend/services/__pycache__/feature_engine.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/graceful_degradation.cpython-311.pyc b/backend/services/__pycache__/graceful_degradation.cpython-311.pyc
+index 03729d5d..fbd4fd71 100644
+Binary files a/backend/services/__pycache__/graceful_degradation.cpython-311.pyc and b/backend/services/__pycache__/graceful_degradation.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/health_monitor.cpython-311.pyc b/backend/services/__pycache__/health_monitor.cpython-311.pyc
+index 5df21988..383959a2 100644
+Binary files a/backend/services/__pycache__/health_monitor.cpython-311.pyc and b/backend/services/__pycache__/health_monitor.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/historical_data_queue_service.cpython-311.pyc b/backend/services/__pycache__/historical_data_queue_service.cpython-311.pyc
+index f3da0ec0..873d6706 100644
+Binary files a/backend/services/__pycache__/historical_data_queue_service.cpython-311.pyc and b/backend/services/__pycache__/historical_data_queue_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/historical_simulation_engine.cpython-311.pyc b/backend/services/__pycache__/historical_simulation_engine.cpython-311.pyc
+deleted file mode 100644
+index 748287cf..00000000
+Binary files a/backend/services/__pycache__/historical_simulation_engine.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/hybrid_data_service.cpython-311.pyc b/backend/services/__pycache__/hybrid_data_service.cpython-311.pyc
+index f51bcb85..55de00c4 100644
+Binary files a/backend/services/__pycache__/hybrid_data_service.cpython-311.pyc and b/backend/services/__pycache__/hybrid_data_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/ib_flex_service.cpython-311.pyc b/backend/services/__pycache__/ib_flex_service.cpython-311.pyc
+index 64029a4b..f1223647 100644
+Binary files a/backend/services/__pycache__/ib_flex_service.cpython-311.pyc and b/backend/services/__pycache__/ib_flex_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/ib_historical_collector.cpython-311.pyc b/backend/services/__pycache__/ib_historical_collector.cpython-311.pyc
+index 3e0d62f4..546a206e 100644
+Binary files a/backend/services/__pycache__/ib_historical_collector.cpython-311.pyc and b/backend/services/__pycache__/ib_historical_collector.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/ib_service.cpython-311.pyc b/backend/services/__pycache__/ib_service.cpython-311.pyc
+index c325bc2c..d71ecba6 100644
+Binary files a/backend/services/__pycache__/ib_service.cpython-311.pyc and b/backend/services/__pycache__/ib_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/index_universe.cpython-311.pyc b/backend/services/__pycache__/index_universe.cpython-311.pyc
+index a3998104..705cceee 100644
+Binary files a/backend/services/__pycache__/index_universe.cpython-311.pyc and b/backend/services/__pycache__/index_universe.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/knowledge_service.cpython-311.pyc b/backend/services/__pycache__/knowledge_service.cpython-311.pyc
+index 6b137473..21fa8679 100644
+Binary files a/backend/services/__pycache__/knowledge_service.cpython-311.pyc and b/backend/services/__pycache__/knowledge_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/learning_connectors_service.cpython-311.pyc b/backend/services/__pycache__/learning_connectors_service.cpython-311.pyc
+index a20fe5e3..9569542b 100644
+Binary files a/backend/services/__pycache__/learning_connectors_service.cpython-311.pyc and b/backend/services/__pycache__/learning_connectors_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/learning_context_provider.cpython-311.pyc b/backend/services/__pycache__/learning_context_provider.cpython-311.pyc
+index d3f84f57..f2b6b9f7 100644
+Binary files a/backend/services/__pycache__/learning_context_provider.cpython-311.pyc and b/backend/services/__pycache__/learning_context_provider.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/learning_loop_service.cpython-311.pyc b/backend/services/__pycache__/learning_loop_service.cpython-311.pyc
+index cb265829..c67ba762 100644
+Binary files a/backend/services/__pycache__/learning_loop_service.cpython-311.pyc and b/backend/services/__pycache__/learning_loop_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/llm_service.cpython-311.pyc b/backend/services/__pycache__/llm_service.cpython-311.pyc
+index 5655321c..dc241a98 100644
+Binary files a/backend/services/__pycache__/llm_service.cpython-311.pyc and b/backend/services/__pycache__/llm_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_context.cpython-311.pyc b/backend/services/__pycache__/market_context.cpython-311.pyc
+index c4546016..e54d462d 100644
+Binary files a/backend/services/__pycache__/market_context.cpython-311.pyc and b/backend/services/__pycache__/market_context.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_indicators.cpython-311.pyc b/backend/services/__pycache__/market_indicators.cpython-311.pyc
+index 9c5b0216..ac78de1f 100644
+Binary files a/backend/services/__pycache__/market_indicators.cpython-311.pyc and b/backend/services/__pycache__/market_indicators.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_intel_service.cpython-311.pyc b/backend/services/__pycache__/market_intel_service.cpython-311.pyc
+index da6ec8fa..640f32ca 100644
+Binary files a/backend/services/__pycache__/market_intel_service.cpython-311.pyc and b/backend/services/__pycache__/market_intel_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_regime_engine.cpython-311.pyc b/backend/services/__pycache__/market_regime_engine.cpython-311.pyc
+index 3fa64111..1546bb4d 100644
+Binary files a/backend/services/__pycache__/market_regime_engine.cpython-311.pyc and b/backend/services/__pycache__/market_regime_engine.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_scanner_service.cpython-311.pyc b/backend/services/__pycache__/market_scanner_service.cpython-311.pyc
+index 7dc25b81..64591b11 100644
+Binary files a/backend/services/__pycache__/market_scanner_service.cpython-311.pyc and b/backend/services/__pycache__/market_scanner_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/market_simulator_service.cpython-311.pyc b/backend/services/__pycache__/market_simulator_service.cpython-311.pyc
+index df8b7c68..67c4731b 100644
+Binary files a/backend/services/__pycache__/market_simulator_service.cpython-311.pyc and b/backend/services/__pycache__/market_simulator_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/news_service.cpython-311.pyc b/backend/services/__pycache__/news_service.cpython-311.pyc
+index 4dc9f119..6297f565 100644
+Binary files a/backend/services/__pycache__/news_service.cpython-311.pyc and b/backend/services/__pycache__/news_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/notifications.cpython-311.pyc b/backend/services/__pycache__/notifications.cpython-311.pyc
+index 46b6a414..fa8270f4 100644
+Binary files a/backend/services/__pycache__/notifications.cpython-311.pyc and b/backend/services/__pycache__/notifications.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/ollama_proxy_manager.cpython-311.pyc b/backend/services/__pycache__/ollama_proxy_manager.cpython-311.pyc
+index f5cb06dc..887b2838 100644
+Binary files a/backend/services/__pycache__/ollama_proxy_manager.cpython-311.pyc and b/backend/services/__pycache__/ollama_proxy_manager.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/order_queue_service.cpython-311.pyc b/backend/services/__pycache__/order_queue_service.cpython-311.pyc
+index 786b8adf..95a0c23c 100644
+Binary files a/backend/services/__pycache__/order_queue_service.cpython-311.pyc and b/backend/services/__pycache__/order_queue_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/portfolio_awareness_service.cpython-311.pyc b/backend/services/__pycache__/portfolio_awareness_service.cpython-311.pyc
+index dda3b3e2..6a589bd2 100644
+Binary files a/backend/services/__pycache__/portfolio_awareness_service.cpython-311.pyc and b/backend/services/__pycache__/portfolio_awareness_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/position_sizer.cpython-311.pyc b/backend/services/__pycache__/position_sizer.cpython-311.pyc
+index c7f3faec..254cb71e 100644
+Binary files a/backend/services/__pycache__/position_sizer.cpython-311.pyc and b/backend/services/__pycache__/position_sizer.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/predictive_scanner.cpython-311.pyc b/backend/services/__pycache__/predictive_scanner.cpython-311.pyc
+index 6d128630..161e4112 100644
+Binary files a/backend/services/__pycache__/predictive_scanner.cpython-311.pyc and b/backend/services/__pycache__/predictive_scanner.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/quality_service.cpython-311.pyc b/backend/services/__pycache__/quality_service.cpython-311.pyc
+index c710fdb4..0cb1d585 100644
+Binary files a/backend/services/__pycache__/quality_service.cpython-311.pyc and b/backend/services/__pycache__/quality_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/realtime_technical_service.cpython-311.pyc b/backend/services/__pycache__/realtime_technical_service.cpython-311.pyc
+index 082f80fb..352bd36d 100644
+Binary files a/backend/services/__pycache__/realtime_technical_service.cpython-311.pyc and b/backend/services/__pycache__/realtime_technical_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/regime_performance_service.cpython-311.pyc b/backend/services/__pycache__/regime_performance_service.cpython-311.pyc
+index 69e6b0bf..58bdc36d 100644
+Binary files a/backend/services/__pycache__/regime_performance_service.cpython-311.pyc and b/backend/services/__pycache__/regime_performance_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/scheduler_service.cpython-311.pyc b/backend/services/__pycache__/scheduler_service.cpython-311.pyc
+index 7755e5df..6fb9b1e4 100644
+Binary files a/backend/services/__pycache__/scheduler_service.cpython-311.pyc and b/backend/services/__pycache__/scheduler_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/scoring_engine.cpython-311.pyc b/backend/services/__pycache__/scoring_engine.cpython-311.pyc
+index d82fca2d..ee9df84b 100644
+Binary files a/backend/services/__pycache__/scoring_engine.cpython-311.pyc and b/backend/services/__pycache__/scoring_engine.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/sector_analysis_service.cpython-311.pyc b/backend/services/__pycache__/sector_analysis_service.cpython-311.pyc
+index e937f245..7a7b2f4b 100644
+Binary files a/backend/services/__pycache__/sector_analysis_service.cpython-311.pyc and b/backend/services/__pycache__/sector_analysis_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/sentcom_service.cpython-311.pyc b/backend/services/__pycache__/sentcom_service.cpython-311.pyc
+index b2d6de2b..9e1cba1d 100644
+Binary files a/backend/services/__pycache__/sentcom_service.cpython-311.pyc and b/backend/services/__pycache__/sentcom_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/sentiment_analysis_service.cpython-311.pyc b/backend/services/__pycache__/sentiment_analysis_service.cpython-311.pyc
+index fcfc7a96..bb6e65a0 100644
+Binary files a/backend/services/__pycache__/sentiment_analysis_service.cpython-311.pyc and b/backend/services/__pycache__/sentiment_analysis_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/service_registry.cpython-311.pyc b/backend/services/__pycache__/service_registry.cpython-311.pyc
+index ccc9df30..ee18945f 100644
+Binary files a/backend/services/__pycache__/service_registry.cpython-311.pyc and b/backend/services/__pycache__/service_registry.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/smart_context_engine.cpython-311.pyc b/backend/services/__pycache__/smart_context_engine.cpython-311.pyc
+deleted file mode 100644
+index cabf20d6..00000000
+Binary files a/backend/services/__pycache__/smart_context_engine.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/smart_stop_service.cpython-311.pyc b/backend/services/__pycache__/smart_stop_service.cpython-311.pyc
+index 86344ca6..56169c35 100644
+Binary files a/backend/services/__pycache__/smart_stop_service.cpython-311.pyc and b/backend/services/__pycache__/smart_stop_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/smart_watchlist_service.cpython-311.pyc b/backend/services/__pycache__/smart_watchlist_service.cpython-311.pyc
+index 1adb48b7..92cfc77b 100644
+Binary files a/backend/services/__pycache__/smart_watchlist_service.cpython-311.pyc and b/backend/services/__pycache__/smart_watchlist_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/smb_integration.cpython-311.pyc b/backend/services/__pycache__/smb_integration.cpython-311.pyc
+index 7874f051..db102b3e 100644
+Binary files a/backend/services/__pycache__/smb_integration.cpython-311.pyc and b/backend/services/__pycache__/smb_integration.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/smb_unified_scoring.cpython-311.pyc b/backend/services/__pycache__/smb_unified_scoring.cpython-311.pyc
+index 2b21b629..5b75770f 100644
+Binary files a/backend/services/__pycache__/smb_unified_scoring.cpython-311.pyc and b/backend/services/__pycache__/smb_unified_scoring.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/stock_data.cpython-311.pyc b/backend/services/__pycache__/stock_data.cpython-311.pyc
+index 5fc18e9e..c4191345 100644
+Binary files a/backend/services/__pycache__/stock_data.cpython-311.pyc and b/backend/services/__pycache__/stock_data.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/strategy_performance_service.cpython-311.pyc b/backend/services/__pycache__/strategy_performance_service.cpython-311.pyc
+index 6de8749e..353c011e 100644
+Binary files a/backend/services/__pycache__/strategy_performance_service.cpython-311.pyc and b/backend/services/__pycache__/strategy_performance_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/strategy_promotion_service.cpython-311.pyc b/backend/services/__pycache__/strategy_promotion_service.cpython-311.pyc
+index 9eb70511..dcce5346 100644
+Binary files a/backend/services/__pycache__/strategy_promotion_service.cpython-311.pyc and b/backend/services/__pycache__/strategy_promotion_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/strategy_recommendations.cpython-311.pyc b/backend/services/__pycache__/strategy_recommendations.cpython-311.pyc
+deleted file mode 100644
+index d4b2558b..00000000
+Binary files a/backend/services/__pycache__/strategy_recommendations.cpython-311.pyc and /dev/null differ
+diff --git a/backend/services/__pycache__/strategy_service.cpython-311.pyc b/backend/services/__pycache__/strategy_service.cpython-311.pyc
+index 847b0985..95136378 100644
+Binary files a/backend/services/__pycache__/strategy_service.cpython-311.pyc and b/backend/services/__pycache__/strategy_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/support_resistance_service.cpython-311.pyc b/backend/services/__pycache__/support_resistance_service.cpython-311.pyc
+index bcbeda5c..2903d913 100644
+Binary files a/backend/services/__pycache__/support_resistance_service.cpython-311.pyc and b/backend/services/__pycache__/support_resistance_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/trade_executor_service.cpython-311.pyc b/backend/services/__pycache__/trade_executor_service.cpython-311.pyc
+index 984b8a1b..c250e1e9 100644
+Binary files a/backend/services/__pycache__/trade_executor_service.cpython-311.pyc and b/backend/services/__pycache__/trade_executor_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/trade_journal.cpython-311.pyc b/backend/services/__pycache__/trade_journal.cpython-311.pyc
+index feac127b..90eed601 100644
+Binary files a/backend/services/__pycache__/trade_journal.cpython-311.pyc and b/backend/services/__pycache__/trade_journal.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/trading_bot_service.cpython-311.pyc b/backend/services/__pycache__/trading_bot_service.cpython-311.pyc
+index 062b0141..f8bd3e25 100644
+Binary files a/backend/services/__pycache__/trading_bot_service.cpython-311.pyc and b/backend/services/__pycache__/trading_bot_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/trading_rules.cpython-311.pyc b/backend/services/__pycache__/trading_rules.cpython-311.pyc
+index 1783aceb..4505b3a4 100644
+Binary files a/backend/services/__pycache__/trading_rules.cpython-311.pyc and b/backend/services/__pycache__/trading_rules.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/trading_scheduler.cpython-311.pyc b/backend/services/__pycache__/trading_scheduler.cpython-311.pyc
+index a8a85810..476d8e54 100644
+Binary files a/backend/services/__pycache__/trading_scheduler.cpython-311.pyc and b/backend/services/__pycache__/trading_scheduler.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/user_viewed_tracker.cpython-311.pyc b/backend/services/__pycache__/user_viewed_tracker.cpython-311.pyc
+index 182c3b38..4519b022 100644
+Binary files a/backend/services/__pycache__/user_viewed_tracker.cpython-311.pyc and b/backend/services/__pycache__/user_viewed_tracker.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/wave_scanner.cpython-311.pyc b/backend/services/__pycache__/wave_scanner.cpython-311.pyc
+index c314310f..a5579037 100644
+Binary files a/backend/services/__pycache__/wave_scanner.cpython-311.pyc and b/backend/services/__pycache__/wave_scanner.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/web_research_service.cpython-311.pyc b/backend/services/__pycache__/web_research_service.cpython-311.pyc
+index d5f84a5d..07647d37 100644
+Binary files a/backend/services/__pycache__/web_research_service.cpython-311.pyc and b/backend/services/__pycache__/web_research_service.cpython-311.pyc differ
+diff --git a/backend/services/__pycache__/weekly_report_service.cpython-311.pyc b/backend/services/__pycache__/weekly_report_service.cpython-311.pyc
+index 2d8df37f..6b6807e0 100644
+Binary files a/backend/services/__pycache__/weekly_report_service.cpython-311.pyc and b/backend/services/__pycache__/weekly_report_service.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/__init__.cpython-311.pyc b/backend/services/ai_modules/__pycache__/__init__.cpython-311.pyc
+index 0e70f950..efb63193 100644
+Binary files a/backend/services/ai_modules/__pycache__/__init__.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/agent_data_service.cpython-311.pyc b/backend/services/ai_modules/__pycache__/agent_data_service.cpython-311.pyc
+index 334f86c7..c2199aaf 100644
+Binary files a/backend/services/ai_modules/__pycache__/agent_data_service.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/agent_data_service.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/debate_agents.cpython-311.pyc b/backend/services/ai_modules/__pycache__/debate_agents.cpython-311.pyc
+index 3630707d..f0c11ab6 100644
+Binary files a/backend/services/ai_modules/__pycache__/debate_agents.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/debate_agents.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/institutional_flow.cpython-311.pyc b/backend/services/ai_modules/__pycache__/institutional_flow.cpython-311.pyc
+index 25b1216b..3fc7b8a2 100644
+Binary files a/backend/services/ai_modules/__pycache__/institutional_flow.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/institutional_flow.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/module_config.cpython-311.pyc b/backend/services/ai_modules/__pycache__/module_config.cpython-311.pyc
+index 56eb5c4d..5e49ae96 100644
+Binary files a/backend/services/ai_modules/__pycache__/module_config.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/module_config.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/risk_manager_agent.cpython-311.pyc b/backend/services/ai_modules/__pycache__/risk_manager_agent.cpython-311.pyc
+index 38d17f83..65b2fcbe 100644
+Binary files a/backend/services/ai_modules/__pycache__/risk_manager_agent.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/risk_manager_agent.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/shadow_tracker.cpython-311.pyc b/backend/services/ai_modules/__pycache__/shadow_tracker.cpython-311.pyc
+index 03749c5b..46b44601 100644
+Binary files a/backend/services/ai_modules/__pycache__/shadow_tracker.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/shadow_tracker.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/timeseries_features.cpython-311.pyc b/backend/services/ai_modules/__pycache__/timeseries_features.cpython-311.pyc
+index 155d4725..c92394fb 100644
+Binary files a/backend/services/ai_modules/__pycache__/timeseries_features.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/timeseries_features.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/timeseries_gbm.cpython-311.pyc b/backend/services/ai_modules/__pycache__/timeseries_gbm.cpython-311.pyc
+index 6490dd81..c173990c 100644
+Binary files a/backend/services/ai_modules/__pycache__/timeseries_gbm.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/timeseries_gbm.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/timeseries_service.cpython-311.pyc b/backend/services/ai_modules/__pycache__/timeseries_service.cpython-311.pyc
+index 1bf54020..fe5cd0f3 100644
+Binary files a/backend/services/ai_modules/__pycache__/timeseries_service.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/timeseries_service.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/trade_consultation.cpython-311.pyc b/backend/services/ai_modules/__pycache__/trade_consultation.cpython-311.pyc
+index cd2103c2..baca18c4 100644
+Binary files a/backend/services/ai_modules/__pycache__/trade_consultation.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/trade_consultation.cpython-311.pyc differ
+diff --git a/backend/services/ai_modules/__pycache__/volume_anomaly.cpython-311.pyc b/backend/services/ai_modules/__pycache__/volume_anomaly.cpython-311.pyc
+index 27b7b3d3..2638d190 100644
+Binary files a/backend/services/ai_modules/__pycache__/volume_anomaly.cpython-311.pyc and b/backend/services/ai_modules/__pycache__/volume_anomaly.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/__init__.cpython-311.pyc b/backend/services/medium_learning/__pycache__/__init__.cpython-311.pyc
+index 2c938340..cb163b7a 100644
+Binary files a/backend/services/medium_learning/__pycache__/__init__.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/calibration_service.cpython-311.pyc b/backend/services/medium_learning/__pycache__/calibration_service.cpython-311.pyc
+index ceb55c9b..28d3c646 100644
+Binary files a/backend/services/medium_learning/__pycache__/calibration_service.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/calibration_service.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/confirmation_validator_service.cpython-311.pyc b/backend/services/medium_learning/__pycache__/confirmation_validator_service.cpython-311.pyc
+index ddab2ff8..54b1a878 100644
+Binary files a/backend/services/medium_learning/__pycache__/confirmation_validator_service.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/confirmation_validator_service.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/context_performance_service.cpython-311.pyc b/backend/services/medium_learning/__pycache__/context_performance_service.cpython-311.pyc
+index 9cba9dac..654556ee 100644
+Binary files a/backend/services/medium_learning/__pycache__/context_performance_service.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/context_performance_service.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/edge_decay_service.cpython-311.pyc b/backend/services/medium_learning/__pycache__/edge_decay_service.cpython-311.pyc
+index 06aa6696..b0768fc4 100644
+Binary files a/backend/services/medium_learning/__pycache__/edge_decay_service.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/edge_decay_service.cpython-311.pyc differ
+diff --git a/backend/services/medium_learning/__pycache__/playbook_performance_service.cpython-311.pyc b/backend/services/medium_learning/__pycache__/playbook_performance_service.cpython-311.pyc
+index db19d4fb..adbcd8f4 100644
+Binary files a/backend/services/medium_learning/__pycache__/playbook_performance_service.cpython-311.pyc and b/backend/services/medium_learning/__pycache__/playbook_performance_service.cpython-311.pyc differ
+diff --git a/backend/services/rag/__pycache__/__init__.cpython-311.pyc b/backend/services/rag/__pycache__/__init__.cpython-311.pyc
+index aba574ec..009d8187 100644
+Binary files a/backend/services/rag/__pycache__/__init__.cpython-311.pyc and b/backend/services/rag/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/rag/__pycache__/embedding_service.cpython-311.pyc b/backend/services/rag/__pycache__/embedding_service.cpython-311.pyc
+index 2e4d9c45..85b4a22b 100644
+Binary files a/backend/services/rag/__pycache__/embedding_service.cpython-311.pyc and b/backend/services/rag/__pycache__/embedding_service.cpython-311.pyc differ
+diff --git a/backend/services/rag/__pycache__/rag_service.cpython-311.pyc b/backend/services/rag/__pycache__/rag_service.cpython-311.pyc
+index 46ba1010..19881da4 100644
+Binary files a/backend/services/rag/__pycache__/rag_service.cpython-311.pyc and b/backend/services/rag/__pycache__/rag_service.cpython-311.pyc differ
+diff --git a/backend/services/rag/__pycache__/vector_store.cpython-311.pyc b/backend/services/rag/__pycache__/vector_store.cpython-311.pyc
+index 9e5f92cf..2a8373c2 100644
+Binary files a/backend/services/rag/__pycache__/vector_store.cpython-311.pyc and b/backend/services/rag/__pycache__/vector_store.cpython-311.pyc differ
+diff --git a/backend/services/slow_learning/__pycache__/__init__.cpython-311.pyc b/backend/services/slow_learning/__pycache__/__init__.cpython-311.pyc
+index 753de798..914d4cae 100644
+Binary files a/backend/services/slow_learning/__pycache__/__init__.cpython-311.pyc and b/backend/services/slow_learning/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/slow_learning/__pycache__/advanced_backtest_engine.cpython-311.pyc b/backend/services/slow_learning/__pycache__/advanced_backtest_engine.cpython-311.pyc
+index eb7a21bd..9f06214e 100644
+Binary files a/backend/services/slow_learning/__pycache__/advanced_backtest_engine.cpython-311.pyc and b/backend/services/slow_learning/__pycache__/advanced_backtest_engine.cpython-311.pyc differ
+diff --git a/backend/services/slow_learning/__pycache__/backtest_engine.cpython-311.pyc b/backend/services/slow_learning/__pycache__/backtest_engine.cpython-311.pyc
+index 3809c6c5..436e58b7 100644
+Binary files a/backend/services/slow_learning/__pycache__/backtest_engine.cpython-311.pyc and b/backend/services/slow_learning/__pycache__/backtest_engine.cpython-311.pyc differ
+diff --git a/backend/services/slow_learning/__pycache__/historical_data_service.cpython-311.pyc b/backend/services/slow_learning/__pycache__/historical_data_service.cpython-311.pyc
+index 45c5037f..5032c455 100644
+Binary files a/backend/services/slow_learning/__pycache__/historical_data_service.cpython-311.pyc and b/backend/services/slow_learning/__pycache__/historical_data_service.cpython-311.pyc differ
+diff --git a/backend/services/slow_learning/__pycache__/shadow_mode_service.cpython-311.pyc b/backend/services/slow_learning/__pycache__/shadow_mode_service.cpython-311.pyc
+index b9c96219..d430cbd1 100644
+Binary files a/backend/services/slow_learning/__pycache__/shadow_mode_service.cpython-311.pyc and b/backend/services/slow_learning/__pycache__/shadow_mode_service.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/__init__.cpython-311.pyc b/backend/services/tqs/__pycache__/__init__.cpython-311.pyc
+index 3a16b654..85ce34eb 100644
+Binary files a/backend/services/tqs/__pycache__/__init__.cpython-311.pyc and b/backend/services/tqs/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/context_quality.cpython-311.pyc b/backend/services/tqs/__pycache__/context_quality.cpython-311.pyc
+index c2e20c6c..0ada99a8 100644
+Binary files a/backend/services/tqs/__pycache__/context_quality.cpython-311.pyc and b/backend/services/tqs/__pycache__/context_quality.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/execution_quality.cpython-311.pyc b/backend/services/tqs/__pycache__/execution_quality.cpython-311.pyc
+index f4c41b00..1cc1fac4 100644
+Binary files a/backend/services/tqs/__pycache__/execution_quality.cpython-311.pyc and b/backend/services/tqs/__pycache__/execution_quality.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/fundamental_quality.cpython-311.pyc b/backend/services/tqs/__pycache__/fundamental_quality.cpython-311.pyc
+index 555283a0..b9267f16 100644
+Binary files a/backend/services/tqs/__pycache__/fundamental_quality.cpython-311.pyc and b/backend/services/tqs/__pycache__/fundamental_quality.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/setup_quality.cpython-311.pyc b/backend/services/tqs/__pycache__/setup_quality.cpython-311.pyc
+index 21e162d0..a3e965ec 100644
+Binary files a/backend/services/tqs/__pycache__/setup_quality.cpython-311.pyc and b/backend/services/tqs/__pycache__/setup_quality.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/technical_quality.cpython-311.pyc b/backend/services/tqs/__pycache__/technical_quality.cpython-311.pyc
+index 47052764..2125349d 100644
+Binary files a/backend/services/tqs/__pycache__/technical_quality.cpython-311.pyc and b/backend/services/tqs/__pycache__/technical_quality.cpython-311.pyc differ
+diff --git a/backend/services/tqs/__pycache__/tqs_engine.cpython-311.pyc b/backend/services/tqs/__pycache__/tqs_engine.cpython-311.pyc
+index 4c44c1b0..0e6da450 100644
+Binary files a/backend/services/tqs/__pycache__/tqs_engine.cpython-311.pyc and b/backend/services/tqs/__pycache__/tqs_engine.cpython-311.pyc differ
+diff --git a/backend/tests/__pycache__/__init__.cpython-311.pyc b/backend/tests/__pycache__/__init__.cpython-311.pyc
+index 72e8ed34..602bbee9 100644
+Binary files a/backend/tests/__pycache__/__init__.cpython-311.pyc and b/backend/tests/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/tests/__pycache__/conftest.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/conftest.cpython-311-pytest-9.0.2.pyc
+index 51a568e2..57f867d1 100644
+Binary files a/backend/tests/__pycache__/conftest.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/conftest.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ai_bot_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ai_bot_integration.cpython-311-pytest-9.0.2.pyc
+index 9332e07a..09ea3098 100644
+Binary files a/backend/tests/__pycache__/test_ai_bot_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ai_bot_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ai_consultation_phase2.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ai_consultation_phase2.cpython-311-pytest-9.0.2.pyc
+index befbbe6a..d8d39592 100644
+Binary files a/backend/tests/__pycache__/test_ai_consultation_phase2.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ai_consultation_phase2.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ai_dashboard_phase4.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ai_dashboard_phase4.cpython-311-pytest-9.0.2.pyc
+index f4251ba0..fa47a34c 100644
+Binary files a/backend/tests/__pycache__/test_ai_dashboard_phase4.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ai_dashboard_phase4.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ai_modules.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ai_modules.cpython-311-pytest-9.0.2.pyc
+index 61822d9b..2d3b4859 100644
+Binary files a/backend/tests/__pycache__/test_ai_modules.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ai_modules.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ai_prompt_intelligence_phase1.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ai_prompt_intelligence_phase1.cpython-311-pytest-9.0.2.pyc
+index d7ae622c..c1be07d7 100644
+Binary files a/backend/tests/__pycache__/test_ai_prompt_intelligence_phase1.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ai_prompt_intelligence_phase1.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_analyst_and_learning.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_analyst_and_learning.cpython-311-pytest-9.0.2.pyc
+index d05eb8bb..7f2697ee 100644
+Binary files a/backend/tests/__pycache__/test_analyst_and_learning.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_analyst_and_learning.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_analytics_scheduler_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_analytics_scheduler_integration.cpython-311-pytest-9.0.2.pyc
+index a6f14bef..bf501509 100644
+Binary files a/backend/tests/__pycache__/test_analytics_scheduler_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_analytics_scheduler_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_api_health.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_api_health.cpython-311-pytest-9.0.2.pyc
+index 2b6f1e85..8ef4cda0 100644
+Binary files a/backend/tests/__pycache__/test_api_health.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_api_health.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_api_optimization.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_api_optimization.cpython-311-pytest-9.0.2.pyc
+index 35bcf0c5..84d432ad 100644
+Binary files a/backend/tests/__pycache__/test_api_optimization.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_api_optimization.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_brief_me_enhanced.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_brief_me_enhanced.cpython-311-pytest-9.0.2.pyc
+index 403ea63b..2e93bf84 100644
+Binary files a/backend/tests/__pycache__/test_brief_me_enhanced.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_brief_me_enhanced.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_catalyst_and_templates.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_catalyst_and_templates.cpython-311-pytest-9.0.2.pyc
+index 1910b069..52d7a0a9 100644
+Binary files a/backend/tests/__pycache__/test_catalyst_and_templates.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_catalyst_and_templates.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_earnings_calendar.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_earnings_calendar.cpython-311-pytest-9.0.2.pyc
+index 73cfa439..df1fbc12 100644
+Binary files a/backend/tests/__pycache__/test_earnings_calendar.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_earnings_calendar.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_earnings_calendar_enhanced.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_earnings_calendar_enhanced.cpython-311-pytest-9.0.2.pyc
+index 9931ce77..8d91c8fa 100644
+Binary files a/backend/tests/__pycache__/test_earnings_calendar_enhanced.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_earnings_calendar_enhanced.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_enhanced_market_intel.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_enhanced_market_intel.cpython-311-pytest-9.0.2.pyc
+index f5830d6e..5d0d4b0a 100644
+Binary files a/backend/tests/__pycache__/test_enhanced_market_intel.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_enhanced_market_intel.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_eod_generation.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_eod_generation.cpython-311-pytest-9.0.2.pyc
+index d5e989bd..c98b0ce9 100644
+Binary files a/backend/tests/__pycache__/test_eod_generation.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_eod_generation.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ib_endpoints.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ib_endpoints.cpython-311-pytest-9.0.2.pyc
+index 66952121..4b5cf222 100644
+Binary files a/backend/tests/__pycache__/test_ib_endpoints.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ib_endpoints.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ib_pushed_data.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ib_pushed_data.cpython-311-pytest-9.0.2.pyc
+index 8325a1a5..feb81b65 100644
+Binary files a/backend/tests/__pycache__/test_ib_pushed_data.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ib_pushed_data.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ib_pushed_data_endpoints.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ib_pushed_data_endpoints.cpython-311-pytest-9.0.2.pyc
+index b30275a8..8a422b86 100644
+Binary files a/backend/tests/__pycache__/test_ib_pushed_data_endpoints.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ib_pushed_data_endpoints.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ib_pusher_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ib_pusher_integration.cpython-311-pytest-9.0.2.pyc
+index 5f4363a8..bdcd4c25 100644
+Binary files a/backend/tests/__pycache__/test_ib_pusher_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ib_pusher_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ib_pusher_live_data.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ib_pusher_live_data.cpython-311-pytest-9.0.2.pyc
+index 39d3b7a5..e0f6ed85 100644
+Binary files a/backend/tests/__pycache__/test_ib_pusher_live_data.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ib_pusher_live_data.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_intelligent_stop_manager.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_intelligent_stop_manager.cpython-311-pytest-9.0.2.pyc
+index 4c0e91ec..7cc4aecd 100644
+Binary files a/backend/tests/__pycache__/test_intelligent_stop_manager.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_intelligent_stop_manager.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_learning_consolidation.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_learning_consolidation.cpython-311-pytest-9.0.2.pyc
+index 1b9b8b61..09215105 100644
+Binary files a/backend/tests/__pycache__/test_learning_consolidation.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_learning_consolidation.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_learning_loop.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_learning_loop.cpython-311-pytest-9.0.2.pyc
+index 9b9d32f2..f1c27365 100644
+Binary files a/backend/tests/__pycache__/test_learning_loop.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_learning_loop.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_learning_loop_phase1.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_learning_loop_phase1.cpython-311-pytest-9.0.2.pyc
+index 168e17b3..3f724625 100644
+Binary files a/backend/tests/__pycache__/test_learning_loop_phase1.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_learning_loop_phase1.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_learning_system.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_learning_system.cpython-311-pytest-9.0.2.pyc
+index 9361f7ab..35153bd4 100644
+Binary files a/backend/tests/__pycache__/test_learning_system.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_learning_system.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_live_scanner.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_live_scanner.cpython-311-pytest-9.0.2.pyc
+index d56304d2..0987b8d2 100644
+Binary files a/backend/tests/__pycache__/test_live_scanner.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_live_scanner.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_market_intel.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_market_intel.cpython-311-pytest-9.0.2.pyc
+index cd83d898..57f96d12 100644
+Binary files a/backend/tests/__pycache__/test_market_intel.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_market_intel.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_market_simulator.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_market_simulator.cpython-311-pytest-9.0.2.pyc
+index cd23427b..9f5ca486 100644
+Binary files a/backend/tests/__pycache__/test_market_simulator.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_market_simulator.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_medium_learning_phase5.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_medium_learning_phase5.cpython-311-pytest-9.0.2.pyc
+index 599c496c..9e0e4fb7 100644
+Binary files a/backend/tests/__pycache__/test_medium_learning_phase5.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_medium_learning_phase5.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_multi_agent_system.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_multi_agent_system.cpython-311-pytest-9.0.2.pyc
+index fafdf394..5c66cd66 100644
+Binary files a/backend/tests/__pycache__/test_multi_agent_system.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_multi_agent_system.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_multi_timeframe_collection.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_multi_timeframe_collection.cpython-311-pytest-9.0.2.pyc
+index bc91089b..c2f953b1 100644
+Binary files a/backend/tests/__pycache__/test_multi_timeframe_collection.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_multi_timeframe_collection.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_new_dashboard_apis.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_new_dashboard_apis.cpython-311-pytest-9.0.2.pyc
+index 0138560e..0aac63c1 100644
+Binary files a/backend/tests/__pycache__/test_new_dashboard_apis.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_new_dashboard_apis.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ollama_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ollama_integration.cpython-311-pytest-9.0.2.pyc
+index 3d4ba9cf..2ceffbd7 100644
+Binary files a/backend/tests/__pycache__/test_ollama_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ollama_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_p1p2_trailing_stops_bot_features.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_p1p2_trailing_stops_bot_features.cpython-311-pytest-9.0.2.pyc
+index 11f817dd..3ac44453 100644
+Binary files a/backend/tests/__pycache__/test_p1p2_trailing_stops_bot_features.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_p1p2_trailing_stops_bot_features.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_prediction_tracking.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_prediction_tracking.cpython-311-pytest-9.0.2.pyc
+index 6cebbe7a..e7c10267 100644
+Binary files a/backend/tests/__pycache__/test_prediction_tracking.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_prediction_tracking.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_quality_scheduler.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_quality_scheduler.cpython-311-pytest-9.0.2.pyc
+index e90c7662..88756cf9 100644
+Binary files a/backend/tests/__pycache__/test_quality_scheduler.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_quality_scheduler.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_quick_actions_and_config.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_quick_actions_and_config.cpython-311-pytest-9.0.2.pyc
+index 47cfa5cf..d8a87de2 100644
+Binary files a/backend/tests/__pycache__/test_quick_actions_and_config.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_quick_actions_and_config.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_rag_phase4.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_rag_phase4.cpython-311-pytest-9.0.2.pyc
+index ce831ce2..27e50e9b 100644
+Binary files a/backend/tests/__pycache__/test_rag_phase4.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_rag_phase4.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_regime_performance.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_regime_performance.cpython-311-pytest-9.0.2.pyc
+index 76a71283..227fc8fc 100644
+Binary files a/backend/tests/__pycache__/test_regime_performance.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_regime_performance.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_regime_performance_api.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_regime_performance_api.cpython-311-pytest-9.0.2.pyc
+index 937d60cd..a962b79e 100644
+Binary files a/backend/tests/__pycache__/test_regime_performance_api.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_regime_performance_api.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_risk_management_phase3.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_risk_management_phase3.cpython-311-pytest-9.0.2.pyc
+index 0ca6ca6e..4dc45f85 100644
+Binary files a/backend/tests/__pycache__/test_risk_management_phase3.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_risk_management_phase3.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_scale_out_feature.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_scale_out_feature.cpython-311-pytest-9.0.2.pyc
+index f258a256..a983de0d 100644
+Binary files a/backend/tests/__pycache__/test_scale_out_feature.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_scale_out_feature.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_scanner_ai_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_scanner_ai_integration.cpython-311-pytest-9.0.2.pyc
+index 05ed55df..f7973acc 100644
+Binary files a/backend/tests/__pycache__/test_scanner_ai_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_scanner_ai_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_scanner_expansion_phase1.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_scanner_expansion_phase1.cpython-311-pytest-9.0.2.pyc
+index 3353e021..cc34ebf4 100644
+Binary files a/backend/tests/__pycache__/test_scanner_expansion_phase1.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_scanner_expansion_phase1.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_scanner_ib_data_priority.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_scanner_ib_data_priority.cpython-311-pytest-9.0.2.pyc
+index e95a3a4d..d1025d3f 100644
+Binary files a/backend/tests/__pycache__/test_scanner_ib_data_priority.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_scanner_ib_data_priority.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_scanner_universe_expansion.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_scanner_universe_expansion.cpython-311-pytest-9.0.2.pyc
+index 98c49e1d..f264213f 100644
+Binary files a/backend/tests/__pycache__/test_scanner_universe_expansion.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_scanner_universe_expansion.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_sentcom_chat_enhance.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_sentcom_chat_enhance.cpython-311-pytest-9.0.2.pyc
+index 060cc8b2..a78ac934 100644
+Binary files a/backend/tests/__pycache__/test_sentcom_chat_enhance.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_sentcom_chat_enhance.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_sentcom_unified.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_sentcom_unified.cpython-311-pytest-9.0.2.pyc
+index 72195a3f..5d573921 100644
+Binary files a/backend/tests/__pycache__/test_sentcom_unified.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_sentcom_unified.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_slow_learning_phase6.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_slow_learning_phase6.cpython-311-pytest-9.0.2.pyc
+index aa28f9db..ecaa587a 100644
+Binary files a/backend/tests/__pycache__/test_slow_learning_phase6.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_slow_learning_phase6.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_smart_filter_stop_fix.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_smart_filter_stop_fix.cpython-311-pytest-9.0.2.pyc
+index d9dc1a39..d13f2394 100644
+Binary files a/backend/tests/__pycache__/test_smart_filter_stop_fix.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_smart_filter_stop_fix.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_smart_routing.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_smart_routing.cpython-311-pytest-9.0.2.pyc
+index 3e9eb888..831dfbad 100644
+Binary files a/backend/tests/__pycache__/test_smart_routing.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_smart_routing.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_smart_stop_service.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_smart_stop_service.cpython-311-pytest-9.0.2.pyc
+index 8e2d611c..8241c0b8 100644
+Binary files a/backend/tests/__pycache__/test_smart_stop_service.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_smart_stop_service.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_sprint1_brief_me_regime.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_sprint1_brief_me_regime.cpython-311-pytest-9.0.2.pyc
+index b10751e5..3c4930a7 100644
+Binary files a/backend/tests/__pycache__/test_sprint1_brief_me_regime.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_sprint1_brief_me_regime.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_stop_audit_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_stop_audit_integration.cpython-311-pytest-9.0.2.pyc
+index e369790f..4ce66cf6 100644
+Binary files a/backend/tests/__pycache__/test_stop_audit_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_stop_audit_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_strategy_configs.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_strategy_configs.cpython-311-pytest-9.0.2.pyc
+index b29bcea4..21fa9982 100644
+Binary files a/backend/tests/__pycache__/test_strategy_configs.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_strategy_configs.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_tabs_and_ai_learning.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_tabs_and_ai_learning.cpython-311-pytest-9.0.2.pyc
+index 89709d82..3005261e 100644
+Binary files a/backend/tests/__pycache__/test_tabs_and_ai_learning.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_tabs_and_ai_learning.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_ticker_news_features.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_ticker_news_features.cpython-311-pytest-9.0.2.pyc
+index fcb8faf9..b6ab57b2 100644
+Binary files a/backend/tests/__pycache__/test_ticker_news_features.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_ticker_news_features.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_timeseries_ai_phase3.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_timeseries_ai_phase3.cpython-311-pytest-9.0.2.pyc
+index 886b4c1a..e2d02046 100644
+Binary files a/backend/tests/__pycache__/test_timeseries_ai_phase3.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_timeseries_ai_phase3.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_timeseries_learning_progress.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_timeseries_learning_progress.cpython-311-pytest-9.0.2.pyc
+index ca6bc17c..2134bc1b 100644
+Binary files a/backend/tests/__pycache__/test_timeseries_learning_progress.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_timeseries_learning_progress.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_tqs_analyst_integration.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_tqs_analyst_integration.cpython-311-pytest-9.0.2.pyc
+index 706a494d..a69958f1 100644
+Binary files a/backend/tests/__pycache__/test_tqs_analyst_integration.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_tqs_analyst_integration.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_tqs_engine.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_tqs_engine.cpython-311-pytest-9.0.2.pyc
+index 6385a042..8e9a3f8f 100644
+Binary files a/backend/tests/__pycache__/test_tqs_engine.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_tqs_engine.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_tqs_timeframe_weights.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_tqs_timeframe_weights.cpython-311-pytest-9.0.2.pyc
+index 25d17caa..88184f52 100644
+Binary files a/backend/tests/__pycache__/test_tqs_timeframe_weights.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_tqs_timeframe_weights.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_trade_style_renaming.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_trade_style_renaming.cpython-311-pytest-9.0.2.pyc
+index 5a90e22a..b3673ed4 100644
+Binary files a/backend/tests/__pycache__/test_trade_style_renaming.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_trade_style_renaming.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_trading_bot.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_trading_bot.cpython-311-pytest-9.0.2.pyc
+index 94c44b16..2db73324 100644
+Binary files a/backend/tests/__pycache__/test_trading_bot.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_trading_bot.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_trading_dashboard_apis.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_trading_dashboard_apis.cpython-311-pytest-9.0.2.pyc
+index 05fa791e..83eca6cd 100644
+Binary files a/backend/tests/__pycache__/test_trading_dashboard_apis.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_trading_dashboard_apis.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_trading_platform_iteration38.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_trading_platform_iteration38.cpython-311-pytest-9.0.2.pyc
+index 680b0939..174220fb 100644
+Binary files a/backend/tests/__pycache__/test_trading_platform_iteration38.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_trading_platform_iteration38.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_trailing_stop_feature.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_trailing_stop_feature.cpython-311-pytest-9.0.2.pyc
+index 1c214888..3f208bc2 100644
+Binary files a/backend/tests/__pycache__/test_trailing_stop_feature.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_trailing_stop_feature.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_unified_smart_stop_service.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_unified_smart_stop_service.cpython-311-pytest-9.0.2.pyc
+index dbfc293e..b2a3ac71 100644
+Binary files a/backend/tests/__pycache__/test_unified_smart_stop_service.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_unified_smart_stop_service.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_vst_and_features.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_vst_and_features.cpython-311-pytest-9.0.2.pyc
+index 4ae9a3b5..d92f6103 100644
+Binary files a/backend/tests/__pycache__/test_vst_and_features.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_vst_and_features.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/tests/__pycache__/test_weekly_intelligence_report.cpython-311-pytest-9.0.2.pyc b/backend/tests/__pycache__/test_weekly_intelligence_report.cpython-311-pytest-9.0.2.pyc
+index 3253f3a7..938c1a1a 100644
+Binary files a/backend/tests/__pycache__/test_weekly_intelligence_report.cpython-311-pytest-9.0.2.pyc and b/backend/tests/__pycache__/test_weekly_intelligence_report.cpython-311-pytest-9.0.2.pyc differ
+diff --git a/backend/utils/__pycache__/__init__.cpython-311.pyc b/backend/utils/__pycache__/__init__.cpython-311.pyc
+index 73ed19af..14244724 100644
+Binary files a/backend/utils/__pycache__/__init__.cpython-311.pyc and b/backend/utils/__pycache__/__init__.cpython-311.pyc differ
+diff --git a/backend/utils/__pycache__/ticker_validator.cpython-311.pyc b/backend/utils/__pycache__/ticker_validator.cpython-311.pyc
+index c3a1649f..794ff909 100644
+Binary files a/backend/utils/__pycache__/ticker_validator.cpython-311.pyc and b/backend/utils/__pycache__/ticker_validator.cpython-311.pyc differ

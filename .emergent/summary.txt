@@ -1,158 +1,194 @@
-<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Resolve UI/UX bugs, EOD auto-close stalling, bracket failures, missing trade grading analytics, and data pipeline observability issues (specifically fixing the Diagnostics tab and ensuring all dropped trades are logged).
+<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Resolve UI/UX bugs, data pipeline observability, execution biases, and ensure signal inputs are accurate and fully trusted. Perform a comprehensive, deep code audit of the entire codebase (411k LOC) to verify data connections, calculations, scoring, execution, and risk management to make the system bulletproof for unmanaged paper trading.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A hardened, full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (:8001) + React (:3000) + MongoDB. In this session, a massive safety overhaul was completed. The persistent EOD Auto-close failure was traced to a 5-second  timeout and fixed/decoupled (v181/v182). Major order-reconciliation phantom loops and sub-penny IB tick-rounding bugs (Error 110) were also resolved (v184, v185, v186, v187), securing the bot's order lifecycle stability. 
+**what currently exists?**: A full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (Backend) + React (Frontend) + MongoDB connected to Interactive Brokers. Features ~110 GBM predictive models and a Deep Learning pipeline.
 
 **Last working item**: 
-    - Last item agent was working: Preparing to begin **v19.34.175** (TQS/SMB unification + 5-pillar UI drill-down). The previous agent shipped 7 critical backend safety patches and consumed ~75% of the context window. To avoid dropping context midway through a heavy full-stack feature (estimated 3-4 hours of work involving both backend wiring and React UI components), the agent requested a fork to provide a clean slate.
-    - Status: NOT STARTED
-    - Agent Testing Done: N/A
-    - Which testing method agent to use? manual testing by bash / python -c. (Automated testing agents WILL FAIL due to physical DGX hardware bindings. DO NOT use testing agents).
-    - User Testing Done: N/A
+    - Last item agent was working: 🔴 (P0) Tier 1a: Wire Combinatorial Purged Cross-Validation (CPCV) into GBM models. The previous agent performed a deep audit and found no further leakage, but realized the  module is only wired to Deep Learning models. The 100+ GBM models are currently evaluated on an in-sample backtest. The next step is to integrate  into  ( and ) to generate true purged/embargoed Out-Of-Sample (OOS) distributions and Probability of Backtest Overfit (PBO).
+    - Status: NOT STARTED (Forked specifically to begin this task with a clean context)
+    - Agent Testing Done: N
+    - Which testing method agent to use? manual testing by python scripts/patchers or  files. **CRITICAL: Automate testing agents and direct git commits WILL FAIL due to physical DGX hardware bindings. DO NOT use testing agents.** Generate python patchers (line-number proof) or  files via , upload to  using curl, and ask the user to execute/apply.
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: 🟡 (P1) Shadow vs Real 18-point gap investigation
+  Issue 1: 🔴 (P0) SECURITY: Hardcoded Atlas credentials
+     - Attempted fixes: Code addressed in previous fork, but user manual action required.
+     - Next debug checklist: Remind user to manually rotate the Atlas password in their MongoDB console.
+     - Why fix this issue and what will be achieved with the fix? Plugs severe database security leak.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? NA
+     - Blocked on other issue: None
+
+  Issue 2: 🟡 (P1) Tier 1b: Backtest Execution Cost Modeling
      - Attempted fixes: None yet.
-     - Next debug checklist: Analyze a paired trade (shadow alert fired, real didn't or vice versa). Look at slippage, stop placement, or gate timing differences.
-     - Why fix this issue and what will be achieved with the fix? Closes the model-vs-execution gap to accurately reflect performance.
+     - Next debug checklist: Add slippage (bps), commission, next-bar-open fills, and gap-through stop fills to .
+     - Why fix this issue and what will be achieved with the fix? Turns the currently optimistic in-sample backtest into a realistic one.
      - Status: NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Backend
      - Blocked on other issue: None
 
-  Issue 2: 🟢 (P3) Investigate missing  alert
-     - Attempted fixes: Investigated alert persistence and confirmed  is working, but this specific early-morning alert was somehow dropped before hitting the DB.
-     - Next debug checklist: Write a one-time script that scans today's  values against  and surfaces any orphans. 
-     - Why fix this issue and what will be achieved with the fix? Plugs a rare edge case/race condition in scanner persistence.
-     - Status: NOT STARTED
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend
-
 **In progress Task List**:
-  Task 1: 🔴 (P0) v19.34.175: TQS / SMB Unification & UI Drill-down
-     - Where to resume: Make TQS the single source of truth (backfill ). Rewire position sizing to read TQS, not SMB. Hide standalone F badges on the frontend. Build a UI drill-down panel for the 5 TQS pillars with expand-on-click showing sub-component breakdowns.
-     - What will be achieved with this? Stops double-counting the SMB score (which is already 15% of the TQS Setup pillar) and cleans up a confusing operator UI.
+  Task 1: 🔴 (P0) Tier 1a: CPCV for GBM (Highest Leverage Upgrade)
+     - Where to resume: Read  immediately. Integrate  into .
+     - What will be achieved with this? Gives a true OOS distribution and PBO for the 100+ GBM models, preventing backtest overfitting and allowing safe scaling.
      - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix? Backend
+     - Blocked on something: None
+  
+  Task 2: 🟡 (P1) Task c2 / #1: Per-stock Multi-TF Regime 
+     - Where to resume: Scaffolded in .
+     - What will be achieved with this? Allows UI/Scanner to see per-ticker LONG/MID/SHORT/MICRO trend-stack.
+     - Status: BLOCKED (User shifted focus to ML integrity and Tier 1 upgrades first).
      - Should Test frontend/backend/both after fix? Both
-     - Blocked on something: None (Forked explicitly to work on this).
+     - Blocked on something: User priority shift.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🟡 (P1) Finish v19.34.172: Dual-shape timestamps ( ISO +  BSON) on  and  (Deferred from previous session to keep patches small).
-    - 🟡 (P1) Frontend UI Fix: Add  /  to position cards in the UI.
-    - 🟡 (P1) v19.34.178: Decide on earnings calendar source (Finnhub vs yfinance).
-    - 🟡 (P1) Diagnostics UX Polish (Rewrite Funnel Stage 0/1 visibility, Standardize ranges to Today/3d/7d/30d, add freshness timestamps).
+    - 🔴 (P0) Tier 1a: CPCV for GBM (Start here).
+    - 🟡 (P1) Tier 1b: Execution cost modeling in backtests.
+    - 🟡 (P1) Tier 2a: Per-model probability calibration (isotonic/Platt).
+    - 🟡 (P1) Tier 2b: Frozen forward hold-out (reserve most recent 45-60d for validation).
+    - 🔴 (P0) P-WIRE Phase 2 (Wiring): Wire regime-matched models into the live decision path. *NOTE: Intentionally PARKED until ~5000 shadow decisions accumulate to prevent trading on an unproven edge.*
+    - 🟡 (P1) Regime-first scanning funnel execution (Task c3).
+    - 🟡 (P1) M0 - Laddered server-side scale-out (multi-leg OCA).
     
     Future Tasks:
-    - 🟢 (P2) v19.34.166: Deploy market regime classifier tolerance patch (fixes SPY downtrend hallucinations; script exists in older fork but was never successfully deployed).
-    - 🟢 (P2) Tick-level Stop Run Probability ML Module.
-    - 🟢 (P3) Break up  monolith.
+    - Tier 3: Model/prediction drift monitor, Promotion gated on PBO, P-WIRE for all families.
+    - 🟢 (P2) T7 - Proper multi-month RS leadership factor (RS Rating 80+) as confluence filter.
+    - 🟢 (P2) Add Wyckoff confirmation trigger.
+    - 🟢 (P2) Break up  monolith.
 
 **Completed work in this session**
-- : Fixed EOD Auto-close (bumped  from 5s to 60s, stopping asyncio timeouts from silently killing EOD checks). (DONE)
-- : Created dedicated EOD supervisor task (15s cadence, no  wall) + 16:00 ET straggler alarm. (DONE)
-- : Restored  in  so backend restarts no longer sever the alert→trade decision trail. (DONE)
-- : Added submit-race guard so the reconciler stops adopting the bot's own in-flight trades as phantoms. (DONE)
-- : Fixed Variable-tick rounding bug (IB Error 110 on sub-penny stops for penny stocks). (DONE)
-- : Added defensive recent-executor-activity cooldown to reconciler (5-min safety net). (DONE)
--  (Part 1): Dual-shape timestamps ( ISO +  BSON) on  and  + DB backfill. (DONE)
-- Repaired phantom trades for BBAI in Mongo to restore correct learning loop attribution. (DONE)
+- v319 NO-PEEK gap-fill leak fix (decide-at-open; neutralized open bar leakage) (DONE)
+- Eviction script for leaky and retired daily/weekly gap models from DB (DONE)
+- v319b López de Prado embargo gap implemented at GBM train/val split (DONE)
+- v319c GBM_FORCE_PROMOTE override logic for model promotion gating (DONE)
+- v319d Phase-8 ensemble FFD injection fix (fixed bug where FFD cols were zero-filled) (DONE)
+- Deep code audit of the entire training, validation, and backtest pipelines (Result: clean bill of health with exception of in-sample backtest optimism, leading to the Tier 1-3 plan) (DONE)
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: Dual-shape timestamps needed on  and .
-     - Debug checklist: Locate insert sites and apply the same  helpers used in v172.
-     - Why to solve this issue and what will be achieved with this? Prevents silent cross-collection Mongo query bugs.
-     - Should Test frontend/backend/both after fix: Backend
-     - Is recurring issue? N
+   - Issue 1: High validation scores across direction/volatility predictors.
+   - Debug checklist: Audit completed. Found legitimate (regime conditioning and volatility clustering). Not a leak. Backtests remain optimistic due to in-sample testing, prompting the CPCV integration task.
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Terminal Base64/Bash chunk pasting corruption and DGX pasting limits.
+  - Issue recurrence in previous fork: Agent attempts to use  or native  via bash, crashing due to physical DGX hardware bindings.
   - Recurrence count: >10
-  - Status: RESOLVED (Mitigated completely by uploading python patch scripts to  and having the user  them directly onto the DGX). **YOU MUST USE THIS PATTERN**.
+  - Status: RESOLVED (Strict mandate: NO testing_agent. NO git bash execution. ALWAYS create line-number-proof  patchers or diff patches, upload via  to , and give the user exact commands to copy/paste and execute).
 
 **Code Architecture**
-- DGX Spark (Linux) running FastAPI (Backend) on , React (Frontend) on .
-- Python scripts interact natively via PyMongo to localhost MongoDB ( DB).
-- Windows PC handles IB Gateway connections () and pushes live market data to DGX via ZMQ/RPC pusher.
+- Physical DGX Spark (Linux) running FastAPI (Backend) on , React (Frontend) on .
+- Massive monolithic backend: 411k LOC.
+- ML pipeline utilizes  (LightGBM) and an API subprocess  (Deep Learning VAE/TFT/CNN-LSTM).
 
 **Key Technical Concepts**
-FastAPI, React, MongoDB, Interactive Brokers (Pusher vs Direct), EOD Auto-close routines, Position Reconciler, TQS (Trade Quality Score), SMB grading.
+DGX  patcher workflows, Combinatorial Purged Cross-Validation (CPCV), Probability of Backtest Overfit (PBO), Deflated Sharpe, López de Prado embargo, look-ahead bias/leakage prevention,  routing.
 
 **key DB schema**
-  - : Stores execution logic, stops, entries, and close reasons.
-  - : Stores EOD variables ().
-  - : The actual scanner outputs containing uid=0(root) gid=0(root) groups=0(root) (alert_id) and .
-  -  & : Recently updated with dual-shape timestamps (, ).
+  - : 
+  - : 
 
 **changes in tech stack**
   - None.
 
 **All files of reference**
-  -  (Heavily modified for EOD tasks)
-  -  (Modified for EOD logic)
-  -  (Patched for race guards)
-  -  (Patched to retain )
-  -  (Patched for tick rounding)
-  -  (Used for v172)
-  -  (CRITICAL RULES FOR AGENTS ON THIS SYSTEM)
+  -  (CRITICAL: Contains instructions for your first task).
+  - 
+  -  (Target file for CPCV integration).
+  -  (Existing logic to import/utilize).
 
 **Areas that need refactoring**
-  - TQS vs SMB overlapping logic (Immediate focus: v19.34.175).
-  -  (Monolith breakdown).
+  -  monolith.
+  - Validation/backtest suite () requires execution cost modeling.
 
 **key api endpoints**
   - 
+  - 
 
 **Critical Info for New Agent**
-- **Hardware Limitations**: Do NOT use automated testing agents ( WILL FAIL). Standard integration tests will fail due to physical DGX hardware bindings. Run manual , , or bash grep checks.
-- **Git Wipe Hazard**: The user's  restart script runs  on the DGX. **ANY UNCOMMITTED CHANGES WILL BE SILENTLY DESTROYED ON RESTART**. Always write deploy scripts that auto-commit the changes (On branch main
-nothing to commit, working tree clean) before asking the user to restart.
-- **File Transfer Method**: The physical terminal corrupts standard base64 pastes. ALWAYS use the  curl pattern proven in this session ().
-- **Read MD Files**: User explicitly requested you review  and other documentation files before beginning.
+- **CRITICAL HARDWARE WORKFLOW**: You are on a physical DGX. Do NOT use the . Do NOT commit via usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
+           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
+           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
+           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
+           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
+           <command> [<args>]
+
+These are common Git commands used in various situations:
+
+start a working area (see also: git help tutorial)
+   clone     Clone a repository into a new directory
+   init      Create an empty Git repository or reinitialize an existing one
+
+work on the current change (see also: git help everyday)
+   add       Add file contents to the index
+   mv        Move or rename a file, a directory, or a symlink
+   restore   Restore working tree files
+   rm        Remove files from the working tree and from the index
+
+examine the history and state (see also: git help revisions)
+   bisect    Use binary search to find the commit that introduced a bug
+   diff      Show changes between commits, commit and working tree, etc
+   grep      Print lines matching a pattern
+   log       Show commit logs
+   show      Show various types of objects
+   status    Show the working tree status
+
+grow, mark and tweak your common history
+   branch    List, create, or delete branches
+   commit    Record changes to the repository
+   merge     Join two or more development histories together
+   rebase    Reapply commits on top of another base tip
+   reset     Reset current HEAD to the specified state
+   switch    Switch branches
+   tag       Create, list, delete or verify a tag object signed with GPG
+
+collaborate (see also: git help workflows)
+   fetch     Download objects and refs from another repository
+   pull      Fetch from and integrate with another repository or a local branch
+   push      Update remote refs along with associated objects
+
+'git help -a' and 'git help -g' list available subcommands and some
+concept guides. See 'git help <command>' or 'git help <concept>'
+to read about a specific subcommand or concept.
+See 'git help git' for an overview of the system. directly through the bash tool. ALWAYS use  () and provide the user with exact execution blocks. Use robust, line-number-agnostic Python patcher scripts when dealing with heavily edited files like .
+- **STARTING TASK**: Read . Your first task is Tier 1a (Wiring CPCV into GBMs).
+- **SEQUENCING**: Do NOT instruct the user to run a full retrain until the Tier 1a CPCV integration patch is fully written, tested, and applied.
 
 **documents and test reports created in this job**
-  -  (Multiple deployment and repair scripts transferred to the DGX).
-  -  updated.
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
 
-**Last 10 User Messages and any pending HUMAN messages** 
- - *User*: ok lets get ready to fork then. make sure next agent reads agents.md and our other .mds
- - *Agent*: Verified docs existed, auto-committed session changes to , and safely initiated fork.
- - *User*: do we need to commit our changes first?
- - *Agent*: Confirmed that the python scripts already executed On branch main
-nothing to commit, working tree clean automatically, so DGX state is safe.
- - *User*: Next Action Items ... ok lets see what of these we want to prioritize next then
- - *Agent*: Provided prioritized list.
- - *User*: lets do A, then D, then E, then F (A=184+187, D=172, E=175, F=166).
- - *Note*: Agent completed A and D. **You are now on E: v19.34.175**.
+**Last 10 User Messages and any pending HUMAN messages**
+ - *(Context)* User ran tests to confirm v319, v319b, v319c, and v319d were successfully applied. All 12 tests passed. User committed changes to their local DGX GitHub.
+ - *User*: Asked if they are ready to go live and trade, or if a full retrain is needed.
+ - *(Context)* Agent ran an inventory script. Found that while some models are fresh, the critical Phase-8 Ensemble models are 45-50 days stale and were trained using the FFD bug.
+ - *User*: Asked the agent to conduct a full audit of the validation/backtesting systems before pulling the trigger.
+ - *(Context)* Agent performed a deep audit. Confirmed no leakage in backtests, but discovered they are optimistic because they test strictly *in-sample*. Recommended adding a true frozen hold-out and using Combinatorial Purged Cross-Validation (CPCV).
+ - *User*: Asked how to implement the smart fixes properly and requested suggestions.
+ - *(Context)* Agent discovered  already exists but isn't wired into the GBM pipeline. Proposed a 3-Tier upgrade plan, starting with Tier 1a (Wiring CPCV into GBMs).
+ - *User*: Agreed. Requested to fork the session for a clean context window to begin the fix.
+ - *Pending Action*: Read  and immediately begin implementing Tier 1a (CPCV for GBM integration).
 
 **Project Health Check:**
-Healthy. Severe order lifecycle / reconciler whiplash and EOD bugs were resolved in the immediate prior session.
+Backend healthy, training pipeline healthy and fully audited. P0/P1 data leakage fixes successfully deployed.
 
 **3rd Party Integrations**
-  - Interactive Brokers (Data & Execution - runs on hardware, requires User credentials)
-  - Finnhub
-  - *No Emergent LLM Key required for this stack.*
+  - Interactive Brokers (Requires User API Key)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Hardware block).
-  - Troubleshoot agent used after agent stuck in loop: NO.
-  - Test files created: N/A. Manual Python diagnostic scripts heavily used instead.
+  - Testing agent used after significant changes: NO (Hardware Blocked)
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created:  
   - Known regressions: None currently.
 
 **Credentials to test flow:**
-N/A - System runs natively on user's local DGX.
+Use DGX environment variables (, ).
 
 **What agent forgot to execute**
-The agent deferred adding / dual timestamps to  and  to keep the v172 patch small. It needs to be picked up in the future.
-
-**Debugging checklist for current issue**
-    Task: v19.34.175 (TQS/SMB unification + UI drill-down)
-    Backend files to check: , , ,  (position sizing logic).
-    Frontend files to check:  (Position cards, UI drill-down panel).
-    Next steps:
-    1. Read  and related documentation as explicitly requested by the user.
-    2. Audit the backend to see exactly where position sizing currently reads the SMB score, and rewrite it to read TQS instead.
-    3. Add a DB backfill script to set  on historical rows.
-    4. On the frontend, hide the standalone F badges that confuse the operator.
-    5. Build the 5-pillar UI drill-down panel with expand-on-click functionality for TQS sub-components.</analysis>
+Nothing was forgotten. The agent successfully set up the memory files for the fork. You must pick up exactly by reading  and implementing CPCV for GBM.</analysis>
