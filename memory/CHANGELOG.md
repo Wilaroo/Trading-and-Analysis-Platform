@@ -1,3 +1,28 @@
+## 2026-06-11 — v19.34.319d (P1): Phase-8 ensemble FFD MATCH-FIX — PATCH READY
+
+Patch: https://paste.rs/U7WVq  (backend-only → `git apply`; v319d-only delta, generated
+against the gap-but-not-FFD baseline so it stacks cleanly on the DGX which already has
+v319 gap). Tests: 4/4 (test_phase8_ffd_match_v319d.py).
+
+WHY: sub-models (Phase 1 `direction_predictor_*` + Phase 2 setup_specific) are trained on
+46 base + 5 FFD = 51 cols when `TB_USE_FFD_FEATURES=1` (live on DGX). The Phase-8 ensemble
+meta-labeler built its `features_matrix` from raw 46-wide base features, so the col_map FFD
+positions (46-50) fell OUT OF BOUNDS and were ZERO-FILLED → every sub-model's FFD splits
+saw 0 during ensemble label-generation (degraded, silently wrong predictions feeding the
+meta-labeler). The old code even documented this as a deferred P2 ("yields degraded but
+non-crashing predictions").
+
+FIX (`training_pipeline.py` Phase 8): FFD-augment `features_matrix` inline with the SAME
+`augment_features` used in Phase 1/2 training (imported as `_ens_augment`/`_ens_ffd_enabled`).
+It aligns to the feature-row convention (row j ↔ bar lookback-1+j) and returns exactly
+`len(features_matrix)` rows (real FFD, or zeros only when a symbol genuinely can't produce
+it), so labels stay aligned. No-op when `TB_USE_FFD_FEATURES` is off (names stay 46-wide →
+col_map has no FFD entries). Sub-models now receive REAL FFD values matching their training.
+
+DEPLOY: apply anytime; takes effect on the next full/ensemble retrain (Phase 8). Reversible
+via `TB_USE_FFD_FEATURES=0` (also disables FFD in training, keeping the two consistent).
+
+
 ## 2026-06-11 — v19.34.319b + 319c (P1): train/val EMBARGO gap + force-promote override — PATCH READY
 
 COMBINED patch (supersedes the earlier d9RFe / au9Pc): https://paste.rs/Brcge

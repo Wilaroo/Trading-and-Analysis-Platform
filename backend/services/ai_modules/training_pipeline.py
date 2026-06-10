@@ -2966,6 +2966,8 @@ async def run_training_pipeline(
             from services.ai_modules.timeseries_features import get_feature_engineer
             from services.ai_modules.feature_augmentors import (
                 augmented_feature_names as _ens_aug_names,
+                augment_features as _ens_augment,
+                ffd_enabled as _ens_ffd_enabled,
             )
 
             feature_engineer = get_feature_engineer()
@@ -3111,12 +3113,29 @@ async def run_training_pipeline(
                                     continue
                                 
                                 features_matrix = bulk_features[:n_usable]  # (n_usable, n_base_features=46)
-                                # NOTE: sub-models expect 51 cols (46 base + 5 FFD). The col_map
-                                # below uses -1 as a sentinel for FFD positions not found in
-                                # base_names; those 5 columns are zero-filled when building
-                                # model_feats. This yields degraded but non-crashing predictions.
-                                # Proper FFD augmentation here is P2 (requires reconciling
-                                # compute_ffd_columns lookback-drop semantics).
+                                # v319d FFD MATCH-FIX: sub-models (Phase 1 direction_
+                                # predictor + Phase 2 setup_specific) were trained on
+                                # 46 base + 5 FFD = 51 cols when TB_USE_FFD_FEATURES=1.
+                                # Previously features_matrix stayed 46-wide, so the
+                                # col_map FFD positions (46-50) fell out of bounds and
+                                # were ZERO-FILLED → every sub-model's FFD splits saw 0
+                                # (degraded predictions feeding the meta-labeler). Now
+                                # we FFD-augment inline using the SAME augmentor as
+                                # training; it aligns to the feature-row convention
+                                # (row j ↔ bar lookback-1+j) and returns exactly
+                                # len(features_matrix) rows (real FFD, or zeros only
+                                # when a symbol genuinely can't produce it). No-op when
+                                # the flag is off (names stay 46-wide → col_map has no
+                                # FFD entries).
+                                if _ens_ffd_enabled():
+                                    features_matrix, _ = _ens_augment(
+                                        features_matrix,
+                                        feature_engineer.get_feature_names(),
+                                        bars,
+                                        lookback=lb,
+                                        cache_key=f"{sym}_{anchor_bs}",
+                                    )
+                                    n_usable = features_matrix.shape[0]
                                 
                                 # Pre-compute TRIPLE-BARRIER labels for all usable windows at once
                                 from services.ai_modules.triple_barrier_labeler import triple_barrier_labels, label_to_class_index
