@@ -1038,10 +1038,11 @@ class MarketRegimeEngine:
         The raw call does 4 Mongo bar queries per symbol — the cache makes it
         safe for the confidence gate to consult on every alert evaluation.
         Bounded (~600 symbols) with oldest-first eviction."""
+        import time as _time
         sym = symbol.upper()
         if not hasattr(self, "_symbol_mtf_cache"):
             self._symbol_mtf_cache = {}
-        now = datetime.now(timezone.utc).timestamp()
+        now = _time.time()
         hit = self._symbol_mtf_cache.get(sym)
         if hit and (now - hit[0]) < ttl_s:
             return hit[1]
