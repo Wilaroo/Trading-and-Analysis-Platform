@@ -1,11 +1,14 @@
 ## 2026-06-10 — v19.34.322: REGIME-FIRST FUNNEL COMPLETE (c2 + sector scoring + c3/T7 + scan steering) — PATCH READY
 
 Patch: ~~https://paste.rs/RVbeU~~ (git diff — FAILED on DGX tree drift at market_regime_engine.py).
-**USE PATCHER v2: https://paste.rs/P8iNC** (v1 j4NHJ failed on market_regime_engine.py body
-drift; v2 regex-inserts the cached wrapper above `async def compute_symbol_multi_tf(` —
-immune to body drift). 22 actions; idempotent; py_compile gate with auto-rollback.
-NOTE: v1 run on DGX wrote only the 5 new files (edits were withheld by the safety gate) —
-v2 skips those and applies all 17 edits + smart insert.
+**USE PATCHER v3: https://paste.rs/6URU7** — final. v1 (j4NHJ) failed on market_regime_engine.py
+body drift; v2 (P8iNC) revealed the DGX NEVER HAD compute_symbol_multi_tf (container-only dead
+code, never shipped). v3 ships a fully SELF-CONTAINED block (_get_tf_bars_v322 bar reader +
+compute_symbol_multi_tf + cached wrapper) inserted before the first method of
+class MarketRegimeEngine — zero engine-internal dependencies. Validated against a simulated
+method-absent DGX tree: inserted, compiled, idempotent. 22 actions total.
+NOTE: v1/v2 runs on DGX wrote only the 5 new files (edits withheld by safety gate) —
+v3 skips those and applies all 16 edits + smart insert.
 Container validation: 43/43 new tests + 42 regression (v316j gate / v321 / v320 CPCV) green;
 backend boots clean; all 3 new endpoints live-smoke-tested; webpack compiles.
 
