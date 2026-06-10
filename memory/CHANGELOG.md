@@ -1,3 +1,29 @@
+## 2026-06-11 — v19.34.316 (NIA cleanup, Section A): prune retired families from the UI/inventory — PATCH READY
+
+Patch: https://paste.rs/8wgrE  (frontend + backend → `git apply`, then `cd frontend && yarn build` + `./start_backend.sh --force`)
+Validation: backend py_compile OK; TrainingPipelinePanel.jsx JSX parse OK; clean-apply on fresh HEAD.
+
+WHY: after v314 retired sector_relative + risk_of_ruin and redesigned gap_fill, the
+NIA "AI Training Pipeline" panel + the /model-inventory endpoint still advertised the
+old lineup (perpetual 0/3 sector, 0/6 risk rows; "Gap Fill Probability"; inflated
+totalExpectedModels skewing the progress bar/ETA and the {trained}/{total} header).
+
+CHANGE (Section A only — model-family surfaces; dead-file deletion deferred):
+- `TrainingPipelinePanel.jsx`: drop sector_relative + risk_of_ruin from ALL_PHASES
+  and the CATEGORY_ICONS/COLORS maps; relabel gap → "Overnight Gap Fill"; remove the
+  now-unused BarChart3 import.
+- `routers/ai_training.py` /model-inventory: sector_relative + risk_of_ruin categories
+  + their config-population are now gated behind INCLUDE_RETIRED_FAMILIES=1 (mirrors the
+  v314 training default — re-enabling training also re-shows them); gap_fill relabeled.
+
+AUDIT NOTES (for later):
+- Dead/orphaned NIA files (Section B, NOT deleted, awaiting go): AIModulesPanel.jsx,
+  SetupModelsPanel.jsx, ModelScorecard.jsx, ServerHealthWidget.jsx. Also
+  components/PipelineProgressPanel.jsx is orphaned (0 imports) with harmless stale
+  sector/risk icon-map entries.
+- All RENDERED NIA panels still serve a distinct purpose — no live panel is redundant.
+
+
 ## 2026-06-11 — v19.34.315 (P0 HOTFIX): Phase-3 volatility 0/7 — negative-label crash — PATCH READY
 
 Patch: https://paste.rs/BoPdX  (backend-only → `git apply` + `./start_backend.sh --force`)
