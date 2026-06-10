@@ -890,7 +890,7 @@ class EnhancedBackgroundScanner:
         self._tier_cache_ttl = 3600  # Reclassify every hour
         self._tier_cache_time: Optional[datetime] = None
         self._swing_scan_frequency = 8  # Every 8th cycle (~2 min at 15s base)
-        self._investment_scan_times = [(11, 0), (15, 45)]  # 11:00 AM ET, 3:45 PM ET
+        self._investment_scan_times = [(11, 0), (15, 30)]  # 11:00 AM ET, 3:30 PM ET
         self._last_investment_scan_hour = -1  # Track to avoid duplicate investment scans
         
         # Symbol validation - known invalid/illiquid symbols that pass through due to data errors
@@ -3248,7 +3248,7 @@ class EnhancedBackgroundScanner:
     
     def _is_investment_scan_window(self) -> bool:
         """Check if current time is within an investment tier scan window.
-        Investment symbols only scan at 11:00 AM ET and 3:45 PM ET."""
+        Investment symbols only scan at 11:00 AM ET and 3:30 PM ET."""
         try:
             from zoneinfo import ZoneInfo
             et_now = datetime.now(ZoneInfo("America/New_York"))
@@ -3272,7 +3272,7 @@ class EnhancedBackgroundScanner:
         
         Tier 1 (Intraday, ADV ≥500K): Every cycle (~15s)
         Tier 2 (Swing, ADV ≥100K): Every 8th cycle (~2 min)
-        Tier 3 (Investment, ADV ≥50K): At 11:00 AM and 3:45 PM ET only
+        Tier 3 (Investment, ADV ≥50K): At 11:00 AM and 3:30 PM ET only
         """
         # Rebuild tier cache if stale
         now = datetime.now(timezone.utc)
