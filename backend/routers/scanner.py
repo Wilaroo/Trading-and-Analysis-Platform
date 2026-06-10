@@ -2037,6 +2037,19 @@ async def ml_feature_preview(symbol: str):
 
 # ===================== v322 — Regime-First Funnel endpoints =====================
 
+def _funnel_db():
+    """v322c — scanner DB when ready, else the app-wide Mongo handle
+    (right after boot the scanner service may not be initialized yet)."""
+    db = getattr(_scanner_service, "db", None) if _scanner_service else None
+    if db is None:
+        try:
+            from database import get_database
+            db = get_database()
+        except Exception:
+            db = None
+    return db
+
+
 @router.get("/rs-leadership")
 async def get_rs_leadership(top: int = 50, direction: str = "long", symbol: Optional[str] = None):
     """v322 (c3/T7) — multi-month RS leadership ratings.
@@ -2045,8 +2058,7 @@ async def get_rs_leadership(top: int = 50, direction: str = "long", symbol: Opti
     slice (desc for `direction=long`, asc for `direction=short`)."""
     try:
         from services.rs_leadership_service import get_rs_leadership_service
-        svc = get_rs_leadership_service(
-            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
+        svc = get_rs_leadership_service(db=_funnel_db())
         await svc.ensure_loaded()
         if symbol:
             doc = svc.get_rating_cached(symbol.upper())
@@ -2068,10 +2080,9 @@ async def trigger_rs_leadership_compute():
     try:
         import asyncio as _asyncio
         from services.rs_leadership_service import get_rs_leadership_service
-        svc = get_rs_leadership_service(
-            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
-        if svc.db is None:
-            raise HTTPException(503, "Scanner service / DB not initialized")
+        svc = get_rs_leadership_service(db=_funnel_db())
+        if svc._ensure_db() is None:
+            raise HTTPException(503, "Mongo not initialized yet — retry in a few seconds")
         if svc._computing:
             return {"success": False, "message": "compute already running"}
         _asyncio.create_task(svc.compute_all())
@@ -2093,8 +2104,7 @@ async def get_regime_focus_list(force: bool = False):
     Cached 5 min; `force=true` rebuilds."""
     try:
         from services.regime_focus_service import get_regime_focus_service
-        svc = get_regime_focus_service(
-            db=getattr(_scanner_service, "db", None) if _scanner_service else None)
+        svc = get_regime_focus_service(db=_funnel_db())
         focus = await svc.get_focus_list(force=force)
         return {"success": True, **focus}
     except Exception as e:

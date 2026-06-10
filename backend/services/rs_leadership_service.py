@@ -34,6 +34,12 @@ RS_PERIODS = [(63, 2.0), (126, 1.0), (189, 1.0), (252, 1.0)]
 RS_MIN_CLOSES = 64          # need at least the 63d lag + today
 RS_MAX_DAILY_BARS = 260     # load window per symbol
 
+# v322c — relaxed variant for the SPDR ETF benchmarks: some rigs keep a
+# shallower daily window for the index/sector ETFs than for the trading
+# universe; a 1-month lag keeps the sector-relative diff usable there.
+RS_RELAXED_PERIODS = [(21, 1.0), (63, 2.0), (126, 1.0), (189, 1.0), (252, 1.0)]
+RS_RELAXED_MIN_CLOSES = 22
+
 # v322b — junk guard: sub-$3 names produce split/penny artifacts
 # (5,000%+ "returns" from unadjusted reverse splits) that pollute the
 # top of the leaderboard. Skipped symbols count as `price_filtered`.
@@ -44,20 +50,22 @@ SECTOR_ETFS = ["XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP",
                "XLU", "XLB", "XLRE", "XLC"]
 
 
-def weighted_rs_score(closes: List[float]) -> Optional[float]:
+def weighted_rs_score(closes: List[float], periods=None, min_closes=None) -> Optional[float]:
     """Pure: weighted multi-period return from a chronological close series.
 
     `closes` oldest→newest. Returns None when history is too thin
-    (< RS_MIN_CLOSES) or prices are degenerate.
+    (< min_closes, default RS_MIN_CLOSES) or prices are degenerate.
     """
-    if not closes or len(closes) < RS_MIN_CLOSES:
+    periods = periods or RS_PERIODS
+    min_closes = min_closes or RS_MIN_CLOSES
+    if not closes or len(closes) < min_closes:
         return None
     last = closes[-1]
     if not last or last <= 0:
         return None
     acc = 0.0
     total_w = 0.0
-    for lag, w in RS_PERIODS:
+    for lag, w in periods:
         if len(closes) > lag:
             base = closes[-1 - lag]
             if base and base > 0:
@@ -96,6 +104,17 @@ class RSLeadershipService:
         self._loaded_at: Optional[float] = None
         self._computing = False
 
+    def _ensure_db(self):
+        """v322c — fall back to the app-wide Mongo handle when the scanner
+        service hasn't injected one yet (e.g., right after boot)."""
+        if self.db is None:
+            try:
+                from database import get_database
+                self.db = get_database()
+            except Exception:
+                pass
+        return self.db
+
     # ── reads ───────────────────────────────────────────────────────────
 
     def get_rating_cached(self, symbol: str) -> Optional[Dict]:
@@ -107,8 +126,9 @@ class RSLeadershipService:
         now = time.monotonic()
         if self._loaded_at is not None and (now - self._loaded_at) < self.RELOAD_TTL_S:
             return
-        if self.db is None:
-            self._loaded_at = now
+        if self._ensure_db() is None:
+            # v322c — don't latch emptiness for the full TTL; retry in 30s.
+            self._loaded_at = now - (self.RELOAD_TTL_S - 30)
             return
         try:
             cursor = self.db[self.COLLECTION].find(
@@ -151,7 +171,7 @@ class RSLeadershipService:
         Designed for the nightly scheduler job (17:30 ET) — Mongo reads
         only, no IB calls. Returns a summary dict.
         """
-        if self.db is None:
+        if self._ensure_db() is None:
             return {"success": False, "error": "no db"}
         if self._computing:
             return {"success": False, "error": "compute already running"}
@@ -163,10 +183,12 @@ class RSLeadershipService:
                 return {"success": False, "error": "empty universe (symbol_adv_cache)"}
 
             # Sector ETF benchmark scores (for sector-relative diff).
+            # v322c: relaxed lags/min-closes — ETF daily windows can be
+            # shallower than the trading universe on some rigs.
             etf_scores: Dict[str, float] = {}
             for etf in SECTOR_ETFS:
                 closes = await self._load_daily_closes(etf)
-                s = weighted_rs_score(closes)
+                s = weighted_rs_score(closes, RS_RELAXED_PERIODS, RS_RELAXED_MIN_CLOSES)
                 if s is not None:
                     etf_scores[etf] = s
 
