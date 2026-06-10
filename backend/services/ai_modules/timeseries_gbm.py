@@ -1201,6 +1201,28 @@ class TimeSeriesGBM:
             recall_up = tp_up / (tp_up + fn_up) if (tp_up + fn_up) > 0 else 0
             f1_up = 2 * precision_up * recall_up / (precision_up + recall_up) if (precision_up + recall_up) > 0 else 0
 
+            # v19.34.317 — compute DOWN (class 0) metrics for BINARY models too.
+            # Previously this branch only produced *_up, so recall_down defaulted
+            # to 0.0 below (locals().get) and the v19.34.312 class-collapse gate
+            # (min(recall_up, recall_down) < floor) PERMANENTLY rejected EVERY
+            # binary model — vol_predictor_*, gap_fill_*, and any other 2-class
+            # family — regardless of real quality. The 2026-04-22 fix added these
+            # to the 3-class path but missed the binary branch.
+            tp_dn = np.sum((y_pred == 0) & (y_val == 0))
+            fp_dn = np.sum((y_pred == 0) & (y_val == 1))
+            fn_dn = np.sum((y_pred == 1) & (y_val == 0))
+            precision_down = tp_dn / (tp_dn + fp_dn) if (tp_dn + fp_dn) > 0 else 0
+            recall_down = tp_dn / (tp_dn + fn_dn) if (tp_dn + fn_dn) > 0 else 0
+            f1_down = 2 * precision_down * recall_down / (precision_down + recall_down) if (precision_down + recall_down) > 0 else 0
+
+            pred_dist = np.bincount(y_pred, minlength=2).astype(float) / max(1, len(y_pred))
+            logger.info(
+                f"2-class eval: accuracy={accuracy:.3f}, "
+                f"UP P={precision_up:.3f} R={recall_up:.3f} F1={f1_up:.3f}, "
+                f"DOWN P={precision_down:.3f} R={recall_down:.3f} F1={f1_down:.3f} · "
+                f"pred_dist={{DOWN:{pred_dist[0]:.2f} UP:{pred_dist[1]:.2f}}}"
+            )
+
         importance_dict = self._model.get_score(importance_type="gain")
         sorted_features = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)[:10]
         top_features = [f[0] for f in sorted_features if f[0] in feature_names]

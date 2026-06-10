@@ -1,3 +1,30 @@
+## 2026-06-11 — v19.34.317 (P0 BUG): binary models never computed recall_down → ALL rejected — PATCH READY
+
+Patch: https://paste.rs/IxjeG  (backend-only → `git apply` + `./start_backend.sh --force`)
+Tests: 3/3 (tests/test_binary_down_recall_v317.py).
+
+DISCOVERY: after v315 unblocked vol training, vol_predictor_1min trained fine
+(acc 0.7034) but was REJECTED "class collapse — recall_up=0.599, recall_down=0.000".
+recall_down was EXACTLY 0.000 → smell test. Traced to train_from_features eval:
+the 3-class branch computes both recall_up + recall_down (fixed 2026-04-22) but the
+BINARY (2-class) else-branch only computes *_up. recall_down then defaults to 0.0
+(locals().get) and the v19.34.312 collapse gate min(recall_up, recall_down) < 0.10
+PERMANENTLY rejects EVERY binary model — the entire vol_predictor_* family AND the
+new balanced gap_fill_* models — regardless of real quality. Direction predictors use
+a separate path so were unaffected (which is why only vol/gap looked "dead").
+
+FIX (`timeseries_gbm.py`): binary branch now computes precision_down / recall_down /
+f1_down (class 0) + a "2-class eval … DOWN R=…" diagnostic log line. Genuinely
+collapsed models (truly all-UP) still get recall_down≈0 and are still rejected, so the
+gate keeps its teeth; healthy two-sided models now promote.
+
+IMPACT / RECOVERY:
+- The in-flight vol re-run is PRE-v317 → will reject all 7 again. Kill or ignore it.
+- After v317: re-run BOTH families → {"force_retrain": true, "phases": ["volatility","gap_fill"]}
+  (gap models also couldn't promote under the bug). Watch for the new
+  "2-class eval … DOWN R=0.xx" line + "promoted" instead of "REJECTED (class collapse)".
+
+
 ## 2026-06-11 — v19.34.316 (NIA cleanup, Section A): prune retired families from the UI/inventory — PATCH READY
 
 Patch: https://paste.rs/8wgrE  (frontend + backend → `git apply`, then `cd frontend && yarn build` + `./start_backend.sh --force`)
