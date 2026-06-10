@@ -35,6 +35,42 @@ Shared surfaces:
    (paste.rs/wL0HT). UI already excludes them (TrainingPipelinePanel ALL_PHASES, v316) →
    NO UI change needed.
 
+## Validation / Backtest subsystem audit (post_training_validator.py + slow_learning/advanced_backtest_engine.py)
+
+Backtest MECHANICS — causally correct, no look-ahead:
+- Signals use `bars[:i+1]` only; `_get_ai_prediction` predicts on the last `lookback` bars
+  ending at i (reversed). No future bars. ✅
+- Entry can't exit on its own bar (exit block runs only once `in_position`, i.e. from i+1). ✅
+- Ambiguous bars (both stop & target in range) take the STOP first (conservative). ✅
+- Stop/target hit tested against the CURRENT bar's high/low (known at bar close). ✅
+- Walk-forward OOS = bars strictly after IS; reports `efficiency_ratio = OOS/IS` overfit flag. ✅
+
+MILD OPTIMISM (standard backtest conventions, NOT leakage — but inflate returns a bit):
+- Entries fill at the SIGNAL BAR's close (realistically next-bar open + slippage).
+- Exits fill at the EXACT stop/target price (no slippage / gap-through modeling).
+
+⚠️ MAIN SYSTEMIC LIMITATION (not look-ahead, but optimism to be aware of):
+- The trained models (gap/direction/vol) are trained on ALL available history. The
+  validation backtest then runs those models over that SAME history → it is **in-sample
+  at the MODEL level** (the model has partly memorized the bars it's being scored on).
+  So backtest win-rate / profit-factor / Sharpe / DSR are OPTIMISTIC and must NOT be read
+  as forward expectations.
+- The walk-forward IS/OOS split is at the STRATEGY-RULE level (`_simulate_strategy`, no AI
+  per fold) — it catches rule overfit, NOT model memorization. No embargo between IS/OOS
+  (low concern since no model is refit per fold).
+- The HONEST model-level generalization number is the embargoed train/val split inside
+  `train_from_features` (gap 0.69-0.75, regime-direction ~0.78, vol ~0.84) — trust THAT,
+  not the backtest equity curve.
+
+Why this is acceptable to START paper trading: paper trading IS the genuine out-of-sample
+forward test (no real capital at risk). Just don't promote the optimistic backtest numbers
+to real-money expectations later.
+
+RECOMMENDED ENHANCEMENT (P1, not a blocker): a "frozen hold-out" — reserve the most recent
+N days (e.g. 45-60) that the training pipeline NEVER trains on, and run the validation
+backtest ONLY on that window for a genuine model-level OOS estimate. Pairs naturally with
+the embargo work.
+
 ## Conclusion
 The gap leak (v319) was the only real leakage. All other families are correctly
 aligned (features end at i, targets strictly future). High accuracies (vol 0.84,
