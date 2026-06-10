@@ -34,6 +34,7 @@ and maintains a decision log for the UI.
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
@@ -43,6 +44,16 @@ logger = logging.getLogger(__name__)
 
 # Maximum decisions to keep in memory
 MAX_DECISION_LOG = 200
+
+# ── P-WIRE shadow mode (regime-conditional model selection) ──────────────────
+# When enabled, every live model prediction additionally runs the generic base
+# direction model AND its regime-specialized variant side-by-side on the SAME
+# bars, logging the comparison inside live_prediction → confidence_gate_log
+# (keyed by decision_id). This NEVER affects execution — it is read-only signal
+# accumulation so we can prove (over ~5000 decisions) whether the regime-matched
+# specialized models produce a better edge than the generic ones. Disable with
+# PWIRE_SHADOW=0.
+PWIRE_SHADOW_ENABLED = os.environ.get("PWIRE_SHADOW", "1") not in ("0", "false", "False")
 
 # T6: position multiplier applied when an ACTIVE regime suppression soft-benches a
 # setup (data-driven per-setup×regime expectancy gate). Kept in sync with
@@ -1403,6 +1414,7 @@ class ConfidenceGate:
             # Use the most recent bars from ib_historical_data
             def _fetch_and_predict():
                 try:
+                    bar_size_used = "5 mins"
                     bars = list(ts_ai._db["ib_historical_data"].find(
                         {"symbol": symbol, "bar_size": "5 mins"},
                         {"_id": 0}
@@ -1410,32 +1422,41 @@ class ConfidenceGate:
                     
                     if len(bars) < 50:
                         # Try daily bars as fallback
+                        bar_size_used = "1 day"
                         bars = list(ts_ai._db["ib_historical_data"].find(
                             {"symbol": symbol, "bar_size": "1 day"},
                             {"_id": 0}
                         ).sort("date", -1).limit(200))
                     
                     if len(bars) < 50:
-                        return None
+                        return None, None
                     
                     # Reverse to chronological order (oldest first)
                     bars.reverse()
                     
                     # Call predict_for_setup — this is the core ML inference
                     prediction = ts_ai.predict_for_setup(symbol, bars, setup_type)
-                    return prediction
+                    # P-WIRE shadow mode (read-only, never affects execution)
+                    shadow = self._compute_regime_shadow(
+                        ts_ai, symbol, setup_type, bars, bar_size_used, prediction
+                    )
+                    return prediction, shadow
                 except Exception as e:
                     logger.debug(f"Live prediction fetch/predict failed for {symbol}: {e}")
-                    return None
+                    return None, None
             
             # Run in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            prediction = await loop.run_in_executor(None, _fetch_and_predict)
+            prediction, shadow = await loop.run_in_executor(None, _fetch_and_predict)
             
             if prediction is None:
                 return result
             
             result["has_prediction"] = True
+            if shadow is not None:
+                # Rides inside live_prediction → persisted to confidence_gate_log
+                # under the decision_id (no schema/flow changes needed).
+                result["regime_shadow"] = shadow
             result["direction"] = prediction.get("direction", "flat")
             result["confidence"] = prediction.get("confidence", 0.0)
             result["prob_up"] = prediction.get("probability_up", 0.5)
@@ -1455,6 +1476,85 @@ class ConfidenceGate:
         except Exception as e:
             logger.debug(f"Live prediction failed (non-critical): {e}")
             return result
+
+    def _compute_regime_shadow(self, ts_ai, symbol, setup_type, bars, bar_size, primary_prediction):
+        """P-WIRE shadow mode (read-only, NEVER affects execution).
+
+        Runs the generic base direction model and its regime-specialized variant
+        side-by-side on the SAME bar snapshot, returning a comparison record that
+        rides inside live_prediction → persisted to confidence_gate_log under the
+        decision_id. Evaluated later vs bot_trades ground truth to prove whether
+        regime-matched models beat the generic ones. Runs inside the prediction
+        thread-pool executor (synchronous, DB-backed) so it never blocks the loop.
+        """
+        if not PWIRE_SHADOW_ENABLED:
+            return None
+        try:
+            import hashlib
+            tf = {
+                "1 min": "1min", "5 mins": "5min", "15 mins": "15min",
+                "30 mins": "30min", "1 hour": "1hour", "1 day": "daily",
+                "1 week": "weekly",
+            }.get(bar_size)
+            if tf is None:
+                return None
+
+            regime = ts_ai.classify_current_regime()
+            if not regime:
+                return None
+
+            generic_name = f"direction_predictor_{tf}"
+            regime_name = f"direction_predictor_{tf}_{regime}"
+            generic = ts_ai.predict_with_named_model(symbol, bars, generic_name)
+            regime_pred = ts_ai.predict_with_named_model(symbol, bars, regime_name)
+
+            # Input fingerprint — proves both legs saw the same bar snapshot
+            last = bars[-1] if bars else {}
+            input_hash = hashlib.sha1(
+                f"{symbol}|{bar_size}|{len(bars)}|{last.get('date','')}|"
+                f"{last.get('close','')}".encode()
+            ).hexdigest()[:16]
+
+            def _leg(p, name):
+                if not p:
+                    return {"available": False, "model_name": name}
+                pu = float(p.get("probability_up", 0.5))
+                pd = float(p.get("probability_down", 0.5))
+                return {
+                    "available": True,
+                    "model_name": name,
+                    "model_used": p.get("model_used"),
+                    "direction": p.get("direction"),
+                    "prob_up": round(pu, 6),
+                    "prob_down": round(pd, 6),
+                    "confidence": round(float(p.get("confidence", 0.0)), 6),
+                    "ev_proxy": round(pu - pd, 6),
+                    "feature_count": p.get("feature_count"),
+                    "model_metrics": p.get("model_metrics") or {},
+                }
+
+            g_leg = _leg(generic, generic_name)
+            r_leg = _leg(regime_pred, regime_name)
+            agree = bool(
+                g_leg.get("available") and r_leg.get("available")
+                and g_leg.get("direction") == r_leg.get("direction")
+            )
+            return {
+                "shadow_version": "pwire_v1",
+                "regime": regime,
+                "bar_size": bar_size,
+                "input_hash": input_hash,
+                "generic_base": g_leg,
+                "regime_specialized": r_leg,
+                "regime_model_available": r_leg.get("available", False),
+                "directions_agree": agree,
+                # The model that actually drove the live decision (context only).
+                "decision_model": (primary_prediction or {}).get("model_used"),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as e:
+            logger.debug(f"Regime shadow compute failed for {symbol}: {e}")
+            return None
 
     async def _get_cnn_signal(self, symbol: str, setup_type: str, direction: str) -> Dict[str, Any]:
         """
