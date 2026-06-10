@@ -38,6 +38,11 @@ lazily, so leaders dropped off the Regime Focus List with `sector=unknown`. New:
 - Endpoints: `POST /api/scanner/sector-backfill/deep?max_symbols=4000&pace_ms=250` (bg task),
   `GET /api/scanner/sector-backfill/status` (progress + universe/rated coverage counts).
 - Tests: `backend/tests/test_v322e_sector_backfill.py` (6 green).
+- **LIVE VERIFIED 2026-06-10**: 4,000 processed in 47 min, 1,566 tagged, 0 aborts.
+  Rated coverage 774 → 1,463 (+89%); universe 1,348 → 2,913. Auto RS-recompute:
+  2,553 rated / 52 split artifacts caught / 19.1s. Focus list fully sector-tagged
+  (ERAS/HUT/ABSI longs, LCID/INTU/CHTR shorts). Known minor: ELF mis-tagged XLE
+  (IB industry-string mapping quirk) — audit `_industry_to_etf` oddballs later.
 
 ### Session context
 - Answered operator's 7 funnel-architecture questions (tiers preserved/promotion-only, why

@@ -9,7 +9,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 |---|---|---|
 | v19.34.322f | Tier 3 (Investment) afternoon scan 3:45 → 3:30 PM ET | shipped + committed (7352bf4d) |
 | v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped + committed (7352bf4d) |
-| v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped + committed (e9c810f9), backfill RUNNING |
+| v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped (e9c810f9), LIVE-VERIFIED: rated 774→1,463 |
+
+GPU note: XGBoost CUDA IS working on the GB10 (subprocess preflight confirmed
+"AVAILABLE and WORKING"; per-model `trained on device=cuda`). The P2 "GPU-torch swap"
+backlog item applies to TORCH only (torch is +cpu build) — XGBoost wheel has CUDA built in.
+Full retrain (142 models) fired 2026-06-10 20:08 UTC — running overnight; wall-clock is
+dominated by Mongo bar loads + feature engineering, not GPU fitting.
 
 Operator's 7 funnel questions answered; two stale-doc claims corrected (pusher=500
 lines via rotation v17, NOT 14; turbo collectors are manual, NOT always-on).
