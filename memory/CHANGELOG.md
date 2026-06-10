@@ -1,3 +1,36 @@
+## 2026-06-11 — v19.34.314 (P-TARGET): overnight gap-fill redesign + retire dead families — PATCH READY
+
+Patch: https://paste.rs/40n0B  (backend-only → `git apply` + `./start_backend.sh --force`)
+Tests: 10/10 green (tests/test_gap_target_v314.py); 17/17 with v313 suite.
+
+WHY: `gap_fill_*` was DEAD + class-collapsed (~98% fill rate). Root cause: it
+sampled EVERY intrabar gap (≥0.2%, gap=|open[i]−close[i-1]|) and checked "fill"
+across a FULL session (up to 390 bars) — a 0.2% level is almost always revisited
+within a whole session, so the target collapsed. Also audited `risk_of_ruin` (6/6
+collapsed) + `sector_relative` (3/3 collapsed): BOTH verified DEAD at inference
+(only referenced in training_pipeline + preflight_validator; never consumed by the
+gate or scanner).
+
+CHANGE:
+- `gap_fill_model.py`: NEW design samples ONLY the overnight OPEN gap (today's
+  session open vs prior-session close, ≥0.5% via OVERNIGHT_GAP_MIN_PCT) and checks
+  fill within an EARLY window (~first 45 min). New `find_session_open_indices()`
+  helper (date-change detection). `GAP_MODEL_CONFIGS` → intraday only with
+  `early_window_bars` (1min=45, 5min=9, 15min=3). Daily/weekly variants RETIRED.
+- `training_pipeline.py` Phase 5.5 rewritten: per-session overnight-gap sampler
+  with true prior-session aggregate OHLC; uses early window for the target.
+  (Also fixed a stale `current_model="risk_…"` label in the gap phase.)
+- RETIRED by default: "sector" + "risk" phases removed from the default `phases`
+  list and zeroed in `count_total_models()`; gap_fill count 7→3. Reversible via
+  `INCLUDE_RETIRED_FAMILIES=1`. P0 collapse-promotion gate (v19.34.312) still
+  guards the new gap models on retrain.
+
+VERIFY (DGX, NO retrain): `PYTHONPATH=. ../.venv/bin/python scripts/gap_target_audit.py`
+→ replays the new sampler on real intraday bars, reports OLD ~98% vs NEW fill%;
+goal = NEW in ~25-75% band (trainable, non-collapsed). Then the new models train
+on the next nightly cycle (or `phases=["gap_fill"]` manual run).
+
+
 ## 2026-06-11 — v19.34.313 (P-WIRE): regime-conditional model SHADOW mode — PATCH READY
 
 Patch: https://paste.rs/EnRHU  (backend-only → `git apply` + `./start_backend.sh --force`)

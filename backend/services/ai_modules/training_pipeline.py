@@ -726,7 +726,7 @@ PHASE_CONFIGS = {
     "volatility_prediction": {"label": "Volatility Prediction", "order": 4, "expected_models": 7, "phase_num": "3"},
     "exit_timing": {"label": "Exit Timing", "order": 5, "expected_models": 10, "phase_num": "4"},
     "sector_relative": {"label": "Sector-Relative", "order": 6, "expected_models": 3, "phase_num": "5"},
-    "gap_fill": {"label": "Gap Fill Probability", "order": 7, "expected_models": 7, "phase_num": "5.5"},
+    "gap_fill": {"label": "Overnight Gap Fill", "order": 7, "expected_models": 3, "phase_num": "5.5"},
     "risk_of_ruin": {"label": "Risk-of-Ruin", "order": 8, "expected_models": 6, "phase_num": "6"},
     "regime_conditional": {"label": "Regime-Conditional", "order": 9, "expected_models": 28, "phase_num": "7"},
     "ensemble_meta": {"label": "Ensemble Meta-Learner", "order": 10, "expected_models": 10, "phase_num": "8"},
@@ -1203,9 +1203,12 @@ def count_total_models() -> int:
     setup_short = sum(len(v) for k, v in SETUP_TRAINING_PROFILES.items() if k.startswith("SHORT_"))  # 17
     volatility = len(BAR_SIZE_CONFIGS)  # 7
     exit_timing = len(ALL_SETUP_TYPES)  # 10
-    sector_relative = 3  # daily, hourly, 5min
-    gap_fill = 7  # one per timeframe
-    risk_of_ruin = 6  # 1min through daily
+    # v19.34.314 — gap_fill retired daily/weekly → 3 intraday models; sector_relative
+    # + risk_of_ruin retired by default (counted only when INCLUDE_RETIRED_FAMILIES=1).
+    _include_retired = os.environ.get("INCLUDE_RETIRED_FAMILIES", "0") == "1"
+    sector_relative = 3 if _include_retired else 0  # daily, hourly, 5min
+    gap_fill = 3  # overnight-gap intraday models: 1min, 5min, 15min
+    risk_of_ruin = 6 if _include_retired else 0  # 1min through daily
     regime_conditional = generic * len(["bull_trend", "bear_trend", "range_bound", "high_vol"])  # 7 * 4 = 28
     ensemble = len(ALL_SETUP_TYPES)  # 10
     cnn_models = 34  # CNN chart pattern models (one per SETUP_TRAINING_PROFILES entry)
@@ -1242,7 +1245,21 @@ async def run_training_pipeline(
         Dict with training results summary.
     """
     if phases is None:
-        phases = ["generic", "setup", "short", "volatility", "exit", "sector", "gap_fill", "risk", "regime", "ensemble", "cnn", "dl", "finbert", "validate"]
+        # v19.34.314 — RETIRED by default: "sector" (sector_relative, 3 models)
+        # and "risk" (risk_of_ruin, 6 models). Both were DEAD at inference (never
+        # consumed by the confidence gate or anywhere else — verified) AND
+        # class-collapsed (3/3, 6/6 min per-class recall < 0.10). Retiring them
+        # saves nightly training compute and stops inflating the model count with
+        # unused artifacts. Re-enable with INCLUDE_RETIRED_FAMILIES=1 (e.g. if a
+        # future task wires them into live scoring).
+        _include_retired = os.environ.get("INCLUDE_RETIRED_FAMILIES", "0") == "1"
+        phases = ["generic", "setup", "short", "volatility", "exit"]
+        if _include_retired:
+            phases.append("sector")
+        phases.append("gap_fill")
+        if _include_retired:
+            phases.append("risk")
+        phases += ["regime", "ensemble", "cnn", "dl", "finbert", "validate"]
         # Note: "regime" and "ensemble" depend on Phase 1-7 models being trained first
         # "validate" runs 5-Phase Auto-Validation on setup_specific + ensemble models
         # "dl" trains Phase 5 deep learning models (VAE, TFT, CNN-LSTM)
@@ -2392,10 +2409,11 @@ async def run_training_pipeline(
             _phase_memory_cleanup("Phase 5")
             status.update(phase="gap_fill")
             _p_elapsed = _time.monotonic() - _pipeline_start
-            logger.info(f"=== Phase 5.5: Training Gap Fill Probability Models === [{int(_p_elapsed//60)}m elapsed]")
+            logger.info(f"=== Phase 5.5: Training Overnight Gap-Fill Models (P-TARGET v19.34.314) === [{int(_p_elapsed//60)}m elapsed]")
             from services.ai_modules.gap_fill_model import (
-                GAP_MODEL_CONFIGS, GAP_FEATURE_NAMES,
+                GAP_MODEL_CONFIGS, GAP_FEATURE_NAMES, OVERNIGHT_GAP_MIN_PCT,
                 compute_gap_features, compute_gap_fill_target,
+                find_session_open_indices,
             )
             from services.ai_modules.timeseries_gbm import TimeSeriesGBM
             from services.ai_modules.timeseries_features import get_feature_engineer
@@ -2406,7 +2424,7 @@ async def run_training_pipeline(
 
             for bs, gap_config in GAP_MODEL_CONFIGS.items():
                 model_name = gap_config["model_name"]
-                max_bars = gap_config["max_bars"]
+                early_window = gap_config["early_window_bars"]
                 status.update(current_model=model_name)
 
                 # Pipeline resume
@@ -2427,7 +2445,7 @@ async def run_training_pipeline(
                     max_sym = max_symbols_override or bs_config.get("max_symbols", 500)
                     symbols = symbols[:max_sym]
 
-                    min_required = 70 + max_bars
+                    min_required = 70 + early_window
                     all_X = []
                     all_y = []
 
@@ -2435,7 +2453,7 @@ async def run_training_pipeline(
                         sb_syms = symbols[sb_start:sb_start + STREAM_BATCH_SIZE]
                         sb_end = min(sb_start + STREAM_BATCH_SIZE, len(symbols))
                         status.update(
-                            current_model=f"risk_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
+                            current_model=f"gap_{bs} — symbols {sb_start+1}-{sb_end}/{len(symbols)}",
                             current_phase_progress=(sb_end / len(symbols)) * 100,
                         )
                         batch_bars = await load_symbols_parallel(
@@ -2455,94 +2473,96 @@ async def run_training_pipeline(
                                 continue
 
                             n_base = base_matrix.shape[1]
-                            n_gap = len(GAP_FEATURE_NAMES)
                             closes = np.array([b["close"] for b in bars], dtype=np.float32)
                             opens = np.array([b["open"] for b in bars], dtype=np.float32)
                             volumes = np.array([b.get("volume", 0) for b in bars], dtype=np.float32)
                             highs = np.array([b["high"] for b in bars], dtype=np.float32)
                             lows = np.array([b["low"] for b in bars], dtype=np.float32)
+                            bar_dates = [str(b.get("date", "")) for b in bars]
 
-                            gap_max_rows = len(bars) - 50 - max_bars
-                            if gap_max_rows <= 0:
+                            if len(closes) < 50:
                                 continue
 
-                            # Pre-compute reversed sliding windows for MRF arrays
+                            # Reversed sliding windows for the per-sample MRF context
                             from numpy.lib.stride_tricks import sliding_window_view as _swv
-                            if len(closes) >= 50:
-                                c_wins_mrf = _swv(closes, 50)[:, ::-1]
-                                h_wins_mrf = _swv(highs, 50)[:, ::-1]
-                                l_wins_mrf = _swv(lows, 50)[:, ::-1]
-                                v_wins_mrf = _swv(volumes, 50)[:, ::-1]
-                            else:
-                                continue
+                            c_wins_mrf = _swv(closes, 50)[:, ::-1]
+                            h_wins_mrf = _swv(highs, 50)[:, ::-1]
+                            l_wins_mrf = _swv(lows, 50)[:, ::-1]
+                            v_wins_mrf = _swv(volumes, 50)[:, ::-1]
 
-                            # Vectorize gap detection: find bars with meaningful gaps
-                            gap_pcts = np.zeros(len(bars), dtype=np.float32)
-                            with np.errstate(divide='ignore', invalid='ignore'):
-                                gap_pcts[1:] = np.where(
-                                    closes[:-1] > 0,
-                                    np.abs(opens[1:] - closes[:-1]) / closes[:-1],
-                                    0.0,
-                                )
+                            # P-TARGET: sample ONLY the overnight OPEN gap per session
+                            session_opens = find_session_open_indices(bar_dates)
 
-                            X_buf = np.empty((gap_max_rows, n_base + n_gap), dtype=np.float32)
-                            y_buf = np.empty(gap_max_rows, dtype=np.float32)
-                            valid = 0
-
-                            for i in range(50, len(bars) - max_bars):
-                                if gap_pcts[i] < 0.002:
+                            rows_X = []
+                            rows_y = []
+                            for k in range(1, len(session_opens)):
+                                i = session_opens[k]
+                                prev_session_start = session_opens[k - 1]
+                                # need base/MRF context + a full early window ahead
+                                if i < 50 or i + early_window >= len(bars):
                                     continue
-
                                 prev_close = closes[i - 1]
                                 today_open = opens[i]
+                                if prev_close <= 0 or today_open <= 0:
+                                    continue
+                                gap = (today_open - prev_close) / prev_close
+                                if abs(gap) < OVERNIGHT_GAP_MIN_PCT:
+                                    continue
+                                gap_direction = 1.0 if gap > 0 else -1.0
 
-                                # Pass correct MRF window arrays as the function expects
-                                win_idx = i - 49  # c_wins_mrf[win_idx] = closes[i-49:i+1][::-1]
+                                win_idx = i - 49
+                                row_idx = i - 49
                                 if win_idx < 0 or win_idx >= len(c_wins_mrf):
                                     continue
+                                if row_idx < 0 or row_idx >= len(base_matrix):
+                                    continue
+
+                                # Prior-session aggregate OHLC (true overnight context)
+                                prev_day_open = float(opens[prev_session_start])
+                                prev_day_high = float(np.max(highs[prev_session_start:i]))
+                                prev_day_low = float(np.min(lows[prev_session_start:i]))
 
                                 gap_feats = compute_gap_features(
-                                    today_open=today_open,
-                                    today_close_bar1=closes[i],
-                                    today_volume_bar1=volumes[i],
-                                    prev_day_open=opens[i - 1],
-                                    prev_day_high=highs[i - 1],
-                                    prev_day_low=lows[i - 1],
-                                    prev_day_close=prev_close,
+                                    today_open=float(today_open),
+                                    today_close_bar1=float(closes[i]),
+                                    today_volume_bar1=float(volumes[i]),
+                                    prev_day_open=prev_day_open,
+                                    prev_day_high=prev_day_high,
+                                    prev_day_low=prev_day_low,
+                                    prev_day_close=float(prev_close),
                                     daily_closes=c_wins_mrf[win_idx],
                                     daily_highs=h_wins_mrf[win_idx],
                                     daily_lows=l_wins_mrf[win_idx],
                                     daily_volumes=v_wins_mrf[win_idx],
                                 )
 
-                                # Compute target: did the gap fill?
+                                # Target: did the gap fill within the EARLY window?
                                 target = compute_gap_fill_target(
-                                    prev_close=prev_close,
-                                    gap_direction=1 if today_open > prev_close else -1,
-                                    intraday_highs=highs[i:i + max_bars],
-                                    intraday_lows=lows[i:i + max_bars],
-                                    max_bars=max_bars,
+                                    prev_close=float(prev_close),
+                                    gap_direction=gap_direction,
+                                    intraday_highs=highs[i:i + early_window],
+                                    intraday_lows=lows[i:i + early_window],
+                                    max_bars=early_window,
                                 )
-
-                                # Base features row
-                                row_idx = i - 49
-                                if row_idx < 0 or row_idx >= len(base_matrix):
+                                if target is None:
                                     continue
 
-                                X_buf[valid, :n_base] = base_matrix[row_idx]
-                                X_buf[valid, n_base:] = [gap_feats.get(f, 0.0) for f in GAP_FEATURE_NAMES]
-                                y_buf[valid] = float(target)
-                                valid += 1
+                                combined_row = np.empty(n_base + len(GAP_FEATURE_NAMES), dtype=np.float32)
+                                combined_row[:n_base] = base_matrix[row_idx]
+                                combined_row[n_base:] = [gap_feats.get(f, 0.0) for f in GAP_FEATURE_NAMES]
+                                rows_X.append(combined_row)
+                                rows_y.append(float(target))
 
-                            if valid > 0:
-                                all_X.append(X_buf[:valid].copy())
-                                all_y.append(y_buf[:valid].copy())
+                            if rows_X:
+                                all_X.append(np.array(rows_X, dtype=np.float32))
+                                all_y.append(np.array(rows_y, dtype=np.float32))
 
                         del batch_bars
                         gc.collect()
 
-                    if len(all_X) < 1 or sum(len(x) for x in all_X) < MIN_TRAINING_SAMPLES:
-                        logger.warning(f"Insufficient gap fill data for {bs}: {sum(len(x) for x in all_X) if all_X else 0} samples")
+                    total_samples = sum(len(x) for x in all_X) if all_X else 0
+                    if total_samples < MIN_TRAINING_SAMPLES:
+                        logger.warning(f"Insufficient overnight-gap data for {bs}: {total_samples} samples (need {MIN_TRAINING_SAMPLES})")
                         continue
 
                     # Memory safety check before vstack
@@ -2554,9 +2574,9 @@ async def run_training_pipeline(
                     y = np.concatenate(all_y).astype(np.float32)
                     fill_pct = float(np.mean(y)) * 100
                     del all_X, all_y
-                    logger.info(f"Training {model_name}: {len(X):,} samples, gap_fill={fill_pct:.1f}%")
+                    logger.info(f"Training {model_name}: {len(X):,} overnight-gap samples, fill={fill_pct:.1f}% (early window={early_window} bars)")
 
-                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=max_bars)
+                    model = TimeSeriesGBM(model_name=model_name, forecast_horizon=early_window)
                     model.set_db(db)
                     metrics = await _run_in_thread(model.train_from_features, X, y, combined_names, num_boost_round=150, early_stopping_rounds=15)
 
