@@ -2926,7 +2926,7 @@ class TimeSeriesAIService:
         return raw
 
     def _get_shadow_model(self, model_name: str):
-        """P-WIRE: load & cache a TimeSeriesGBM by exact name for shadow
+        """v19.34.313 P-WIRE: load & cache a TimeSeriesGBM by exact name for shadow
         inference. Loaded with the DB to fetch weights, then detached
         (_db=None) so shadow predictions never write to timeseries_predictions
         or pollute verification stats. Caches misses (None) too so an absent
@@ -3027,9 +3027,9 @@ class TimeSeriesAIService:
         are using the generic model vs their own.
         """
         import numpy as np
-        # P-WIRE shadow mode: route to an explicit named model (e.g. a regime
-        # variant) without touching live setup-model resolution. Additive —
-        # default None preserves byte-for-byte existing behavior.
+        # v19.34.313 P-WIRE shadow mode: route to an explicit named model (e.g.
+        # a regime variant) without touching live setup-model resolution.
+        # Additive — default None preserves byte-for-byte existing behavior.
         if model_name_override:
             return self.predict_with_named_model(symbol, bars, model_name_override)
         effective_type = self._resolve_setup_model_key(setup_type, self._setup_models.keys())

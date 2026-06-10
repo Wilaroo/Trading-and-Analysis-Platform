@@ -1,3 +1,43 @@
+## 2026-06-11 — v19.34.313 (P-WIRE): regime-conditional model SHADOW mode — PATCH READY
+
+Patch: https://paste.rs/EnRHU  (backend-only → `git apply` + `./start_backend.sh --force`)
+Tests: 7/7 green (tests/test_pwire_shadow_v313.py, runs without DGX DB/GPU).
+
+WHY: ~18 regime_conditional models (`direction_predictor_{tf}_{bull_trend|bear_trend|
+range_bound|high_vol}`) are HEALTHY two-sided (acc 0.52–0.78) but DEAD at inference —
+the live layer only loads the generic `direction_predictor_{tf}`. An OFFLINE harness
+can't prove their edge because the inference path's Layer-3 label features depend on
+LIVE caches (`get_market_setup_classifier()._cache`) populated only during live scans;
+offline would feed NEUTRAL/UNKNOWN and invalidate the comparison. So this ships a
+LIVE SHADOW MODE instead.
+
+CHANGE (additive, read-only, NEVER affects execution):
+- `timeseries_service.py`:
+  • `predict_for_setup(..., model_name_override=None)` — default None preserves the
+    live path byte-for-byte; when set, short-circuits to a named model.
+  • `_get_shadow_model(name)` — cached TimeSeriesGBM load by exact name; detaches
+    `_db` after load so shadow preds never write timeseries_predictions.
+  • `predict_with_named_model(symbol, bars, name)` — self-contained `.predict()`
+    (base features only, no Layer-3 caches → valid comparison).
+  • `classify_current_regime(ttl=300s)` — SPY-daily regime, short-TTL cached.
+- `confidence_gate.py`:
+  • `_compute_regime_shadow(...)` runs generic `direction_predictor_{tf}` AND
+    regime variant `direction_predictor_{tf}_{regime}` on the SAME bar snapshot;
+    result rides inside `live_prediction.regime_shadow` → auto-persisted to
+    `confidence_gate_log` under the existing `decision_id`. No schema/flow change.
+  • Logs: regime label, input_hash (proves same snapshot), both legs' raw
+    prob_up/down, confidence, ev_proxy (pUp−pDown), feature_count, model_metrics,
+    directions_agree, decision_model. Toggle `PWIRE_SHADOW=0`.
+
+VERIFY (DGX): `.venv/bin/python scripts/pwire_shadow_verify.py` (4 checks).
+EVALUATE (after ~5000 decisions): `.venv/bin/python scripts/pwire_shadow_eval.py`
+→ regime vs generic directional hit-rate + signed EV vs bot_trades, GO/NO-GO verdict.
+Once verdict = REGIME WINS, wire the variant into the live path (P-WIRE phase 2).
+
+NOTE: regime variants with sparse data are legitimately untrained → fall back
+(logged `regime_model_available:false`), expected, not a failure.
+
+
 ## 2026-06-09 — v316j (c1): multi_tf regime → confidence-gate directional SCORING — PATCH READY
 
 Patch: https://paste.rs/fL453  (backend-only → `git apply` + `./start_backend.sh --force`)

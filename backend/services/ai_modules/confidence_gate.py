@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # Maximum decisions to keep in memory
 MAX_DECISION_LOG = 200
 
-# ── P-WIRE shadow mode (regime-conditional model selection) ──────────────────
+# ── P-WIRE shadow mode (regime-conditional model selection) — v19.34.313 ─────
 # When enabled, every live model prediction additionally runs the generic base
 # direction model AND its regime-specialized variant side-by-side on the SAME
 # bars, logging the comparison inside live_prediction → confidence_gate_log
@@ -1436,7 +1436,7 @@ class ConfidenceGate:
                     
                     # Call predict_for_setup — this is the core ML inference
                     prediction = ts_ai.predict_for_setup(symbol, bars, setup_type)
-                    # P-WIRE shadow mode (read-only, never affects execution)
+                    # v19.34.313 P-WIRE shadow mode (read-only, never affects execution)
                     shadow = self._compute_regime_shadow(
                         ts_ai, symbol, setup_type, bars, bar_size_used, prediction
                     )
@@ -1478,7 +1478,7 @@ class ConfidenceGate:
             return result
 
     def _compute_regime_shadow(self, ts_ai, symbol, setup_type, bars, bar_size, primary_prediction):
-        """P-WIRE shadow mode (read-only, NEVER affects execution).
+        """P-WIRE shadow mode (v19.34.313) — read-only, NEVER affects execution.
 
         Runs the generic base direction model and its regime-specialized variant
         side-by-side on the SAME bar snapshot, returning a comparison record that
