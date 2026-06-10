@@ -473,7 +473,46 @@ class TimeSeriesGBM:
                 {"name": self.model_name},
                 {"metrics": 1, "version": 1, "_id": 0}
             )
-            
+
+            # v19.34.312: ABSOLUTE class-collapse unfitness gate.
+            # The relative guard below only runs when an active model already
+            # exists, so the FIRST training of a model (and every vol_predictor_*
+            # / gap_fill_* family, which bypassed the direction-only path) could
+            # ship a model that ignores one class entirely — e.g. gap_fill 0.98
+            # accuracy with recall_down=0.00 (always "FILL"), vol_predictor
+            # always-"HIGH_VOL". Headline accuracy is then just the base rate:
+            # zero tradeable edge. Refuse to promote such a model to the LIVE
+            # inference collection regardless of accuracy or whether an active
+            # model exists. Archive it as rejected_class_collapse for audit.
+            import os as _os_abs
+            ABS_MIN_RECALL = float(_os_abs.environ.get("GBM_ABS_MIN_RECALL", "0.10"))
+            _nm_abs = self._metrics.to_dict() if self._metrics else {}
+            _abs_ru = float(_nm_abs.get("recall_up", 0.0))
+            _abs_rd = float(_nm_abs.get("recall_down", 0.0))
+            if min(_abs_ru, _abs_rd) < ABS_MIN_RECALL:
+                logger.warning(
+                    f"Model protection: NEW {self._version} of {self.model_name} "
+                    f"REJECTED (class collapse) — recall_up={_abs_ru:.3f}, "
+                    f"recall_down={_abs_rd:.3f} < floor {ABS_MIN_RECALL}. "
+                    f"Headline accuracy {new_accuracy:.4f} is base-rate only; NOT "
+                    f"promoted to live inference. Archived as rejected_class_collapse."
+                )
+                try:
+                    self._db[self.MODEL_ARCHIVE_COLLECTION].update_one(
+                        {"name": self.model_name, "version": self._version},
+                        {"$set": {
+                            "rejected_reason": "class_collapse",
+                            "rejected_recall_up": _abs_ru,
+                            "rejected_recall_down": _abs_rd,
+                        }},
+                    )
+                except Exception:
+                    pass
+                # Keep any existing (presumably non-collapsed) active model.
+                if current_active is not None:
+                    self._load_model()
+                return "rejected_class_collapse"
+
             should_promote = True
             demotion_reason = None
             if current_active and "metrics" in current_active:
