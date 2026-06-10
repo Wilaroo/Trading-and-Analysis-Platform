@@ -1,3 +1,41 @@
+## 2026-06 — v321: PRE-RETRAIN BATCH (Tier 2b + 3b shadow + 3a-lite) — PATCHERS READY
+
+DELIVERABLES (all verified byte-identical on paste.rs):
+  NEW services/ai_modules/frozen_holdout.py   https://paste.rs/D4sCI
+  NEW services/ai_modules/feature_baseline.py https://paste.rs/fdPxh
+  apply_v321_pretrain_batch.py (16 edits)     https://paste.rs/eAJDW
+  tests/test_v321_pretrain_batch.py (20 tests) https://paste.rs/WeFlh
+Container validation: 20/20 new + 88 regression green; local_train.py compiles; idempotent.
+PREREQ: v320 applied (anchors on v320 code); module files must be downloaded BEFORE patcher.
+
+Tier 2b — FROZEN FORWARD HOLD-OUT (TB_FROZEN_HOLDOUT_DAYS, default 45; 0=off):
+- TRAINING loaders drop bars newer than cutoff: timeseries_service._get_historical_bars_from_db
+  (train/universe/setup), training_pipeline.load_symbol_bars (all 9 families, filter BEFORE
+  NVMe caching), scripts/local_train.py. Inference loaders untouched (verified: only
+  smart_stop_service has a same-named but separate method).
+- Cache identity: NVMe bar/feature filenames get _fh{days} suffix; Mongo feature-cache key
+  gets _fh{days} tag -> changing the knob auto-invalidates stale caches.
+- Model docs stamped {"frozen_holdout": {days, cutoff}}.
+- CONSEQUENCE: any backtest/revalidation over the last 45d (with v320b costs) = TRUE OOS.
+
+Tier 3b — PBO PROMOTION GATE (TB_PBO_GATE=off|shadow|enforce, default SHADOW):
+- pbo_gate_check() in timeseries_gbm; wired in _save_model AFTER class-collapse gate.
+- shadow: logs "[PBO-GATE shadow] WOULD BLOCK ..." + stamps archive doc {pbo_gate:...}.
+- enforce: returns rejected_pbo_gate, never writes live collection; GBM_FORCE_PROMOTE overrides.
+- Thresholds: TB_PBO_MAX (0.20), TB_CPCV_MIN_EDGE (0.0). No-CPCV models always pass.
+- Setup-type models: shadow logging only this round (separate promote logic).
+- PLAN: review first retrain's PBO distribution -> then set TB_PBO_GATE=enforce.
+
+Tier 3a-lite — FEATURE BASELINES (TB_FEATURE_BASELINE, default on):
+- compute_feature_baseline(): per-feature mean/std/min/max + decile bin edges/fracs
+  (PSI-ready), subsampled to 50k rows, Mongo-safe keys. Captured in train_from_features
+  AND inline universe path; persisted as model_doc.feature_baseline (+ setup docs).
+- Future: drift monitor compares live feature streams vs these baselines.
+
+RETRAIN SEQUENCE: apply v321 -> tests -> restart backend -> FULL RETRAIN (gets CPCV +
+hold-out + shadow gate + baselines in one pass) -> review PBO lines -> enforce gate.
+
+
 ## 2026-06 — v320 (Tier 1a) + v320b (Tier 1b): CPCV for GBMs + backtest execution costs — PATCHERS READY
 
 PATCHERS (string-anchored, idempotent, py_compile-guarded, dry-run default):
