@@ -1,5 +1,21 @@
 # 🔜 NEXT SESSION — START HERE (forked 2026-06-11)
 
+## ✅ v320 (Tier 1a) + v320b (Tier 1b) BUILT & CONTAINER-TESTED 2026-06 — AWAITING DGX APPLY
+- Patchers on paste.rs: CPCV/GBM `mOsoh` · backtest costs `UGzyM` · tests `9ukb3` / `9Ryar`
+- Tier 1a: run_gbm_cpcv() in timeseries_gbm.py (15-fold purged CPCV, PBO proxy, env knobs
+  TB_GBM_CPCV*), event_intervals threaded through train_vectorized + setup trainer,
+  ModelMetrics cpcv_* fields persist to timeseries_models.metrics. ALSO fixed: inline
+  train_full_universe path in timeseries_service.py was MISSING the v319b embargo — now embargoed.
+- Tier 1b: advanced_backtest_engine.py — next-bar-open fills, adverse slippage (BT_SLIPPAGE_BPS,
+  default 2), IBKR commission (BT_COMMISSION_PER_SHARE 0.005 / min 1.00), gap-through stop fills,
+  favorable gap target fills. BT_COSTS=0 restores legacy. Costs ON BY DEFAULT → expect lower
+  (honest) revalidation numbers.
+- Known quirk: span-based purge in purged_cpcv.py empties train for the {first,last} group combo
+  → 14 usable folds of 15 (deterministic, conservative). Pinned in tests.
+- Pre-existing STALE test failures (NOT v320): test_model_protection_class_collapse (6),
+  test_phase3_4_45 (5) — expectations predate v19.34.312 ABS class-collapse gate + newer
+  train_full_universe defaults. Confirmed failing on pristine tree. Housekeeping candidate.
+
 Respond in ENGLISH only. This is a physical DGX deployment.
 
 ## ⛔ HARD WORKFLOW RULES (do not violate — caused >10 crashes in prior forks)

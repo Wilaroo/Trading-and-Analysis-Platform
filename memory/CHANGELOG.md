@@ -1,3 +1,46 @@
+## 2026-06 — v320 (Tier 1a) + v320b (Tier 1b): CPCV for GBMs + backtest execution costs — PATCHERS READY
+
+PATCHERS (string-anchored, idempotent, py_compile-guarded, dry-run default):
+  apply_v320_cpcv_gbm.py        https://paste.rs/mOsoh
+  apply_v320b_backtest_costs.py https://paste.rs/UGzyM
+TESTS (drop into backend/tests/): test_gbm_cpcv_v320.py https://paste.rs/9ukb3 ·
+  test_backtest_costs_v320b.py https://paste.rs/9Ryar
+Container validation: 24/24 new tests + 71 regression tests green (v319 suites, sample
+weights, class balance, triple barrier, direction-stops, v313).
+
+v320 Tier 1a (timeseries_gbm.py + timeseries_service.py):
+- `run_gbm_cpcv()`: CombinatorialPurgedKFold C(6,2)=15 folds (14 usable — span-purge empties
+  the {first,last} combo, deterministic+conservative), capped fold fits, row-subsampling.
+  Outputs cpcv_oos_acc_{mean,std,p05,min}, cpcv_edge_mean, cpcv_pbo (fraction of OOS folds
+  with NO edge over majority baseline), cpcv_n_folds → ModelMetrics → timeseries_models.metrics.
+- `train_from_features(event_intervals=…)` runs CPCV pre-fit; shipped model unchanged
+  (final fit on all-data-minus-embargo). No-interval callers get conservative consecutive-bar
+  fallback intervals → ALL GBM families (training_pipeline 9 call sites) covered for free.
+- train_vectorized: globally-offset explicit intervals (cnn_lstm convention, valid_rows-masked).
+- Setup trainer: exact per-pattern intervals (entry=i+49, exit=+horizon, cumulative offset).
+- BONUS FIX: inline train_full_universe split had NO v319b embargo → now embargoed + CPCV +
+  cpcv in API return payload.
+- Env: TB_GBM_CPCV(=1), TB_GBM_CPCV_SPLITS(6), TB_GBM_CPCV_TEST_SPLITS(2),
+  TB_GBM_CPCV_MAX_ROWS(300000), TB_GBM_CPCV_BOOST_ROUNDS(150).
+
+v320b Tier 1b (advanced_backtest_engine.py, all 3 sim loops):
+- Next-bar-OPEN entry fills (pending_entry queue), adverse slippage on ALL market orders
+  (entry/stop/time/eod), gap-through stops fill at the open (worse), targets are limit
+  orders (no slippage; favorable gaps fill at open), IBKR round-trip commission subtracted
+  from pnl (BacktestTrade.commission / .slippage_cost fields added).
+- Env: BT_COSTS(=1; 0=legacy frictionless), BT_SLIPPAGE_BPS(2.0),
+  BT_COMMISSION_PER_SHARE(0.005), BT_COMMISSION_MIN(1.0), BT_NEXT_BAR_FILLS(=1).
+- EXPECT: all revalidation/backtest numbers drop vs pre-v320b — that is the point.
+- test_backtest_direction_stops.py gets an autouse BT_COSTS=0 fixture (it pins direction
+  logic, not costs) — included in the patcher.
+
+PRE-EXISTING stale failures (NOT v320, confirmed on pristine tree):
+test_model_protection_class_collapse (6) + test_phase3_4_45 (5) — expectations predate
+v19.34.312 ABS class-collapse gate / newer train_full_universe defaults. Housekeeping.
+
+DEPLOY ORDER: apply v320+v320b → run tests → THEN full retrain (models get CPCV-validated).
+
+
 ## 2026-06-11 — v19.34.319d (P1): Phase-8 ensemble FFD MATCH-FIX — PATCH READY
 
 Patch: https://paste.rs/U7WVq  (backend-only → `git apply`; v319d-only delta, generated

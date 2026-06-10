@@ -203,6 +203,19 @@ class ModelMetrics:
     training_samples: int = 0
     validation_samples: int = 0
 
+    # v320 Tier-1a — CPCV (Combinatorial Purged Cross-Validation) honest OOS
+    # metrics. cpcv_n_folds == 0 means CPCV was skipped (disabled or not
+    # enough data). cpcv_pbo = fraction of OOS folds with NO edge over the
+    # majority-class baseline — a probability-of-backtest-overfit proxy
+    # (lower is better; < 0.2 healthy, > 0.5 suspicious).
+    cpcv_n_folds: int = 0
+    cpcv_oos_acc_mean: float = 0.0
+    cpcv_oos_acc_std: float = 0.0
+    cpcv_oos_acc_p05: float = 0.0
+    cpcv_oos_acc_min: float = 0.0
+    cpcv_edge_mean: float = 0.0
+    cpcv_pbo: float = 0.0
+
     # Feature importance
     top_features: List[str] = field(default_factory=list)
 
@@ -250,6 +263,144 @@ def _embargo_size(split_idx: int, forecast_horizon: int, env_override: Optional[
         return 0
     embargo = min(embargo, split_idx - 1, int(split_idx * 0.25))
     return max(0, embargo)
+
+# ── v320 Tier-1a: Combinatorial Purged CV (CPCV) for GBM models ──────────────
+# The GBM families (direction/gap/vol/setup/exit) previously shipped with a
+# SINGLE embargoed train/val split, so headline metrics were a one-exam point
+# estimate. CPCV re-trains LIGHTWEIGHT fold models over C(n_splits,
+# n_test_splits) purged+embargoed train/test combinations to produce an OOS
+# score DISTRIBUTION plus a PBO proxy. The production model is NOT changed —
+# CPCV exists for honest metrics, not for the shipped fit.
+#
+# Env knobs:
+#   TB_GBM_CPCV=0              -> disable entirely
+#   TB_GBM_CPCV_SPLITS         -> N groups (default 6)
+#   TB_GBM_CPCV_TEST_SPLITS    -> K held-out groups (default 2 -> C(6,2)=15)
+#   TB_GBM_CPCV_MAX_ROWS       -> row cap per fold-eval (default 300000)
+#   TB_GBM_CPCV_BOOST_ROUNDS   -> boost-round cap for fold fits (default 150)
+
+_CPCV_ZERO = {
+    "cpcv_n_folds": 0, "cpcv_oos_acc_mean": 0.0, "cpcv_oos_acc_std": 0.0,
+    "cpcv_oos_acc_p05": 0.0, "cpcv_oos_acc_min": 0.0,
+    "cpcv_edge_mean": 0.0, "cpcv_pbo": 0.0,
+}
+
+
+def _cpcv_fallback_intervals(n_samples: int, forecast_horizon: int) -> np.ndarray:
+    """Conservative event intervals when the caller has none: treat samples as
+    CONSECUTIVE bars whose labels look `forecast_horizon` bars forward. Within
+    a symbol block this is exactly right; at block boundaries it over-purges a
+    few extra samples (conservative — never optimistic)."""
+    fh = max(1, int(forecast_horizon))
+    idx = np.arange(int(n_samples), dtype=np.int64)
+    return np.stack([idx, idx + fh], axis=1)
+
+
+def run_gbm_cpcv(
+    X,
+    y,
+    sample_weights,
+    event_intervals,
+    train_params: Dict,
+    num_boost_round: int = 300,
+    num_classes: int = 3,
+    forecast_horizon: int = 5,
+    model_name: str = "",
+) -> Dict[str, Any]:
+    """Purged CPCV OOS evaluation for an XGBoost classifier.
+
+    Returns the cpcv_* metric dict (zeroed when skipped/disabled).
+    PBO proxy = fraction of OOS folds whose accuracy does NOT beat that
+    fold's majority-class baseline (i.e. no real edge on unseen data).
+    Lower is better: < 0.2 healthy, > 0.5 suspicious.
+    """
+    if str(os.environ.get("TB_GBM_CPCV", "1")).strip().lower() in ("0", "false", "off", "no"):
+        return dict(_CPCV_ZERO)
+    try:
+        n_splits = int(os.environ.get("TB_GBM_CPCV_SPLITS", "6"))
+        n_test_splits = int(os.environ.get("TB_GBM_CPCV_TEST_SPLITS", "2"))
+        max_rows = int(os.environ.get("TB_GBM_CPCV_MAX_ROWS", "300000"))
+        cap_rounds = int(os.environ.get("TB_GBM_CPCV_BOOST_ROUNDS", "150"))
+    except (TypeError, ValueError):
+        n_splits, n_test_splits, max_rows, cap_rounds = 6, 2, 300000, 150
+
+    try:
+        n = len(X)
+        if n < n_splits * 50:
+            return dict(_CPCV_ZERO)
+
+        if event_intervals is None or len(event_intervals) != n:
+            iv = _cpcv_fallback_intervals(n, forecast_horizon)
+        else:
+            iv = np.asarray(event_intervals, dtype=np.int64)
+
+        w = None
+        if sample_weights is not None and len(sample_weights) == n:
+            w = np.asarray(sample_weights, dtype=np.float32)
+
+        X_c, y_c = X, np.asarray(y, dtype=np.int64)
+        if n > max_rows:
+            rng = np.random.default_rng(42)
+            keep = np.sort(rng.choice(n, size=max_rows, replace=False))
+            X_c, y_c, iv = X_c[keep], y_c[keep], iv[keep]
+            if w is not None:
+                w = w[keep]
+
+        from services.ai_modules.purged_cpcv import CombinatorialPurgedKFold, cpcv_stability
+
+        embargo = max(1, int(forecast_horizon))
+        splitter = CombinatorialPurgedKFold(
+            iv, n_splits=n_splits, n_test_splits=n_test_splits, embargo_bars=embargo,
+        )
+        rounds = max(20, min(int(num_boost_round), cap_rounds))
+
+        accs, edges = [], []
+        for fold_i, (tr, te) in enumerate(splitter.split()):
+            if len(tr) < 50 or len(te) < 20:
+                continue
+            try:
+                dtr = xgb.DMatrix(X_c[tr], label=y_c[tr], weight=(w[tr] if w is not None else None))
+                dte = xgb.DMatrix(X_c[te])
+                booster = xgb.train(dict(train_params), dtr, num_boost_round=rounds, verbose_eval=False)
+                raw = booster.predict(dte)
+                if raw.ndim > 1:
+                    pred = np.argmax(raw, axis=1)
+                else:
+                    pred = (raw > 0.5).astype(np.int64)
+                y_te = y_c[te]
+                acc = float(np.mean(pred == y_te))
+                counts = np.bincount(y_te, minlength=max(2, int(num_classes)))
+                baseline = float(counts.max()) / float(max(1, len(y_te)))
+                accs.append(acc)
+                edges.append(acc - baseline)
+            except Exception as fold_err:
+                logger.warning(f"[CPCV] {model_name} fold {fold_i} failed: {fold_err}")
+
+        if not accs:
+            return dict(_CPCV_ZERO)
+
+        stab = cpcv_stability(accs)
+        edge_arr = np.asarray(edges, dtype=np.float64)
+        pbo = float((edge_arr <= 0).sum()) / float(len(edge_arr))
+        res = {
+            "cpcv_n_folds": int(len(accs)),
+            "cpcv_oos_acc_mean": float(stab["mean"]),
+            "cpcv_oos_acc_std": float(stab["std"]),
+            "cpcv_oos_acc_p05": float(stab["p05"]),
+            "cpcv_oos_acc_min": float(stab["min"]),
+            "cpcv_edge_mean": float(edge_arr.mean()),
+            "cpcv_pbo": pbo,
+        }
+        logger.info(
+            f"[CPCV] {model_name}: {res['cpcv_n_folds']} folds · "
+            f"OOS acc {res['cpcv_oos_acc_mean']:.3f}±{res['cpcv_oos_acc_std']:.3f} "
+            f"(min {res['cpcv_oos_acc_min']:.3f} · p05 {res['cpcv_oos_acc_p05']:.3f}) · "
+            f"edge vs baseline {res['cpcv_edge_mean']:+.3f} · PBO {pbo:.2f}"
+        )
+        return res
+    except Exception as cpcv_err:
+        logger.warning(f"[CPCV] {model_name} skipped (error: {cpcv_err})")
+        return dict(_CPCV_ZERO)
 
 
 
@@ -1008,13 +1159,26 @@ class TimeSeriesGBM:
         X = np.vstack(all_features).astype(np.float32)
         y = np.concatenate(all_targets).astype(np.int64)
 
-        # Compute per-symbol uniqueness weights, then concatenate in same order as X
+        # Compute per-symbol uniqueness weights, then concatenate in same order as X.
+        # v320: ALSO build a single globally-offset event_intervals array (same
+        # convention as cnn_lstm: local intervals + cumulative bar offset) so the
+        # CPCV splitter in train_from_features can purge across symbol blocks.
         from .event_intervals import concurrency_weights
         weights_parts = []
+        intervals_parts = []
+        _iv_offset = 0
+        _fh = max(1, int(self.forecast_horizon))
         for feat_matrix, iv in zip(all_features, all_intervals_per_symbol):
             n = len(feat_matrix)
             if iv is None or len(iv) == 0:
                 weights_parts.append(np.ones(n, dtype=np.float32))
+                # Synthesize consecutive-bar intervals so CPCV alignment
+                # survives backward-compat 2-tuple worker results.
+                if n > 0:
+                    ent = np.arange(n, dtype=np.int64)
+                    synth = np.stack([ent, ent + _fh], axis=1)
+                    intervals_parts.append(synth + _iv_offset)
+                    _iv_offset += int(synth[:, 1].max()) + 2
                 continue
             # Per-symbol scope: n_bars = max exit + 1
             n_bars = int(iv[:, 1].max()) + 2
@@ -1023,9 +1187,22 @@ class TimeSeriesGBM:
             if len(w) != n:
                 w = np.ones(n, dtype=np.float32)
             weights_parts.append(w)
+            if len(iv) == n:
+                intervals_parts.append(np.asarray(iv, dtype=np.int64) + _iv_offset)
+            elif n > 0:
+                ent = np.arange(n, dtype=np.int64)
+                intervals_parts.append(np.stack([ent, ent + _fh], axis=1) + _iv_offset)
+            _iv_offset += n_bars
         sample_weights = np.concatenate(weights_parts) if weights_parts else None
+        event_intervals = np.concatenate(intervals_parts) if intervals_parts else None
+        if event_intervals is not None and len(event_intervals) != len(X):
+            logger.warning(
+                f"event_intervals length {len(event_intervals)} != X length {len(X)} — "
+                "dropping explicit intervals (CPCV falls back to conservative ones)"
+            )
+            event_intervals = None
 
-        del all_features, all_targets, all_intervals_per_symbol, weights_parts
+        del all_features, all_targets, all_intervals_per_symbol, weights_parts, intervals_parts
         gc.collect()
 
         logger.info(f"Extracted {len(X)} training samples (vectorized, triple-barrier 3-class)")
@@ -1035,6 +1212,8 @@ class TimeSeriesGBM:
         y = y[valid_rows]
         if sample_weights is not None:
             sample_weights = sample_weights[valid_rows]
+        if event_intervals is not None:
+            event_intervals = event_intervals[valid_rows]
 
         feature_names = feature_engineer.get_feature_names()
         return self.train_from_features(
@@ -1044,6 +1223,7 @@ class TimeSeriesGBM:
             early_stopping_rounds=early_stopping_rounds,
             num_classes=3,
             sample_weights=sample_weights,
+            event_intervals=event_intervals,
         )
 
     def train_from_features(
@@ -1058,6 +1238,7 @@ class TimeSeriesGBM:
         num_classes: int = 2,
         sample_weights: Optional[np.ndarray] = None,
         apply_class_balance: bool = True,
+        event_intervals: Optional[np.ndarray] = None,
     ) -> 'ModelMetrics':
         """
         Train the model from pre-extracted features and targets.
@@ -1169,6 +1350,16 @@ class TimeSeriesGBM:
             train_params["objective"] = "multi:softprob"
             train_params["num_class"] = num_classes
             train_params["eval_metric"] = "mlogloss"
+
+        # ── v320 Tier-1a: CPCV honest OOS evaluation (metrics only) ─────────
+        # Runs a CombinatorialPurgedKFold over (X, y) to produce an OOS score
+        # distribution + PBO proxy. The SHIPPED model below is still the final
+        # fit on all-data-minus-embargo — CPCV is for honest metrics only.
+        _cpcv_res = run_gbm_cpcv(
+            X, y, sample_weights, event_intervals, train_params,
+            num_boost_round=num_boost_round, num_classes=num_classes,
+            forecast_horizon=self.forecast_horizon, model_name=self.model_name,
+        )
 
         # Split train/validation (time-ordered) with a LÓPEZ DE PRADO EMBARGO gap.
         # v319b: each sample's label looks `forecast_horizon` bars forward, so the
@@ -1327,6 +1518,13 @@ class TimeSeriesGBM:
             calibrated_down_threshold=float(_cal_down),
             training_samples=len(X_train),
             validation_samples=len(X_val),
+            cpcv_n_folds=int(_cpcv_res.get("cpcv_n_folds", 0)),
+            cpcv_oos_acc_mean=float(_cpcv_res.get("cpcv_oos_acc_mean", 0.0)),
+            cpcv_oos_acc_std=float(_cpcv_res.get("cpcv_oos_acc_std", 0.0)),
+            cpcv_oos_acc_p05=float(_cpcv_res.get("cpcv_oos_acc_p05", 0.0)),
+            cpcv_oos_acc_min=float(_cpcv_res.get("cpcv_oos_acc_min", 0.0)),
+            cpcv_edge_mean=float(_cpcv_res.get("cpcv_edge_mean", 0.0)),
+            cpcv_pbo=float(_cpcv_res.get("cpcv_pbo", 0.0)),
             top_features=top_features,
             last_trained=datetime.now(timezone.utc).isoformat()
         )

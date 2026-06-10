@@ -1154,11 +1154,23 @@ class TimeSeriesAIService:
                     logger.warning(f"    → {rec}")
             sys.stdout.flush()
 
-            # Train/validation split
+            # Train/validation split — v320: embargoed (López de Prado). This
+            # inline path previously MISSED the v319b embargo applied to
+            # TimeSeriesGBM.train_from_features: the last `horizon` training
+            # samples have label windows overlapping the validation block.
             validation_split = 0.2
             split_idx = int(len(X) * (1 - validation_split))
-            X_train, X_val = X[:split_idx], X[split_idx:]
-            y_train, y_val = y[:split_idx], y[split_idx:]
+            from .timeseries_gbm import _embargo_size as _emb_size
+            _emb = _emb_size(split_idx, int(forecast_horizon), os.environ.get("TB_EMBARGO_BARS"))
+            _train_end = split_idx - _emb
+            if _emb > 0:
+                logger.info(
+                    f"[FULL UNIVERSE] embargo gap: purging {_emb} boundary "
+                    f"sample(s) — train[:{_train_end}] | val[{split_idx}:] "
+                    f"(horizon={forecast_horizon})"
+                )
+            X_train, X_val = X[:_train_end], X[split_idx:]
+            y_train, y_val = y[:_train_end], y[split_idx:]
 
             logger.info(f"[FULL UNIVERSE] Training samples: {len(X_train):,}, Validation: {len(X_val):,}")
             sys.stdout.flush()
@@ -1284,6 +1296,23 @@ class TimeSeriesAIService:
             logger.info(f"[FULL UNIVERSE] Prediction dist: DOWN={pred_pct[0]*100:.1f}% FLAT={pred_pct[1]*100:.1f}% UP={pred_pct[2]*100:.1f}%")
             sys.stdout.flush()
 
+            # ── v320 Tier-1a: CPCV honest OOS evaluation (metrics only) ─────
+            # Purged+embargoed OOS distribution + PBO proxy for the generic
+            # direction predictor. The shipped model below is unchanged.
+            from .timeseries_gbm import run_gbm_cpcv
+            try:
+                _cpcv_w = compute_per_sample_class_weights(
+                    y.astype(np.int64), num_classes=3, clip_ratio=5.0,
+                    scheme=get_class_weight_scheme(),
+                )
+            except Exception:
+                _cpcv_w = None
+            _cpcv_res = run_gbm_cpcv(
+                X, y, _cpcv_w, None, xgb_params,
+                num_boost_round=300, num_classes=3,
+                forecast_horizon=int(forecast_horizon), model_name=model_name,
+            )
+
             # Save model — mark as 3-class triple-barrier so metadata persists correctly.
             model._model = trained_model
             model._num_classes = 3
@@ -1316,6 +1345,13 @@ class TimeSeriesAIService:
                 calibrated_down_threshold=float(cal_down),
                 training_samples=len(X_train),
                 validation_samples=len(X_val),
+                cpcv_n_folds=int(_cpcv_res.get("cpcv_n_folds", 0)),
+                cpcv_oos_acc_mean=float(_cpcv_res.get("cpcv_oos_acc_mean", 0.0)),
+                cpcv_oos_acc_std=float(_cpcv_res.get("cpcv_oos_acc_std", 0.0)),
+                cpcv_oos_acc_p05=float(_cpcv_res.get("cpcv_oos_acc_p05", 0.0)),
+                cpcv_oos_acc_min=float(_cpcv_res.get("cpcv_oos_acc_min", 0.0)),
+                cpcv_edge_mean=float(_cpcv_res.get("cpcv_edge_mean", 0.0)),
+                cpcv_pbo=float(_cpcv_res.get("cpcv_pbo", 0.0)),
                 last_trained=datetime.now(timezone.utc).isoformat()
             )
             
@@ -1371,6 +1407,7 @@ class TimeSeriesAIService:
                 "f1": f1_up,
                 "training_samples": len(X_train),
                 "validation_samples": len(X_val),
+                "cpcv": _cpcv_res,
                 "symbols_processed": symbols_with_data,
                 "total_bars": total_bars_processed,
                 "elapsed_seconds": elapsed
@@ -2470,6 +2507,8 @@ class TimeSeriesAIService:
             
             all_feature_chunks = []
             all_target_list = []
+            all_event_intervals = []  # v320: (entry, exit) per sample, global bar offset
+            _iv_offset = 0
             total_samples = 0
             total_bars_scanned = 0
             total_matches = 0
@@ -2634,8 +2673,12 @@ class TimeSeriesAIService:
                     combined = np.concatenate([base_vector, setup_vector, regime_vector, mtf_vector, label_vector])
                     all_feature_chunks.append(combined)
                     all_target_list.append(target)
+                    all_event_intervals.append(
+                        (_iv_offset + i + 49, _iv_offset + i + 49 + forecast_horizon)
+                    )
                     total_samples += 1
                 
+                _iv_offset += len(bars)
                 del bulk_features, bars, symbol_matches
             
             if total_samples < min_samples:
@@ -2665,11 +2708,17 @@ class TimeSeriesAIService:
             dist_parts = [f"{class_labels.get(int(c), c)}={n} ({n/len(y)*100:.1f}%)" for c, n in zip(unique, counts)]
             logger.info(f"[SETUP TRAIN] {setup_type}/{bar_size} class dist: {', '.join(dist_parts)}")
             
+            _setup_iv = (
+                np.asarray(all_event_intervals, dtype=np.int64)
+                if (all_event_intervals and len(all_event_intervals) == len(X))
+                else None
+            )
             metrics = model.train_from_features(
                 X, y, combined_feature_names,
                 skip_save=True,
                 num_boost_round=num_boost_round,
-                num_classes=num_classes
+                num_classes=num_classes,
+                event_intervals=_setup_iv,
             )
             
             # Model protection: compare against previous model for same (setup, bar_size)
