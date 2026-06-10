@@ -1904,7 +1904,23 @@ class ConfidenceGate:
         """
         if self._db is None:
             return False
-            
+
+        # GAP-5 fix (2026-06-10): normalize outcome vocabulary at this single
+        # boundary. The primary genuine-close path
+        # (position_manager -> learning_loop_service.record_trade_outcome)
+        # passes "won"/"lost"/"breakeven", while trade_journal passes
+        # "win"/"loss"/"scratch". gate_calibrator counts ONLY "win"/"loss", so
+        # the dominant feed was silently bucketed as scratches -> every score
+        # bucket read ~0% win-rate -> calibrator fell back to a STRICTER
+        # threshold than the defaults. Canonicalize here so the loop learns.
+        _o = str(outcome or "").strip().lower()
+        if _o in ("win", "won", "w"):
+            outcome = "win"
+        elif _o in ("loss", "lost", "lose", "l"):
+            outcome = "loss"
+        else:  # breakeven / scratch / be / flat / unknown
+            outcome = "scratch"
+
         try:
             result = self._db["confidence_gate_log"].find_one_and_update(
                 {
