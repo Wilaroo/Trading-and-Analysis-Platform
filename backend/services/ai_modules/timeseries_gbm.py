@@ -206,6 +206,44 @@ class ModelMetrics:
         return asdict(self)
 
 
+def _force_promote_enabled(model_name: str, env_val: Optional[str] = None) -> bool:
+    """v319c — one-shot operator override (env `GBM_FORCE_PROMOTE`) to evict a
+    KNOWN-INVALID active model (e.g. a leaky pre-fix model whose inflated macro-F1
+    blocks an honest, legitimately-lower replacement). Matches "1"/"true"/"all"/"*"
+    (every model) or a comma-list of exact model names. Default off (empty → False).
+
+    NOTE: this bypasses ONLY the relative-vs-active comparison; the ABSOLUTE
+    class-collapse gate (min per-class recall >= GBM_ABS_MIN_RECALL) still applies,
+    so a genuinely-collapsed model can never be force-promoted.
+    """
+    if not env_val:
+        return False
+    v = str(env_val).strip().lower()
+    if v in ("1", "true", "all", "*", "yes", "on"):
+        return True
+    names = {n.strip() for n in str(env_val).split(",") if n.strip()}
+    return model_name in names
+
+
+def _embargo_size(split_idx: int, forecast_horizon: int, env_override: Optional[str] = None) -> int:
+    """López de Prado EMBARGO: number of boundary training samples to purge so
+    their forward-looking label windows don't overlap the validation block.
+
+    Defaults to the label horizon (`forecast_horizon`); env `TB_EMBARGO_BARS`
+    overrides. Clamped to keep the train block non-empty (never more than 25% of
+    the train samples, never the whole block). Returns 0 when split_idx <= 1.
+    """
+    try:
+        embargo = int(env_override) if (env_override and str(env_override).strip()) else int(forecast_horizon)
+    except (TypeError, ValueError):
+        embargo = int(forecast_horizon)
+    embargo = max(0, embargo)
+    if split_idx <= 1:
+        return 0
+    embargo = min(embargo, split_idx - 1, int(split_idx * 0.25))
+    return max(0, embargo)
+
+
 class TimeSeriesGBM:
     """
     XGBoost model for directional price forecasting (GPU-accelerated).
@@ -616,6 +654,24 @@ class TimeSeriesGBM:
                             f"new macro-F1 {new_macro_f1:.4f} < "
                             f"{MACRO_F1_FLOOR:.2f}×active {cur_macro_f1:.4f}"
                         )
+
+                if not should_promote:
+                    # v319c: one-shot override to evict a KNOWN-INVALID incumbent
+                    # (e.g. a leaky pre-fix model whose inflated macro-F1 blocks an
+                    # honest, legitimately-lower replacement). Bypasses ONLY this
+                    # relative-vs-active comparison; the ABSOLUTE class-collapse gate
+                    # above already rejected genuine collapse, so this can't promote
+                    # a degenerate model. Default off; reversible (unset the env).
+                    if _force_promote_enabled(self.model_name, os.environ.get("GBM_FORCE_PROMOTE")):
+                        logger.warning(
+                            f"Model protection OVERRIDE (GBM_FORCE_PROMOTE): promoting "
+                            f"{self.model_name} {self._version} despite '{demotion_reason}' "
+                            f"(new macro-F1 {new_macro_f1:.4f} vs active {cur_macro_f1:.4f}, "
+                            f"UP R {new_recall_up:.3f}/DOWN R {new_recall_down:.3f}). "
+                            f"Operator asserted the active model is invalid."
+                        )
+                        should_promote = True
+                        demotion_reason = None
 
                 if not should_promote:
                     logger.warning(
@@ -1105,12 +1161,24 @@ class TimeSeriesGBM:
             train_params["num_class"] = num_classes
             train_params["eval_metric"] = "mlogloss"
 
-        # Split train/validation (time-ordered)
+        # Split train/validation (time-ordered) with a LÓPEZ DE PRADO EMBARGO gap.
+        # v319b: each sample's label looks `forecast_horizon` bars forward, so the
+        # last `embargo` training samples have label windows that overlap the start
+        # of the validation block → mild optimistic leakage at the boundary. Purge
+        # those `embargo` samples off the END of train (the gap is left unused).
         split_idx = int(len(X) * (1 - validation_split))
-        X_train, X_val = X[:split_idx], X[split_idx:]
-        y_train, y_val = y[:split_idx], y[split_idx:]
+        embargo = _embargo_size(split_idx, self.forecast_horizon, os.environ.get("TB_EMBARGO_BARS"))
+        train_end = split_idx - embargo
+        if embargo > 0:
+            logger.info(
+                f"[{self.model_name}] embargo gap: purging {embargo} boundary "
+                f"sample(s) — train[:{train_end}] | val[{split_idx}:] "
+                f"(horizon={self.forecast_horizon})"
+            )
+        X_train, X_val = X[:train_end], X[split_idx:]
+        y_train, y_val = y[:train_end], y[split_idx:]
         if sample_weights is not None:
-            w_train = np.asarray(sample_weights[:split_idx], dtype=np.float32)
+            w_train = np.asarray(sample_weights[:train_end], dtype=np.float32)
             w_val = np.asarray(sample_weights[split_idx:], dtype=np.float32)
         else:
             w_train = w_val = None

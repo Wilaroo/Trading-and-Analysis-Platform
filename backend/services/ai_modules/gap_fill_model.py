@@ -147,7 +147,11 @@ def compute_gap_fill_target(
     """
     Compute gap fill target within a bounded window.
 
-    intraday_lows/highs: Intraday bars after the gap (chronological, oldest first)
+    intraday_lows/highs: Intraday bars in the evaluation window (chronological,
+        oldest first). For v319 NO-PEEK training the CALLER must pass the
+        post-open slice `[i+1 : i+1+early_window]` (i.e. EXCLUDING the session
+        open bar i) so the target never reads the same bar whose range is also
+        in the feature row.
     prev_close: Previous day's closing price
     gap_direction: 1.0 for gap up, -1.0 for gap down
     max_bars: how many bars ahead to consider a "fill" (the EARLY window in the
@@ -203,6 +207,16 @@ def find_session_open_indices(bar_dates) -> list:
 # balanced, actionable target. Multi-day "daily"/"weekly" gap variants are RETIRED
 # (a gap that fills sometime over 20 days / 12 weeks is not a tradeable intraday
 # signal).
+#
+# v19.34.319 — NO-PEEK fix. The v314 sampler still leaked: the feature row for the
+# open bar i included bar i's own H/L/C, and compute_gap_features read bar i's close
+# + volume, while the fill target was evaluated over [i, i+w] (INCLUDING bar i). A
+# leak audit (scripts/gap_leakage_audit.py) showed 76.2% (15m) / 49.6% (5m) of all
+# fills land in the open bar — trivially readable from the features → inflated
+# ~94.6% accuracy. The training pipeline now DECIDES AT THE OPEN: the base/MRF
+# feature window ends at bar i-1, the two bar-i-derived gap features are neutralized
+# (premarket_momentum→0, gap_volume_ratio→0), and the fill target is evaluated over
+# [i+1, i+early_window], excluding the open bar.
 OVERNIGHT_GAP_MIN_PCT = 0.005  # only model overnight gaps ≥ 0.5%
 
 GAP_MODEL_CONFIGS = {
