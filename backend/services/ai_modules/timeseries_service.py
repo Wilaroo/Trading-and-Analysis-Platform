@@ -2157,10 +2157,33 @@ class TimeSeriesAIService:
         try:
             diag = self.diagnose_model_load_consistency()
             if diag["missing_count"] > 0:
-                logger.warning(
-                    f"Model load consistency: {diag['loaded_count']}/{diag['trained_in_db_count']} "
-                    f"trained models reachable. MISSING: {diag['missing_models']}"
-                )
+                missing = list(diag["missing_models"])
+                # v322j — split deliberate quarantines (PBO sweep) from genuine
+                # load failures so the boot warning only fires on real bugs.
+                quarantined = []
+                if self._db is not None:
+                    try:
+                        quarantined = [d["name"] for d in self._db["timeseries_models"].find(
+                            {"name": {"$in": missing}, "quarantined": True},
+                            {"_id": 0, "name": 1})]
+                    except Exception:
+                        pass
+                genuinely_missing = [m for m in missing if m not in quarantined]
+                if quarantined:
+                    logger.info(
+                        f"Model load consistency: {len(quarantined)} model(s) "
+                        f"QUARANTINED (intentional, PBO sweep): {quarantined}"
+                    )
+                if genuinely_missing:
+                    logger.warning(
+                        f"Model load consistency: {diag['loaded_count']}/{diag['trained_in_db_count']} "
+                        f"trained models reachable. MISSING: {genuinely_missing}"
+                    )
+                else:
+                    logger.info(
+                        f"Model load consistency OK: {diag['loaded_count']}/{diag['trained_in_db_count']} "
+                        "reachable (all gaps are intentional quarantines)."
+                    )
             else:
                 logger.info(
                     f"Model load consistency OK: {diag['loaded_count']}/{diag['trained_in_db_count']} "
