@@ -742,3 +742,12 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   OPERATOR DECISIONS LOGGED: 15:35-15:45 EOD window stays WARN-ONLY; V5 HUD Integrity
   tile deferred. NEXT: P1 broker-rejection re-fire churn (same signal fired 11x), then
   P1 taxonomy mismatch (style=swing/tf=intraday), IGV INT-21 hardening, v322p decay rework.
+- 2026-06-11 v322t DEPLOYED+VERIFIED ON DGX: patcher UxwrZ applied (hash guards green),
+  91-suite ran 87 passed + 4 FileNotFoundError failures in test_alert_id_threadthrough
+  (pre-existing hardcoded "/app/backend/..." paths — container-only, NOT v322t).
+  Follow-up v322t-t1 patcher Mcffz fixed paths to Path(__file__)-relative: 9/9 green
+  on DGX. Commits 4d11bd76 (v322t) + 221162ef (t1) pushed. CASY bookkeeping-rewrite
+  issue CLOSED end-to-end. Backend restart still pending (changes take effect on next
+  boot). NOTE: many other test files still hardcode /app paths (test_chat_extended_*,
+  test_collection_mode_*, test_collector_uses_end_date, test_confidence_gate_wiring...)
+  — backlog: portable-test-paths sweep.
