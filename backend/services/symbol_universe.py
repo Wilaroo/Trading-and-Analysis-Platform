@@ -316,9 +316,14 @@ def get_pusher_l1_recommendations(
 
     extra_priority = extra_priority or []
 
-    # Pull top-N by avg_dollar_volume (qualified + non-unqualifiable only)
+    # Pull top-N by avg_dollar_volume (qualified + non-unqualifiable only).
+    # v322n — over-fetch then drop bond/cash, income, index clones and
+    # single-stock leveraged products: ~25% of a raw dollar-volume top-400
+    # was ETFs (2026-06-11 audit); every line freed goes to a tradeable
+    # stock. The always-on context ETF set below is unaffected.
     top_by_adv: List[str] = []
     try:
+        from services.etf_classifier import is_l1_eligible
         cursor = (
             db["symbol_adv_cache"]
             .find(
@@ -327,9 +332,11 @@ def get_pusher_l1_recommendations(
                 {"_id": 0, "symbol": 1, "avg_dollar_volume": 1},
             )
             .sort("avg_dollar_volume", -1)
-            .limit(int(top_n))
+            .limit(int(top_n) * 2)
         )
-        top_by_adv = [d["symbol"] for d in cursor if d.get("symbol")]
+        top_by_adv = [d["symbol"] for d in cursor
+                      if d.get("symbol") and is_l1_eligible(d["symbol"])]
+        top_by_adv = top_by_adv[:int(top_n)]
     except Exception as e:
         return {"success": False, "error": str(e)[:120], "symbols": []}
 

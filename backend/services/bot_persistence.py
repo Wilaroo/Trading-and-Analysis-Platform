@@ -675,6 +675,15 @@ class BotPersistence:
             # Add metadata
             trade_dict["last_updated"] = datetime.now(timezone.utc).isoformat()
 
+            # v322n — ETF tagging for per-class EV measurement.
+            try:
+                from services.etf_classifier import classify_etf
+                _ec = classify_etf(trade.symbol)
+                trade_dict["etf_class"] = _ec
+                trade_dict["is_etf"] = _ec is not None
+            except Exception:
+                pass
+
             # v19.34.195 — dual-shape timestamp (ts ISO + ts_dt BSON) anchored
             # to the trade's creation time, so cross-collection queries can
             # filter bot_trades by either type (parity with v172
@@ -717,6 +726,15 @@ class BotPersistence:
             trades_col = bot._db["bot_trades"]
             trade_dict = trade.to_dict()
             trade_dict['_id'] = trade.id
+
+            # v322n — ETF tagging for per-class EV measurement.
+            try:
+                from services.etf_classifier import classify_etf
+                _ec = classify_etf(trade.symbol)
+                trade_dict["etf_class"] = _ec
+                trade_dict["is_etf"] = _ec is not None
+            except Exception:
+                pass
 
             # v19.34.195 — dual-shape timestamp (parity with persist_trade).
             from utils.timestamps import stamps as _stamps
