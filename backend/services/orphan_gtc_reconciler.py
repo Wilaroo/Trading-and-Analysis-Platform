@@ -189,6 +189,19 @@ def classify_open_orders(
                 except (TypeError, ValueError):
                     pass
 
+    # v322k — index trades by their string id as well. ADOPT-OCA groups
+    # embed the owning trade id (ADOPT-OCA-{sym}-{trade_id}-{nonce}), which
+    # survives even when the snapshot's order-id fields are stale — the
+    # exact failure behind the 2026-06-11 UNP/USB cancel↔re-issue loop
+    # (naked-sweep re-issued brackets, this classifier couldn't see the
+    # fresh order ids, auto-sweep cancelled them, repeat).
+    trade_by_str_id: Dict[str, Dict[str, Any]] = {}
+    for t in bot_trades or []:
+        for key in ("id", "trade_id"):
+            v = t.get(key)
+            if v:
+                trade_by_str_id[str(v)] = t
+
     out: List[OrderVerdict] = []
 
     for o in ib_open_orders or []:
@@ -247,6 +260,16 @@ def classify_open_orders(
         matched_trade = trade_by_order_id.get(ib_order_id_int)
         if matched_trade is None and perm_id_int is not None:
             matched_trade = trade_by_order_id.get(perm_id_int)
+        if matched_trade is None:
+            # v322k — OCA-group fallback: any token of the OCA group that
+            # equals a known bot-trade id proves ownership (trade ids are
+            # ≥8-char hex; symbols/nonces can't collide at that length).
+            for tok in (o.get("oca_group") or "").split("-"):
+                if len(tok) >= 8 and tok in trade_by_str_id:
+                    matched_trade = trade_by_str_id[tok]
+                    verdict_obj.reasons.append(
+                        f"matched bot trade via OCA group token '{tok}'")
+                    break
         verdict_obj.bot_trade_id = (
             matched_trade.get("id") or matched_trade.get("trade_id")
         ) if matched_trade else None
@@ -532,6 +555,9 @@ async def _fetch_ib_open_orders() -> Tuple[Optional[List[Dict[str, Any]]], Dict[
                         "stop_price": _safe_float(getattr(order, "auxPrice", None)),
                         "time_in_force": (getattr(order, "tif", "") or "").upper(),
                         "status": status,
+                        # v322k — OCA group carries the owning trade id for
+                        # ADOPT-OCA / re-issued brackets (classifier fallback).
+                        "oca_group": getattr(order, "ocaGroup", "") or "",
                     })
                 src["tier"] = "ib_direct"
                 src["ok"] = True
@@ -587,6 +613,7 @@ async def _fetch_ib_open_orders() -> Tuple[Optional[List[Dict[str, Any]]], Dict[
                     "stop_price": _safe_float(o.get("stop_price") or o.get("aux_price")),
                     "time_in_force": (o.get("tif") or "").upper(),
                     "status": status,
+                    "oca_group": o.get("oca_group") or o.get("ocaGroup") or "",
                 })
             except Exception:
                 continue
@@ -735,7 +762,12 @@ def _fetch_bot_trades(bot) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
                 {"executed_at": {"$exists": False}},
             ]},
             proj,
-        ).limit(2000)  # generous; protects against runaway scans
+        ).sort("executed_at", -1).limit(2000)
+        # v322k — NEWEST FIRST before the cap. The unsorted limit(2000)
+        # returned the OLDEST rows in natural order once the 30-day window
+        # exceeded 2,000 trades, silently dropping TODAY's trades from the
+        # snapshot — every freshly attached bracket then classified as
+        # orphan_no_trade and got auto-cancelled (2026-06-11 incident).
         rows = list(cursor)
         src["tier"] = "mongo_bot_trades"
         src["ok"] = True
