@@ -244,6 +244,25 @@ class TestLadderPlan:
     def test_gate_style(self):
         assert self._plan(make_trade(style="swing")) is None
 
+    def test_gate_no_explicit_style_M0b(self):
+        # The CASY adoption case: trade_style unset → policy resolver would
+        # default to intraday → must NOT ladder.
+        t = make_trade()
+        t.trade_style = None
+        assert self._plan(t) is None
+
+    def test_gate_legacy_field_contradiction_M0b(self):
+        # trade_style says intraday but a legacy horizon field says swing →
+        # ambiguous classification, no ladder.
+        t = make_trade(style="intraday")
+        t.timeframe = "swing"
+        assert self._plan(t) is None
+
+    def test_legacy_style_alias_maps_and_ladders_M0b(self):
+        # 'trade_2_hold' is the legacy alias for intraday — should ladder.
+        legs = self._plan(make_trade(style="trade_2_hold"))
+        assert legs and len(legs) == 3
+
     def test_gate_env_disabled(self, monkeypatch):
         monkeypatch.setenv("M0_LADDER_ENABLED", "false")
         assert self._plan(make_trade()) is None
