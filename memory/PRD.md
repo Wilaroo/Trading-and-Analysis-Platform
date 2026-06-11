@@ -1,5 +1,10 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-12 — v322r (leveraged scalp exclusion + ACMR EOD-escape probe) built/tested,
+> patcher at paste.rs/5K39N — AWAITING OPERATOR APPLY + probe run.** M0 stack (base/a/b/c/d)
+> deployed + committed; awaiting live-session ladder validation. See CHANGELOG top entry.
+> DGX patcher workflow ONLY — no testing_agent, no git from bash. Respond in English.
+
 > **🔜 FORKED 2026-06-11 — NEXT AGENT: read `/app/memory/NEXT_SESSION_TIER1_PLAN.md` FIRST.**
 > All v319/b/c/d ML-integrity fixes are DEPLOYED + committed (DGX main @ d96def40). Full
 > leakage audit done (clean). **Tier 1a (CPCV for GBMs, v320) + Tier 1b (backtest execution

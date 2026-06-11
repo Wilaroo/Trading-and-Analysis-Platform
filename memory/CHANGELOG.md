@@ -1,3 +1,40 @@
+## 2026-06-12 — v322r: leveraged-instrument scalp exclusion + EOD-flatten escape probe
+
+**v322r patcher: https://paste.rs/5K39N — PENDING user apply (then git add/commit/push BEFORE restart).**
+
+### v322r — leveraged ETP scalp exclusion (EXT_SL autopsy fix)
+EXT_SL autopsy showed full-population stop slippage is BETTER than design (avg -0.80R);
+the entire excess tail is ~5 GAP-throughs in geared daily products — ARMG (Leverage
+Shares 2X Long ARM, NOT in the static classifier) 3× in the worst-12, -3.93R in a
+6-minute hold. Fix is ENTRY-side:
+- `etf_classifier.py`: ARMG + AAPB/FBL/NVDX/NVDQ/TSLT/BRKU added to
+  SINGLE_STOCK_LEVERAGED; new `LEVERAGED_NAME_RE` + `name_looks_leveraged(long_name,
+  stock_type)` (fund-type contracts only, fail-open for COMMON stocks) +
+  `is_known_leveraged()`.
+- `ib_direct_service.py`: new `get_contract_profile(symbol)` → {long_name, stock_type}.
+- `enhanced_scanner.py`: `_is_leveraged_instrument()` (static classifier → IB longName
+  probe, in-process cached, fail-open); `_passes_universal_liquidity_gate` blocks
+  leveraged ETPs for scalp/intraday styles **BEFORE the known-liquid bypass** (UVXY-class
+  symbols would otherwise skip the gate). Drops → trade_drops gate=scalp_leveraged_exclusion.
+- Env: `SCALP_BLOCK_LEVERAGED` (default true), `SCALP_LEVERAGED_ALLOW`
+  (default TQQQ,SQQQ,SOXL,SOXS). Swing entries unaffected.
+- Tests: `backend/tests/test_v322r_leveraged_scalp_exclusion.py` (22 green; + v322m/v297/
+  v322n/M0/M0c/M0d regression all green, 134 total).
+
+### diag_eod_flatten_escape.py — ACMR 65-hour escape probe (read-only, in same patcher)
+Replays a trade against all three kill-paths (decay sweep requirements, EOD close-pass
+`should_close_at_eod` policy resolution incl. precedence branch, heartbeat eligible-count
+query) + per-EOD-day scheduler evidence (bot_events eod_auto_close, sentcom_thoughts
+eod_heartbeat, state_integrity_events) + verdict. Hypotheses: CASY-class bookkeeping
+invisibility (row not 'open' → absent from bot._open_trades) or trade pre-dates v301/302.
+
+### Carry-over observations (NOT yet fixed)
+- `b6db5295` (GLD): realized_pnl=-568.91 but net_pnl=-1.0 — same bookkeeping smell as
+  CASY; fold into the CASY P1 fix.
+- `e587da92` absent from bot_trades even at --days 7 while lifecycle events reference it
+  on 06-11 → row older than 7d or symbol field differs; query by id when revisiting.
+- GLD -77 adopted short: confirm flat after EOD.
+
 ## 2026-06-11 — v19.34.322f/g/e: Tier-3 3:30 PM window + EOD AUTO-CHAIN + paced deep sector backfill
 
 **v322f+g patcher: https://paste.rs/CyqKv — APPLIED + COMMITTED on DGX (7352bf4d, pushed to GitHub).**

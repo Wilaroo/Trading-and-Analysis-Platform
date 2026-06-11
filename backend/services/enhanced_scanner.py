@@ -892,6 +892,24 @@ class EnhancedBackgroundScanner:
                 os.environ.get("SCALP_MIN_RVOL", "1.0"))
         except (TypeError, ValueError):
             self._scalp_min_rvol = 1.0
+        # v322r — leveraged-instrument scalp exclusion (2026-06-12 EXT_SL
+        # autopsy: gap-throughs on geared products — ARMG -3.93R in a
+        # 6-minute hold — account for the entire excess stop-slippage tail).
+        #   • SCALP_BLOCK_LEVERAGED   — "true" (default) blocks leveraged/
+        #     inverse ETPs from scalp/intraday entries. "false" disables.
+        #   • SCALP_LEVERAGED_ALLOW   — comma list of operator carve-outs
+        #     (default: the deep index-leveraged set actively traded).
+        self._scalp_block_leveraged = (
+            os.environ.get("SCALP_BLOCK_LEVERAGED", "true").lower() == "true"
+        )
+        self._scalp_leveraged_allow: Set[str] = {
+            s.strip().upper()
+            for s in os.environ.get(
+                "SCALP_LEVERAGED_ALLOW", "TQQQ,SQQQ,SOXL,SOXS").split(",")
+            if s.strip()
+        }
+        # In-process cache for IB longName leverage probes (symbol → bool).
+        self._leverage_probe_cache: Dict[str, bool] = {}
         # ATR% range
         self._min_atr_pct = 0.015   # 1.5% minimum
         self._max_atr_pct = 0.10    # 10% maximum
@@ -1649,6 +1667,43 @@ class EnhancedBackgroundScanner:
         except Exception:
             pass
 
+    async def _is_leveraged_instrument(self, symbol: str) -> Tuple[bool, str]:
+        """v322r — is ``symbol`` a leveraged/inverse ETP? (ARMG gap autopsy.)
+
+        Layer 1: static ``etf_classifier`` class (instant, covers the known
+        universe). Layer 2: IB contract longName/stockType heuristic for NEW
+        geared launches the static list hasn't caught up with — single-stock
+        2x products list monthly (the ARMG class). Probe results are cached
+        in-process; IB unavailable → fail OPEN (never block a common stock
+        on a probe miss). Returns ``(is_leveraged, source)``."""
+        sym = (symbol or "").upper().strip()
+        if not sym:
+            return False, "no_symbol"
+        try:
+            from services.etf_classifier import classify_etf, name_looks_leveraged
+        except ImportError:
+            return False, "classifier_unavailable"
+        if classify_etf(sym) == "leveraged_inverse":
+            return True, "static_classifier"
+        cache = getattr(self, "_leverage_probe_cache", None)
+        if cache is not None and sym in cache:
+            return cache[sym], "probe_cache"
+        try:
+            from services.ib_direct_service import get_ib_direct_service
+            svc = get_ib_direct_service()
+            if svc is None or not getattr(svc, "_connected", False):
+                return False, "ib_unavailable"
+            profile = await svc.get_contract_profile(sym)
+            if not profile:
+                return False, "no_contract_profile"
+            looks = bool(name_looks_leveraged(
+                profile.get("long_name"), profile.get("stock_type")))
+            if cache is not None:
+                cache[sym] = looks
+            return looks, "ib_long_name"
+        except Exception:
+            return False, "probe_error"
+
     def _liquidity_tier_floor(self, alert) -> Tuple[str, int]:
         """v322m — STRICTEST-OF keying: resolve a candidate floor from the
         scan tier AND from the trade style, then take the MAX of the two.
@@ -1697,6 +1752,59 @@ class EnhancedBackgroundScanner:
             symbol = (getattr(alert, "symbol", "") or "").upper()
             if not symbol:
                 return True  # nothing to gate on; let downstream guards handle
+
+            # ── v322r — leveraged-instrument scalp exclusion ─────────────
+            # 2026-06-12 EXT_SL autopsy: gap-throughs on geared daily
+            # products (ARMG -3.93R in a 6-minute hold) account for the
+            # entire excess stop-slippage tail — geared products gap through
+            # stops BY CONSTRUCTION, so the fix is entry-side. MUST run
+            # BEFORE the known-liquid bypass below: UVXY/TZA-class symbols
+            # live in _known_liquid_symbols and would skip the gate entirely.
+            _style_v322r = str(
+                getattr(alert, "trade_style", "") or "").strip().lower()
+            _lev_check = getattr(self, "_is_leveraged_instrument", None)
+            if (
+                getattr(self, "_scalp_block_leveraged", True)
+                and _lev_check is not None
+                and _style_v322r in ("scalp", "intraday")
+                and symbol not in getattr(self, "_scalp_leveraged_allow", set())
+            ):
+                _lev, _lev_src = await _lev_check(symbol)
+                if _lev:
+                    _lev_reason = (
+                        f"leveraged-instrument scalp exclusion: {symbol} is "
+                        f"a geared/inverse product ({_lev_src}) — gap-through "
+                        f"stop risk (ARMG class); blocked for scalp/intraday"
+                    )
+                    try:
+                        from services.trade_drop_recorder import record_trade_drop
+                        record_trade_drop(
+                            getattr(self, "db", None),
+                            gate="scalp_leveraged_exclusion",
+                            symbol=symbol,
+                            setup_type=getattr(alert, "setup_type", None),
+                            direction=getattr(alert, "direction", "long") or "long",
+                            reason=_lev_reason,
+                            context={"check": "leveraged_instrument",
+                                     "source": _lev_src,
+                                     "trade_style": _style_v322r},
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        await self._emit_scanner_thought(
+                            symbol=symbol, kind="reject",
+                            text=(f"⛔ {symbol} "
+                                  f"{getattr(alert, 'setup_type', '?')} "
+                                  f"blocked — {_lev_reason}"),
+                            setup_type=getattr(alert, "setup_type", None),
+                            direction=getattr(alert, "direction", None),
+                            filter="scalp_leveraged_exclusion",
+                        )
+                    except Exception:
+                        pass
+                    return False
+
             # Known-liquid bypass (operator decision 2026-06-XX): a transient
             # ADV cache miss on AAPL/SPY must not block a legit signal.
             if symbol in self._known_liquid_symbols:
