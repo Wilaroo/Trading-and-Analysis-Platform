@@ -70,6 +70,73 @@ def resolve_restore_grades(trade_doc: Dict, entry_context: Optional[Dict]):
     return str(unified or ""), str(tqs_grade or ""), tqs_score, str(smb or "")
 
 
+# ── v322t — Field-preserving rehydration ─────────────────────────────────
+# The single generic hydrator used by EVERY BotTrade-from-Mongo path
+# (boot restore of open trades, closed-trade history restore, and
+# dict_to_trade). History of this bug class:
+#   v19.34.21  dict_to_trade rebuilt only ~25 of ~50 fields → zombies.
+#   v19.34.87  restore_open_trades wiped remaining_shares/bracket ids.
+#   v19.34.199 restore_open_trades wiped TQS grades.
+#   v322s      restore_open_trades wiped created_at → 675 rows persisted
+#              with created_at="" (invisible to every date-windowed query;
+#              the ACMR 65h-carry autopsy needed a type-agnostic probe).
+# Each was patched as a one-off field addition. The structural defect is
+# the same every time: the restore path reconstructs the dataclass from a
+# hardcoded subset, then the next persist_trade/_save_trade rewrites Mongo
+# with dataclass DEFAULTS for everything not in the subset (the CASY
+# bookkeeping-rewrite class). This hydrator closes the whole class: every
+# persisted dataclass field round-trips automatically, including any
+# field added in the future.
+
+_HYDRATE_CONSTRUCTOR_FIELDS = frozenset({
+    "id", "symbol", "direction", "status", "setup_type",
+    "timeframe", "quality_score", "quality_grade",
+    "entry_price", "current_price", "stop_price",
+    "target_prices", "shares", "risk_amount",
+    "potential_reward", "risk_reward_ratio",
+})
+
+# Container fields with dataclass default_factory dicts/lists. A literal
+# `null` in Mongo must NOT replace the structured default — downstream
+# code indexes into these unconditionally (e.g. scale_out_config["m0_legs"]).
+_HYDRATE_CONTAINER_FIELDS = frozenset({
+    "scale_out_config", "trailing_stop_config", "entry_context",
+    "target_prices", "target_order_ids", "prior_verdicts",
+})
+
+
+def hydrate_trade_from_doc(trade: 'BotTrade', trade_doc: Dict) -> 'BotTrade':
+    """v322t — Copy EVERY persisted dataclass field from `trade_doc` onto
+    `trade`. Call immediately after the minimal BotTrade(...) construction.
+
+    Skips: constructor-set fields (incl. enum-typed status/direction),
+    `explanation` (nested dataclass — not safely round-trippable from a
+    plain dict), and `None` values for container-typed fields so a null in
+    Mongo can't replace a structured default.
+
+    Special-case overrides (fill_price None-coercion, remaining_shares
+    fallbacks, trailing-stop init, v199 grade resolution) must run AFTER
+    this call — they refine, never recreate.
+    """
+    from dataclasses import fields as _dc_fields
+    from services.trading_bot_service import BotTrade as _BT
+    allowed = {f.name for f in _dc_fields(_BT)}
+    for k, v in trade_doc.items():
+        if (k not in allowed or k in _HYDRATE_CONSTRUCTOR_FIELDS
+                or k == "explanation"):
+            continue
+        if v is None and k in _HYDRATE_CONTAINER_FIELDS:
+            continue
+        try:
+            setattr(trade, k, v)
+        except Exception as set_err:  # pragma: no cover
+            logger.warning(
+                "hydrate_trade_from_doc: failed to setattr %s=%r on %s: %s",
+                k, v, getattr(trade, "id", "?"), set_err,
+            )
+    return trade
+
+
 class BotPersistence:
     """Manages bot state persistence and restoration from MongoDB."""
 
@@ -245,6 +312,14 @@ class BotPersistence:
                         # survive across restarts.
                         alert_id=trade_doc.get("alert_id"),
                     )
+                    # v322t — full-field hydration BEFORE the targeted
+                    # overrides below. Pre-fix, restored closed trades
+                    # carried dataclass defaults for created_at /
+                    # trade_style / commissions / realized breakdown —
+                    # misrepresenting history in the UI and (worst case)
+                    # rewriting Mongo with those defaults if any code
+                    # path re-persisted them.
+                    hydrate_trade_from_doc(trade, trade_doc)
                     trade.fill_price = trade_doc.get("fill_price", trade_doc.get("entry_price", 0))
                     trade.exit_price = trade_doc.get("exit_price", 0)
                     trade.realized_pnl = trade_doc.get("realized_pnl", 0)
@@ -416,6 +491,19 @@ class BotPersistence:
                         # learning_loop joins survive across restarts.
                         alert_id=trade_doc.get("alert_id"),
                     )
+
+                    # ── v322t — Full-field hydration FIRST ──────────────
+                    # Everything persisted on the Mongo row lands back on
+                    # the instance (created_at, scale_out_config incl.
+                    # m0_legs/targets_hit, close_at_eod, trade_style,
+                    # trade_type, realized_pnl, commissions, bracket
+                    # telemetry, ...). The targeted restores below remain
+                    # as refinement/fallback overrides only. Pre-fix this
+                    # path wiped every non-listed field to dataclass
+                    # defaults and the next persist rewrote Mongo with
+                    # the wiped values (the created_at="" / CASY
+                    # bookkeeping-rewrite class).
+                    hydrate_trade_from_doc(trade, trade_doc)
 
                     # Restore optional fields via direct assignment.
                     # v19.34.27 — coerce None → entry_price for fill_price
@@ -725,7 +813,6 @@ class BotPersistence:
         try:
             trades_col = bot._db["bot_trades"]
             trade_dict = trade.to_dict()
-            trade_dict['_id'] = trade.id
 
             # v322n — ETF tagging for per-class EV measurement.
             try:
@@ -740,10 +827,24 @@ class BotPersistence:
             from utils.timestamps import stamps as _stamps
             trade_dict.update(_stamps(trade_dict.get("created_at")))
 
+            # v322t — two fixes in one write:
+            #   1. was replace_one: a full-document REPLACE drops any
+            #      Mongo-only fields written outside to_dict() (repair-
+            #      audit markers, stale-pending-prune notes, fields set
+            #      by external scripts). $set semantics overwrite what
+            #      the bot owns and PRESERVE everything else.
+            #   2. was keyed on {"_id": trade.id} while persist_trade
+            #      keys on {"id": trade.id}. If persist_trade created the
+            #      row first (auto ObjectId _id), save_trade's _id filter
+            #      missed it and upserted a SECOND row for the same
+            #      logical trade — one copy then goes stale (e.g.
+            #      `rejected`) while the other updates (`open`): the CASY
+            #      rejected-vs-active two-row signature. Both writers now
+            #      converge on the same row keyed by `id`.
             await asyncio.to_thread(
-                lambda: trades_col.replace_one(
-                    {"_id": trade.id},
-                    trade_dict,
+                lambda: trades_col.update_one(
+                    {"id": trade.id},
+                    {"$set": trade_dict},
                     upsert=True
                 )
             )
@@ -836,30 +937,11 @@ class BotPersistence:
                 risk_reward_ratio=d.get('risk_reward_ratio', 0),
             )
 
-            # ── v19.34.21: hydrate every persisted field back onto the
-            # instance. We use the dataclass field set as the allow-list
-            # to avoid setting random keys; explanation/_id are excluded.
-            from dataclasses import fields as _dc_fields
-            allowed = {f.name for f in _dc_fields(BotTrade)}
-            # These were already set by the constructor — don't overwrite.
-            constructor_set = {
-                "id", "symbol", "direction", "status", "setup_type",
-                "timeframe", "quality_score", "quality_grade",
-                "entry_price", "current_price", "stop_price",
-                "target_prices", "shares", "risk_amount",
-                "potential_reward", "risk_reward_ratio",
-            }
-            # Fields that need explicit conversion to avoid losing types.
-            for k, v in d.items():
-                if k not in allowed or k in constructor_set or k == "explanation":
-                    continue
-                try:
-                    setattr(trade, k, v)
-                except Exception as set_err:  # pragma: no cover
-                    logger.warning(
-                        f"dict_to_trade: failed to setattr "
-                        f"{k}={v!r} on {trade.id}: {set_err}"
-                    )
+            # ── v19.34.21 → v322t: hydrate every persisted field back
+            # onto the instance via the shared field-preserving hydrator
+            # (identical allow-list semantics, plus the v322t None-guard
+            # for container fields).
+            hydrate_trade_from_doc(trade, d)
 
             # ── v19.34.59 (2026-02-XX) — Boot-time zombie tripwire ──
             # A trade loaded with `status=OPEN` AND `remaining_shares=0`

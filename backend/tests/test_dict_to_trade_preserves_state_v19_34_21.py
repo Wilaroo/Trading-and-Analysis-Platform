@@ -274,6 +274,9 @@ def test_source_marks_v19_34_21_v19_34_21():
     with open(os.path.abspath(src_path), "r") as f:
         src = f.read()
     assert "v19.34.21" in src, "v19.34.21 marker missing — patch reverted?"
-    assert "_dc_fields(BotTrade)" in src, (
-        "v19.34.21 dataclass-fields hydration missing — patch reverted?"
+    # v322t — the inline _dc_fields(BotTrade) loop moved into the shared
+    # field-preserving hydrator `hydrate_trade_from_doc` (same allow-list
+    # semantics). Guard the successor, not the literal implementation.
+    assert "hydrate_trade_from_doc" in src and "_dc_fields(_BT)" in src, (
+        "v19.34.21/v322t dataclass-fields hydration missing — patch reverted?"
     )

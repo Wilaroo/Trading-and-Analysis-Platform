@@ -720,3 +720,25 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   M0_LADDER_ENABLED=true and restart. VALIDATION PENDING: clean boot audit (or M0c
   EMPTY-SNAPSHOT GUARD abort) with zero cancellations; next live ladder legs surviving
   restarts.
+- 2026-06-11 v322t SHIPPED (patcher https://paste.rs/UxwrZ): CASY bookkeeping-rewrite
+  class CLOSED at the root. (1) NEW shared hydrator `hydrate_trade_from_doc` in
+  bot_persistence.py — restore_open_trades / restore_closed_trades / dict_to_trade now
+  round-trip EVERY persisted BotTrade dataclass field (created_at, scale_out_config incl.
+  m0_legs+targets_hit+partial_exits, close_at_eod, trade_style, trade_type, realized_pnl,
+  commissions, bracket telemetry...). Pre-fix the boot restore rebuilt trades from a
+  ~17-field subset; everything else reset to dataclass defaults and the next persist
+  REWROTE Mongo with wiped values (mechanism behind the 675 created_at="" rows AND M0
+  ladder state loss on every restart AND restored swings regaining close_at_eod=True).
+  (2) save_trade: replace_one({"_id":id}) → update_one({"id":id},{"$set":...},upsert) —
+  kills BOTH the Mongo-only-field drop (repair markers) and the duplicate-row hazard
+  (persist_trade keys on "id", save_trade keyed on "_id" → two rows per trade, one going
+  stale: the CASY rejected-vs-active two-row signature). v87/v27/v199 fallback overrides
+  preserved (run AFTER hydration). 11 new tests (test_v322t_rehydration_preserves_fields
+  .py, mongomock-driven through the REAL restore_open_trades); 2 stale tests updated
+  (v19.34.21 source guard → hydrator successor; v195 dual-ts lookup _id→id). 91/91
+  persistence-suite green in container. Patcher = whole-file replace w/ SHA256 pre-patch
+  guards (--check dry-run, --force override, auto-backup). AWAITING: user applies on DGX,
+  runs 91-test suite, commits BEFORE restart.
+  OPERATOR DECISIONS LOGGED: 15:35-15:45 EOD window stays WARN-ONLY; V5 HUD Integrity
+  tile deferred. NEXT: P1 broker-rejection re-fire churn (same signal fired 11x), then
+  P1 taxonomy mismatch (style=swing/tf=intraday), IGV INT-21 hardening, v322p decay rework.
