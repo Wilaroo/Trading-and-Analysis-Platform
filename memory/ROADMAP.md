@@ -3,36 +3,37 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## Session Summary - 2026-06-11 (v322f/g/e shipped + deployed on DGX)
+## Session Summary - 2026-06-11 (v322f/g/e shipped + RETRAIN DONE + Tier 3b ENFORCED)
 
 | Version | Topic | Status |
 |---|---|---|
 | v19.34.322f | Tier 3 (Investment) afternoon scan 3:45 → 3:30 PM ET | shipped + committed (7352bf4d) |
-| v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped + committed (7352bf4d) |
+| v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped (7352bf4d); first run queued 3,240 daily bars 06-10 16:35 ET |
 | v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped (e9c810f9), LIVE-VERIFIED: rated 774→1,463 |
+| v19.34.322h | Tier 3b: PBO calibration audit script + `TB_PBO_GATE=enforce` flipped | DONE (82065684; enforce live in backend/.env) |
+
+### FULL RETRAIN COMPLETE (2026-06-10 20:08 → 06-11 ~05:45 UTC, 997m, GPU)
+162 models, 0 failures. **P7 Regime-Conditional 28/28 @ 56.7% — sample-count fix verified.**
+P3 Vol 76.7%, P9 CNN 74.1%, P8 Ensemble 65.0%, P1 Generic 52.7%.
+CPCV corpus: 79 models, median PBO 0.00, median edge +0.043. Gate calibration: defaults
+(0.20/0.0) block 16/79 (20%) — exactly the overfit tail (exit_timing breakout/momentum/
+reversal/trend @ PBO 0.93-1.00 negative edge, 5min setup quartet @ 0.64, marginal regime
+variants). 15 shadow_blocks logged during the run. ENFORCE NOW LIVE for future promotions.
+⚠ Known: several PBO-1.00 models (exit_timing family) were promoted in shadow mode and
+remain ACTIVE — optional "quarantine sweep" (demote active gate-failers) on the backlog.
 
 GPU note: XGBoost CUDA IS working on the GB10 (subprocess preflight confirmed
 "AVAILABLE and WORKING"; per-model `trained on device=cuda`). The P2 "GPU-torch swap"
 backlog item applies to TORCH only (torch is +cpu build) — XGBoost wheel has CUDA built in.
-Full retrain (142 models) fired 2026-06-10 20:08 UTC — running overnight; wall-clock is
-dominated by Mongo bar loads + feature engineering, not GPU fitting.
-
-Operator's 7 funnel questions answered; two stale-doc claims corrected (pusher=500
-lines via rotation v17, NOT 14; turbo collectors are manual, NOT always-on).
-Deep backfill started 2026-06-10 20:01 UTC: coverage at start universe 1,348/9,412,
-rated 774/3,066 — targets=4000, rated-first, ~17-20 min run, auto RS-recompute at end.
 
 ### Next session priorities (in order)
-- 🔴 **P0**: Fire the full pipeline retrain `POST /api/ai-training/start {"force_retrain": true}`
-  (operator was about to run it — verify OOS distributions + P7 regime-conditional models trained).
-- 🔴 **P0**: Tier 3b — calibrate + flip `TB_PBO_GATE=enforce` AFTER the retrain completes.
-- 🟡 **P1**: Verify v322g chain fires tonight (16:35 `eod_daily_topup`, 17:10 `adv_cache_rebuild`,
-  17:30 RS compute — check `scheduled_task_results` / backend log).
-- 🟡 **P1**: Verify deep-backfill completion (`GET /api/scanner/sector-backfill/status`) — if
-  rated_tagged < rated_total, re-run with `?max_symbols=9000`.
+- 🟡 **P1**: Verify Windows collector windows are draining the 3,240-item daily-bar queue
+  (they were idle overnight); confirm tonight's 16:35/17:10/17:30 chain end-to-end.
 - 🟡 **P1**: T6 flip to active (per-setup×regime expectancy suppressor out of shadow).
 - 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA); Tier 3a drift-monitor UI tile;
   Tier 2a per-model probability calibration.
+- 🟢 **P2**: Quarantine sweep — demote already-active models failing the PBO gate.
+- 🟢 **P2**: `_industry_to_etf` oddball audit (ELF mis-tagged XLE); sector-coverage UI chip.
 - 🔴 SECURITY (user action): rotate Atlas MongoDB password (still pending).
 
 ## Session Summary - 2026-06-04 (chart depth + bad-tick guard shipped)
