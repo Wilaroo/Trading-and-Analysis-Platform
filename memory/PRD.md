@@ -597,3 +597,23 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - Regression checked: all other failures in orphan/naked/trade-execution suites confirmed
   PRE-EXISTING (identical pre/post patch).
 - NEXT: M0 laddered server-side scale-out (multi-leg OCA) — user's stated next priority.
+
+---
+## 2026-06-11 — v322m + v322n: scalp liquidity proof + ETF universe re-evaluation
+- **v322m (patch https://paste.rs/2Cc5M, 30/30 tests, AWAITING DGX apply)**: AIQ/CZR audit
+  found CZR ORB scalps judged against the $2M investment floor (scan_tier=investment +
+  trade_style=scalp) with rvol=0.0, and AIQ scalping with only 2.2M sh/day. Fixes in
+  enhanced_scanner: (1) floor = STRICTEST-OF(scan_tier, trade_style); (2) scalp/intraday
+  alerts must prove RVOL ≥ SCALP_MIN_RVOL (default 1.0, rvol<=0 fail-closed); (3) scalp
+  share-ADV floor SCALP_MIN_SHARE_ADV (default 3M sh/day, fail-closed). Env=0 disables.
+- **v322n (patch https://paste.rs/quG8o, 9+66 tests, AWAITING DGX apply)**: ~25% of the
+  top-400-dollar-ADV L1 universe was ETFs. New services/etf_classifier.py (8 classes).
+  Focus list excludes leveraged_inverse/bond_cash/income/index_clone (carve-out:
+  TQQQ/SQQQ/SOXL/SOXS per user). L1 top-N drops bond_cash/income/index_clone/single-stock
+  leveraged (context ETF set unaffected; takes effect on pusher restart). bot_trades now
+  stamped is_etf/etf_class for per-class EV measurement.
+- Diagnostic created: /app/scripts/diag_liquidity_trail.py (paste.rs/rQfZB).
+- FINDING: IB_PUSHER_L1_AUTO_TOP_N is set as a Windows env var (not in .bat) — auto-fetch
+  works (404 symbols). The 14-symbol .bat IB_SYMBOLS list is fallback-only, harmless.
+- NEXT: user applies v322m+v322n, then M0 laddered scale-out. Future: per-class EV review
+  after ~2 weeks of tagged trades; ELF→XLE sector mis-tag; CZR tier misclassification probe.

@@ -20,6 +20,8 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from services.etf_classifier import is_focus_eligible
+
 logger = logging.getLogger(__name__)
 
 FOCUS_TTL_S = 300
@@ -69,6 +71,12 @@ def build_focus_list(ratings: Dict[str, Dict],
     for sym, doc in ratings.items():
         rs = doc.get("rs_rating")
         if rs is None:
+            continue
+        # v322n — mechanical products (leveraged/inverse, bond/cash, income,
+        # index clones) post RS ratings that are leverage or duration, not
+        # leadership; they can't crowd out real candidates. TQQQ/SQQQ/
+        # SOXL/SOXS carve-out per operator (2026-06-11).
+        if not is_focus_eligible(sym):
             continue
         if min_adv > 0 and (doc.get("adv") or 0) < min_adv:
             continue    # v322d liquidity floor
