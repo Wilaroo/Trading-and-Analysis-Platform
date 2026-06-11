@@ -2309,15 +2309,37 @@ class IBDirectService:
         if (os.environ.get("M0_LADDER_ENABLED", "true").strip().lower()
                 in ("false", "0", "no", "off")):
             return None
-        from services.order_policy_registry import get_policy_for_trade
-        policy = get_policy_for_trade(trade)
         styles = {
             s.strip().lower()
             for s in (os.environ.get("M0_LADDER_STYLES", "scalp,intraday")).split(",")
             if s.strip()
         }
-        if (policy.style or "").lower() not in styles:
+        # M0b (2026-06-11) — STRICT style gate. get_policy_for_trade falls
+        # back to DEFAULT_POLICY (intraday) when trade_style is unset, which
+        # laddered an adopted CASY whose legacy fields said "swing". The
+        # ladder now requires (a) an EXPLICIT trade_style in the eligible
+        # set, and (b) no legacy horizon field (timeframe / trade_type /
+        # scan_tier) contradicting it with a known NON-eligible style.
+        _LEGACY_MAP = {"move_2_move": "scalp", "trade_2_hold": "intraday",
+                       "a_plus": "multi_day", "investment": "position"}
+        _KNOWN = {"scalp", "intraday", "multi_day", "swing", "position", "investment"}
+        _style_raw = getattr(trade, "trade_style", None)
+        _style = str(getattr(_style_raw, "value", None) or _style_raw or "").strip().lower()
+        _style = _LEGACY_MAP.get(_style, _style)
+        if _style not in styles:
             return None
+        for _f in ("timeframe", "trade_type", "scan_tier"):
+            _v_raw = getattr(trade, _f, None)
+            _v = str(getattr(_v_raw, "value", None) or _v_raw or "").strip().lower()
+            _v = _LEGACY_MAP.get(_v, _v)
+            if _v in _KNOWN and _v not in styles:
+                logger.info(
+                    "[M0b] %s ladder skipped — %s=%s contradicts trade_style=%s",
+                    getattr(trade, "symbol", "?"), _f, _v, _style,
+                )
+                return None
+        from services.order_policy_registry import get_policy
+        policy = get_policy(_style)
         rungs = list(policy.tp_ladder or [])
         if len(rungs) < 2:
             return None
@@ -2353,9 +2375,26 @@ class IBDirectService:
         if rung_qtys[-1] < 1 or len(rungs) < 2:
             return None
 
+        # M0a (2026-06-11) — first live session: the scanner's SINGLE far
+        # target (typically ~2.5R) landed as leg 1 while legs 2-3 used
+        # R-math → inverted ladders (C: L1@145.36 "1R" vs L2@143.26 2R).
+        # Explicit targets are now used ONLY when the scanner supplied a
+        # FULL monotonic ladder: at least as many targets as rungs, every
+        # price strictly walking AWAY from entry in the trade direction.
+        # Anything else → pure R-math for ALL legs.
+        use_explicit = False
+        if len(explicit) >= len(rungs):
+            seq = explicit[: len(rungs)]
+            if direction == "long":
+                use_explicit = seq[0] > entry and all(
+                    a < b for a, b in zip(seq, seq[1:]))
+            else:
+                use_explicit = seq[0] < entry and all(
+                    a > b for a, b in zip(seq, seq[1:]))
+
         legs: List[Dict[str, Any]] = []
         for i, (rung, lq) in enumerate(zip(rungs, rung_qtys)):
-            if i < len(explicit):
+            if use_explicit:
                 tpx = explicit[i]
             else:
                 tpx = (entry + float(rung.r_multiple) * risk if direction == "long"
