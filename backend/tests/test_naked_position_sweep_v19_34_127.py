@@ -52,8 +52,15 @@ def _make_executor(*, mode="LIVE", oca_result=None):
     return executor
 
 
-def _patch_fetch(ib_orders, source_tier="pusher_orders_snapshot"):
-    """Patch the 3-tier open-orders resolver to return `ib_orders`."""
+def _patch_fetch(ib_orders, source_tier="ib_direct"):
+    """Patch the 3-tier open-orders resolver to return `ib_orders`.
+
+    M0c-t1 — default tier is `ib_direct` (the tier production actually
+    runs on with BOT_ORDER_PATH=direct). The old default
+    `pusher_orders_snapshot` made every test environment-dependent: on
+    hosts where BOT_ORDER_PATH=direct is exported, the v19.34.163
+    tier-mismatch guard (correctly) skips the whole sweep for pusher-tier
+    snapshots and all naked-detection assertions fail."""
     return patch(
         "services.orphan_gtc_reconciler._fetch_ib_open_orders",
         new_callable=AsyncMock,
