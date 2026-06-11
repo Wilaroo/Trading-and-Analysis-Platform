@@ -97,20 +97,36 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="ACMR")
     ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--trade-id", default=None,
+                    help="id prefix — bypasses the symbol/date filter entirely")
     ap.add_argument("--min-hold-min", type=float, default=0.0,
                     help="only replay rows held longer than this (minutes)")
     args = ap.parse_args()
     sym = args.symbol.upper()
     _load_env()
     db = _db()
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+    cut_dt = datetime.now(timezone.utc) - timedelta(days=args.days)
+    cutoff = cut_dt.isoformat()
 
-    rows = list(db["bot_trades"].find(
-        {"symbol": sym, "created_at": {"$gte": cutoff}}, {"_id": 0},
-    ).sort("created_at", -1))
+    # v2 — TYPE-AGNOSTIC window: created_at/closed_at may be stored as ISO
+    # strings OR native BSON datetimes depending on the writer's era, and
+    # Mongo range queries only match the SAME BSON type (type bracketing).
+    # Also match on closed_at so a long-lived row CREATED before the window
+    # but CLOSED inside it (the EXT_SL-autopsy semantics) is still found.
+    if args.trade_id:
+        q = {"id": {"$regex": f"^{args.trade_id}"}}
+    else:
+        q = {"symbol": sym, "$or": [
+            {"created_at": {"$gte": cutoff}},
+            {"created_at": {"$gte": cut_dt}},
+            {"closed_at": {"$gte": cutoff}},
+            {"closed_at": {"$gte": cut_dt}},
+        ]}
+    rows = list(db["bot_trades"].find(q, {"_id": 0}).sort("created_at", -1))
 
     print("\n" + "=" * 100)
-    print(f"1. bot_trades for {sym} — last {args.days}d — {len(rows)} row(s) (newest first)")
+    print(f"1. bot_trades for {args.trade_id or sym} — last {args.days}d "
+          f"(created OR closed in window) — {len(rows)} row(s) (newest first)")
     print("=" * 100)
     for t in rows:
         ex, cl = _dt(t.get("executed_at")), _dt(t.get("closed_at"))
@@ -130,6 +146,10 @@ def main():
         print(f"    close_reason={_s(t.get('close_reason'))}"
               f"  realized_pnl={_s(t.get('realized_pnl'))}"
               f"  net_pnl={_s(t.get('net_pnl'))}")
+        print(f"    raw types: created={type(t.get('created_at')).__name__}"
+              f" executed={type(t.get('executed_at')).__name__}"
+              f" closed={type(t.get('closed_at')).__name__}"
+              f"  symbol_field={t.get('symbol')!r}")
 
     # ── 2. guard-eligibility replay ──────────────────────────────────────
     print("\n" + "=" * 100)
