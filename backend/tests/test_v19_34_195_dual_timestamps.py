@@ -70,7 +70,9 @@ def test_save_trade_writes_dual_timestamps():
     bot = _FakeBot(db)
     asyncio.run(BotPersistence().save_trade(_FakeTrade(_CREATED), bot))
 
-    doc = db["bot_trades"].find_one({"_id": "t1"})
+    # v322t — save_trade now upserts on {"id": ...} (same key as
+    # persist_trade) so both writers converge on ONE row per trade.
+    doc = db["bot_trades"].find_one({"id": "t1"})
     assert doc is not None
     _assert_stamps(doc, _CREATED)
 
