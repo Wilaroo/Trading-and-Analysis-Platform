@@ -2281,6 +2281,325 @@ class IBDirectService:
                 found = True
         return int(abs(signed)) if found else None
 
+    # ── M0 (2026-06) — laddered server-side scale-out ────────────────────
+    #
+    # Design (operator-approved): 3-leg OCA — 40% @ +1R, 30% @ +2R, 30%
+    # "runner" with a far cap (+4R scalp / +6R intraday). Each leg is its
+    # OWN OCA pair (stop_i + target_i, same qty, ocaType=1) so a target
+    # fill cancels exactly its own stop and never disturbs the other
+    # legs' protection. Group names keep the `ADOPT-OCA-{sym}-{trade_id}`
+    # convention (+ `-L{i}` suffix) so the v322k orphan reconciler can
+    # prove ownership via the embedded trade-id token.
+    #
+    # BE-move / trailing for the surviving legs is done by
+    # services/m0_ladder_manager.py via `modify_stop_price` (in-place IB
+    # order modification — same orderId, new auxPrice — which does NOT
+    # cancel the OCA group).
+
+    def _m0_ladder_plan(self, trade, qty: int, stop_px: float) -> Optional[List[Dict[str, Any]]]:
+        """Pure planning: return per-leg dicts or None for legacy single pair.
+
+        Gates (all must pass):
+          • M0_LADDER_ENABLED != false  (default true)
+          • trade style ∈ M0_LADDER_STYLES (default "scalp,intraday")
+          • policy tp_ladder has ≥ 2 rungs
+          • qty ≥ M0_LADDER_MIN_SHARES (default 10)
+          • risk distance > 0
+        """
+        if (os.environ.get("M0_LADDER_ENABLED", "true").strip().lower()
+                in ("false", "0", "no", "off")):
+            return None
+        from services.order_policy_registry import get_policy_for_trade
+        policy = get_policy_for_trade(trade)
+        styles = {
+            s.strip().lower()
+            for s in (os.environ.get("M0_LADDER_STYLES", "scalp,intraday")).split(",")
+            if s.strip()
+        }
+        if (policy.style or "").lower() not in styles:
+            return None
+        rungs = list(policy.tp_ladder or [])
+        if len(rungs) < 2:
+            return None
+        try:
+            min_shares = int(os.environ.get("M0_LADDER_MIN_SHARES", "10") or 10)
+        except (TypeError, ValueError):
+            min_shares = 10
+        if qty < max(min_shares, len(rungs)):
+            return None
+
+        entry = float(getattr(trade, "fill_price", 0) or 0) or float(
+            getattr(trade, "entry_price", 0) or 0)
+        if entry <= 0:
+            return None
+        risk = abs(entry - float(stop_px))
+        if risk <= 0:
+            return None
+        direction = (getattr(trade.direction, "value", None) or str(trade.direction)).lower()
+        explicit = [float(t) for t in (getattr(trade, "target_prices", None) or [])
+                    if t is not None]
+
+        # Qty split — round per rung, drop trailing zero rungs, force ≥1,
+        # last rung absorbs the rounding drift so sum == qty exactly
+        # (mirrors the v19.34.103 pusher-ladder accounting).
+        rung_qtys = [int(round(qty * float(r.pct_of_position))) for r in rungs]
+        while rung_qtys and rung_qtys[-1] == 0 and len(rung_qtys) > 1:
+            rung_qtys.pop()
+            rungs = rungs[: len(rung_qtys)]
+        rung_qtys = [max(q, 1) for q in rung_qtys]
+        drift = qty - sum(rung_qtys)
+        if drift != 0:
+            rung_qtys[-1] = rung_qtys[-1] + drift
+        if rung_qtys[-1] < 1 or len(rungs) < 2:
+            return None
+
+        legs: List[Dict[str, Any]] = []
+        for i, (rung, lq) in enumerate(zip(rungs, rung_qtys)):
+            if i < len(explicit):
+                tpx = explicit[i]
+            else:
+                tpx = (entry + float(rung.r_multiple) * risk if direction == "long"
+                       else entry - float(rung.r_multiple) * risk)
+            legs.append({
+                "idx": i,
+                "qty": int(lq),
+                "target_px": round(float(tpx), 4),
+                "r_multiple": float(rung.r_multiple),
+            })
+        return legs
+
+    async def _m0_place_oca_ladder(
+        self, *, trade, symbol: str, qty: int, stop_px: float,
+        legs: List[Dict[str, Any]], action: str, tif_u: str,
+        outside_rth: bool, exchange: str, currency: str,
+    ) -> Dict[str, Any]:
+        """Place the per-leg OCA pairs at IB.
+
+        Failure semantics (same catastrophe contract as the single pair):
+          • ANY stop leg fails to submit or permanent-rejects → cancel
+            EVERYTHING placed, return success=False — caller treats the
+            position as naked and emergency-flattens.
+          • A target leg fails → its stop stays live (leg is stop-only),
+            partial=True so the reconciler can re-attach later.
+        """
+        import uuid as _uuid
+        trade_id = getattr(trade, "id", "x")
+        try:
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            min_tick = await self._resolve_min_tick(contract)
+            stop_px_t = self._round_to_tick(float(stop_px), min_tick)
+
+            placed: List[Dict[str, Any]] = []   # per-leg runtime records
+            all_orders = []                      # (order_obj) for rollback
+
+            # Phase 1 — ALL stop legs first (full protection before any TP).
+            for leg in legs:
+                grp = f"ADOPT-OCA-{symbol}-{trade_id}-L{leg['idx'] + 1}-{_uuid.uuid4().hex[:6]}"
+                stop_order = StopOrder(action, int(leg["qty"]), stop_px_t)
+                try:
+                    stop_order.tif = tif_u
+                    stop_order.ocaGroup = grp
+                    stop_order.ocaType = 1
+                    if outside_rth:
+                        stop_order.outsideRth = True
+                except Exception:
+                    pass
+                try:
+                    st = self._ib.placeOrder(contract, stop_order)
+                    placed.append({
+                        **leg,
+                        "oca_group": grp,
+                        "stop_order_id": int(st.order.orderId),
+                        "stop_px": stop_px_t,
+                        "_stop_order": stop_order,
+                        "_stop_trade": st,
+                        "target_order_id": None,
+                        "status": "working",
+                    })
+                    all_orders.append(stop_order)
+                except Exception as e:
+                    logger.error(
+                        "[M0] %s stop leg L%d submit failed: %s — cancelling "
+                        "%d already-placed leg(s); caller must flatten.",
+                        symbol, leg["idx"] + 1, e, len(all_orders),
+                    )
+                    for o in all_orders:
+                        try:
+                            self._ib.cancelOrder(o)
+                        except Exception:
+                            pass
+                    return {
+                        "success": False,
+                        "error": f"m0_stop_submit_failed_L{leg['idx'] + 1}: {str(e)[:160]}",
+                        "stop_order_id": None, "target_order_id": None,
+                        "oca_group": None, "broker": "ib_direct", "simulated": False,
+                    }
+
+            # Phase 2 — target legs (same group as their stop).
+            target_errors: List[str] = []
+            for rec in placed:
+                tpx_t = self._round_to_tick(float(rec["target_px"]), min_tick)
+                rec["target_px"] = tpx_t
+                tgt_order = LimitOrder(action, int(rec["qty"]), tpx_t)
+                try:
+                    tgt_order.tif = tif_u
+                    tgt_order.ocaGroup = rec["oca_group"]
+                    tgt_order.ocaType = 1
+                    if outside_rth:
+                        tgt_order.outsideRth = True
+                except Exception:
+                    pass
+                try:
+                    tt = self._ib.placeOrder(contract, tgt_order)
+                    rec["target_order_id"] = int(tt.order.orderId)
+                    rec["_tgt_trade"] = tt
+                    all_orders.append(tgt_order)
+                except Exception as e:
+                    target_errors.append(f"L{rec['idx'] + 1}: {str(e)[:120]}")
+                    logger.error(
+                        "[M0] %s target leg L%d submit failed: %s — leg is "
+                        "STOP-ONLY (still protected).", symbol, rec["idx"] + 1, e,
+                    )
+
+            # Phase 3 — brief async-rejection poll (mirrors v19.34.154).
+            try:
+                poll_s = float(os.environ.get("IB_BRACKET_POLL_S", "1.5"))
+            except (TypeError, ValueError):
+                poll_s = 1.5
+            deadline = asyncio.get_event_loop().time() + max(0.2, poll_s)
+            stop_perm_reject = None
+            while asyncio.get_event_loop().time() < deadline and stop_perm_reject is None:
+                await asyncio.sleep(0.15)
+                for rec in placed:
+                    perm = self.has_permanent_failure_error(rec["stop_order_id"])
+                    if perm is not None:
+                        stop_perm_reject = (rec["idx"], perm)
+                        break
+            if stop_perm_reject is not None:
+                _idx, _code = stop_perm_reject
+                logger.critical(
+                    "[M0] %s stop leg L%d PERMANENT-REJECTED (code=%s) — "
+                    "cancelling whole ladder; caller must flatten.",
+                    symbol, _idx + 1, _code,
+                )
+                for o in all_orders:
+                    try:
+                        self._ib.cancelOrder(o)
+                    except Exception:
+                        pass
+                return {
+                    "success": False,
+                    "error": f"m0_stop_permanent_reject_L{_idx + 1}_code_{_code}",
+                    "stop_order_id": None, "target_order_id": None,
+                    "oca_group": None, "broker": "ib_direct", "simulated": False,
+                }
+
+            # Persist leg state ON the trade so every consumer (manage
+            # loop, persistence, close/EOD cancel paths) sees it.
+            clean_legs = [
+                {k: v for k, v in rec.items() if not k.startswith("_")}
+                for rec in placed
+            ]
+            try:
+                if not isinstance(getattr(trade, "scale_out_config", None), dict):
+                    trade.scale_out_config = {}
+                trade.scale_out_config["m0_legs"] = clean_legs
+                trade.scale_out_config["m0_ib_stop_px"] = stop_px_t
+                trade.scale_out_config["scale_out_pcts"] = [
+                    round(rec["qty"] / max(qty, 1), 4) for rec in placed
+                ]
+                # All child ids into target_order_ids so EVERY existing
+                # close/EOD/decay cancel path (which iterates
+                # stop_order_id + target_order_id + target_order_ids)
+                # cancels the full ladder with zero changes.
+                _extra_ids = [str(r["target_order_id"]) for r in placed
+                              if r.get("target_order_id")]
+                _extra_ids += [str(r["stop_order_id"]) for r in placed[1:]]
+                trade.target_order_ids = _extra_ids
+            except Exception as _persist_err:
+                logger.warning("[M0] %s could not stamp m0_legs on trade: %s",
+                               symbol, _persist_err)
+
+            ladder_str = " ".join(
+                f"L{r['idx'] + 1}:{r['qty']}@{r['target_px']}" for r in placed
+            )
+            logger.warning(
+                "[M0 LADDER] %s trade=%s %d legs placed: stop@%.4f ×%dsh total "
+                "| %s | tif=%s partial=%s",
+                symbol, trade_id, len(placed), stop_px_t, qty, ladder_str,
+                tif_u, bool(target_errors),
+            )
+            return {
+                "success": True,
+                "stop_order_id": placed[0]["stop_order_id"],
+                "target_order_id": placed[0]["target_order_id"],
+                "oca_group": placed[0]["oca_group"],
+                "stop_order_ids": [r["stop_order_id"] for r in placed],
+                "target_order_ids": [r["target_order_id"] for r in placed],
+                "oca_groups": [r["oca_group"] for r in placed],
+                "legs": clean_legs,
+                "stop_price": stop_px_t,
+                "target_price": placed[0]["target_px"],
+                "partial": bool(target_errors),
+                "errors": target_errors,
+                "broker": "ib_direct",
+                "simulated": False,
+                "m0_ladder": True,
+            }
+        except Exception as e:
+            logger.error("[M0] ladder placement failed for %s: %s", symbol, e)
+            return {
+                "success": False,
+                "error": f"m0_ladder_error: {str(e)[:200]}",
+                "stop_order_id": None, "target_order_id": None,
+                "oca_group": None, "broker": "ib_direct", "simulated": False,
+            }
+
+    async def modify_stop_price(self, order_id: int, new_stop_px: float) -> Dict[str, Any]:
+        """M0 — modify a live STP order's trigger price IN PLACE.
+
+        Re-submits the SAME order (same orderId) with a new auxPrice —
+        IB treats this as a modification, NOT a cancel/replace, so the
+        order's OCA group stays intact (cancelling an OCA member would
+        nuke the whole group). Used by m0_ladder_manager for BE-moves
+        and runner trailing.
+        """
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected"}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode"}
+        if not self.is_authorized_to_trade():
+            return {"success": False, "error": "ib_direct_not_authorized"}
+        try:
+            order_id = int(order_id)
+            target = None
+            for t in list(self._ib.trades() or []):
+                try:
+                    if int(t.order.orderId) == order_id and t.isActive():
+                        target = t
+                        break
+                except Exception:
+                    continue
+            if target is None:
+                return {"success": False, "error": "order_not_open",
+                        "order_id": order_id}
+            min_tick = await self._resolve_min_tick(target.contract)
+            new_px = self._round_to_tick(float(new_stop_px), min_tick)
+            old_px = float(getattr(target.order, "auxPrice", 0) or 0)
+            if abs(new_px - old_px) < (min_tick or 0.01) / 2:
+                return {"success": True, "order_id": order_id,
+                        "unchanged": True, "stop_price": old_px}
+            target.order.auxPrice = new_px
+            self._ib.placeOrder(target.contract, target.order)
+            logger.info("[M0 STOP-MODIFY] order=%d %.4f -> %.4f",
+                        order_id, old_px, new_px)
+            return {"success": True, "order_id": order_id,
+                    "old_stop": old_px, "stop_price": new_px}
+        except Exception as e:
+            return {"success": False, "error": f"modify_failed: {str(e)[:160]}",
+                    "order_id": order_id}
+
     async def place_oca_stop_target(
         self,
         trade,
@@ -2352,6 +2671,29 @@ class IBDirectService:
         except Exception as e:
             return {"success": False, "error": f"bad trade fields: {e}",
                     "broker": "ib_direct", "simulated": False}
+
+        # ── M0 (2026-06) — laddered scale-out branch ─────────────────────
+        # When the trade's order policy carries a multi-rung tp_ladder
+        # (scalp/intraday since M0) and the position is big enough to
+        # split, place PER-LEG OCA pairs instead of one full-qty pair:
+        # leg_i = (stop_i, target_i) sharing their own OCA group, all at
+        # the same initial stop price. A target fill cancels ONLY its own
+        # leg's stop — legs 2..n stay protected; m0_ladder_manager then
+        # moves the surviving stops (BE after leg 1, trail after leg 2)
+        # via in-place modify. Falls through to the legacy single pair
+        # when disabled / style not eligible / position too small.
+        try:
+            _m0_legs = self._m0_ladder_plan(trade, qty, stop_px)
+        except Exception as _m0_plan_err:
+            logger.warning("[M0] ladder plan failed for %s (%s) — legacy single pair",
+                           symbol, _m0_plan_err)
+            _m0_legs = None
+        if _m0_legs:
+            return await self._m0_place_oca_ladder(
+                trade=trade, symbol=symbol, qty=qty, stop_px=stop_px,
+                legs=_m0_legs, action=action, tif_u=tif_u,
+                outside_rth=outside_rth, exchange=exchange, currency=currency,
+            )
 
         try:
             contract = Stock(symbol, exchange, currency)

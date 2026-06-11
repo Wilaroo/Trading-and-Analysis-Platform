@@ -644,3 +644,35 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - NEXT: user applies v322o (backend restart needed) + pastes autopsy output + chart timings
   → then M0 laddered scale-out (3-leg OCA 40%@+1R/30%@+2R/30% runner, env-tunable, with
   orphan-safety: legs must share OCA group + ownership token per v322k conventions).
+
+## 2026-06-11 — M0 Laddered Scale-Out BUILT (CONTAINER-VALIDATED, awaiting DGX apply)
+- **Order-path finding**: DGX runs BOT_ORDER_PATH=direct (probe confirmed). The v19.34.103
+  pusher ladder NEVER fired — every bracket has been single-target full-qty via
+  ib_direct.place_oca_stop_target. Autopsy v2: EXT_TP 8 (+1.08R avg) vs EXT_SL 17
+  (-1.62R avg — slippage red flag, backlog probe) vs EXT_SCRATCH 61 (71%).
+- **M0 architecture** (paste.rs: patcher zQaVU, manager a4r4M, tests s6pgK):
+  1. order_policy_registry: scalp/intraday tp_ladder → 40%@1R / 30%@2R / 30% runner
+     (cap +4R scalp / +6R intraday). Env: M0_TP_LADDER_SCALP/_INTRADAY="0.4@1.0,...".
+     _ladder_from_env validates (2-5 rungs, pcts sum 1, ascending R) else code default.
+  2. ib_direct_service: _m0_ladder_plan (gates: M0_LADDER_ENABLED default true,
+     M0_LADDER_STYLES default scalp,intraday, M0_LADDER_MIN_SHARES default 10) +
+     _m0_place_oca_ladder: PER-LEG OCA pairs (stop_i+target_i own group
+     `ADOPT-OCA-{sym}-{tradeid}-L{i}-{nonce}`, ocaType=1 — leg TP fill cancels only its
+     own stop). Stops placed FIRST; any stop submit-fail or permanent-reject → cancel all,
+     success=False (caller flattens). Target fail → stop-only leg, partial=True.
+     All child ids → trade.target_order_ids so EVERY existing close/EOD/decay cancel
+     path covers the ladder. modify_stop_price: in-place IB stop modify (same orderId,
+     new auxPrice — OCA group preserved).
+  3. NEW services/m0_ladder_manager.py: manage-loop tick. Leg-fill detection =
+     open-orders snapshot (10s cache, blank snapshot → skip, never infer fills) +
+     position-deficit corroboration; TP-vs-stop attribution via MFE; stamps
+     targets_hit → EXISTING StopManager does BE-after-leg1/trail-after-leg2 internally;
+     stop-sync pushes ratcheted current_stop to surviving IB stops (ratchet-only,
+     M0_STOP_SYNC_MIN_R=0.1R min delta, M0_STOP_SYNC_INTERVAL_S=30s throttle).
+  4. position_manager: manage hook after _update_trailing_stop + hard guard in
+     check_and_execute_scale_out (m0_legs → return; kills v19.34.7 double-sell class).
+- **Testing**: 36 new tests + 37 v322k-n regression all pass in container. Backend boots.
+  test_strategy_configs.py failures are PRE-EXISTING (identical at HEAD).
+- NEXT: user applies M0 + runs tests + paper-session validation checklist; then v322p
+  decay (LIGHT touch — autopsy showed timer ~neutral), v322q, chart-slow phase fix
+  (awaiting [v322o chart-slow] log lines from user).
