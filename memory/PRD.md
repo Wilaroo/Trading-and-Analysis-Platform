@@ -705,3 +705,12 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   4 pre-existing sweep-test failures (v285 flip-guard unverifiable positions) repaired.
   148/148 relevant tests green in container. AWAITING: user applies M0c on DGX, runs
   pytest, flips M0_LADDER_ENABLED=true, restarts backend, validates next live ladder.
+- 2026-06-12 M0c DEPLOYED+VERIFIED ON DGX: patcher lfViT (17/17 applied) + follow-up
+  M0c-t1 patcher BaMtZ (test-only: _patch_fetch mocked tier pusher_orders_snapshot →
+  ib_direct; DGX exports BOT_ORDER_PATH=direct so the v163 tier-mismatch guard skipped
+  the sweep and 7 tests failed — env-dependent test flaw, reproduced+fixed in container).
+  Final DGX run: 91/91 green in .venv (repo root ~/Trading-and-Analysis-Platform, use
+  `source .venv/bin/activate`, NOT system python3.12). User instructed to flip
+  M0_LADDER_ENABLED=true and restart. VALIDATION PENDING: clean boot audit (or M0c
+  EMPTY-SNAPSHOT GUARD abort) with zero cancellations; next live ladder legs surviving
+  restarts.
