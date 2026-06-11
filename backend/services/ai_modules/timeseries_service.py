@@ -2049,6 +2049,24 @@ class TimeSeriesAIService:
                 
                 from services.ai_modules.setup_training_config import get_model_name
                 model_name = doc.get("model_name") or get_model_name(setup_type, bar_size)
+
+                # v322i — the quarantine flag lives on the canonical
+                # `timeseries_models` doc; the legacy `setup_type_models`
+                # copy of the same model must not bypass it.
+                try:
+                    if self._db["timeseries_models"].find_one(
+                            {"name": model_name, "quarantined": True}, {"_id": 1}):
+                        logger.info(
+                            f"[QUARANTINE] skipping legacy setup model "
+                            f"{setup_type}/{bar_size} ({model_name})")
+                        self._setup_models.pop((setup_type, bar_size), None)
+                        _legacy = self._setup_models.get(setup_type)
+                        if getattr(_legacy, "model_name", None) == model_name:
+                            self._setup_models.pop(setup_type, None)
+                        continue
+                except Exception:
+                    pass
+
                 gbm = TimeSeriesGBM(model_name=model_name)
                 gbm.set_db(self._db)
                 
