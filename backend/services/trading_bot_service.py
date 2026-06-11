@@ -74,6 +74,57 @@ def _m0_working_leg_stop_ids(trade) -> list:
         return []
 
 
+# ── M0d (2026-06-12) — ladder coverage audit helpers ─────────────────────────
+# A partially-destroyed ladder (legs 2..n cancelled, leg 1 alive — the
+# CZR/IGV/KRE 2026-06-11 incident) reads as fully protected under the binary
+# naked check. These helpers measure ACTUAL covered quantity so the sweep can
+# top-up the shortfall.
+def _m0_coverage_scan(trade, live_order_ids) -> tuple:
+    """Returns (covered_qty, live_stop_px, lost_count).
+
+    covered_qty   — sum of qty across working legs whose stop is LIVE at IB
+    live_stop_px  — stop price of a surviving leg (BE-moves included), or None
+    lost_count    — legs that claimed 'working' but whose stop is gone; these
+                    are MUTATED to status='lost' so no manager acts on dead ids
+    """
+    try:
+        cfg = getattr(trade, "scale_out_config", None) or {}
+        legs = cfg.get("m0_legs") or []
+        covered = 0
+        live_stop_px = None
+        lost = 0
+        for leg in legs:
+            if not isinstance(leg, dict) or leg.get("status") != "working":
+                continue
+            sid = leg.get("stop_order_id")
+            if sid is not None and str(sid) in live_order_ids:
+                covered += int(leg.get("qty") or 0)
+                if leg.get("stop_px") is not None:
+                    live_stop_px = float(leg["stop_px"])
+            else:
+                leg["status"] = "lost"
+                lost += 1
+        return covered, live_stop_px, lost
+    except Exception:
+        return 0, None, 0
+
+
+def _m0_furthest_lost_target(trade):
+    """Furthest lost-leg target px in the trade direction (preserves the
+    runner's upside on the top-up leg), or None → stop-only top-up."""
+    try:
+        cfg = getattr(trade, "scale_out_config", None) or {}
+        tps = [float(l["target_px"]) for l in (cfg.get("m0_legs") or [])
+               if isinstance(l, dict) and l.get("status") == "lost"
+               and l.get("target_px")]
+        if not tps:
+            return None
+        d = (getattr(trade.direction, "value", None) or str(trade.direction)).lower()
+        return max(tps) if d == "long" else min(tps)
+    except Exception:
+        return None
+
+
 class BotMode(str, Enum):
     """Bot operating mode"""
     AUTONOMOUS = "autonomous"      # Execute trades without confirmation
@@ -6109,6 +6160,95 @@ class TradingBotService:
                         )
                         result.setdefault("skipped_phantom_siblings", []).append(tid)
                         continue
+
+                # ── M0d (2026-06-12) — ladder coverage audit + top-up ────
+                # Runs for every M0-laddered trade BEFORE the binary naked
+                # check: leg 1's live stop used to mask destroyed legs 2..n
+                # (CZR 175sh with only 70 protected). Audit actual covered
+                # qty; if part of the position is uncovered, append ONE
+                # top-up OCA leg at the surviving legs' stop price. Flip-
+                # guard verified: top-up only when IB confirms same-side
+                # shares, clamped so total protection never exceeds the
+                # live position.
+                if ((getattr(trade, "scale_out_config", None) or {}).get("m0_legs")):
+                    _cov, _live_stop_px, _lost_n = _m0_coverage_scan(
+                        trade, live_order_ids)
+                    if _cov > 0:
+                        _shortfall = rs - _cov
+                        _sgn_m0 = ib_signed_by_sym.get(_g_sym)
+                        _same_side_m0 = 0
+                        if _sgn_m0 is not None:
+                            if _g_dv == "long" and _sgn_m0 > 0:
+                                _same_side_m0 = int(_sgn_m0)
+                            elif _g_dv == "short" and _sgn_m0 < 0:
+                                _same_side_m0 = int(abs(_sgn_m0))
+                        if _shortfall >= 1:
+                            result.setdefault("m0_shortfall_found", 0)
+                            result["m0_shortfall_found"] += 1
+                            if not ib_positions_available or _same_side_m0 <= _cov:
+                                print(
+                                    f"[M0d naked-sweep] {_g_sym} {tid} ladder "
+                                    f"shortfall {_shortfall}sh (covered {_cov}/"
+                                    f"{rs}) but IB side unverified/flat "
+                                    f"(avail={ib_positions_available} "
+                                    f"same_side={_same_side_m0}) — SKIP top-up "
+                                    f"this cycle.", flush=True,
+                                )
+                            else:
+                                _topup_qty = min(_shortfall, _same_side_m0 - _cov)
+                                _spx_m0 = _live_stop_px or float(
+                                    getattr(trade, "stop_price", 0) or 0)
+                                _tpx_m0 = _m0_furthest_lost_target(trade)
+                                if _topup_qty >= 1 and _spx_m0 > 0:
+                                    try:
+                                        from services.ib_direct_service import (
+                                            get_ib_direct_service,
+                                        )
+                                        _topup_res = await (
+                                            get_ib_direct_service().m0_topup_leg(
+                                                trade, qty=_topup_qty,
+                                                stop_px=_spx_m0,
+                                                target_px=_tpx_m0, tif="DAY",
+                                            )
+                                        )
+                                    except Exception as _tue:
+                                        _topup_res = {
+                                            "success": False,
+                                            "error": f"{type(_tue).__name__}:{_tue}",
+                                        }
+                                    if _topup_res.get("success"):
+                                        result.setdefault("m0_topup_placed", 0)
+                                        result["m0_topup_placed"] += 1
+                                        try:
+                                            trade.last_bracket_attach_at = (
+                                                datetime.now(timezone.utc).isoformat()
+                                            )
+                                        except Exception:
+                                            pass
+                                        print(
+                                            f"[M0d naked-sweep] {_g_sym} {tid} "
+                                            f"TOP-UP placed: {_topup_qty}sh "
+                                            f"stop@{_spx_m0} "
+                                            f"(was covered {_cov}/{rs}, "
+                                            f"{_lost_n} leg(s) lost).",
+                                            flush=True,
+                                        )
+                                    else:
+                                        result.setdefault("m0_topup_failed", 0)
+                                        result["m0_topup_failed"] += 1
+                                        print(
+                                            f"[M0d naked-sweep] {_g_sym} {tid} "
+                                            f"top-up FAILED: "
+                                            f"{_topup_res.get('error')} — will "
+                                            f"retry next cycle.", flush=True,
+                                        )
+                        # ≥1 live ladder leg → never fall through to the
+                        # binary naked check (leg-1 stop may legitimately
+                        # be gone after its TP filled).
+                        continue
+                    # covered == 0 → whole ladder dead (legs already marked
+                    # lost by the scan) — fall through to the standard
+                    # naked-reissue path below.
 
                 stop_id = getattr(trade, "stop_order_id", None)
                 stop_id_str = str(stop_id) if stop_id is not None else None

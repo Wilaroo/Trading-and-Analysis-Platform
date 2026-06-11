@@ -2639,6 +2639,132 @@ class IBDirectService:
             return {"success": False, "error": f"modify_failed: {str(e)[:160]}",
                     "order_id": order_id}
 
+    async def m0_topup_leg(
+        self,
+        trade,
+        *,
+        qty: int,
+        stop_px: float,
+        target_px: Optional[float] = None,
+        tif: str = "DAY",
+        exchange: str = "SMART",
+        currency: str = "USD",
+    ) -> Dict[str, Any]:
+        """M0d (2026-06-12) — re-cover a ladder coverage shortfall.
+
+        Places ONE extra OCA leg (STP + optional LMT) for exactly `qty`
+        shares and APPENDS the leg record to trade.scale_out_config
+        ['m0_legs'] — unlike `_m0_place_oca_ladder`, which clobbers the
+        whole leg list. Used by the naked-sweep when legs 2..n of a
+        ladder were destroyed (CZR/IGV/KRE incident) but ≥1 leg is
+        still live, leaving part of the position naked.
+
+        Target submit failure is tolerated → STOP-ONLY leg (protection
+        beats symmetry).
+        """
+        import uuid as _uuid
+        if not await self.ensure_connected():
+            return {"success": False, "error": "ib_direct_not_connected",
+                    "broker": "ib_direct", "simulated": False}
+        if self.config.read_only:
+            return {"success": False, "error": "ib_direct_read_only_mode",
+                    "broker": "ib_direct", "simulated": False}
+        if not self.is_authorized_to_trade():
+            return {"success": False, "error": "ib_direct_not_authorized",
+                    "broker": "ib_direct", "simulated": False}
+        try:
+            qty = int(qty)
+            if qty < 1:
+                return {"success": False, "error": "m0_topup_qty_lt_1"}
+            symbol = str(getattr(trade, "symbol", "")).upper()
+            trade_id = str(getattr(trade, "id", "x"))
+            direction = (getattr(trade.direction, "value", None)
+                         or str(trade.direction)).lower()
+            action = "SELL" if direction == "long" else "BUY"
+            tif_u = (tif or "DAY").upper()
+
+            contract = Stock(symbol, exchange, currency)
+            await self._ib.qualifyContractsAsync(contract)
+            min_tick = await self._resolve_min_tick(contract)
+            stop_px_t = self._round_to_tick(float(stop_px), min_tick)
+
+            cfg = (trade.scale_out_config
+                   if isinstance(getattr(trade, "scale_out_config", None), dict)
+                   else {})
+            legs = cfg.get("m0_legs") or []
+            next_idx = max([int(l.get("idx", -1)) for l in legs] + [-1]) + 1
+            grp = (f"ADOPT-OCA-{symbol}-{trade_id}-L{next_idx + 1}-"
+                   f"{_uuid.uuid4().hex[:6]}")
+
+            stop_order = StopOrder(action, qty, stop_px_t)
+            try:
+                stop_order.tif = tif_u
+                stop_order.ocaGroup = grp
+                stop_order.ocaType = 1
+            except Exception:
+                pass
+            st = self._ib.placeOrder(contract, stop_order)
+            stop_id = int(st.order.orderId)
+
+            tgt_id = None
+            tpx_t = None
+            if target_px is not None and float(target_px) > 0:
+                tpx_t = self._round_to_tick(float(target_px), min_tick)
+                tgt_order = LimitOrder(action, qty, tpx_t)
+                try:
+                    tgt_order.tif = tif_u
+                    tgt_order.ocaGroup = grp
+                    tgt_order.ocaType = 1
+                except Exception:
+                    pass
+                try:
+                    tt = self._ib.placeOrder(contract, tgt_order)
+                    tgt_id = int(tt.order.orderId)
+                except Exception as _te:
+                    tpx_t = None
+                    logger.error(
+                        "[M0d] %s top-up target submit failed (%s) — leg is "
+                        "STOP-ONLY (still protected).", symbol, _te,
+                    )
+
+            leg_rec = {
+                "idx": next_idx, "qty": qty,
+                "target_px": tpx_t, "r_multiple": None,
+                "oca_group": grp, "stop_order_id": stop_id,
+                "stop_px": stop_px_t, "target_order_id": tgt_id,
+                "status": "working", "topup": True,
+            }
+            try:
+                if not isinstance(getattr(trade, "scale_out_config", None), dict):
+                    trade.scale_out_config = {}
+                trade.scale_out_config.setdefault("m0_legs", []).append(leg_rec)
+                _ids = [str(x) for x in
+                        (getattr(trade, "target_order_ids", None) or [])]
+                _ids.append(str(stop_id))
+                if tgt_id is not None:
+                    _ids.append(str(tgt_id))
+                trade.target_order_ids = _ids
+            except Exception as _pe:
+                logger.warning("[M0d] %s could not stamp top-up leg: %s",
+                               symbol, _pe)
+
+            logger.warning(
+                "[M0d TOP-UP] %s trade=%s +1 leg L%d: %dsh stop@%.4f%s (%s)",
+                symbol, trade_id, next_idx + 1, qty, stop_px_t,
+                (f" target@{tpx_t}" if tpx_t else " STOP-ONLY"), grp,
+            )
+            return {"success": True, "stop_order_id": stop_id,
+                    "target_order_id": tgt_id, "oca_group": grp,
+                    "stop_price": stop_px_t, "target_price": tpx_t,
+                    "qty": qty, "leg": leg_rec, "broker": "ib_direct",
+                    "simulated": False, "m0_topup": True}
+        except Exception as e:
+            logger.error("[M0d] top-up failed for %s: %s",
+                         getattr(trade, "symbol", "?"), e)
+            return {"success": False,
+                    "error": f"m0_topup_error: {str(e)[:160]}",
+                    "broker": "ib_direct", "simulated": False}
+
     async def place_oca_stop_target(
         self,
         trade,
