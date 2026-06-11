@@ -866,7 +866,12 @@ class BotTrade:
     net_pnl: float = 0.0  # realized_pnl - total_commissions
     
     # Timing
-    created_at: str = ""
+    # v322s — was `""`: any construction path that didn't set created_at
+    # explicitly persisted an EMPTY STRING, hiding the row from every
+    # date-windowed query and sorting it out of forensics (the ACMR
+    # 65h-carry row was invisible to two autopsy probes because of this).
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat())
     executed_at: Optional[str] = None
     closed_at: Optional[str] = None
     # v19.34.274 — realized hold-duration label (seconds), stamped at close
@@ -3883,6 +3888,37 @@ class TradingBotService:
         except Exception as e:
             logger.warning(
                 f"[v19.34.30 PENDING-REAPER] failed to schedule (non-fatal): {e}"
+            )
+
+        # ─── v322s — missed-EOD boot catch-up sweep ───────────────────
+        # ACMR 2026-05-29: the backend was DOWN during the 15:45-16:00 ET
+        # EOD window, so a close_at_eod position carried the WEEKEND and
+        # gapped through its stop at Monday's open auction (-$285). The
+        # in-session guards (v301/302) can't help when the process isn't
+        # running — this boot task closes that hole: any tracked OPEN
+        # close_at_eod trade whose fill date is a PREVIOUS session gets
+        # flattened at boot (market open) or at the next open (boots
+        # premarket / weekend; the task re-checks every 2 min until the
+        # bell). Kill switch: MISSED_EOD_BOOT_SWEEP_ENABLED=0.
+        async def _missed_eod_boot_sweep_task():
+            try:
+                await asyncio.sleep(75)  # let boot reconcile + rehydrate settle
+                while True:
+                    res = await self._position_manager.missed_eod_boot_sweep(self)
+                    if not res.get("waiting_for_open"):
+                        break
+                    await asyncio.sleep(120)  # re-check until the open
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"[v322s MISSED-EOD] boot sweep task failed: {e}")
+
+        try:
+            self._missed_eod_boot_task = asyncio.create_task(
+                _missed_eod_boot_sweep_task())
+        except Exception as e:
+            logger.warning(
+                f"[v322s MISSED-EOD] failed to schedule boot sweep (non-fatal): {e}"
             )
 
         # ─── v19.34.17 (2026-05-06) — EOD-close policy migration ──────
