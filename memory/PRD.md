@@ -676,3 +676,8 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - NEXT: user applies M0 + runs tests + paper-session validation checklist; then v322p
   decay (LIGHT touch — autopsy showed timer ~neutral), v322q, chart-slow phase fix
   (awaiting [v322o chart-slow] log lines from user).
+- 2026-06-11 DEPLOYED: M0 applied on DGX (6/6 patches, 36/36 tests on-box), backend
+  restarted clean (23s boot), registry ladders confirmed live (scalp 40/30/30 cap 4R,
+  intraday cap 6R), health green incl. ib_gateway via ib-direct. AWAITING: first live
+  [M0 LADDER] entry + leg-fill/BE-sync validation; [v322o chart-slow] log lines; TQS
+  badge A/B visual confirmation.
