@@ -29,8 +29,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-EVALUATOR_PATH = Path("/app/backend/services/opportunity_evaluator.py")
-BOT_PATH = Path("/app/backend/services/trading_bot_service.py")
+# v322u-t1 — paths were hardcoded "/app/backend/..." (dev-container only)
+# and raised FileNotFoundError on the DGX. Resolve relative to this file.
+_SERVICES_DIR = Path(__file__).resolve().parents[1] / "services"
+EVALUATOR_PATH = _SERVICES_DIR / "opportunity_evaluator.py"
+BOT_PATH = _SERVICES_DIR / "trading_bot_service.py"
 
 
 def _read(path: Path) -> str:
