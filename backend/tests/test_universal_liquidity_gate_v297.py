@@ -77,8 +77,12 @@ def _alert(symbol="DGCB", *, scan_tier="intraday", trade_style="intraday",
 def test_tier_floor_from_scan_tier():
     s = _make_scanner()
     assert s._liquidity_tier_floor(_alert(scan_tier="intraday")) == ("intraday", 50_000_000)
-    assert s._liquidity_tier_floor(_alert(scan_tier="swing")) == ("swing", 10_000_000)
-    assert s._liquidity_tier_floor(_alert(scan_tier="investment")) == ("investment", 2_000_000)
+    # v322m — floor is now STRICTEST-OF(scan_tier, trade_style). The default
+    # _alert carries trade_style="intraday", which would (correctly) force
+    # the intraday floor — pass a matching style so this test still
+    # exercises pure scan_tier keying.
+    assert s._liquidity_tier_floor(_alert(scan_tier="swing", trade_style="swing")) == ("swing", 10_000_000)
+    assert s._liquidity_tier_floor(_alert(scan_tier="investment", trade_style="position")) == ("investment", 2_000_000)
 
 
 def test_tier_floor_infers_from_trade_style_when_scan_tier_missing():
