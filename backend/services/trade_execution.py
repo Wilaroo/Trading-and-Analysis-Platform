@@ -1238,6 +1238,16 @@ class TradeExecution:
                         symbol=trade.symbol,
                         setup_type=getattr(trade, "setup_type", None) or "unknown",
                         reason=_reason,
+                        # v322u — DEFAULT-DENY at the broker boundary. The
+                        # structural allow-list only knows ~18 wordings;
+                        # IB produces hundreds (tick-size Error 110,
+                        # margin variants, pacing violations, "reason not
+                        # given"). Pre-fix any unlisted wording got NO
+                        # cooldown and the scan loop re-fired the same
+                        # signal every tick (probe 2026-06-11: 11× in a
+                        # row). Only an EXPLICIT transient match bypasses
+                        # the cooldown here.
+                        assume_structural=True,
                     )
                 except Exception as _cd_err:
                     logger.debug(f"rejection_cooldown.mark_rejection failed: {_cd_err}")

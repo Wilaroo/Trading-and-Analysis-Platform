@@ -20,6 +20,38 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── v322u — Taxonomy coherence: timeframe follows trade_style ────────
+# STRATEGY_CONFIG[setup_type]["timeframe"] and the scanner-stamped
+# trade_style (trade_style_classifier.SETUP_TO_STYLE / SMB registry
+# default_style) are two PARALLEL per-setup tables that drift
+# independently. Probe 2026-06-11 found bot_trades rows with
+# style=swing + tf=intraday; the inverse (style=scalp + tf=intraday)
+# silently exempts scalps from the v19.34.171 scalp-decay sweep, and
+# a swing mislabeled tf=scalp would get wrongly flattened at 60 min.
+# The style is the policy-bearing axis (order_policy_registry, EOD
+# policy and sizing key on it), so on conflict the style-derived
+# horizon wins. Legacy/generic SMB styles (trade_2_hold, move_2_move,
+# a_plus, reconciled, ...) carry no horizon info → table value kept.
+STYLE_TO_TIMEFRAME: Dict[str, str] = {
+    "scalp": "scalp",
+    "intraday": "intraday",
+    "multi_day": "swing",
+    "swing": "swing",
+    "position": "position",
+    "investment": "position",
+}
+
+
+def reconcile_timeframe_with_style(timeframe_str, trade_style) -> Tuple[str, bool]:
+    """v322u — Return (timeframe, changed). Style-derived horizon wins
+    on conflict; styles without a canonical horizon leave it untouched."""
+    style = str(trade_style or "").strip().lower()
+    tf_from_style = STYLE_TO_TIMEFRAME.get(style)
+    if tf_from_style and tf_from_style != str(timeframe_str or "").lower():
+        return tf_from_style, True
+    return timeframe_str, False
+
+
 # ── v19.34.247 (2026-06-03) — EOD no-new-entries cut resolver ───────
 # Pure helper so the EOD gate's time math is unit-testable and its
 # operator-facing strings stay in lockstep with the bot's ACTUAL
@@ -1367,6 +1399,19 @@ class OpportunityEvaluator:
             strategy_cfg = STRATEGY_CONFIG.get(setup_type, DEFAULT_STRATEGY_CONFIG)
             timeframe_val = strategy_cfg["timeframe"]
             timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
+            # v322u — taxonomy coherence: when the scanner-resolved
+            # trade_style maps to a canonical horizon that conflicts with
+            # the per-setup STRATEGY_CONFIG table, the style wins (it
+            # drives order policy / EOD / decay). See STYLE_TO_TIMEFRAME.
+            timeframe_str, _tf_reconciled = reconcile_timeframe_with_style(
+                timeframe_str, alert.get("trade_style"))
+            if _tf_reconciled:
+                logger.info(
+                    "[v322u TAXONOMY] %s %s: timeframe → %r "
+                    "(follows trade_style=%r, STRATEGY_CONFIG said %r)",
+                    symbol, setup_type, timeframe_str,
+                    alert.get("trade_style"), strategy_cfg["timeframe"],
+                )
             trail_pct = strategy_cfg.get("trail_pct", 0.02)
             scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
             # v19.34.245 — derive close_at_eod from the trade-style POLICY when

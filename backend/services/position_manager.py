@@ -1099,7 +1099,19 @@ class PositionManager:
                 _tf = getattr(trade, "timeframe", "")
                 if hasattr(_tf, "value"):
                     _tf = _tf.value
-                if str(_tf).lower() != "scalp":
+                # v322u — style-aware selection (probe 2026-06-11 found
+                # style/timeframe drift on persisted rows):
+                #   1. a scalp-STYLE trade stamped tf="intraday" by the
+                #      drifted STRATEGY_CONFIG table escaped decay forever;
+                #   2. (defensive) a swing-style trade stamped tf="scalp"
+                #      would be wrongly flattened at 60 min.
+                # trade_style is the policy-bearing axis — it wins both
+                # ways. Covers legacy rows already in Mongo, not just
+                # new trades stamped by the v322u evaluator reconciler.
+                _style = str(getattr(trade, "trade_style", "") or "").strip().lower()
+                if _style in ("swing", "multi_day", "position", "investment"):
+                    continue
+                if str(_tf).lower() != "scalp" and _style != "scalp":
                     continue
                 _st = getattr(trade, "status", "")
                 if hasattr(_st, "value"):
