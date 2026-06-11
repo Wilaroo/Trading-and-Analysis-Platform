@@ -55,6 +55,25 @@ def _naked_sweep_flip_decision(direction_value, bot_remaining_shares,
     return "proceed"
 
 
+# ── M0c (2026-06-12) — ladder-aware naked detection helper ───────────────────
+# An M0-laddered trade has N independent OCA pairs at IB; the trade's primary
+# `stop_order_id` is only leg 1's stop. After leg 1's target fills, OCA cancels
+# leg 1's stop — the legacy naked check (`stop_order_id not in live_order_ids`)
+# then reads the trade as NAKED even though legs 2..n still protect every
+# remaining share. This helper returns the stop ids of all still-working ladder
+# legs so the sweep can check ANY of them against the live order snapshot.
+def _m0_working_leg_stop_ids(trade) -> list:
+    """Stop order ids (as str) of all still-working M0 ladder legs."""
+    try:
+        cfg = getattr(trade, "scale_out_config", None) or {}
+        return [
+            str(l["stop_order_id"]) for l in (cfg.get("m0_legs") or [])
+            if l.get("status") == "working" and l.get("stop_order_id") is not None
+        ]
+    except Exception:
+        return []
+
+
 class BotMode(str, Enum):
     """Bot operating mode"""
     AUTONOMOUS = "autonomous"      # Execute trades without confirmation
@@ -5925,6 +5944,34 @@ class TradingBotService:
                 if v is not None:
                     live_order_ids.add(str(v))
 
+        # ── M0c (2026-06-12) — empty order-snapshot guard ───────────────────
+        # An EMPTY open-orders read while the bot tracks real IB stop ids is
+        # far more likely a degraded/unprimed snapshot (backend just
+        # restarted; ib_direct freshly reconnected; pusher feed wiped) than
+        # every bracket genuinely vanishing at once. Mass-reissuing on a
+        # blank snapshot is the bracket-stacking / ladder-clobbering failure
+        # mode — skip the cycle instead (detection resumes next tick).
+        if not live_order_ids:
+            _tracked_stop_count = 0
+            for _gt in self._open_trades.values():
+                _gsid = getattr(_gt, "stop_order_id", None)
+                _gsid_str = str(_gsid) if _gsid is not None else None
+                if _gsid_str and not (
+                    _gsid_str.startswith("SIM-")
+                    or _gsid_str.startswith("ADOPT-STOP-")
+                ):
+                    _tracked_stop_count += 1
+            if _tracked_stop_count > 0:
+                result["skipped_reason"] = "empty_order_snapshot_suspect"
+                print(
+                    f"[M0c naked-sweep] SKIP — order snapshot is EMPTY "
+                    f"(tier={source_info.get('tier')}) but bot tracks "
+                    f"{_tracked_stop_count} live stop id(s). Refusing "
+                    f"mass-reissue on a blank snapshot.",
+                    flush=True,
+                )
+                return result
+
         # ── v19.34.285 — flip-guard: signed live IB positions ──────────────
         # Build a SIGNED per-symbol IB net-position map so a naked reissue can
         # be refused when IB is flat/opposite for the symbol (would flip the
@@ -6084,6 +6131,26 @@ class TradingBotService:
                 if not is_naked:
                     continue
 
+                # ── M0c (2026-06-12) — ladder-aware naked check ──────────
+                # For M0 trades the primary stop_order_id is only leg 1's
+                # stop; after a leg fill OCA legitimately cancels it. The
+                # trade is protected as long as ANY working leg stop is
+                # still live at IB.
+                _m0_stop_ids = _m0_working_leg_stop_ids(trade)
+                if _m0_stop_ids and any(_s in live_order_ids for _s in _m0_stop_ids):
+                    continue
+                if _m0_stop_ids:
+                    # Ladder tracked but NO leg stop live → legs were lost
+                    # (cancelled externally). Mark them so the M0 manager
+                    # stops acting on dead ids; the reissue below
+                    # re-protects the position (possibly with a new ladder).
+                    try:
+                        for _leg in (trade.scale_out_config or {}).get("m0_legs", []):
+                            if _leg.get("status") == "working":
+                                _leg["status"] = "lost"
+                    except Exception:
+                        pass
+
                 result["naked_found"] += 1
                 sym = getattr(trade, "symbol", "?")
                 print(
@@ -6239,8 +6306,14 @@ class TradingBotService:
                     if tgt_id is not None:
                         trade.target_order_id = tgt_id
                         # v19.34.30 Patch A: REPLACE not append.
+                        # M0c — unless the reissue placed a NEW M0 ladder:
+                        # _m0_place_oca_ladder already stamped the FULL leg
+                        # id list on trade.target_order_ids; clobbering it
+                        # to [tgt_id] would blind every cancel path (and
+                        # the orphan classifier) to legs 2..n.
                         try:
-                            trade.target_order_ids = [tgt_id]
+                            if not (oca_result or {}).get("m0_ladder"):
+                                trade.target_order_ids = [tgt_id]
                         except Exception:
                             pass
                     trade.oca_group = oca_result.get("oca_group")

@@ -61,6 +61,21 @@ def _patch_fetch(ib_orders, source_tier="pusher_orders_snapshot"):
     )
 
 
+def _patch_positions(positions):
+    """M0c — patch the positions resolver so the v285 flip-guard can verify
+    the live IB side (otherwise it SKIPs every reissue as unverifiable)."""
+    return patch(
+        "services.orphan_gtc_reconciler._fetch_ib_positions_async",
+        new_callable=AsyncMock,
+        return_value=(positions, {"tier": "pusher_snapshot", "ok": True}),
+    )
+
+
+# An unrelated working order so the M0c empty-order-snapshot guard doesn't
+# read the snapshot as blank/unprimed (blank snapshots now skip the sweep).
+_UNRELATED_ORDER = {"ib_order_id": "UNRELATED-1", "symbol": "ZZZ"}
+
+
 # ────────────────────────────────────────────────────────────────────
 # 1. stop_order_id=None ⇒ naked ⇒ reissue + lifecycle event
 # ────────────────────────────────────────────────────────────────────
@@ -74,7 +89,9 @@ async def test_sweep_detects_missing_stop_id():
     trade = _make_trade(tid="t1", symbol="RJF", shares=100, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    with _patch_fetch([]), patch(
+    with _patch_fetch([_UNRELATED_ORDER]), _patch_positions(
+        [{"symbol": "RJF", "position": 100}]
+    ), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ) as persist_mock:
@@ -113,7 +130,7 @@ async def test_sweep_detects_stop_id_missing_from_ib():
     with _patch_fetch([
         {"ib_order_id": "OTHER-1", "symbol": "AAPL"},
         {"ib_order_id": "OTHER-2", "symbol": "MSFT"},
-    ]), patch(
+    ]), _patch_positions([{"symbol": "RJF", "position": 200}]), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ):
@@ -223,7 +240,9 @@ async def test_sweep_persists_event_on_reissue_failure():
     trade = _make_trade(tid="t1", symbol="RJF", shares=200, stop_order_id=None)
     bot = _make_bot(executor=executor, open_trades={"t1": trade})
 
-    with _patch_fetch([]), patch(
+    with _patch_fetch([_UNRELATED_ORDER]), _patch_positions(
+        [{"symbol": "RJF", "position": 200}]
+    ), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ) as persist_mock:
@@ -257,7 +276,9 @@ async def test_sweep_continues_after_per_trade_crash():
     bot = _make_bot(executor=executor,
                     open_trades={"bad": bad_trade, "good": good_trade})
 
-    with _patch_fetch([]), patch(
+    with _patch_fetch([_UNRELATED_ORDER]), _patch_positions(
+        [{"symbol": "GOOD", "position": 50}]
+    ), patch(
         "services.bracket_reissue_service._persist_lifecycle_event",
         new_callable=AsyncMock,
     ):

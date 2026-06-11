@@ -688,3 +688,20 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   pure R-math (patcher U7Qtd, tests 0SILH, 40/40 pass). v322o2 taller layout shipped
   (row 1600px, browser-verified 1792px scroll). check_m0_status.py shipped (N81iR).
   TQS true-0-100 display rescale → backlog (pair with Tier 2a isotonic calibration).
+- 2026-06-12 M0c SHIPPED (patcher https://paste.rs/lfViT): root cause of CASY ladder-kill
+  CONFIRMED as unprimed in-memory snapshots after backend restarts (NOT a 4h-dead pusher —
+  `_pushed_ib_data` wipes on every restart; boot audit fires 10s later; `if fresh:` in
+  _fetch_ib_positions_async treats empty ib_direct reads as failure → falls to wiped
+  snapshot → everything classified naked_no_position → auto-flush killed valid legs).
+  Fixes: (1) audit_orphan_gtc_orders fail-closed abort on empty positions snapshot while
+  bot tracks active trades OR pusher not fresh; (2) classifier downgrades matched-ACTIVE-
+  trade+flat-snapshot to awaiting_data (never auto-cancel); (3) naked-sweep skips on
+  blank order snapshot w/ tracked stop ids; (4) naked-sweep ladder-aware (ANY working
+  m0_legs stop live at IB = protected; all-legs-lost → mark "lost" then reissue);
+  (5) reissue no longer clobbers target_order_ids when reissue placed new M0 ladder;
+  (6) consolidator refuses to merge groups holding working m0_legs. 15 new tests
+  (test_m0c_reconciler_guards.py); 3 stale tests updated to current contracts
+  (v89 cancel-queue fallback, async positions fetcher, v151 SAFE_TO_AUTO_CANCEL set);
+  4 pre-existing sweep-test failures (v285 flip-guard unverifiable positions) repaired.
+  148/148 relevant tests green in container. AWAITING: user applies M0c on DGX, runs
+  pytest, flips M0_LADDER_ENABLED=true, restarts backend, validates next live ladder.

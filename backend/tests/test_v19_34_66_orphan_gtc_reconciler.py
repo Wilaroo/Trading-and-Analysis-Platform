@@ -340,11 +340,12 @@ def test_cancel_helper_handles_ib_disconnected_gracefully():
     ):
         summary = asyncio.run(cancel_orphan_gtc_orders(verdicts_to_cancel=[naked]))
 
-    assert summary["cancelled"] == []
-    assert any(
-        e.get("stage") == "ib_direct_not_connected"
-        for e in summary["errors"]
-    )
+    # v19.34.89 — with ib_direct disconnected the helper falls through to
+    # the pusher cancel QUEUE instead of erroring out. The leg reports
+    # via="cancel_queue" with a pending queue status.
+    assert len(summary["cancelled"]) == 1
+    assert summary["cancelled"][0]["via"] == "cancel_queue"
+    assert summary["errors"] == []
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -381,8 +382,14 @@ def test_audit_happy_path_combines_all_sources():
         "services.orphan_gtc_reconciler._fetch_ib_open_orders",
         new=AsyncMock(return_value=(fake_orders, {"tier": "ib_direct", "ok": True})),
     ), patch(
-        "services.orphan_gtc_reconciler._fetch_ib_positions",
-        return_value=([], {"tier": "pusher_snapshot", "ok": True}),
+        # M0c — patch the ASYNC positions fetcher (the one the orchestrator
+        # actually calls) and mark the pusher feed FRESH so the empty
+        # positions read is trustworthy (bot tracks no trades → genuine
+        # naked zombie must still classify).
+        "services.orphan_gtc_reconciler._fetch_ib_positions_async",
+        new=AsyncMock(return_value=(
+            [], {"tier": "pusher_snapshot", "ok": True, "pusher_connected": True},
+        )),
     ), patch(
         "services.orphan_gtc_reconciler._fetch_bot_trades",
         return_value=([], {"tier": "mongo_bot_trades", "ok": True}),
