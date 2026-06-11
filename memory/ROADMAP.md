@@ -12,6 +12,18 @@ Open priorities, deferred ideas, and backlog. Move items to
 | v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped (e9c810f9), LIVE-VERIFIED: rated 774→1,463 |
 | v19.34.322h | Tier 3b: PBO calibration audit script + `TB_PBO_GATE=enforce` flipped | DONE (82065684; enforce live in backend/.env) |
 | v19.34.322i | PBO quarantine sweep: flag-based, ALL load paths, auto-lift on healthy promotion | DONE + VERIFIED (922a8ced + r2 d6687642); 12 toxic models quarantined |
+| v19.34.322j | T6 verification + flip tooling + quarantine-aware boot diagnostic + gate-summary runtime probe | DONE (27a01d7e + r2); T6 CONFIRMED ACTIVE |
+
+### v322j — T6 status (2026-06-11)
+**T6 was ALREADY active** (flipped in an earlier session; roadmap entry was stale).
+Runtime-verified via new probe: `GET /api/ai-training/confidence-gate/summary` →
+`regime_suppression: {mode: active, table_loaded: true, cell_count: 111}`.
+Table: 16 actionable cells → 0 SKIP, 7 REDUCE (all counter-trend-in-BULL:
+vwap_fade, vwap_bounce, squeeze|short etc.). Shadow replay empty (no decision has
+landed in a suppressible cell since logging began) — expected, recent regime NEUT/PULLBACK.
+`scripts/t6_flip.py` = standing audit tool (--flip/--shadow --apply to toggle).
+KNOWN QUIRK (benign): early-startup INFO logs from gate loaders (calibrated thresholds,
+regime expectancy) are swallowed by logging-config timing — use the summary endpoint, not greps.
 
 ### v322i — Quarantine sweep (2026-06-11)
 12 negative-edge gate failers flagged via `scripts/quarantine_pbo_sweep.py --apply`:
@@ -44,10 +56,8 @@ GPU note: XGBoost CUDA IS working on the GB10 (subprocess preflight confirmed
 backlog item applies to TORCH only (torch is +cpu build) — XGBoost wheel has CUDA built in.
 
 ### Next session priorities (in order)
-- 🟡 **P1**: T6 flip to active (per-setup×regime expectancy suppressor out of shadow).
-- 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA); Tier 3a drift-monitor UI tile;
-  Tier 2a per-model probability calibration.
-- 🟢 **P2**: Cosmetic — consistency diagnostic should label quarantined models separately.
+- 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA) — biggest live-P&L lever.
+- 🟡 **P1**: Tier 3a drift-monitor UI tile; Tier 2a per-model probability calibration.
 - 🟢 **P2**: `_industry_to_etf` oddball audit (ELF mis-tagged XLE); sector-coverage UI chip.
 - 🔴 SECURITY (user action): rotate Atlas MongoDB password (still pending).
 
