@@ -114,6 +114,40 @@ def classify_exit(t) -> str:
     return "OTHER"
 
 
+def external_subclass(t):
+    """v322o-2 — OCA bracket exits land as `oca_closed_externally` with no
+    exit_price. Reconstruct exit = entry ± realized/shares and classify by
+    realized-R magnitude + proximity: which bracket leg actually fired?
+      EXT_TP      realized >= +0.5R and exit nearer target than stop
+      EXT_SL      realized <= -0.5R and exit nearer stop than target
+      EXT_SCRATCH |realized| < 0.5R (BE-ish stop, tight unwind, partial)
+      None        fields missing — unclassifiable
+    """
+    entry = _f(t.get("entry_price")) or _f(t.get("fill_price"))
+    stop = _f(t.get("stop_price")) or _f(t.get("stop_loss"))
+    tps = t.get("target_prices") or []
+    tgt = _f(tps[0]) if tps else (_f(t.get("tp_price")) or _f(t.get("target")))
+    realized = _f(t.get("realized_pnl")) or _f(t.get("net_pnl"))
+    shares = _f(t.get("shares"))
+    if entry <= 0 or stop <= 0 or shares <= 0:
+        return None
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    rr = (realized / shares) / risk
+    if abs(rr) < 0.5:
+        return "EXT_SCRATCH"
+    if tgt > 0:
+        pps = realized / shares
+        exit_px = entry + pps if _dir(t) == "long" else entry - pps
+        near_target = abs(exit_px - tgt) <= abs(exit_px - stop)
+        if rr > 0 and near_target:
+            return "EXT_TP"
+        if rr < 0 and not near_target:
+            return "EXT_SL"
+    return "EXT_TP" if rr > 0 else "EXT_SL"
+
+
 def realized_r_signed(t):
     """Realized R: per-share pnl / per-share risk. pnl is already signed
     correctly for direction (realized_pnl is dollar P&L), so no flip needed."""
@@ -246,6 +280,36 @@ def main():
               f"{_fmt(statistics.mean(rs) if rs else None, '+6.2f'):>6} "
               f"{_fmt(statistics.median(rs) if rs else None, '+6.2f'):>6} "
               f"{_fmt(statistics.mean(holds) if holds else None, '7.0f', '    n/a'):>7}m")
+
+    # ── EXTERNAL sub-classification (which OCA leg actually fired?) ─────
+    ext = buckets.get("EXTERNAL", [])
+    if ext:
+        subs = defaultdict(list)
+        for t in ext:
+            subs[external_subclass(t) or "EXT_UNKNOWN"].append(t)
+        print(f"\nEXTERNAL ({len(ext)}) — reconstructed leg attribution "
+              f"[no exit_price persisted; exit = entry ± pnl/shares]:")
+        for k in ("EXT_TP", "EXT_SL", "EXT_SCRATCH", "EXT_UNKNOWN"):
+            sub = subs.get(k, [])
+            if not sub:
+                continue
+            n = len(sub)
+            pnls = [(_f(t.get("realized_pnl")) or _f(t.get("net_pnl"))) for t in sub]
+            rs = [r for r in (realized_r_signed(t) for t in sub) if r is not None]
+            print(f"   {k:<12} {n:>4} ({n / len(ext) * 100:3.0f}%)  totPnL {sum(pnls):>+8.0f}  "
+                  f"avgR {_fmt(statistics.mean(rs) if rs else None, '+.2f')}  "
+                  f"medR {_fmt(statistics.median(rs) if rs else None, '+.2f')}")
+        # Realized-R histogram across ALL externals (M0 ladder shape input).
+        ext_rs = [r for r in (realized_r_signed(t) for t in ext) if r is not None]
+        if ext_rs:
+            print(f"   realized-R histogram (n={len(ext_rs)}):")
+            for lab, lo, hi in (("<=-1R", -99, -1.0), ("-1..-0.5R", -1.0, -0.5),
+                                ("-0.5..-0.25R", -0.5, -0.25), ("scratch ±0.25R", -0.25, 0.25),
+                                ("+0.25..0.5R", 0.25, 0.5), ("+0.5..1R", 0.5, 1.0),
+                                ("+1..2R", 1.0, 2.0), (">=+2R", 2.0, 99)):
+                c = sum(1 for r in ext_rs if lo <= r < hi)
+                if c:
+                    print(f"      {lab:<16} {c:>4} ({c / len(ext_rs) * 100:3.0f}%)")
 
     # ── TP realized-R distribution (M0 ladder input) ─────────────────────
     tp_rs = [r for r in (realized_r_signed(t) for t in buckets.get("TP", []))
