@@ -751,7 +751,7 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   boot). NOTE: many other test files still hardcode /app paths (test_chat_extended_*,
   test_collection_mode_*, test_collector_uses_end_date, test_confidence_gate_wiring...)
   — backlog: portable-test-paths sweep.
-- 2026-06-11 v322u SHIPPED (patcher https://paste.rs/bBNI9) — pre-open mission-critical
+- 2026-06-11 v322u SHIPPED (patcher https://paste.rs/sKOpP) — pre-open mission-critical
   pair. (1) RE-FIRE CHURN root cause CONFIRMED in code: v19.34.8 cooldown's
   mark_rejection no-ops unless broker error text matches the 18-token structural
   allow-list; unlisted IB wordings (Error 110 tick-size, margin variants, pacing,
@@ -771,3 +771,13 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   commit+push BEFORE restart; v322t+v322u both go live at tomorrow's StartTrading boot.
   DEFERRED to next session: IGV INT-21 session-age guard (item 4), repair_dedupe sweep,
   rehydration boot-log one-liner.
+- 2026-06-11 (late) v322u DRIFT RESOLVED: bBNI9 aborted on DGX — opportunity_evaluator.py
+  hash mismatch. Operator pasted their file (YTjMB, sha f7f2b734): DGX copy LACKS
+  v19.34.266 MICRO_SETUPS block + lint formatting/noqa present in sandbox — sandbox-only
+  drift; DGX adopted as canonical baseline per AGENTS.md §12 (sandbox evaluator replaced
+  with DGX content + v322u edits re-applied). 293/293 re-verified on rebased build.
+  Final patcher https://paste.rs/sKOpP (43KB compact anchored-chunk, round-trip verified).
+  FLAGGED TO OPERATOR: MICRO_SETUPS (v19.34.266) is NOT live in production — needs a
+  decision next session (ship it as its own patcher, or drop it from sandbox).
+  LESSON: paste.rs hard-caps ~384KB (jY0IW/Pvqhc were silently truncated) — ALWAYS
+  round-trip-verify uploads (download + cmp) before sharing URLs.

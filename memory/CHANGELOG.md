@@ -1,6 +1,6 @@
 ## 2026-06-11 — v322u: broker-rejection default-deny cooldown + style/timeframe coherence
 
-**v322u patcher: https://paste.rs/bBNI9 — PENDING user apply (then git add/commit/push BEFORE restart; restart via ./start_backend.sh --force or next StartTrading.bat boot).**
+**v322u patcher: https://paste.rs/sKOpP — PENDING user apply (then git add/commit/push BEFORE restart; restart via ./start_backend.sh --force or next StartTrading.bat boot).**
 
 ### Fix 1 — broker-rejection RE-FIRE CHURN (probe: identical signal fired 11x in a row)
 Root cause: v19.34.8 cooldown's `mark_rejection` no-ops unless the broker error text
