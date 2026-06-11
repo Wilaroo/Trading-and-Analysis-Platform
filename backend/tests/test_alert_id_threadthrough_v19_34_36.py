@@ -12,8 +12,16 @@ These tests pin the contract: alert.id → alert_dict → BotTrade.alert_id
 must survive save→load and be reachable everywhere downstream.
 """
 
+from pathlib import Path
+
 from services.trading_bot_service import BotTrade, TradeDirection, TradeStatus
 from services.bot_persistence import BotPersistence
+
+# v322t-t1 — static-source tests previously hardcoded "/app/backend/..."
+# which only exists in the dev container; on the DGX the repo lives at
+# ~/Trading-and-Analysis-Platform and all four read_text() calls raised
+# FileNotFoundError. Resolve relative to this test file instead.
+_SERVICES_DIR = Path(__file__).resolve().parents[1] / "services"
 
 
 def _make_trade(**overrides) -> BotTrade:
@@ -86,7 +94,7 @@ def test_evaluator_stamps_alert_id_from_alert_dict():
     matching silently breaks again.
     """
     from pathlib import Path
-    src = Path("/app/backend/services/opportunity_evaluator.py").read_text("utf-8")
+    src = (_SERVICES_DIR / "opportunity_evaluator.py").read_text("utf-8")
     assert 'alert_id=alert.get("alert_id")' in src, (
         "opportunity_evaluator no longer threads alert_id into BotTrade — "
         "learning-loop context matching will silently break."
@@ -96,7 +104,7 @@ def test_evaluator_stamps_alert_id_from_alert_dict():
 def test_trading_bot_alert_dict_includes_alert_id():
     """The scanner→bot alert_dict must carry alert.id forward."""
     from pathlib import Path
-    src = Path("/app/backend/services/trading_bot_service.py").read_text("utf-8")
+    src = (_SERVICES_DIR / "trading_bot_service.py").read_text("utf-8")
     # The alert_dict construction in _check_for_opportunities
     assert "'alert_id': alert.id" in src, (
         "trading_bot_service no longer threads alert.id into alert_dict — "
@@ -107,7 +115,7 @@ def test_trading_bot_alert_dict_includes_alert_id():
 def test_close_path_uses_real_alert_id_for_learning_loop():
     """position_manager.close_trade must pass trade.alert_id (not getattr fallback)."""
     from pathlib import Path
-    src = Path("/app/backend/services/position_manager.py").read_text("utf-8")
+    src = (_SERVICES_DIR / "position_manager.py").read_text("utf-8")
     assert "alert_id=trade.alert_id or trade.id" in src, (
         "close_trade no longer uses real trade.alert_id — learning-loop "
         "pending-context lookup will fall through to fresh capture at "
@@ -128,7 +136,7 @@ def test_execution_path_planned_r_is_r_multiple_not_price_ratio():
     `r_capture_percent` / `quality_score` was wrong by a factor of risk/entry.
     """
     from pathlib import Path
-    src = Path("/app/backend/services/trade_execution.py").read_text("utf-8")
+    src = (_SERVICES_DIR / "trade_execution.py").read_text("utf-8")
     idx = src.index("# Start execution tracking (Phase 1 Learning)")
     block = src[idx:idx + 1500]
     # The buggy expression `target_prices[0] / trade.entry_price - 1` must be gone
