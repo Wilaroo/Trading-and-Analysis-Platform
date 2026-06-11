@@ -751,3 +751,23 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   boot). NOTE: many other test files still hardcode /app paths (test_chat_extended_*,
   test_collection_mode_*, test_collector_uses_end_date, test_confidence_gate_wiring...)
   — backlog: portable-test-paths sweep.
+- 2026-06-11 v322u SHIPPED (patcher https://paste.rs/jY0IW) — pre-open mission-critical
+  pair. (1) RE-FIRE CHURN root cause CONFIRMED in code: v19.34.8 cooldown's
+  mark_rejection no-ops unless broker error text matches the 18-token structural
+  allow-list; unlisted IB wordings (Error 110 tick-size, margin variants, pacing,
+  "reason not given") got NO cooldown → identical signal re-fired every tick (the 11×
+  churn). Fix: mark_rejection(assume_structural=True) at trade_execution broker-rejected
+  branch = DEFAULT-DENY (only explicit transient match bypasses); guardrail/evaluator
+  sites keep legacy allow-list. New is_transient_rejection helper. (2) TAXONOMY DRIFT
+  root cause: timeframe from STRATEGY_CONFIG[setup_type] vs trade_style from scanner
+  SETUP_TO_STYLE — parallel tables drift (style=swing+tf=intraday probe rows).
+  Fix both sides: WRITE — reconcile_timeframe_with_style in opportunity_evaluator
+  (style wins on conflict, [v322u TAXONOMY] log, legacy styles untouched); READ —
+  check_scalp_decay style-aware (catches scalp-style/tf-drifted legacy Mongo rows,
+  NEVER decays swing/multi_day/position/investment even if tf=scalp). 12 new tests
+  (test_v322u_refire_cooldown_and_taxonomy.py, drives REAL check_scalp_decay w/ stub
+  bot + env-pinned gates); 293/293 related suite green in container. Patcher = 5-file
+  hash-guarded whole-file replace, sim-verified. AWAITING: user applies, 293 green,
+  commit+push BEFORE restart; v322t+v322u both go live at tomorrow's StartTrading boot.
+  DEFERRED to next session: IGV INT-21 session-age guard (item 4), repair_dedupe sweep,
+  rehydration boot-log one-liner.

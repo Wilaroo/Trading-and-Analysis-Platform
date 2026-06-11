@@ -180,6 +180,15 @@ def is_structural_rejection(reason: Optional[str]) -> bool:
     return False
 
 
+def is_transient_rejection(reason: Optional[str]) -> bool:
+    """v322u — True only when `reason` explicitly matches the transient
+    list. Used by the default-deny path for broker-side rejections."""
+    if not reason:
+        return False
+    r = str(reason).lower()
+    return any(token in r for token in TRANSIENT_REJECTION_REASONS)
+
+
 @dataclass
 class CooldownEntry:
     symbol: str
@@ -248,6 +257,7 @@ class RejectionCooldown:
         setup_type: str,
         reason: str,
         cooldown_seconds: Optional[int] = None,
+        assume_structural: bool = False,
     ) -> Optional[CooldownEntry]:
         """Record a rejection and start (or extend) the cooldown for
         `(symbol, setup_type)`.
@@ -259,10 +269,23 @@ class RejectionCooldown:
         EXTENDS the cooldown to `now + cooldown_seconds` (whichever is
         later) and increments `rejection_count`. This rate-limits the
         loop further the more it spirals.
+
+        v322u — `assume_structural=True` flips classification to
+        DEFAULT-DENY: only an EXPLICIT transient match bypasses the
+        cooldown; any other (or empty) reason cools down. Used at the
+        broker-rejection boundary, where the allow-list only knows ~18
+        wordings while IB produces hundreds — pre-fix, an unlisted
+        wording got NO cooldown and the scan loop re-fired the identical
+        signal every tick (probe 2026-06-11: same signal 11× in a row).
+        Guardrail-veto and evaluator call sites keep the legacy
+        allow-list behavior (default False).
         """
         if not symbol or not setup_type:
             return None
-        if not is_structural_rejection(reason):
+        if assume_structural:
+            if is_transient_rejection(reason):
+                return None
+        elif not is_structural_rejection(reason):
             return None
         # Honor explicit 0 / negative as "no cooldown" without falling
         # through `0 or default` truthiness gotcha.
