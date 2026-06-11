@@ -1,3 +1,40 @@
+## 2026-06-12 — v322s: missed-EOD boot sweep + created_at="" fix (ACMR root cause CLOSED)
+
+**v322s patcher: https://paste.rs/HPO1C — PENDING user apply (then git add/commit/push BEFORE restart).**
+
+### Root cause (proven via diag_eod_flatten_escape --trade-id e11450ca)
+ACMR e11450ca filled 15:38:39 ET Fri 05-29 (soft-cut warn-only window); the backend went
+DOWN before the 15:45 EOD pass (ZERO heartbeats + no eod_auto_close event that Friday) →
+position carried the WEEKEND on its GTC stop → Monday boot adopted it (ADOPT-OCA,
+bracket_attach_count=4) → 9:30 open auction gapped through the stop (82.03 vs 83.54,
+-$285). NOT a guard logic bug: every in-session guard requires the process to be RUNNING.
+Plus: BotTrade.created_at defaulted to "" → the row was invisible to every date-windowed
+query (two probes missed it; found only via no-date-filter regex query).
+
+### v322s fixes
+- `trading_bot_service.py`: BotTrade.created_at default "" → default_factory now-ISO;
+  boot task `_missed_eod_boot_sweep_task` (sleep 75s, re-check 120s until open).
+- `position_manager.py`: `missed_eod_boot_sweep(bot, now_et=None)` — tracked OPEN +
+  policy close_at_eod=True + fill date < today (ET) → CRITICAL alarm +
+  `state_integrity_events` (event=missed_eod_carryover) + flatten now (RTH) or
+  waiting_for_open (flattens at the bell). Alarm dedupe via bot._missed_eod_alarmed_ids.
+  Kill switch MISSED_EOD_BOOT_SWEEP_ENABLED=0. Uses canonical close_trade path.
+- NEW `scripts/repair_created_at_backfill.py` (dry-run default; --apply backfills from
+  executed_at/pre_submit_at/closed_at, stamps created_at_backfilled_from).
+- NEW `tests/test_v322s_missed_eod_boot_sweep.py` (11 green; +119 regression green:
+  M0/M0c/M0d, v322r, EOD-aware thresholds, eod fast path, flatten_all).
+- diag_eod_flatten_escape v2 (committed a054961b on DGX): type-agnostic created/closed
+  window + --trade-id + raw-type printout (Mongo type bracketing made datetime-typed or
+  empty created_at rows invisible to ISO-string range queries).
+
+### Deferred (operator chose 1+2 only)
+- 🟡 Soft-cut (15:35-15:45) is still warn-only — a close_at_eod entry fired there has
+  minutes to live. Option pending: hard-cut close_at_eod styles at the soft time.
+- 🟡 Broker-rejection re-fire churn: same pocket_pivot (entry 86.46) fired 11x on 06-01,
+  ~5 min apart, all broker_rejected — no per-signal rejection cooldown/dedup observed.
+- 🟡 Taxonomy: rows carry style=swing/investment with tf=intraday (trade_2_hold maps to
+  intraday); decay sweep only trusts literal tf=='scalp'.
+
 ## 2026-06-12 — v322r: leveraged-instrument scalp exclusion + EOD-flatten escape probe
 
 **v322r patcher: https://paste.rs/5K39N — PENDING user apply (then git add/commit/push BEFORE restart).**

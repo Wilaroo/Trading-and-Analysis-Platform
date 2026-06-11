@@ -1,9 +1,10 @@
 # TradeCommand / SentCom — Product Requirements
 
-> **🔜 2026-06-12 — v322r (leveraged scalp exclusion + ACMR EOD-escape probe) built/tested,
-> patcher at paste.rs/5K39N — AWAITING OPERATOR APPLY + probe run.** M0 stack (base/a/b/c/d)
-> deployed + committed; awaiting live-session ladder validation. See CHANGELOG top entry.
-> DGX patcher workflow ONLY — no testing_agent, no git from bash. Respond in English.
+> **🔜 2026-06-12 — v322r APPLIED+COMMITTED on DGX (7b12a984). ACMR root cause PROVEN
+> (backend down during Friday EOD window → weekend carry; created_at="" hid the row).
+> v322s (missed-EOD boot sweep + created_at fix + repair script) built/tested, patcher at
+> paste.rs/HPO1C — AWAITING OPERATOR APPLY.** M0 stack deployed; awaiting live ladder
+> validation. DGX patcher workflow ONLY — no testing_agent, no git from bash. English.
 
 > **🔜 FORKED 2026-06-11 — NEXT AGENT: read `/app/memory/NEXT_SESSION_TIER1_PLAN.md` FIRST.**
 > All v319/b/c/d ML-integrity fixes are DEPLOYED + committed (DGX main @ d96def40). Full

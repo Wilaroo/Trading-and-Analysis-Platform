@@ -1182,6 +1182,142 @@ class PositionManager:
         except Exception as e:
             logger.error(f"[v19.34.171 SCALP-DECAY] sweep failed: {e}")
 
+    async def missed_eod_boot_sweep(self, bot: 'TradingBotService',
+                                    now_et: Optional[datetime] = None) -> dict:
+        """v322s — boot-time catch-up for a MISSED EOD window.
+
+        The ACMR 2026-05-29 carry: a close_at_eod position filled at 15:38
+        ET, the backend went down before the 15:45 flatten pass, and the
+        position survived the weekend on its GTC stop — gapping through it
+        at Monday's open. Every in-session guard (decay, EOD close pass,
+        v301/302 naked/force-flatten) requires the process to be RUNNING in
+        the window; none can catch a missed window after the fact.
+
+        This sweep runs once at boot (scheduled by TradingBotService):
+          • tracked OPEN trade + policy says close_at_eod=True + fill date
+            (ET) is BEFORE today → "missed-EOD carryover".
+          • market open  → flatten NOW via the canonical close path.
+          • market closed → CRITICAL alarm + state_integrity_event, then
+            report waiting_for_open=True so the caller re-runs until the
+            bell (flatten happens at the open auction — the position should
+            not exist, same discipline the missed EOD pass would have
+            enforced).
+        Alarms dedupe per trade per boot via bot._missed_eod_alarmed_ids.
+        Kill switch: MISSED_EOD_BOOT_SWEEP_ENABLED=0.
+        """
+        result = {"checked": 0, "stale": 0, "flattened": 0, "alarmed": 0,
+                  "waiting_for_open": False, "skipped_reason": None}
+        if os.environ.get("MISSED_EOD_BOOT_SWEEP_ENABLED", "1") != "1":
+            result["skipped_reason"] = "disabled"
+            return result
+        if now_et is None:
+            try:
+                from zoneinfo import ZoneInfo
+                now_et = datetime.now(ZoneInfo("America/New_York"))
+            except Exception:
+                result["skipped_reason"] = "tz_unavailable"
+                return result
+        today_et = now_et.date()
+        in_rth = (
+            now_et.weekday() < 5
+            and (now_et.hour, now_et.minute) >= (9, 30)
+            and now_et.hour < 16
+        )
+        try:
+            from services.order_policy_registry import should_close_at_eod
+        except ImportError:
+            result["skipped_reason"] = "policy_unavailable"
+            return result
+
+        alarmed_ids = getattr(bot, "_missed_eod_alarmed_ids", None)
+        if alarmed_ids is None:
+            alarmed_ids = set()
+            try:
+                bot._missed_eod_alarmed_ids = alarmed_ids
+            except Exception:
+                pass
+
+        for trade in list((getattr(bot, "_open_trades", {}) or {}).values()):
+            _st = getattr(trade, "status", "")
+            if str(getattr(_st, "value", _st)).lower() != "open":
+                continue
+            result["checked"] += 1
+            try:
+                if not should_close_at_eod(trade):
+                    continue  # genuine overnight hold — not ours to touch
+            except Exception:
+                continue
+            ex = (getattr(trade, "executed_at", None)
+                  or getattr(trade, "entry_time", None))
+            if isinstance(ex, str):
+                try:
+                    ex_dt = datetime.fromisoformat(ex.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+            elif isinstance(ex, datetime):
+                ex_dt = ex
+            else:
+                continue
+            if ex_dt.tzinfo is None:
+                ex_dt = ex_dt.replace(tzinfo=timezone.utc)
+            ex_et_date = (ex_dt.astimezone(now_et.tzinfo).date()
+                          if now_et.tzinfo else ex_dt.date())
+            if ex_et_date >= today_et:
+                continue  # filled today — the normal EOD pass owns it
+            result["stale"] += 1
+            tid = getattr(trade, "id", None) or getattr(trade, "trade_id", None)
+            sym = getattr(trade, "symbol", "?")
+
+            if tid not in alarmed_ids:
+                alarmed_ids.add(tid)
+                result["alarmed"] += 1
+                logger.critical(
+                    "[v322s MISSED-EOD] %s %s filled %s but is still OPEN on "
+                    "%s — the EOD flatten window was MISSED (backend down in "
+                    "the window?). %s.",
+                    sym, tid, ex_et_date, today_et,
+                    "Flattening NOW" if in_rth else "Will flatten at the next open",
+                )
+                try:
+                    _db = getattr(bot, "_db", None)
+                    if _db is None:
+                        _db = getattr(bot, "db", None)
+                    if _db is not None:
+                        _db["state_integrity_events"].insert_one({
+                            "event": "missed_eod_carryover",
+                            "severity": "critical",
+                            "symbol": sym,
+                            "trade_id": tid,
+                            "fill_date_et": str(ex_et_date),
+                            "detected_date_et": str(today_et),
+                            "action": "flatten_now" if in_rth else "flatten_at_open",
+                            "detail": (
+                                "close_at_eod position survived a missed EOD "
+                                "window (process not running 15:45-16:00 ET; "
+                                "ACMR-class weekend carry)."
+                            ),
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                except Exception:
+                    pass
+
+            if not in_rth:
+                result["waiting_for_open"] = True
+                continue
+            if not tid:
+                continue
+            try:
+                ok = await self.close_trade(tid, bot, reason="missed_eod_boot_flatten")
+                if ok:
+                    result["flattened"] += 1
+                    logger.info("[v322s MISSED-EOD] flattened %s (%s)", sym, tid)
+                else:
+                    logger.error(
+                        "[v322s MISSED-EOD] close_trade returned False for %s (%s)",
+                        sym, tid)
+            except Exception as fe:
+                logger.error("[v322s MISSED-EOD] flatten %s raised: %s", sym, fe)
+        return result
 
 
     async def _eod_naked_flatten_guard(self, bot: 'TradingBotService') -> dict:
