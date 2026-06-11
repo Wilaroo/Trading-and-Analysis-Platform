@@ -238,10 +238,12 @@ def predict_meta_label_p_win(
     # ── 2. Load ensemble meta-labeler & verify binary ──
     ens_doc = db["timeseries_models"].find_one(
         {"name": ens_model_name},
-        {"_id": 0, "label_scheme": 1, "metrics": 1},
+        {"_id": 0, "label_scheme": 1, "metrics": 1, "quarantined": 1},
     )
     if not ens_doc:
         return miss(f"ensemble_not_trained:{ens_model_name}")
+    if ens_doc.get("quarantined"):
+        return miss(f"ensemble_quarantined:{ens_model_name}")
     if ens_doc.get("label_scheme") != "meta_label_binary":
         return miss(f"ensemble_not_binary:{ens_model_name}")
 

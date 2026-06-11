@@ -550,17 +550,31 @@ class TimeSeriesGBM:
         try:
             # Try to load exact model name first
             doc = self._db[self.MODEL_COLLECTION].find_one({"name": self.model_name})
-            
+
+            # v322i — quarantined models must NOT serve predictions, and must
+            # NOT fall through to a different model standing in for them
+            # (e.g. direction_predictor_daily answering exit-timing queries).
+            # predict() returns the neutral flat/0-confidence prediction when
+            # self._model is None, which is the intended degraded behaviour.
+            if doc is not None and doc.get("quarantined"):
+                logger.info(
+                    f"[QUARANTINE] '{self.model_name}' is quarantined "
+                    f"({doc.get('quarantine_reason', 'no reason recorded')}) — serving no model"
+                )
+                self._model = None
+                return
+
             # Fallback 1: Try to load the daily model (most commonly trained)
             if not doc or "model_data" not in doc:
                 logger.info(f"Model '{self.model_name}' not found, trying 'direction_predictor_daily'...")
-                doc = self._db[self.MODEL_COLLECTION].find_one({"name": "direction_predictor_daily"})
+                doc = self._db[self.MODEL_COLLECTION].find_one(
+                    {"name": "direction_predictor_daily", "quarantined": {"$ne": True}})
             
             # Fallback 2: Try to load any available model
             if not doc or "model_data" not in doc:
                 logger.info("Daily model not found, searching for any trained model...")
                 doc = self._db[self.MODEL_COLLECTION].find_one(
-                    {"model_data": {"$exists": True}},
+                    {"model_data": {"$exists": True}, "quarantined": {"$ne": True}},
                     sort=[("updated_at", -1)]  # Get most recently updated
                 )
             
@@ -926,7 +940,12 @@ class TimeSeriesGBM:
                 model_doc["promoted_at"] = datetime.now(timezone.utc).isoformat()
                 self._db[self.MODEL_COLLECTION].update_one(
                     {"name": self.model_name},
-                    {"$set": model_doc},
+                    {"$set": model_doc,
+                     # v322i — a healthy promotion lifts any quarantine: the
+                     # new version passed the PBO gate, so the flag must not
+                     # linger on the refreshed active doc.
+                     "$unset": {"quarantined": "", "quarantine_reason": "",
+                                "quarantined_at": ""}},
                     upsert=True
                 )
                 logger.info(f"Promoted model {self.model_name} {self._version} as active (accuracy={new_accuracy:.4f})")

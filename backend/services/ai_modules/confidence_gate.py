@@ -1248,7 +1248,7 @@ class ConfidenceGate:
             )
 
             models = list(self._db["timeseries_models"].find(
-                {"$or": relevant_patterns},
+                {"$or": relevant_patterns, "quarantined": {"$ne": True}},
                 {"_id": 0, "name": 1, "metrics": 1, "version": 1}
             ))
 
