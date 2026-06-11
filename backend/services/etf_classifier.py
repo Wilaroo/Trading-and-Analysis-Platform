@@ -46,6 +46,9 @@ SINGLE_STOCK_LEVERAGED: Set[str] = {
     "METU", "METD", "AMZU", "AMZD",
     "AVGX", "AVGD", "SMCX", "SMCZ", "COIW", "COIG",
     "BABX", "PALU", "HOOX", "RBLU",
+    # v322r (2026-06-12 ARMG gap autopsy) — Leverage Shares / GraniteShares /
+    # T-Rex / Direxion single-stock products seen or likely in the scan set.
+    "ARMG", "AAPB", "FBL", "NVDX", "NVDQ", "TSLT", "BRKU",
 }
 
 LEVERAGED_INVERSE: Set[str] = SINGLE_STOCK_LEVERAGED | FOCUS_EXEMPT | {
@@ -177,3 +180,48 @@ def is_l1_eligible(symbol: str) -> bool:
     if sym in SINGLE_STOCK_LEVERAGED:
         return False
     return _CLASS_MAP.get(sym) not in L1_EXCLUDED_CLASSES
+
+
+# ── v322r (2026-06-12) — leveraged-instrument scalp exclusion ───────────────
+# EXT_SL autopsy: stop slippage decomposes into ~design-level traded-throughs
+# plus a small set of catastrophic GAP-throughs concentrated in geared daily
+# products (ARMG, a 2x single-stock ETP: -3.93R in a 6-minute hold). Geared
+# products gap through stops BY CONSTRUCTION (daily reset + concentrated
+# underlying), so the fix is entry-side: scalp/intraday entries refuse
+# leveraged/inverse ETPs. The static class list above covers the known
+# universe; `name_looks_leveraged` is the safety net for NEW launches —
+# single-stock 2x products list monthly and a static set will always lag.
+import re
+
+LEVERAGED_NAME_RE = re.compile(
+    r"(?:"
+    r"\b[1-5](?:\.\d+)?X\b"           # "2X", "3X", "1.5X" tokens
+    r"|\bULTRA"                        # ProShares Ultra / UltraPro / UltraShort
+    r"|\bBULL\b|\bBEAR\b"              # Direxion Daily ... Bull/Bear
+    r"|LEVERAG"                        # "Leveraged", "Leverage Shares"
+    r"|\bINVERSE\b"
+    r"|\bDAILY\s+(?:LONG|SHORT)\b"     # "GraniteShares 2x Daily Long ..."
+    r")",
+    re.IGNORECASE,
+)
+
+# The name heuristic ONLY applies to fund-type contracts — a COMMON stock
+# whose company name happens to contain "Ultra" (Ultra Clean Holdings,
+# Ultragenyx) must never be tagged leveraged.
+_FUND_STOCK_TYPES = {"ETF", "ETN", "ETP", "FUND", "UNIT"}
+
+
+def name_looks_leveraged(long_name: Optional[str],
+                         stock_type: Optional[str]) -> bool:
+    """True when an IB contract's longName/stockType indicates a geared or
+    inverse ETP. Fail-OPEN on non-fund / unknown stockType — the heuristic
+    must never block a common stock."""
+    st = str(stock_type or "").upper().strip()
+    if st not in _FUND_STOCK_TYPES:
+        return False
+    return bool(LEVERAGED_NAME_RE.search(str(long_name or "")))
+
+
+def is_known_leveraged(symbol: str) -> bool:
+    """True when the static classifier already knows `symbol` is geared."""
+    return classify_etf(symbol) == "leveraged_inverse"

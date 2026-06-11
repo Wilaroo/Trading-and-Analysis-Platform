@@ -745,6 +745,36 @@ class IBDirectService:
             )
             return None
 
+    async def get_contract_profile(self, symbol: str) -> Optional[Dict[str, str]]:
+        """v322r — return ``{'long_name': str, 'stock_type': str}`` for
+        ``symbol`` via IB ``reqContractDetailsAsync``, or ``None`` on miss /
+        error. Used by the scalp leveraged-instrument exclusion to detect NEW
+        geared single-stock ETPs (ARMG class) the static classifier hasn't
+        caught up with: ``stockType`` is 'ETF'/'ETN' for funds and
+        ``longName`` carries the '2X'/'Bull'/'Leverage Shares' tokens."""
+        if not self._connected or not self._ib:
+            return None
+        try:
+            from ib_async import Stock
+        except ImportError:
+            return None
+        try:
+            contract = Stock(symbol.upper(), "SMART", "USD")
+            details = await self._ib.reqContractDetailsAsync(contract)
+            if not details:
+                return None
+            cd = details[0]
+            return {
+                "long_name":  (getattr(cd, "longName", "") or "").strip(),
+                "stock_type": (getattr(cd, "stockType", "") or "").strip(),
+            }
+        except Exception as exc:
+            logger.debug(
+                "[v322r get_contract_profile] %s lookup failed: %s",
+                symbol, exc,
+            )
+            return None
+
     async def get_fundamental_report(
         self,
         symbol: str,
