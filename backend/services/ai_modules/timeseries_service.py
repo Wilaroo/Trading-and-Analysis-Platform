@@ -210,6 +210,13 @@ class TimeSeriesAIService:
                 doc = None
                 for col_name in collections_to_check:
                     doc = self._db[col_name].find_one({"name": model_name})
+                    if doc and doc.get("quarantined"):
+                        # v322i — quarantined: evict any stale in-memory
+                        # booster and serve nothing for this timeframe.
+                        logger.info(f"[QUARANTINE] skipping reload of {model_name} (quarantined)")
+                        self._models.pop(bar_size, None)
+                        doc = None
+                        break
                     if doc and "model_data" in doc:
                         break
                     doc = None
@@ -2098,7 +2105,8 @@ class TimeSeriesAIService:
                 if cache_key in self._setup_models:
                     continue  # Already loaded via legacy path
                 model_name = get_model_name(setup_type, bar_size)
-                doc = ts_col.find_one({"name": model_name, "model_data": {"$exists": True}})
+                doc = ts_col.find_one({"name": model_name, "model_data": {"$exists": True},
+                                       "quarantined": {"$ne": True}})
                 if not doc:
                     continue
                 try:
