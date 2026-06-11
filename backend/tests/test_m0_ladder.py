@@ -210,10 +210,33 @@ class TestLadderPlan:
                                      direction="short"))
         assert [l["target_px"] for l in legs] == [99.0, 98.0, 96.0]
 
-    def test_explicit_targets_override_matching_rungs(self):
-        legs = self._plan(make_trade(shares=100, targets=[101.37]))
-        assert legs[0]["target_px"] == 101.37
-        assert legs[1]["target_px"] == 102.0   # rung 2 falls back to R-math
+    def test_single_far_explicit_target_is_ignored_M0a(self):
+        # The live-session bug: scanner's lone target (≈2.6R out) must NOT
+        # become leg 1 — all legs use R-math.
+        legs = self._plan(make_trade(shares=100, targets=[108.55]))
+        assert [l["target_px"] for l in legs] == [101.0, 102.0, 104.0]
+
+    def test_full_monotonic_explicit_ladder_is_used(self):
+        legs = self._plan(make_trade(shares=100,
+                                     targets=[101.37, 102.5, 105.25]))
+        assert [l["target_px"] for l in legs] == [101.37, 102.5, 105.25]
+
+    def test_inverted_explicit_ladder_falls_back_to_r_math(self):
+        legs = self._plan(make_trade(shares=100,
+                                     targets=[105.0, 102.0, 103.0]))
+        assert [l["target_px"] for l in legs] == [101.0, 102.0, 104.0]
+
+    def test_short_descending_explicit_ladder_is_used(self):
+        legs = self._plan(make_trade(shares=100, entry=100.0, stop=101.0,
+                                     direction="short",
+                                     targets=[98.8, 97.5, 94.0]))
+        assert [l["target_px"] for l in legs] == [98.8, 97.5, 94.0]
+
+    def test_short_ascending_explicit_rejected_r_math_used(self):
+        legs = self._plan(make_trade(shares=100, entry=100.0, stop=101.0,
+                                     direction="short",
+                                     targets=[94.0, 97.5, 98.8]))
+        assert [l["target_px"] for l in legs] == [99.0, 98.0, 96.0]
 
     def test_gate_min_shares(self):
         assert self._plan(make_trade(shares=9)) is None

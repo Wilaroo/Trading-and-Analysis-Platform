@@ -2353,9 +2353,26 @@ class IBDirectService:
         if rung_qtys[-1] < 1 or len(rungs) < 2:
             return None
 
+        # M0a (2026-06-11) — first live session: the scanner's SINGLE far
+        # target (typically ~2.5R) landed as leg 1 while legs 2-3 used
+        # R-math → inverted ladders (C: L1@145.36 "1R" vs L2@143.26 2R).
+        # Explicit targets are now used ONLY when the scanner supplied a
+        # FULL monotonic ladder: at least as many targets as rungs, every
+        # price strictly walking AWAY from entry in the trade direction.
+        # Anything else → pure R-math for ALL legs.
+        use_explicit = False
+        if len(explicit) >= len(rungs):
+            seq = explicit[: len(rungs)]
+            if direction == "long":
+                use_explicit = seq[0] > entry and all(
+                    a < b for a, b in zip(seq, seq[1:]))
+            else:
+                use_explicit = seq[0] < entry and all(
+                    a > b for a, b in zip(seq, seq[1:]))
+
         legs: List[Dict[str, Any]] = []
         for i, (rung, lq) in enumerate(zip(rungs, rung_qtys)):
-            if i < len(explicit):
+            if use_explicit:
                 tpx = explicit[i]
             else:
                 tpx = (entry + float(rung.r_multiple) * risk if direction == "long"

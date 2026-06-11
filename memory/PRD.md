@@ -681,3 +681,10 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   intraday cap 6R), health green incl. ib_gateway via ib-direct. AWAITING: first live
   [M0 LADDER] entry + leg-fill/BE-sync validation; [v322o chart-slow] log lines; TQS
   badge A/B visual confirmation.
+- 2026-06-11 LIVE VALIDATION: M0 fired on 7 entries day 1 (C, SLV, CZR, IGV, CASY, KRE, B)
+  — placement/qty-split/OCA-pairs all correct. BUG M0a found+fixed: scanner's single far
+  target (~2.5R) became leg 1 while legs 2-3 used R-math → INVERTED ladders (C L1@145.36
+  "1R" > L2@143.26 2R). Fix: explicit targets only honored as full monotonic ladder, else
+  pure R-math (patcher U7Qtd, tests 0SILH, 40/40 pass). v322o2 taller layout shipped
+  (row 1600px, browser-verified 1792px scroll). check_m0_status.py shipped (N81iR).
+  TQS true-0-100 display rescale → backlog (pair with Tier 2a isotonic calibration).
