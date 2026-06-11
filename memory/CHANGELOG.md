@@ -1,3 +1,56 @@
+## 2026-06-11 — v322u: broker-rejection default-deny cooldown + style/timeframe coherence
+
+**v322u patcher: https://paste.rs/Pvqhc — PENDING user apply (then git add/commit/push BEFORE restart; restart via ./start_backend.sh --force or next StartTrading.bat boot).**
+
+### Fix 1 — broker-rejection RE-FIRE CHURN (probe: identical signal fired 11x in a row)
+Root cause: v19.34.8 cooldown's `mark_rejection` no-ops unless the broker error text
+matches the ~18-token STRUCTURAL_REJECTION_REASONS allow-list. Unlisted IB wordings
+(tick-size Error 110, margin variants, pacing, "reason not given") got NO cooldown →
+the scan loop re-fired the same (symbol, setup) every tick.
+- `rejection_cooldown_service.py`: NEW `is_transient_rejection`; `mark_rejection`
+  gains `assume_structural=False` kwarg — when True, classification flips to
+  DEFAULT-DENY (only an explicit transient match bypasses the cooldown).
+- `trade_execution.py`: broker-rejected branch passes `assume_structural=True`.
+  Guardrail-veto + evaluator call sites keep legacy allow-list behavior.
+
+### Fix 2 — style/timeframe TAXONOMY DRIFT (probe: rows with style=swing + tf=intraday)
+Root cause: `timeframe` from STRATEGY_CONFIG[setup_type] vs `trade_style` from scanner
+SETUP_TO_STYLE — two parallel per-setup tables that drift. Consequences: scalp-style
+trades stamped tf=intraday escaped the v19.34.171 scalp-decay sweep forever; a swing
+mislabeled tf=scalp would be wrongly flattened at 60 min.
+- `opportunity_evaluator.py`: NEW `STYLE_TO_TIMEFRAME` + `reconcile_timeframe_with_style`
+  — style-derived horizon wins on conflict at trade creation ([v322u TAXONOMY] log);
+  legacy/generic styles (trade_2_hold, move_2_move, a_plus, reconciled) untouched.
+- `position_manager.py`: `check_scalp_decay` selection is style-aware both directions
+  (catches drifted legacy Mongo rows; NEVER decays swing/multi_day/position/investment).
+
+### Tests
+NEW `tests/test_v322u_refire_cooldown_and_taxonomy.py` (12 green — drives the REAL
+check_scalp_decay with stub bot + env-pinned gates). 293/293 across the related
+rejection/taxonomy/scalp/persistence suite. ruff clean. AGENTS.md audit: no
+safety-critical symbols touched (close_trade / submit_with_bracket /
+_cancel_ib_bracket_orders / kill-switch / _open_trades writes all untouched).
+
+## 2026-06-11 — v322t (+t1): field-preserving rehydration + single-row persistence (CASY rewrite class CLOSED)
+
+**DEPLOYED+VERIFIED on DGX — commits 4d11bd76 (v322t) + 221162ef (t1) pushed. Active at next boot.**
+
+- `bot_persistence.py`: NEW shared `hydrate_trade_from_doc` allow-list hydrator used by
+  restore_open_trades / restore_closed_trades / dict_to_trade — EVERY persisted BotTrade
+  dataclass field now round-trips across restarts (created_at, scale_out_config incl.
+  m0_legs/targets_hit, close_at_eod, trade_style, trade_type, realized_pnl, commissions,
+  bracket telemetry). Pre-fix the boot restore rebuilt trades from a ~17-field subset and
+  the next persist REWROTE Mongo with dataclass defaults (mechanism behind the 675
+  created_at="" rows and M0 ladder state loss on every restart).
+- `save_trade`: replace_one({"_id": id}) → update_one({"id": id}, {"$set": ...}, upsert)
+  — kills the Mongo-only-field drop AND the duplicate-row hazard (persist_trade keys on
+  "id" while save_trade keyed "_id" → two rows per trade, one going stale: the CASY
+  rejected-vs-active two-row signature).
+- v87/v27/v199 fallback overrides preserved (run AFTER hydration).
+- NEW `tests/test_v322t_rehydration_preserves_fields.py` (11 green, mongomock-driven
+  through the REAL restore path). t1: portable Path(__file__) fix for 4 static-source
+  tests in test_alert_id_threadthrough_v19_34_36.py that hardcoded /app paths (9/9 on DGX).
+
 ## 2026-06-12 — v322s: missed-EOD boot sweep + created_at="" fix (ACMR root cause CLOSED)
 
 **v322s patcher: https://paste.rs/HPO1C — PENDING user apply (then git add/commit/push BEFORE restart).**

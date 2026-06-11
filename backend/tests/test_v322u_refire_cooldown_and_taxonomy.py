@@ -36,8 +36,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 sys.path.insert(0, "/app/backend")
 sys.path.insert(0, "backend")
 
