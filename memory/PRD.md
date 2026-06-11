@@ -575,3 +575,25 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
 - P1: ~~per-stock multi-TF regime (market_regime_engine.py); regime-first scanning funnel (c3)~~ ✅ v322.
 - P2: dedicated intraday DL model; ~~RS leadership factor (RS 80+)~~ ✅ v322; Wyckoff trigger; L2 probe;
   break up server.py monolith.
+
+---
+## 2026-06-11 — v322k + v322l: orphan cancel↔re-issue loop + false-rejection re-claim
+- **v322k (DEPLOYED on DGX, patch https://paste.rs/5H8Zw, 5/5 pytest on DGX)**: killed the
+  UNP/USB pathological loop (orphan-GTC auto-sweep cancelled ADOPT-OCA brackets the
+  naked-sweep had just issued, repeat ~60s). Root cause was NOT the limit(2000) cap (window
+  was 890 rows) but stale order-id fields in the bot_trades snapshot. Fix: classifier now
+  proves ownership via the trade id embedded in the OCA group name
+  (ADOPT-OCA-{sym}-{trade_id}-{nonce}, ≥8-char token match) + oca_group threaded through
+  tier-1/tier-3 order snapshots + sort("executed_at",-1) before the cap as defence.
+  Files: services/orphan_gtc_reconciler.py, tests/test_v322k_orphan_loop.py.
+- **v322l (CONTAINER-VALIDATED, patch https://paste.rs/fIwcU, 6/6 pytest, AWAITING DGX apply)**:
+  fixes the upstream IB Gateway race — orders tagged `parent_not_filled:cancelled` →
+  broker_rejected while the fill lands at IB. The v19.34.15a poll-back now RE-CLAIMS the
+  rejected trade in-place (direction guard, qty clamp to |delta|, R-preserve via true avg
+  fill from ib_direct fills by entry_order_id, brackets re-attached via
+  attach_oca_stop_target, `trade_reclaimed_v322l` stream event) instead of leaving it to
+  generic orphan adoption that lost setup/SL/PT.
+  Files: services/trade_execution.py, tests/test_v322l_silent_fill_reclaim.py.
+- Regression checked: all other failures in orphan/naked/trade-execution suites confirmed
+  PRE-EXISTING (identical pre/post patch).
+- NEXT: M0 laddered server-side scale-out (multi-leg OCA) — user's stated next priority.

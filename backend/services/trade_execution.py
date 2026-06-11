@@ -24,6 +24,8 @@ async def _poll_ib_for_silent_fill_v19_34_15a(
     rejected_error: str,
     poll_interval_s: float = 1.0,
     total_duration_s: float = 15.0,
+    bot: 'TradingBotService' = None,
+    entry_order_id=None,
 ) -> None:
     """Post-rejection IB position poll-back.
 
@@ -108,6 +110,35 @@ async def _poll_ib_for_silent_fill_v19_34_15a(
                         trade.symbol, trade.id, rejected_error,
                         pre_qty, cur_qty, delta, elapsed,
                     )
+                    # ── v322l (2026-06-11) — RE-CLAIM the rejected trade
+                    # in-place. Pre-fix the poll-back only emitted an event
+                    # and left recovery to the generic drift loop, which
+                    # adopts the position as an anonymous
+                    # `reconciled_excess_slice` — the original setup tag,
+                    # stop and targets were LOST (UNP/USB 2026-06-11: trade
+                    # notes read "I did NOT open this position" while the
+                    # bot's own rejected order had actually filled at the
+                    # open). Now the original BotTrade is flipped back to
+                    # OPEN with its own SL/PT and brackets attach right here.
+                    try:
+                        reclaimed = await _reclaim_silently_filled_trade_v322l(
+                            trade=trade, bot=bot, delta=delta,
+                            entry_order_id=entry_order_id,
+                            rejected_error=rejected_error,
+                        )
+                    except Exception as rc_err:
+                        reclaimed = False
+                        logger.error(
+                            "[v322l] re-claim raised for %s (trade %s): %s — "
+                            "falling back to drift-loop recovery.",
+                            trade.symbol, trade.id, rc_err,
+                        )
+                    if not reclaimed:
+                        logger.warning(
+                            "[v322l] %s silent fill NOT re-claimed (see above) "
+                            "— v19.34.15b drift loop remains the safety net.",
+                            trade.symbol,
+                        )
                     return
             except Exception as inner_err:
                 logger.debug(
@@ -125,6 +156,193 @@ async def _poll_ib_for_silent_fill_v19_34_15a(
             "[v19.34.15a] poll-back task crashed for %s: %s",
             getattr(trade, "symbol", "?"), outer_err,
         )
+
+
+# ── v322l (2026-06-11) ── Silent-fill re-claim.
+async def _reclaim_silently_filled_trade_v322l(
+    *,
+    trade: 'BotTrade',
+    bot: 'TradingBotService',
+    delta: float,
+    entry_order_id=None,
+    rejected_error: str = "",
+) -> bool:
+    """Flip a broker-`rejected` trade back to OPEN when its order silently
+    filled at IB, restoring the ORIGINAL setup / stop / targets and
+    attaching brackets immediately.
+
+    Guards:
+      • direction check — the position delta's sign must match the trade
+        direction (a LONG rejection can only claim a positive delta);
+        manual/other-source fills are never claimed.
+      • qty clamp — claims min(|delta|, trade.shares); a partial silent
+        fill is sized to what actually landed.
+      • R-preserve — if the true avg fill price is recoverable from
+        ib_direct fills (matched on the rejected entry_order_id), stop and
+        targets are translated by the fill-vs-trigger delta, same rule as
+        the v19.34.283 two-step path.
+
+    Returns True when the trade was re-claimed (even if the bracket attach
+    then failed — the trade is tracked OPEN and the naked-sweep covers it).
+    Returns False when no claim was made (caller falls back to the
+    v19.34.15b drift-loop recovery).
+    """
+    from services.trading_bot_service import TradeStatus
+
+    if bot is None:
+        return False
+
+    dir_val = (getattr(trade.direction, "value", None)
+               or str(trade.direction)).lower()
+    if (dir_val == "long" and delta < 1) or (dir_val == "short" and delta > -1):
+        logger.warning(
+            "[v322l] %s fill delta %+.0f direction-mismatched vs %s "
+            "rejection — NOT re-claiming (manual / other-source fill?).",
+            trade.symbol, delta, dir_val,
+        )
+        return False
+
+    planned = int(trade.shares or 0)
+    claim_qty = int(min(abs(delta), planned)) if planned > 0 else int(abs(delta))
+    if claim_qty < 1:
+        return False
+
+    # Best-effort TRUE avg fill price for the rejected order id.
+    avg_fill = 0.0
+    try:
+        if entry_order_id:
+            from services.ib_direct_service import get_ib_direct_service
+            ibd = get_ib_direct_service()
+            if ibd is not None and hasattr(ibd, "_ib") and ibd.is_connected():
+                for f in ibd._ib.fills():
+                    if int(getattr(f.execution, "orderId", 0) or 0) == int(entry_order_id):
+                        avg_fill = float(
+                            getattr(f.execution, "avgPrice", 0) or 0
+                        ) or avg_fill
+    except Exception as fp_err:
+        logger.debug("[v322l] %s avg-fill lookup failed: %s",
+                     trade.symbol, fp_err)
+
+    fill_px = avg_fill or float(trade.entry_price or 0)
+
+    # R-preserve: translate stop + targets by the fill-vs-trigger delta
+    # (pure translation keeps every risk/reward distance intact).
+    try:
+        if avg_fill and trade.entry_price:
+            _d = avg_fill - float(trade.entry_price)
+            if abs(_d) > 1e-9:
+                if getattr(trade, "stop_price", None):
+                    trade.stop_price = round(float(trade.stop_price) + _d, 4)
+                _tps = getattr(trade, "target_prices", None) or []
+                if _tps:
+                    trade.target_prices = [round(float(t) + _d, 4) for t in _tps]
+                logger.warning(
+                    "[v322l R-preserve] %s fill=%.4f trigger=%.4f delta=%.4f "
+                    "-> stop=%s targets=%s",
+                    trade.symbol, avg_fill, float(trade.entry_price), _d,
+                    getattr(trade, "stop_price", None),
+                    getattr(trade, "target_prices", None),
+                )
+    except Exception as _rp_err:
+        logger.warning("[v322l R-preserve] %s skipped: %s",
+                       trade.symbol, _rp_err)
+
+    # Restore the trade to OPEN with its original identity.
+    trade.status = TradeStatus.OPEN
+    trade.fill_price = fill_px
+    trade.executed_at = datetime.now(timezone.utc).isoformat()
+    trade.shares = claim_qty
+    trade.remaining_shares = claim_qty
+    trade.original_shares = claim_qty
+    trade.mfe_price = fill_px
+    trade.mae_price = fill_px
+    trade.close_reason = None
+    if entry_order_id:
+        trade.entry_order_id = entry_order_id
+    trade.stop_order_id = None
+    trade.target_order_id = None
+    try:
+        trade.target_order_ids = []
+    except Exception:
+        pass
+    trade.oca_group = None
+    trade.notes = (trade.notes or "") + (
+        f" [v322l RECLAIMED: broker said '{rejected_error[:60]}' but the "
+        f"order filled at IB — original setup/SL/PT restored, "
+        f"{claim_qty}sh @ {fill_px:.4f}.]"
+    )
+
+    bot._open_trades[trade.id] = trade
+    if trade.id in getattr(bot, "_pending_trades", {}):
+        del bot._pending_trades[trade.id]
+    try:
+        bot._daily_stats.trades_executed += 1
+    except Exception:
+        pass
+    await bot._save_trade(trade)
+
+    # Attach the ORIGINAL brackets (same helper every adoption path uses —
+    # handles ib_direct AND pusher-queue, with live-position qty clamp).
+    attach_err = None
+    executor = getattr(bot, "_trade_executor", None)
+    if executor is not None and hasattr(executor, "attach_oca_stop_target"):
+        try:
+            oca = await executor.attach_oca_stop_target(trade)
+            if oca and oca.get("success"):
+                trade.stop_order_id = oca.get("stop_order_id")
+                if oca.get("target_order_id"):
+                    trade.target_order_id = oca.get("target_order_id")
+                trade.oca_group = oca.get("oca_group")
+            else:
+                attach_err = (oca or {}).get("error", "unknown")
+        except Exception as e:
+            attach_err = f"{type(e).__name__}: {e}"
+    else:
+        attach_err = "no_trade_executor"
+    if attach_err:
+        logger.critical(
+            "[v322l] %s RECLAIMED %dsh but bracket attach FAILED: %s — "
+            "naked until the next naked-sweep tick.",
+            trade.symbol, claim_qty, attach_err,
+        )
+    await bot._save_trade(trade)
+
+    try:
+        from services.sentcom_service import emit_stream_event
+        await emit_stream_event({
+            "kind": "success" if not attach_err else "warning",
+            "event": "trade_reclaimed_v322l",
+            "symbol": trade.symbol,
+            "text": (
+                f"✅ {trade.symbol} re-claimed after false rejection "
+                f"({rejected_error[:50]}): {claim_qty}sh @ {fill_px:.2f}, "
+                f"setup={getattr(trade, 'setup_type', '?')}, "
+                f"stop={trade.stop_order_id or 'ATTACH-FAILED'}, "
+                f"target={trade.target_order_id or '-'}"
+            ),
+            "metadata": {
+                "trade_id": trade.id,
+                "rejected_error": rejected_error,
+                "claimed_qty": claim_qty,
+                "fill_price": fill_px,
+                "avg_fill_recovered": bool(avg_fill),
+                "stop_order_id": trade.stop_order_id,
+                "target_order_id": trade.target_order_id,
+                "oca_group": trade.oca_group,
+                "attach_error": attach_err,
+            },
+        })
+    except Exception:
+        pass
+
+    logger.warning(
+        "[v322l] %s RECLAIMED trade %s: %dsh @ %.4f, stop=%s target=%s "
+        "oca=%s (attach_err=%s)",
+        trade.symbol, trade.id, claim_qty, fill_px,
+        trade.stop_order_id, trade.target_order_id, trade.oca_group,
+        attach_err,
+    )
+    return True
 
 
 class TradeExecution:
@@ -1097,6 +1315,15 @@ class TradeExecution:
                                 ),
                                 poll_interval_s=1.0,
                                 total_duration_s=15.0,
+                                # v322l — re-claim context: the bot (to
+                                # restore the trade to OPEN) and the rejected
+                                # entry order id (to recover the true avg
+                                # fill from ib_direct fills).
+                                bot=bot,
+                                entry_order_id=(
+                                    result.get("entry_order_id")
+                                    or result.get("order_id")
+                                ),
                             )
                         )
                     except Exception as _poll_err:
