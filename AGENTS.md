@@ -1143,3 +1143,6 @@ backend features after the AGENTS.md docs run: bracket-stacking
 auto-cancel endpoint + quote-resub watchdog. 14/14 tests passing,
 21/21 adjacent regression tests passing). Update this file whenever
 you learn a new convention or trap.*
+
+## ⚠️ PATCHER RULE (added 2026-06-11)
+Every patcher application MUST end with `git add` + `git commit` + `git push origin main` BEFORE the next StartTrading.bat run. Its step-2 `git checkout -- .` silently reverts any uncommitted patch (this wiped M0a/M0b on 2026-06-11).
