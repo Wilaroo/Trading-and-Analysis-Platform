@@ -617,3 +617,30 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   works (404 symbols). The 14-symbol .bat IB_SYMBOLS list is fallback-only, harmless.
 - NEXT: user applies v322m+v322n, then M0 laddered scale-out. Future: per-class EV review
   after ~2 weeks of tagged trades; ELF→XLE sector mis-tag; CZR tier misclassification probe.
+
+---
+## 2026-06-11 — v322o Quick-Wins Batch (CONTAINER-VALIDATED, patch https://paste.rs/VMM4l, AWAITING DGX apply)
+- **#10 TQS stuck at C/C+ — ROOT CAUSE FOUND (display bug)**: backend calibration healthy
+  (user diag: reference_n=16,069, scores 45–71). `TqsBadge.jsx` re-derived the grade from
+  the raw score with the STATIC ladder (>=85=A…) "as single source of truth" (v19.34.257),
+  undoing the v19.34.228 percentile calibration on the frontend. Fix: badge now prefers the
+  backend-stamped calibrated `tqs_grade` (all call sites already pass it as gradeFallback);
+  static ladder kept only for legacy rows with score-but-no-grade.
+- **#5 2% toast spam**: usePriceAlerts.js dedup key was per-minute → re-toasted every 60s.
+  Now ONE alert per symbol per 15 min (ALERT_COOLDOWN_MS).
+- **#8 Command-center cutoff**: V5 root overflow-hidden → overflow-y-auto + main row hard
+  floor min-h-[900px] + center column min-heights (chart 340 / stream 200 / drawer 240).
+  Page scrolls on short viewports instead of crushing SentCom Intelligence / Deep Feed.
+  v19.34.1 chart-ResizeObserver regression cannot recur (row height never content-driven).
+- **#11 slow charts step 1**: /api/sentcom/chart now returns `timings` meta
+  (cache_ms/mongo_ms/rpc_ms/indicators_ms/markers_ms/total_ms) on hit/miss/failure +
+  WARNING log `[v322o chart-slow]` for loads > CHART_SLOW_LOG_MS (1500ms default).
+  Verified all 4 paths via curl with seeded bars. NEXT: user loads slow charts → timings
+  convict the phase → fix (likely short-circuit RPC merge for unsubscribed symbols).
+- **#3 Scalp Exit Autopsy**: new read-only backend/scripts/scalp_exit_autopsy.py
+  (https://paste.rs/Nv5cM): exit-bucket table (TP/SL/DECAY/EOD/EXTERNAL/MANUAL), TP
+  realized-R distribution (M0 ladder input), decay post-exit replay vs 5-min bars — %
+  stop-saved vs % left-on-table ≥0.5R/1R (v322p input). Validated against synthetic trades.
+- NEXT: user applies v322o (backend restart needed) + pastes autopsy output + chart timings
+  → then M0 laddered scale-out (3-leg OCA 40%@+1R/30%@+2R/30% runner, env-tunable, with
+  orphan-safety: legs must share OCA group + ownership token per v322k conventions).

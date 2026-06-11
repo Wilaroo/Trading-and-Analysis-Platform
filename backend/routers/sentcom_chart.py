@@ -29,6 +29,8 @@ Endpoint:
 from __future__ import annotations
 
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -612,19 +614,33 @@ async def get_chart_bars(
         get_chart_response_cache, make_cache_key, chart_cache_ttl_for,
     )
 
+    # v322o — phase-timing instrumentation. Every /chart response carries a
+    # `timings` block (cache_ms / mongo_ms / rpc_ms / indicators_ms /
+    # markers_ms / total_ms) so a slow load can be ATTRIBUTED to a specific
+    # phase instead of guessed at. Loads slower than CHART_SLOW_LOG_MS
+    # (default 1500ms) also emit a WARNING log line with the breakdown.
+    _t_start = time.perf_counter()
+
     cache = get_chart_response_cache(db=_db)
     cache_key = make_cache_key(symbol.upper(), tf, session, days)
     cached_response = await cache.get(cache_key)
+    _cache_ms = round((time.perf_counter() - _t_start) * 1000.0, 1)
     if cached_response is not None:
         # Stamp `cache: 'hit'` so the frontend can surface freshness
         # in dev tooling without the operator needing a separate curl.
-        return {**cached_response, "cache": "hit"}
+        return {
+            **cached_response,
+            "cache": "hit",
+            "timings": {"cache_ms": _cache_ms, "total_ms": _cache_ms},
+        }
 
+    _t_phase = time.perf_counter()
     result = await _hybrid_data_service.get_bars(
         symbol=symbol.upper(),
         timeframe=tf,
         days_back=days,
     )
+    _mongo_ms = round((time.perf_counter() - _t_phase) * 1000.0, 1)
 
     if not result.success:
         return {
@@ -635,6 +651,12 @@ async def get_chart_bars(
             "bars": [],
             "indicators": {},
             "error": result.error,
+            # v322o — failed loads still report where the time went.
+            "timings": {
+                "cache_ms": _cache_ms,
+                "mongo_ms": _mongo_ms,
+                "total_ms": round((time.perf_counter() - _t_start) * 1000.0, 1),
+            },
         }
 
     # ---- Phase 1: merge latest-session bars via pusher RPC --------------
@@ -647,6 +669,7 @@ async def get_chart_bars(
     live_appended = 0
     live_source = None
     live_market_state = None
+    _t_phase = time.perf_counter()
     try:
         tf_cfg = _hybrid_data_service.TIMEFRAMES.get(tf)
         live_bar_size = tf_cfg.get("ib_bar_size") if tf_cfg else None
@@ -692,8 +715,10 @@ async def get_chart_bars(
                 live_market_state = live_res.get("market_state")
     except Exception as _live_exc:
         logger.info("live-bars merge skipped: %s", _live_exc)
+    _rpc_ms = round((time.perf_counter() - _t_phase) * 1000.0, 1)
 
     # Normalise + sort
+    _t_phase = time.perf_counter()
     normalised: List[Dict[str, Any]] = []
     for b in result.bars:
         ts = _to_utc_seconds(b.get("timestamp") or b.get("date") or b.get("time"))
@@ -835,9 +860,34 @@ async def get_chart_bars(
     ]
     per_session = tf in {"1min", "5min", "15min", "1hour"}
     vwap = _vwap(normalised, per_session=per_session)
+    _indicators_ms = round((time.perf_counter() - _t_phase) * 1000.0, 1)
 
     # Overlay markers (executed trades). Silent no-op if db isn't wired.
+    _t_phase = time.perf_counter()
     markers = _fetch_trade_markers(symbol, times[0], times[-1])
+    _markers_ms = round((time.perf_counter() - _t_phase) * 1000.0, 1)
+
+    _total_ms = round((time.perf_counter() - _t_start) * 1000.0, 1)
+    _timings = {
+        "cache_ms": _cache_ms,
+        "mongo_ms": _mongo_ms,
+        "rpc_ms": _rpc_ms,
+        "indicators_ms": _indicators_ms,
+        "markers_ms": _markers_ms,
+        "total_ms": _total_ms,
+    }
+    try:
+        _slow_ms = float(os.environ.get("CHART_SLOW_LOG_MS", "1500") or 1500.0)
+    except (TypeError, ValueError):
+        _slow_ms = 1500.0
+    if _total_ms >= _slow_ms:
+        logger.warning(
+            "[v322o chart-slow] %s %s days=%d session=%s — total=%.0fms "
+            "(mongo=%.0fms rpc=%.0fms indicators=%.0fms markers=%.0fms "
+            "live_appended=%d)",
+            symbol.upper(), tf, days, session, _total_ms,
+            _mongo_ms, _rpc_ms, _indicators_ms, _markers_ms, live_appended,
+        )
 
     response = {
         "success": True,
@@ -865,6 +915,8 @@ async def get_chart_bars(
             "bb_lower": _as_series(times, bb_lower),
         },
         "markers": markers,
+        # v322o — per-phase latency attribution for slow-chart diagnosis.
+        "timings": _timings,
     }
 
     # ── v19.25 Tier 1: persist to cache for subsequent requests.

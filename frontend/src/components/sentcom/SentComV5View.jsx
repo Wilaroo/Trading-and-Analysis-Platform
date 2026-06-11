@@ -388,7 +388,14 @@ export const SentComV5View = ({
       // hidden` + `h-full` via the existing `top-0…bottom-0` fixed
       // bounds). Inner panels already have their own `overflow-y-auto`
       // so they scroll internally instead of pushing siblings around.
-      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden v5-root"
+      // v322o — re-allow VERTICAL page scroll, but ONLY when the viewport
+      // is shorter than the main row's hard floor (min-h-[900px] below).
+      // The v19.34.1 regression (stream growth dragging the chart taller)
+      // can't recur: the row's height is max(viewport remainder, fixed
+      // floor) — inner content growth still scrolls internally and never
+      // feeds back into the row height. This un-clips SentCom Intelligence
+      // / Stream Deep Feed / Unified Stream on shorter viewports.
+      className="fixed top-0 right-0 bottom-0 left-[52px] z-30 bg-zinc-950 text-zinc-100 flex flex-col overflow-y-auto v5-root"
     >
       {/* Safety kill-switch banner — z-60, above everything when tripped */}
       <SafetyBannerV5 safety={safety} />
@@ -604,7 +611,11 @@ export const SentComV5View = ({
         // remaining viewport height after the strips above and never
         // exceeds it. Inner panels (Scanner, Stream, Open Positions)
         // each scroll internally via their own `overflow-y-auto`.
-        className="flex flex-1 min-h-0 gap-px bg-zinc-900"
+        // v322o — `min-h-0` → `min-h-[900px]`: a HARD floor so the center
+        // column's chart/stream/drawer flex split never compresses below
+        // usability. On viewports shorter than the floor the root (now
+        // overflow-y-auto) scrolls the page instead of crushing panels.
+        className="flex flex-1 min-h-[900px] gap-px bg-zinc-900"
       >
         {/* LEFT — Scanner · Live (full height) */}
         <section
@@ -726,7 +737,7 @@ export const SentComV5View = ({
               get clipped. */}
           <div
             className="min-h-0 overflow-hidden flex flex-col"
-            style={{ flex: '60 1 0%' }}
+            style={{ flex: '60 1 0%', minHeight: 340 }}
           >
             <PanelErrorBoundary label="chart">
               <ChartPanel
@@ -743,7 +754,7 @@ export const SentComV5View = ({
           <div
             data-testid="sentcom-v5-stream-center"
             className="border-t border-zinc-800 flex flex-col min-h-0 overflow-hidden"
-            style={{ flex: '30 1 0%' }}
+            style={{ flex: '30 1 0%', minHeight: 200 }}
           >
             <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
               <div className="v5-panel-title">Unified Stream</div>
@@ -776,7 +787,7 @@ export const SentComV5View = ({
               show all rows without an inner scroll. */}
           <div
             className="border-t border-zinc-800 flex-shrink-0 bg-zinc-950 flex flex-col min-h-0"
-            style={{ flex: '20 1 0%' }}
+            style={{ flex: '20 1 0%', minHeight: 240 }}
             data-testid="sentcom-v5-bottom-drawer"
           >
             <div
