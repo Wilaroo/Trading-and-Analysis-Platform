@@ -24,8 +24,12 @@ Mirrors:
 """
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -37,6 +41,36 @@ class TpLadderRung:
     """
     pct_of_position: float
     r_multiple: float
+
+
+def _ladder_from_env(env_key: str, default: List[TpLadderRung]) -> List[TpLadderRung]:
+    """M0 — env-tunable ladder. Format: "0.4@1.0,0.3@2.0,0.3@4.0"
+    (pct@r_multiple, comma-separated). Validation: 2-5 rungs, pcts sum to
+    ~1.0, r_multiples strictly ascending, all positive. Any violation →
+    keep the code default and log a warning (never break order placement
+    over a typo'd env var). Parsed once at import; restart to apply.
+    """
+    raw = (os.environ.get(env_key) or "").strip()
+    if not raw:
+        return default
+    try:
+        rungs: List[TpLadderRung] = []
+        for part in raw.split(","):
+            pct_s, _, r_s = part.strip().partition("@")
+            rungs.append(TpLadderRung(float(pct_s), float(r_s)))
+        if not (2 <= len(rungs) <= 5):
+            raise ValueError(f"need 2-5 rungs, got {len(rungs)}")
+        if abs(sum(r.pct_of_position for r in rungs) - 1.0) > 0.01:
+            raise ValueError("pcts must sum to 1.0")
+        if any(r.pct_of_position <= 0 or r.r_multiple <= 0 for r in rungs):
+            raise ValueError("pct and r_multiple must be > 0")
+        if any(rungs[i].r_multiple >= rungs[i + 1].r_multiple for i in range(len(rungs) - 1)):
+            raise ValueError("r_multiples must be strictly ascending")
+        return rungs
+    except Exception as e:
+        logger.warning("[M0] %s invalid (%s: %s) — using code default ladder",
+                       env_key, type(e).__name__, e)
+        return default
 
 
 @dataclass(frozen=True)
@@ -87,31 +121,43 @@ ORDER_POLICIES: Dict[str, OrderPolicy] = {
         style="scalp",
         time_in_force="DAY",
         outside_rth=False,
-        tp_ladder=[TpLadderRung(1.0, 1.0)],                # single 1R target
+        # M0 (2026-06) — 3-leg server-side scale-out at IB. 40% banks the
+        # +1R single, 30% at +2R, 30% "runner" capped at +4R (the far LMT
+        # keeps IB's OCA qty contract intact; the trailing stop — synced
+        # to IB by m0_ladder_manager — does the real runner exit work).
+        # Override without code changes: M0_TP_LADDER_SCALP="0.4@1.0,0.3@2.0,0.3@4.0"
+        tp_ladder=_ladder_from_env("M0_TP_LADDER_SCALP", [
+            TpLadderRung(0.40, 1.0),
+            TpLadderRung(0.30, 2.0),
+            TpLadderRung(0.30, 4.0),                       # runner cap
+        ]),
         stop_trail_anchor="atr",
         stop_atr_multiple=0.5,
         stop_breakeven_at_r=0.5,                           # to BE at +0.5R
         close_at_eod=True,
         eod_sweep_eligible=True,
         horizon_label="Minutes – 1 hour",
-        notes="Quick in-out. Tight ATR stop, target 1R. Hard close at EOD.",
+        notes="M0 ladder: 40%@1R, 30%@2R, 30% runner (cap 4R, trail). Hard close at EOD.",
     ),
 
     "intraday": OrderPolicy(
         style="intraday",
         time_in_force="DAY",
         outside_rth=False,
-        tp_ladder=[                                        # 2-rung ladder
-            TpLadderRung(0.5, 2.0),                        # 50% off at +2R
-            TpLadderRung(0.5, 5.0),                        # 50% runs to +5R
-        ],
+        # M0 (2026-06) — same 40/30/30 shape as scalp, wider runner cap.
+        # Override: M0_TP_LADDER_INTRADAY="0.4@1.0,0.3@2.0,0.3@6.0"
+        tp_ladder=_ladder_from_env("M0_TP_LADDER_INTRADAY", [
+            TpLadderRung(0.40, 1.0),
+            TpLadderRung(0.30, 2.0),
+            TpLadderRung(0.30, 6.0),                       # runner cap
+        ]),
         stop_trail_anchor="atr",
         stop_atr_multiple=1.5,
         stop_breakeven_at_r=1.0,
         close_at_eod=True,
         eod_sweep_eligible=True,
         horizon_label="1 – 6 hours",
-        notes="Bellafiore intraday swing. Scale out at +2R, runner to +5R. Hard close at EOD.",
+        notes="M0 ladder: 40%@1R, 30%@2R, 30% runner (cap 6R, trail). Hard close at EOD.",
     ),
 
     "multi_day": OrderPolicy(

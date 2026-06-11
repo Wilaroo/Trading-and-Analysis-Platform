@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createAlertSound } from '../utils/alertSounds';
 
+// v322o — minimum gap between two alerts for the SAME symbol. The old
+// dedup key was per-minute, so a symbol sitting past the threshold
+// re-toasted every 60s all session (the "2% move spam" complaint).
+const ALERT_COOLDOWN_MS = 15 * 60 * 1000;
+
 // ===================== PRICE ALERTS HOOK =====================
 export const usePriceAlerts = (streamingQuotes, watchlist = []) => {
   const [alerts, setAlerts] = useState([]);
@@ -12,7 +17,8 @@ export const usePriceAlerts = (streamingQuotes, watchlist = []) => {
   });
   const previousPricesRef = useRef({});
   const alertSoundRef = useRef(null);
-  const processedAlertsRef = useRef(new Set());
+  // v322o — per-symbol last-alert timestamps for the 15-min cooldown.
+  const lastAlertAtRef = useRef({});
   
   // Save threshold to localStorage when it changes
   useEffect(() => {
@@ -68,16 +74,11 @@ export const usePriceAlerts = (streamingQuotes, watchlist = []) => {
         }
       }
       
-      // Create alert if triggered and not already processed recently
-      const alertKey = `${symbol}-${Math.floor(now / 60000)}`; // Unique per minute
-      if (alertTriggered && !processedAlertsRef.current.has(alertKey)) {
-        processedAlertsRef.current.add(alertKey);
-        
-        // Clean old processed alerts (keep last 100)
-        if (processedAlertsRef.current.size > 100) {
-          const entries = Array.from(processedAlertsRef.current);
-          processedAlertsRef.current = new Set(entries.slice(-50));
-        }
+      // v322o — throttle: at most ONE alert per symbol per 15 minutes,
+      // no matter how long the move persists past the threshold.
+      const lastAt = lastAlertAtRef.current[symbol] || 0;
+      if (alertTriggered && (now - lastAt) >= ALERT_COOLDOWN_MS) {
+        lastAlertAtRef.current[symbol] = now;
         
         const alert = {
           id: `${symbol}-${now}`,

@@ -8,9 +8,13 @@
  * Click opens the shared <TqsDrillDownDrawer/> (via tqsDrawerBus) where the
  * full 5-pillar breakdown + folded context lives.
  *
- * Grade + color are derived FROM the numeric score (single source of truth)
- * using the same ladder the pillars use — never from the legacy 3-tier
- * `tqs_grade`, which can disagree with the score (v19.34.257).
+ * v322o — the badge now PREFERS the backend-stamped `tqs_grade`. Since
+ * v19.34.228 that grade is CALIBRATED by percentile rank against a rolling
+ * 5-day reference (grade_calibration.py): composites compress into ~45-71,
+ * so re-deriving the grade here with the static ladder (>=85=A …) undid the
+ * calibration and pinned every card at C/C+ even when the backend graded
+ * A/B. The static score-ladder remains only as a fallback for legacy rows
+ * that carry a score but no grade.
  */
 import React from 'react';
 import { openTqsDrawer } from './tqsDrawerBus';
@@ -84,7 +88,9 @@ const TqsBadge = ({
   testIdSuffix = '',
 }) => {
   const hasScore = score != null && Number.isFinite(Number(score)) && Number(score) > 0;
-  const grade = hasScore ? gradeFromScore(score) : String(gradeFallback || '').toUpperCase();
+  // v322o — backend calibrated grade wins; static score-ladder is fallback-only.
+  const backendGrade = String(gradeFallback || '').toUpperCase();
+  const grade = backendGrade || (hasScore ? gradeFromScore(score) : '');
   const tone = gradeTone(grade);
   const testId = `tqs-badge-card${testIdSuffix ? `-${testIdSuffix}` : ''}`;
 

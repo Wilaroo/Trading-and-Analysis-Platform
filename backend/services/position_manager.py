@@ -809,6 +809,17 @@ class PositionManager:
                 if trade.trailing_stop_config.get('enabled', True):
                     await bot._update_trailing_stop(trade)
 
+                # M0 (2026-06) — laddered scale-out live management. Detects
+                # IB-side leg fills (stamps targets_hit so StopManager's
+                # BE/trail activates) and pushes the ratcheted internal
+                # current_stop to the surviving IB leg stops in place.
+                # No-op for trades without m0_legs.
+                try:
+                    from services.m0_ladder_manager import manage_m0_trade
+                    await manage_m0_trade(trade, bot)
+                except Exception as _m0_err:
+                    logger.debug(f"[M0] manage tick skipped for {trade.symbol}: {_m0_err}")
+
                 # 2026-04-30 v19.13 — bid/ask-aware stop trigger.
                 # Long position exits at the BID; short exits at the ASK.
                 # Triggering on `last` can fire prematurely (last printed
@@ -2678,6 +2689,14 @@ class PositionManager:
         from services.trading_bot_service import TradeDirection, TradeStatus
 
         if not trade.target_prices or trade.remaining_shares <= 0:
+            return
+
+        # M0 (2026-06) — trades with an IB-resident leg ladder must NEVER
+        # fire bot-side scale-out sells: the exits already live AT IB as
+        # per-leg OCA pairs, and a duplicate LMT here recreates the
+        # v19.34.7 STX double-sell/flip bug class. m0_ladder_manager owns
+        # the lifecycle for these trades.
+        if (getattr(trade, "scale_out_config", None) or {}).get("m0_legs"):
             return
 
         targets_hit = trade.scale_out_config.get('targets_hit', [])
