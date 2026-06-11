@@ -125,6 +125,8 @@ def test_all_load_paths_filter_quarantined():
     svc = (ROOT / "services" / "ai_modules" / "timeseries_service.py").read_text()
     assert svc.count("quarantined") >= 3, (
         "timeseries_service load paths missing quarantine filtering")
+    assert "skipping legacy setup model" in svc, (
+        "legacy setup_type_models loader bypasses the quarantine flag")
     ens = (ROOT / "services" / "ai_modules" / "ensemble_live_inference.py").read_text()
     assert 'ensemble_quarantined' in ens
     gate = (ROOT / "services" / "ai_modules" / "confidence_gate.py").read_text()
