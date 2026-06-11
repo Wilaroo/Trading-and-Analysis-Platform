@@ -58,6 +58,20 @@ def test_boot_diagnostic_separates_quarantined():
     assert "all gaps are intentional quarantines" in src
 
 
+def test_gate_summary_exposes_t6_runtime_state():
+    """v322j r2 — /confidence-gate/summary must report the LIVE process's
+    suppression mode + table load state (runtime probe for T6)."""
+    gate_src = (ROOT / "services" / "ai_modules" / "confidence_gate.py").read_text()
+    assert '"regime_suppression": {' in gate_src
+    assert '"table_loaded": bool(self._regime_expectancy)' in gate_src
+
+    from services.ai_modules.confidence_gate import ConfidenceGate
+    g = ConfidenceGate()          # no db — defaults
+    s = g.get_summary()
+    rs = s.get("regime_suppression")
+    assert rs == {"mode": "shadow", "table_loaded": False, "cell_count": 0}, rs
+
+
 def test_decide_suppression_thresholds():
     from services.ai_modules.regime_expectancy_calibrator import decide_suppression
     cells = {

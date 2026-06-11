@@ -2170,6 +2170,13 @@ class ConfidenceGate:
         return {
             "trading_mode": self._trading_mode,
             "mode_reason": self._mode_reason,
+            # v322j r2 — T6 runtime observability: proves what the LIVE gate
+            # process actually has loaded (the Mongo config alone can't).
+            "regime_suppression": {
+                "mode": self._regime_suppression_mode,
+                "table_loaded": bool(self._regime_expectancy),
+                "cell_count": (self._regime_expectancy or {}).get("cell_count", 0),
+            },
             "today": {
                 "evaluated": today_eval,
                 "taken": today_go,
