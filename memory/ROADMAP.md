@@ -11,6 +11,23 @@ Open priorities, deferred ideas, and backlog. Move items to
 | v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped (7352bf4d); first run queued 3,240 daily bars 06-10 16:35 ET |
 | v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped (e9c810f9), LIVE-VERIFIED: rated 774→1,463 |
 | v19.34.322h | Tier 3b: PBO calibration audit script + `TB_PBO_GATE=enforce` flipped | DONE (82065684; enforce live in backend/.env) |
+| v19.34.322i | PBO quarantine sweep: flag-based, ALL load paths, auto-lift on healthy promotion | DONE + VERIFIED (922a8ced + r2 d6687642); 12 toxic models quarantined |
+
+### v322i — Quarantine sweep (2026-06-11)
+12 negative-edge gate failers flagged via `scripts/quarantine_pbo_sweep.py --apply`:
+exit_timing {breakout,momentum,reversal,trend}, dp_5min_{high_vol,bear_trend},
+{range,mean_reversion,reversal,trend_continuation}_5min_predictor, dp_1min_bear_trend,
+scalp_1min_predictor. Flag honored at: GBM `_load_model` (exact + fallbacks),
+timeseries_service reloaders ×2, LEGACY `setup_type_models` loader (r2 — gap found
+post-apply: legacy collection copies bypassed the flag), ensemble meta-labeler,
+confidence-gate scoring query. predict() degrades to neutral flat/0-confidence.
+Promotion `$unset`s the flag (auto-rehab). Reverse: `--undo --apply`. Spared (positive
+edge, fail PBO only): short_scalp_1min, dp_1min_range_bound/high_vol, gap_fill_1min —
+use `--strict` to flag those too.
+VERIFIED on DGX: consistency diagnostic shows 29/34 reachable, MISSING = exactly the
+5 quarantined setup-family models; none of the 12 loaded at startup.
+COSMETIC (backlog): consistency diagnostic lists quarantined models as "MISSING" —
+could label them "QUARANTINED (intentional)" instead.
 
 ### FULL RETRAIN COMPLETE (2026-06-10 20:08 → 06-11 ~05:45 UTC, 997m, GPU)
 162 models, 0 failures. **P7 Regime-Conditional 28/28 @ 56.7% — sample-count fix verified.**
@@ -27,12 +44,10 @@ GPU note: XGBoost CUDA IS working on the GB10 (subprocess preflight confirmed
 backlog item applies to TORCH only (torch is +cpu build) — XGBoost wheel has CUDA built in.
 
 ### Next session priorities (in order)
-- 🟡 **P1**: Verify Windows collector windows are draining the 3,240-item daily-bar queue
-  (they were idle overnight); confirm tonight's 16:35/17:10/17:30 chain end-to-end.
 - 🟡 **P1**: T6 flip to active (per-setup×regime expectancy suppressor out of shadow).
 - 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA); Tier 3a drift-monitor UI tile;
   Tier 2a per-model probability calibration.
-- 🟢 **P2**: Quarantine sweep — demote already-active models failing the PBO gate.
+- 🟢 **P2**: Cosmetic — consistency diagnostic should label quarantined models separately.
 - 🟢 **P2**: `_industry_to_etf` oddball audit (ELF mis-tagged XLE); sector-coverage UI chip.
 - 🔴 SECURITY (user action): rotate Atlas MongoDB password (still pending).
 
