@@ -159,22 +159,29 @@ async def test_cancel_orphan_mixed_safe_and_unsafe(fresh_modules):
 @pytest.mark.asyncio
 async def test_safe_to_auto_cancel_constant_unchanged():
     """Defensive: the SAFE_TO_AUTO_CANCEL set must remain
-    {NAKED_NO_POSITION, ORPHAN_NO_TRADE}. Expanding it without
-    explicit operator review would risk cancelling stops that
-    are legitimately protecting positions (MISMATCHED_SIZE)."""
+    {NAKED_NO_POSITION, ORPHAN_NO_TRADE, EOD_INTRADAY_ENTRY} (the
+    third member added in v19.34.151 for the EOD intraday-entry
+    sweep). Expanding it further without explicit operator review
+    would risk cancelling stops that are legitimately protecting
+    positions (MISMATCHED_SIZE) — and awaiting_data (M0c) must NEVER
+    be auto-cancellable."""
     from services.orphan_gtc_reconciler import (
         SAFE_TO_AUTO_CANCEL,
         VERDICT_NAKED_NO_POSITION,
         VERDICT_ORPHAN_NO_TRADE,
+        VERDICT_EOD_INTRADAY_ENTRY,
+        VERDICT_AWAITING_DATA,
         VERDICT_MISMATCHED_SIZE,
         VERDICT_TRACKED,
     )
     assert SAFE_TO_AUTO_CANCEL == frozenset({
         VERDICT_NAKED_NO_POSITION,
         VERDICT_ORPHAN_NO_TRADE,
+        VERDICT_EOD_INTRADAY_ENTRY,
     })
     assert VERDICT_MISMATCHED_SIZE not in SAFE_TO_AUTO_CANCEL
     assert VERDICT_TRACKED not in SAFE_TO_AUTO_CANCEL
+    assert VERDICT_AWAITING_DATA not in SAFE_TO_AUTO_CANCEL
 
 
 @pytest.mark.asyncio

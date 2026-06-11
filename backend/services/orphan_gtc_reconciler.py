@@ -275,10 +275,33 @@ def classify_open_orders(
         ) if matched_trade else None
 
         # 3) Classify.
+        # M0c (2026-06-12) — active-trade contradiction guard. If the
+        # order maps to a bot trade that claims LIVE shares but the
+        # position snapshot reads flat, a stale/racing snapshot is far
+        # more likely than a genuinely naked order with an active
+        # tracking row (the CASY ladder-kill incident). NEVER auto-cancel
+        # on this contradiction — classify awaiting_data (not in
+        # SAFE_TO_AUTO_CANCEL) and let the next 30s cycle, or the
+        # position reconciler closing the row, resolve it.
+        matched_status = ((matched_trade or {}).get("status") or "").lower()
+        matched_active = (
+            matched_trade is not None
+            and matched_status in ("open", "partial", "pending")
+            and float(matched_trade.get("remaining_shares") or 0) > 0
+        )
         # Naked = no position behind the protective order at all. This is
         # the most dangerous case — the order would create a NEW short
         # (or long for buy-side) when triggered.
-        if ib_pos_abs < 1.0:
+        if ib_pos_abs < 1.0 and matched_active:
+            verdict_obj.verdict = VERDICT_AWAITING_DATA
+            verdict_obj.reasons.append(
+                f"bot trade {verdict_obj.bot_trade_id} is "
+                f"{matched_status} with "
+                f"{matched_trade.get('remaining_shares')} share(s) but IB "
+                f"position snapshot reads {ib_pos:+.0f} — contradictory; "
+                f"skipping destructive action this cycle"
+            )
+        elif ib_pos_abs < 1.0:
             verdict_obj.verdict = VERDICT_NAKED_NO_POSITION
             verdict_obj.reasons.append(
                 f"IB position for {sym} is {ib_pos:+.0f} — "
@@ -495,6 +518,42 @@ async def audit_orphan_gtc_orders(
     bot_trades, src_bt = _fetch_bot_trades(bot)
     data_sources["bot_trades"] = src_bt
 
+    # ── M0c (2026-06-12) — empty-snapshot circuit breaker ──────────────
+    # Root cause of the CASY ladder-kill incident: `_pushed_ib_data` is
+    # in-memory and wiped on every backend restart. The boot audit fired
+    # ~10s after a restart, read positions=[] from the unprimed snapshot,
+    # classified every working M0 ladder leg as naked_no_position and
+    # auto-flushed them — leaving the live position naked. Rule: an
+    # EMPTY positions read is only trustworthy when the pusher feed is
+    # verifiably fresh AND the bot is tracking zero active trades.
+    # Otherwise abort the audit (fail-closed); the periodic loop retries
+    # in 30s once the feed primes.
+    if not ib_positions:
+        pusher_fresh = bool((src_positions or {}).get("pusher_connected"))
+        active_rows = [
+            t for t in (bot_trades or [])
+            if (t.get("status") or "").lower() in ("open", "partial", "pending")
+            and float(t.get("remaining_shares") or 0) > 0
+        ]
+        mem_open = len(getattr(bot, "_open_trades", {}) or {}) if bot is not None else 0
+        if active_rows or mem_open or not pusher_fresh:
+            logger.warning(
+                "[M0c EMPTY-SNAPSHOT GUARD] positions snapshot is EMPTY "
+                "(tier=%s pusher_fresh=%s) while bot tracks %d active "
+                "row(s) / %d in-memory trade(s) — ABORTING audit instead "
+                "of classifying everything naked. Will retry next cycle.",
+                (src_positions or {}).get("tier"), pusher_fresh,
+                len(active_rows), mem_open,
+            )
+            return {
+                "success": False,
+                "reason": "empty_positions_snapshot_guard",
+                "data_sources": data_sources,
+                "verdicts": [],
+                "summary": _empty_summary(),
+                "checked_at": started_at,
+            }
+
     verdicts = classify_open_orders(
         ib_open_orders=ib_orders,
         ib_positions=ib_positions,
@@ -523,6 +582,7 @@ def _empty_summary() -> Dict[str, int]:
         VERDICT_ORPHAN_NO_TRADE: 0,
         VERDICT_MISMATCHED_SIZE: 0,
         VERDICT_EOD_INTRADAY_ENTRY: 0,
+        VERDICT_AWAITING_DATA: 0,
     }
 
 

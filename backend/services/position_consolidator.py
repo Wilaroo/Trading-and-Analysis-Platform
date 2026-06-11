@@ -353,6 +353,32 @@ class PositionConsolidator:
             }
         siblings = [t for t in trades if getattr(t, "id", None) != canonical_id]
 
+        # ── M0c (2026-06-12) — never rip an active M0 ladder ────────────
+        # Consolidation cancels ALL brackets then re-attaches ONE OCA pair
+        # sized to the merged total. For a trade carrying a working M0
+        # ladder that collapses N protective legs (with BE/trail state)
+        # into a single bracket and orphans `m0_legs` bookkeeping. Skip
+        # the group; the operator can consolidate manually after the
+        # ladder resolves.
+        _m0_holders = [
+            getattr(t, "id", "?") for t in [canonical, *siblings]
+            if any(
+                (l.get("status") == "working")
+                for l in ((getattr(t, "scale_out_config", None) or {}).get("m0_legs") or [])
+            )
+        ]
+        if _m0_holders:
+            logger.warning(
+                f"[M0c consolidator] {sym} {direction} SKIP — trade(s) "
+                f"{_m0_holders} carry working M0 ladder legs; refusing to "
+                f"cancel/merge an active ladder."
+            )
+            return {
+                "symbol": sym, "direction": direction,
+                "skipped": True, "reason": "m0_ladder_active",
+                "m0_trades": _m0_holders,
+            }
+
         action_log: List[str] = []
 
         # ── Step 2: cancel ALL existing OCA brackets at IB (canonical + siblings).
