@@ -875,6 +875,23 @@ class EnhancedBackgroundScanner:
         self._universal_liquidity_gate_enabled = (
             os.environ.get("SCANNER_UNIVERSAL_LIQUIDITY_GATE", "true").lower() == "true"
         )
+        # v322m — scalp-grade liquidity proof (2026-06-11 AIQ/CZR audit).
+        # Dollar ADV alone lets high-priced thin names and premarket
+        # zero-RVOL alerts through:
+        #   • SCALP_MIN_SHARE_ADV — min avg SHARE volume/day for scalp/
+        #     intraday-style alerts (default 3M sh). 0 disables.
+        #   • SCALP_MIN_RVOL — scalp/intraday alerts must PROVE relative
+        #     volume; rvol unmeasured (<=0) is FAIL-CLOSED. 0 disables.
+        try:
+            self._scalp_min_share_adv = int(float(
+                os.environ.get("SCALP_MIN_SHARE_ADV", "3000000")))
+        except (TypeError, ValueError):
+            self._scalp_min_share_adv = 3_000_000
+        try:
+            self._scalp_min_rvol = float(
+                os.environ.get("SCALP_MIN_RVOL", "1.0"))
+        except (TypeError, ValueError):
+            self._scalp_min_rvol = 1.0
         # ATR% range
         self._min_atr_pct = 0.015   # 1.5% minimum
         self._max_atr_pct = 0.10    # 10% maximum
@@ -1633,26 +1650,36 @@ class EnhancedBackgroundScanner:
             pass
 
     def _liquidity_tier_floor(self, alert) -> Tuple[str, int]:
-        """v19.34.297 — resolve the canonical avg-DOLLAR-volume floor an alert must
-        clear, keyed off its intended horizon. Prefer the explicit `scan_tier`;
-        otherwise infer from `trade_style`. Unknown → strictest (intraday $50M)."""
-        tier = str(getattr(alert, "scan_tier", "") or "").strip().lower()
-        if tier not in ("intraday", "swing", "investment"):
-            style = str(getattr(alert, "trade_style", "") or "").strip().lower()
-            if style in ("scalp", "intraday"):
-                tier = "intraday"
-            elif style in ("swing", "multi_day"):
-                tier = "swing"
-            elif style in ("position", "investment"):
-                tier = "investment"
-            else:
-                tier = "intraday"  # fail toward the strictest floor
-        floor = {
+        """v322m — STRICTEST-OF keying: resolve a candidate floor from the
+        scan tier AND from the trade style, then take the MAX of the two.
+
+        Closes the CZR hole (2026-06-11): an ORB *scalp* emitted by the
+        investment-tier scan carried scan_tier=investment and was judged
+        against the $2M floor instead of the $50M a scalp deserves. The
+        floor must follow the trade's horizon when that is stricter than
+        the scan tier that happened to emit it. Both unknown → intraday
+        (fail toward the strictest floor)."""
+        floors = {
             "intraday": self._min_adv_intraday,
             "swing": self._min_adv_general,
             "investment": self._min_adv_investment,
-        }.get(tier, self._min_adv_intraday)
-        return tier, int(floor)
+        }
+        scan_tier = str(getattr(alert, "scan_tier", "") or "").strip().lower()
+        if scan_tier not in floors:
+            scan_tier = None
+        style = str(getattr(alert, "trade_style", "") or "").strip().lower()
+        style_tier = None
+        if style in ("scalp", "intraday"):
+            style_tier = "intraday"
+        elif style in ("swing", "multi_day"):
+            style_tier = "swing"
+        elif style in ("position", "investment"):
+            style_tier = "investment"
+        candidates = [t for t in (scan_tier, style_tier) if t]
+        if not candidates:
+            return "intraday", int(floors["intraday"])
+        tier = max(candidates, key=lambda t: floors[t])
+        return tier, int(floors[tier])
 
     async def _passes_universal_liquidity_gate(self, alert) -> bool:
         """v19.34.297 — UNIVERSAL hard dollar-volume floor enforced at alert
@@ -1696,15 +1723,63 @@ class EnhancedBackgroundScanner:
                 except Exception:
                     adv_dollar = 0
 
-            if adv_dollar >= floor:
+            reason = None
+            ctx_extra: Dict[str, Any] = {}
+            if adv_dollar < floor:
+                reason = (
+                    f"liquidity floor: avg_dollar_vol "
+                    f"{'unknown/0' if adv_dollar <= 0 else f'${adv_dollar:,}'} "
+                    f"< {tier} floor ${floor:,}"
+                )
+                ctx_extra = {"check": "dollar_adv",
+                             "fail_closed": adv_dollar <= 0}
+            else:
+                # v322m — scalp-grade proof (2026-06-11 AIQ/CZR audit).
+                # Dollar ADV passed, but scalp/intraday-style alerts must
+                # ALSO prove (a) relative volume and (b) raw share depth —
+                # the CZR ORB scalps fired premarket with rvol=0.0 and the
+                # dollar floor can't see thin books on high-priced names.
+                style = str(getattr(alert, "trade_style", "") or "").strip().lower()
+                if style in ("scalp", "intraday"):
+                    if self._scalp_min_rvol > 0:
+                        try:
+                            rvol = float(getattr(alert, "rvol", 0) or 0)
+                        except (TypeError, ValueError):
+                            rvol = 0.0
+                        if rvol <= 0:
+                            reason = (
+                                f"scalp RVOL proof: rvol unmeasured (0.0) — "
+                                f"scalp/intraday needs ≥{self._scalp_min_rvol:g}x "
+                                f"(fail-closed)"
+                            )
+                            ctx_extra = {"check": "scalp_rvol", "rvol": rvol,
+                                         "min_rvol": self._scalp_min_rvol,
+                                         "fail_closed": True}
+                        elif rvol < self._scalp_min_rvol:
+                            reason = (
+                                f"scalp RVOL proof: rvol {rvol:.2f}x < "
+                                f"{self._scalp_min_rvol:g}x floor"
+                            )
+                            ctx_extra = {"check": "scalp_rvol", "rvol": rvol,
+                                         "min_rvol": self._scalp_min_rvol,
+                                         "fail_closed": False}
+                    if reason is None and self._scalp_min_share_adv > 0:
+                        share_adv = await self._get_share_adv_for_gate(symbol)
+                        if share_adv < self._scalp_min_share_adv:
+                            reason = (
+                                f"scalp share-ADV floor: "
+                                f"{'unknown/0' if share_adv <= 0 else f'{share_adv:,} sh/day'} "
+                                f"< {self._scalp_min_share_adv:,} sh/day"
+                            )
+                            ctx_extra = {"check": "scalp_share_adv",
+                                         "share_adv": share_adv,
+                                         "min_share_adv": self._scalp_min_share_adv,
+                                         "fail_closed": share_adv <= 0}
+
+            if reason is None:
                 return True
 
             # REJECTED — record + narrate, then drop.
-            reason = (
-                f"liquidity floor: avg_dollar_vol "
-                f"{'unknown/0' if adv_dollar <= 0 else f'${adv_dollar:,}'} "
-                f"< {tier} floor ${floor:,}"
-            )
             try:
                 from services.trade_drop_recorder import record_trade_drop
                 record_trade_drop(
@@ -1716,8 +1791,8 @@ class EnhancedBackgroundScanner:
                     reason=reason,
                     context={"tier": tier, "floor_usd": floor,
                              "avg_dollar_volume": adv_dollar,
-                             "fail_closed": adv_dollar <= 0,
-                             "source": getattr(alert, "source", None)},
+                             "source": getattr(alert, "source", None),
+                             **ctx_extra},
                 )
             except Exception:
                 pass
@@ -3526,6 +3601,31 @@ class EnhancedBackgroundScanner:
         
         return adv_data
     
+    async def _get_share_adv_for_gate(self, symbol: str) -> int:
+        """v322m — avg SHARE volume/day for the scalp share-ADV floor.
+        Reads `symbol_adv_cache.avg_volume` first (pre-computed by the IB
+        collector), falls back to a 20-bar compute from ib_historical_data.
+        Returns 0 when unprovable (caller treats that as fail-closed)."""
+        def _sync_lookup():
+            try:
+                from database import get_database
+                db = get_database()
+                if db is None:
+                    return 0
+                doc = db["symbol_adv_cache"].find_one(
+                    {"symbol": symbol}, {"_id": 0, "avg_volume": 1})
+                return int((doc or {}).get("avg_volume") or 0)
+            except Exception:
+                return 0
+
+        shares = await asyncio.to_thread(_sync_lookup)
+        if shares <= 0:
+            try:
+                shares = await self._fetch_single_adv(symbol)
+            except Exception:
+                shares = 0
+        return int(shares or 0)
+
     async def _fetch_single_adv(self, symbol: str) -> int:
         """
         Fetch ADV (Average Daily Volume) for a single symbol from MongoDB.
