@@ -58,12 +58,12 @@ def test_stocks_are_not_etfs():
 # ── 2. focus-list eligibility ───────────────────────────────────────────────
 
 def test_operator_carveout_focus_eligible():
-    for sym in ("TQQQ", "SQQQ", "SOXL", "SOXS"):
+    for sym in ("TQQQ", "SQQQ", "SOXL", "SOXS", "NVDL", "TSLL"):
         assert is_focus_eligible(sym) is True, sym
 
 
 def test_mechanical_products_not_focus_eligible():
-    for sym in ("NVDL", "TSLL", "PLTD", "VOO", "QQQM", "JEPI",
+    for sym in ("MSTU", "PLTD", "VOO", "QQQM", "JEPI",
                 "TLT", "SGOV", "SPXU", "TZA"):
         assert is_focus_eligible(sym) is False, sym
 
@@ -74,17 +74,19 @@ def test_stocks_and_thematic_focus_eligible():
 
 
 def test_build_focus_list_excludes_leveraged_leader():
-    """NVDL posting RS 99 in a semis rally must NOT make the focus list;
-    a real stock with the same rating must."""
+    """MSTU posting RS 99 in a rally must NOT make the focus list;
+    a real stock with the same rating must. NVDL is operator carve-out."""
     ratings = {
-        "NVDL": {"rs_rating": 99, "sector": "XLK", "adv": 900_000_000},
+        "MSTU": {"rs_rating": 99, "sector": "XLK", "adv": 900_000_000},
         "NVDA": {"rs_rating": 98, "sector": "XLK", "adv": 900_000_000},
-        "TQQQ": {"rs_rating": 97, "sector": None, "adv": 900_000_000},
+        "NVDL": {"rs_rating": 97, "sector": "XLK", "adv": 900_000_000},
+        "TQQQ": {"rs_rating": 96, "sector": None, "adv": 900_000_000},
     }
     out = build_focus_list(ratings, {"XLK": "strong"}, min_adv=10_000_000)
     syms = {r["symbol"] for r in out["longs"]}
     assert "NVDA" in syms
-    assert "NVDL" not in syms
+    assert "MSTU" not in syms
+    assert "NVDL" in syms       # carve-out (re-added 2026-06-11)
     # TQQQ is carve-out eligible but has no sector tag → still excluded by
     # the sector-regime requirement (unchanged behaviour).
     assert "TQQQ" not in syms
@@ -93,9 +95,10 @@ def test_build_focus_list_excludes_leveraged_leader():
 # ── 3. L1 recommendation filtering ──────────────────────────────────────────
 
 def test_l1_eligibility():
-    for sym in ("SGOV", "BIL", "AGG", "VOO", "QQQM", "JEPI", "NVDL", "TSLL"):
+    for sym in ("SGOV", "BIL", "AGG", "VOO", "QQQM", "JEPI", "MSTU", "PLTD"):
         assert is_l1_eligible(sym) is False, sym
-    for sym in ("AAPL", "TQQQ", "SOXL", "XLK", "SMH", "GLD", "IBIT", "EWY"):
+    for sym in ("AAPL", "TQQQ", "SOXL", "NVDL", "TSLL", "XLK", "SMH",
+                "GLD", "IBIT", "EWY"):
         assert is_l1_eligible(sym) is True, sym
 
 
@@ -141,7 +144,7 @@ def test_l1_recommendations_filter_mechanical_etfs():
         {"symbol": "NVDA", "avg_dollar_volume": 900},
         {"symbol": "SGOV", "avg_dollar_volume": 800},   # bond_cash → out
         {"symbol": "VOO", "avg_dollar_volume": 700},    # index_clone → out
-        {"symbol": "NVDL", "avg_dollar_volume": 600},   # 1-stock lev → out
+        {"symbol": "MSTU", "avg_dollar_volume": 600},   # 1-stock lev → out
         {"symbol": "TQQQ", "avg_dollar_volume": 500},   # keeps its line
         {"symbol": "AAPL", "avg_dollar_volume": 400},
         {"symbol": "JEPI", "avg_dollar_volume": 300},   # income → out

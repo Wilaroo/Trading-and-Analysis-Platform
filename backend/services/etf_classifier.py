@@ -30,9 +30,9 @@ Policy (2026-06-11, user-approved):
 """
 from typing import Optional, Set
 
-# Index/sector leveraged & inverse products the operator KEEPS for the
-# focus list (explicit carve-out, 2026-06-11).
-FOCUS_EXEMPT: Set[str] = {"TQQQ", "SQQQ", "SOXL", "SOXS"}
+# Leveraged products the operator KEEPS for the focus list AND L1 lines
+# (explicit carve-out, 2026-06-11; NVDL/TSLL re-added same day).
+FOCUS_EXEMPT: Set[str] = {"TQQQ", "SQQQ", "SOXL", "SOXS", "NVDL", "TSLL"}
 
 # Single-stock leveraged/inverse products — never useful as L1 lines
 # (the underlying is already streamed) and never RS "leaders".
@@ -169,8 +169,11 @@ def is_l1_eligible(symbol: str) -> bool:
     """May this symbol take an L1 line via the top-N ADV ranking?
 
     Drops bond/cash, income, index clones and single-stock leveraged
-    products — each line freed goes to an actual tradeable stock."""
+    products — each line freed goes to an actual tradeable stock. The
+    operator carve-out (FOCUS_EXEMPT) always keeps its lines."""
     sym = str(symbol or "").upper().strip()
+    if sym in FOCUS_EXEMPT:
+        return True
     if sym in SINGLE_STOCK_LEVERAGED:
         return False
     return _CLASS_MAP.get(sym) not in L1_EXCLUDED_CLASSES
