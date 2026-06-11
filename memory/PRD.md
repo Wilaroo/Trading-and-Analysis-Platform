@@ -781,3 +781,16 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   decision next session (ship it as its own patcher, or drop it from sandbox).
   LESSON: paste.rs hard-caps ~384KB (jY0IW/Pvqhc were silently truncated) — ALWAYS
   round-trip-verify uploads (download + cmp) before sharing URLs.
+- 2026-06-11 (final) v322u DEPLOYED+VERIFIED ON DGX: patcher sKOpP applied clean (5/5
+  hash-verified after rebase onto operator's evaluator YTjMB); 288 behavioral green;
+  5 failures were test_evaluator_rejection_codes.py hardcoded /app paths → v322u-t1
+  patcher DjFy1 fixed (5/5 green). Single commit cb1c356b pushed (user Ctrl-C'd first
+  commit; t1 commit captured all 6 files: 4 prod + v322u tests + path fix). Full night
+  shipped: v322t (4d11bd76) + t1 (221162ef) + v322u/u-t1 (cb1c356b) — ALL live at next
+  StartTrading.bat boot. MORNING WATCH: [v322s MISSED-EOD] silence, [v322u TAXONOMY]
+  breadcrumbs, M0 ladder live validation, zero re-fire chains.
+  NEXT SESSION DECISIONS: MICRO_SETUPS v19.34.266 sandbox-only (ship or drop), IGV
+  INT-21 session-age guard, repair_dedupe_bot_trades sweep, portable-test-paths sweep
+  (~25 files w/ hardcoded /app — NEVER include unswept files in recommended suites
+  without grepping for '"/app' first), AGENTS.md §2 refresh (compact anchored-chunk
+  patcher convention + paste.rs 384KB cap + round-trip verify rule).
