@@ -154,6 +154,10 @@ def get_universe(
 
     Excludes `unqualifiable=true` symbols by default. Set
     `include_unqualifiable=True` only for diagnostics.
+
+    v331 — rows with `manual_universe_pin: true` are ALWAYS included
+    regardless of ADV (operator pins, e.g. day-one IPOs like SPCX that
+    have no daily bars yet so no avg_dollar_volume).
     """
     if db is None:
         return set()
@@ -163,7 +167,10 @@ def get_universe(
                          f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}")
     threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
 
-    query: Dict[str, Any] = {"avg_dollar_volume": {"$gte": threshold}}
+    query: Dict[str, Any] = {"$or": [
+        {"avg_dollar_volume": {"$gte": threshold}},
+        {"manual_universe_pin": True},
+    ]}
     if not include_unqualifiable:
         query["unqualifiable"] = {"$ne": True}
 
@@ -197,7 +204,11 @@ def get_universe_ranked(
                          f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}")
     threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
 
-    query: Dict[str, Any] = {"avg_dollar_volume": {"$gte": threshold}}
+    # v331 — manual pins always included (sort by ADV puts no-ADV pins last).
+    query: Dict[str, Any] = {"$or": [
+        {"avg_dollar_volume": {"$gte": threshold}},
+        {"manual_universe_pin": True},
+    ]}
     if not include_unqualifiable:
         query["unqualifiable"] = {"$ne": True}
 
@@ -315,6 +326,18 @@ def get_pusher_l1_recommendations(
         ]
 
     extra_priority = extra_priority or []
+
+    # v331 — operator-pinned symbols (manual_universe_pin, e.g. day-one
+    # IPOs) are always L1-streamed: a pinned name has no Mongo bar depth
+    # yet, so live ticks are the only way the scanner can see it.
+    try:
+        pinned = [d["symbol"] for d in db["symbol_adv_cache"].find(
+            {"manual_universe_pin": True, "unqualifiable": {"$ne": True}},
+            {"_id": 0, "symbol": 1})]
+        extra_priority = list(extra_priority) + [
+            p for p in pinned if p not in extra_priority]
+    except Exception as e:
+        logger.debug(f"pin lookup failed: {e}")
 
     # Pull top-N by avg_dollar_volume (qualified + non-unqualifiable only).
     # v322n — over-fetch then drop bond/cash, income, index clones and
@@ -517,11 +540,30 @@ def mark_unqualifiable(
     doc = adv.find_one(
         {"symbol": sym},
         {"_id": 0, "unqualifiable_failure_count": 1, "unqualifiable": 1,
-         "avg_dollar_volume": 1},
+         "avg_dollar_volume": 1, "manual_universe_pin": 1},
     ) or {}
     count = doc.get("unqualifiable_failure_count", 0)
     already = bool(doc.get("unqualifiable"))
     adv_value = float(doc.get("avg_dollar_volume") or 0.0)
+
+    # ---- Layer 0: manual-pin immunity (v331) ----------------------------
+    # Operator-pinned symbols (fresh IPOs etc.) often fail IB qualification
+    # transiently in their first sessions — never auto-promote them.
+    if doc.get("manual_universe_pin"):
+        if not already:
+            logger.warning(
+                f"🛡️ {sym} would have been promoted to unqualifiable after "
+                f"{count} failures (reason={reason!r}) — BLOCKED by "
+                "manual_universe_pin (operator pin)."
+            )
+        return {
+            "success": True,
+            "symbol": sym,
+            "failure_count": count,
+            "unqualifiable": False,
+            "promoted_now": False,
+            "protected_by": "manual_universe_pin",
+        }
 
     # ---- Layer 1: mega-cap immunity (v19.34.140) -----------------------
     # Imported lazily to avoid a circular import between symbol_universe
@@ -591,6 +633,48 @@ def mark_unqualifiable(
         "effective_threshold": effective_threshold,
         "protected_by": "high_adv" if (high_adv and not promoted) else None,
     }
+
+
+def pin_symbol(db, symbol: str, reason: str = "operator pin") -> Dict[str, Any]:
+    """v331 — operator pin: force `symbol` into every scan universe and
+    the pusher L1 priority list regardless of ADV. Use for day-one IPOs
+    (no daily bars → no avg_dollar_volume → otherwise invisible until
+    the nightly ADV rebuild AFTER its first collected daily bar — which
+    itself never happens because collection only targets cached symbols:
+    chicken-and-egg). The pin also grants unqualifiable immunity. The
+    nightly rebuild will fill in real ADV/tier once bars exist; the pin
+    flag survives because rebuild upserts with $set (doesn't clear it).
+    """
+    if db is None or not symbol:
+        return {"success": False, "error": "missing db or symbol"}
+    sym = symbol.upper()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    db["symbol_adv_cache"].update_one(
+        {"symbol": sym},
+        {"$set": {
+            "manual_universe_pin": True,
+            "pinned_at": now_iso,
+            "pinned_reason": reason,
+            "unqualifiable": False,
+        },
+         "$setOnInsert": {"symbol": sym, "tier": "intraday",
+                          "first_seen_at": now_iso}},
+        upsert=True,
+    )
+    logger.info(f"📌 {sym} pinned into the scan universe ({reason})")
+    return {"success": True, "symbol": sym, "pinned": True}
+
+
+def unpin_symbol(db, symbol: str) -> bool:
+    """v331 — remove an operator pin (symbol reverts to ADV-based rules)."""
+    if db is None or not symbol:
+        return False
+    res = db["symbol_adv_cache"].update_one(
+        {"symbol": symbol.upper()},
+        {"$unset": {"manual_universe_pin": "", "pinned_at": "",
+                    "pinned_reason": ""}},
+    )
+    return res.modified_count > 0
 
 
 def reset_unqualifiable(db, symbol: str) -> bool:
