@@ -872,6 +872,67 @@ class OpportunityEvaluator:
                 atr = current_price * 0.02
                 atr_percent = 2.0
 
+            # ── v325 HSBG — canonical DAILY-ATR basis ─────────────────
+            # The PT-reachability probe (2026-06-12) found entry_context
+            # .atr units are heterogeneous: some alerts carry intraday
+            # ATR, some daily, some fall through to the hardcoded 2%-of-
+            # price guess. Every downstream geometry decision (stop
+            # multiplier, stop floor, R-rung targets, reach gate) assumes
+            # a DAILY basis — resolve one explicitly:
+            #   1. collector's symbol_adv_cache.atr_pct (14d daily ATR/close)
+            #   2. alert/technicals atr IF plausibly daily (0.3%–20% of px)
+            #   3. 2% of price (last resort, flagged in meta)
+            hsbg_atr_meta = {"source": "fallback_2pct"}
+            try:
+                _px_ref = float(current_price) if current_price else 0.0
+                _atr_daily = None
+                _db_hsbg = getattr(bot, "_db", None)
+                if _db_hsbg is None:
+                    _db_hsbg = getattr(bot, "db", None)
+                if _db_hsbg is not None and symbol and _px_ref > 0:
+                    try:
+                        _doc = _db_hsbg["symbol_adv_cache"].find_one(
+                            {"symbol": symbol.upper()}, {"atr_pct": 1, "_id": 0})
+                        if _doc and _doc.get("atr_pct"):
+                            _cand = float(_doc["atr_pct"]) * _px_ref
+                            if 0.003 * _px_ref <= _cand <= 0.20 * _px_ref:
+                                _atr_daily = _cand
+                                hsbg_atr_meta = {
+                                    "source": "symbol_adv_cache",
+                                    "atr_pct": round(float(_doc["atr_pct"]), 6),
+                                }
+                    except Exception:
+                        _atr_daily = None
+                if _atr_daily is None and atr and _px_ref > 0:
+                    # Trust the alert/technicals ATR only when plausibly a
+                    # DAILY range. An intraday 5-min ATR (typically <0.3%
+                    # of price) fails this window and falls through to the
+                    # 2% guess instead of poisoning geometry.
+                    if 0.003 * _px_ref <= float(atr) <= 0.20 * _px_ref:
+                        _atr_daily = float(atr)
+                        hsbg_atr_meta = {"source": "alert_or_technicals"}
+                if _atr_daily is None and _px_ref > 0:
+                    _atr_daily = _px_ref * 0.02
+                if _atr_daily and _atr_daily > 0:
+                    if abs(_atr_daily - float(atr or 0)) > 1e-9:
+                        logger.info(
+                            "[v325 HSBG] %s ATR basis normalized: %.4f → %.4f (%s)",
+                            symbol, float(atr or 0), _atr_daily,
+                            hsbg_atr_meta["source"],
+                        )
+                    atr = _atr_daily
+                    if _px_ref > 0:
+                        atr_percent = (_atr_daily / _px_ref) * 100.0
+                    hsbg_atr_meta["atr_daily"] = round(_atr_daily, 6)
+            except Exception as _hsbg_atr_err:
+                logger.debug("[v325 HSBG] atr-basis normalize skipped: %s", _hsbg_atr_err)
+
+            # Canonical trade style + horizon fraction for geometry
+            # decisions (scalp/intraday get horizon-scaled stops; swing/
+            # position/investment keep the daily basis, frac=1.0).
+            hsbg_style = self._resolve_geometry_style(alert, setup_type)
+            hsbg_frac = self._hsbg_horizon_frac(hsbg_style)
+
             # Get trade parameters from alert
             entry_price = alert.get('trigger_price', current_price)
             stop_price = alert.get('stop_price', 0)
@@ -879,7 +940,10 @@ class OpportunityEvaluator:
 
             # Calculate ATR-based stop if not provided
             if not stop_price:
-                stop_price = self.calculate_atr_based_stop(entry_price, direction, atr, setup_type, bot)
+                stop_price = self.calculate_atr_based_stop(
+                    entry_price, direction, atr, setup_type, bot,
+                    trade_style=hsbg_style,  # v325 HSBG
+                )
 
             # ── v19.34.183 — Wrong-side stop guard (entry/sizing path) ───
             # A long must have stop < entry; a short stop > entry. A detector
@@ -896,7 +960,8 @@ class OpportunityEvaluator:
                     if _wrong_side:
                         _orig_ws = float(stop_price)
                         stop_price = self.calculate_atr_based_stop(
-                            entry_price, direction, atr, setup_type, bot
+                            entry_price, direction, atr, setup_type, bot,
+                            trade_style=hsbg_style,  # v325 HSBG
                         )
                         logger.warning(
                             f"🩹 [v19.34.183 wrong-side-stop] {symbol} "
@@ -923,6 +988,69 @@ class OpportunityEvaluator:
                             pass
             except Exception as _ws_err:
                 logger.debug(f"[v19.34.183 wrong-side-stop] skipped for {symbol}: {_ws_err}")
+
+            # ── v325 HSBG — detector-stop horizon cap (scalp/intraday) ─
+            # Detector-supplied stops bypass calculate_atr_based_stop, so
+            # a structurally wide stop (e.g. below a daily swing low)
+            # re-creates the exact geometry the PT-reachability probe
+            # condemned: ~1.3-2.5× DAILY ATR on a position that lives
+            # minutes-to-hours. Cap (tighten-only) the distance at
+            # HSBG_DETECTOR_STOP_CAP_MULT × the canonical horizon stop.
+            # Multi-day styles untouched (their v183 5% cap exists).
+            hsbg_stop_cap_meta = None
+            try:
+                if (self._hsbg_enabled() and stop_price and entry_price
+                        and hsbg_frac < 1.0 and atr and atr > 0):
+                    import os as _os_hsbg
+                    try:
+                        _cap_mult = float(_os_hsbg.environ.get(
+                            "HSBG_DETECTOR_STOP_CAP_MULT", "1.5"))
+                    except (TypeError, ValueError):
+                        _cap_mult = 1.5
+                    _canon = self.calculate_atr_based_stop(
+                        float(entry_price), direction, float(atr), setup_type, bot,
+                        trade_style=hsbg_style,
+                    )
+                    _canon_dist = abs(float(entry_price) - float(_canon))
+                    _dist = abs(float(entry_price) - float(stop_price))
+                    _cap_dist = _canon_dist * _cap_mult
+                    if _cap_dist > 0 and _dist > _cap_dist:
+                        _is_long = (direction == TradeDirection.LONG)
+                        _new_stop = (entry_price - _cap_dist) if _is_long else (entry_price + _cap_dist)
+                        logger.info(
+                            "✂️ [v325 HSBG] %s %s detector stop Δ$%.4f (%.2f%% of "
+                            "entry) exceeds horizon cap Δ$%.4f — tightened → $%.4f",
+                            symbol, hsbg_style, _dist,
+                            _dist / entry_price * 100.0, _cap_dist, _new_stop,
+                        )
+                        hsbg_stop_cap_meta = {
+                            "applied": True,
+                            "original_stop": round(float(stop_price), 4),
+                            "capped_stop": round(_new_stop, 4),
+                            "cap_mult": _cap_mult,
+                            "canon_dist": round(_canon_dist, 4),
+                        }
+                        stop_price = _new_stop
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "info",
+                                "event": "hsbg_stop_capped",
+                                "symbol": symbol,
+                                "text": (
+                                    f"✂️ {symbol} {hsbg_style} stop "
+                                    f"{_dist/entry_price*100:.1f}% → "
+                                    f"{_cap_dist/entry_price*100:.1f}% (horizon cap) — "
+                                    f"bracket sized for its actual hold window"
+                                ),
+                                "metadata": {"source": "opportunity_evaluator",
+                                             "guard": "v325_hsbg_stop_cap",
+                                             **hsbg_stop_cap_meta},
+                            })
+                        except Exception:
+                            pass
+            except Exception as _hsbg_cap_err:
+                logger.debug("[v325 HSBG] detector-stop cap skipped: %s", _hsbg_cap_err)
 
             # ── v19.34.183 — Position/investment stop-cap for DETECTOR stops ─
             # v169 caps multi-day stops at 5% of entry, but that cap lives
@@ -1022,11 +1150,15 @@ class OpportunityEvaluator:
                     except (TypeError, ValueError):
                         _floor_mult = 0.3
                     _distance = abs(float(entry_price) - float(stop_price))
-                    _threshold = _floor_mult * float(atr)
+                    # v325 HSBG — floor measured on the horizon-scaled
+                    # basis, otherwise a 0.3×DAILY-ATR floor would undo
+                    # the scalp/intraday tightening every time.
+                    _threshold = _floor_mult * float(atr) * (hsbg_frac or 1.0)
                     if _distance < _threshold:
                         _orig_stop = float(stop_price)
                         _new_stop = self.calculate_atr_based_stop(
                             float(entry_price), direction, float(atr), setup_type, bot,
+                            trade_style=hsbg_style,  # v325 HSBG
                         )
                         _new_distance = abs(float(entry_price) - float(_new_stop))
                         if _new_distance >= _threshold:
@@ -1133,6 +1265,102 @@ class OpportunityEvaluator:
                     target_snap_meta = snap.get("details")
             except Exception as exc:
                 logger.debug(f"target-snap skipped for {alert.get('symbol') if isinstance(alert, dict) else '?'}: {exc}")
+
+            # ── v325 HSBG — PT reachability stamp + gate ───────────────
+            # Stamp every trade with its geometry-vs-time ratio; warn on
+            # borderline brackets; hard-block ones that are mathematically
+            # configured to fail (PT1 needs >1.5× the price travel the
+            # hold window statistically provides). Post-v325 geometry
+            # lands ~0.4-0.8× — the block is a tripwire against future
+            # regressions (bad detector stop / corrupt ATR), not a
+            # routine filter. HSBG_REACH_GATE_MODE=warn disables blocking.
+            hsbg_meta = None
+            try:
+                if atr and atr > 0 and target_prices and entry_price:
+                    import os as _os_reach
+                    _envelope = self._hsbg_reach_envelope(float(atr), hsbg_style)
+                    _pt1_dist = abs(float(target_prices[0]) - float(entry_price))
+                    _stop_dist = abs(float(entry_price) - float(stop_price)) if stop_price else 0.0
+                    _ratio = (_pt1_dist / _envelope) if _envelope > 0 else None
+                    hsbg_meta = {
+                        "style": hsbg_style,
+                        "frac": round(hsbg_frac, 4),
+                        "atr_daily": round(float(atr), 6),
+                        "atr_source": hsbg_atr_meta.get("source"),
+                        "hold_minutes": round(self._hsbg_hold_minutes(hsbg_style), 1),
+                        "reach_envelope": round(_envelope, 4),
+                        "stop_env_ratio": round(_stop_dist / _envelope, 4) if _envelope > 0 else None,
+                        "pt1_env_ratio": round(_ratio, 4) if _ratio is not None else None,
+                        "stop_cap": hsbg_stop_cap_meta,
+                    }
+                    try:
+                        _warn_at = float(_os_reach.environ.get("HSBG_REACH_WARN_RATIO", "0.85"))
+                    except (TypeError, ValueError):
+                        _warn_at = 0.85
+                    try:
+                        _block_at = float(_os_reach.environ.get("HSBG_REACH_BLOCK_RATIO", "1.5"))
+                    except (TypeError, ValueError):
+                        _block_at = 1.5
+                    _gate_mode = str(_os_reach.environ.get(
+                        "HSBG_REACH_GATE_MODE", "block")).strip().lower()
+                    if (_ratio is not None and _ratio > _block_at
+                            and _gate_mode == "block" and self._hsbg_enabled()):
+                        logger.warning(
+                            "🚫 [v325 HSBG reach-gate] Blocking %s %s — PT1 needs "
+                            "%.2fx the expected price travel for a %s hold "
+                            "(PT1 Δ$%.2f vs envelope $%.2f).",
+                            symbol, setup_type, _ratio, hsbg_style,
+                            _pt1_dist, _envelope,
+                        )
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "rejection",
+                                "event": "hsbg_reach_gate_block",
+                                "symbol": symbol,
+                                "text": (
+                                    f"🚫 {symbol} {setup_type} blocked — PT1 at "
+                                    f"{_ratio:.1f}× reach ({hsbg_style} hold, envelope "
+                                    f"${_envelope:.2f}). Unreachable bracket geometry."
+                                ),
+                                "metadata": {"source": "opportunity_evaluator",
+                                             **hsbg_meta},
+                            })
+                        except Exception:
+                            pass
+                        try:
+                            bot.record_rejection(
+                                symbol=symbol, setup_type=setup_type,
+                                direction=direction_str,
+                                reason_code="hsbg_pt_unreachable",
+                                context=hsbg_meta,
+                            )
+                        except Exception:
+                            pass
+                        return None
+                    if _ratio is not None and _ratio > _warn_at:
+                        logger.info(
+                            "⚠️ [v325 HSBG reach-gate] %s %s borderline geometry — "
+                            "PT1 at %.2fx reach (warn>%.2f).",
+                            symbol, setup_type, _ratio, _warn_at,
+                        )
+                        try:
+                            from services.sentcom_service import emit_stream_event
+                            await emit_stream_event({
+                                "kind": "warning",
+                                "event": "hsbg_reach_gate_warn",
+                                "symbol": symbol,
+                                "text": (
+                                    f"⚠️ {symbol} PT1 at {_ratio:.2f}× reach for a "
+                                    f"{hsbg_style} hold — borderline bracket geometry"
+                                ),
+                                "metadata": {"source": "opportunity_evaluator",
+                                             **hsbg_meta},
+                            })
+                        except Exception:
+                            pass
+            except Exception as _reach_err:
+                logger.debug("[v325 HSBG] reach gate skipped: %s", _reach_err)
 
             # Calculate position size with volatility adjustment + Volume-Profile path multiplier (2026-04-28e)
             # + v19.34.156 grade-based scaler (P3-A) + v19.34.157 MR regime scaler (P3-C).
@@ -1549,6 +1777,9 @@ class OpportunityEvaluator:
                         "position": position_multipliers,
                         "stop_guard": stop_guard_meta,
                         "target_snap": target_snap_meta,
+                        # v325 — geometry/reachability stamps (atr basis,
+                        # horizon frac, reach envelope, pt1_env_ratio).
+                        "hsbg": hsbg_meta,
                     },
                     # 2026-04-28f: AI module results were previously
                     # only landed under `explanation.ai_consultation`,
@@ -2104,8 +2335,16 @@ class OpportunityEvaluator:
             })
         return shares, risk_amount
 
-    def calculate_atr_based_stop(self, entry_price: float, direction, atr: float, setup_type: str, bot: 'TradingBotService') -> float:
-        """Calculate stop loss based on ATR with setup-specific multiplier."""
+    def calculate_atr_based_stop(self, entry_price: float, direction, atr: float, setup_type: str, bot: 'TradingBotService', trade_style: str = None) -> float:
+        """Calculate stop loss based on ATR with setup-specific multiplier.
+
+        v325 HSBG — when `trade_style` is passed, `atr` is treated as the
+        canonical DAILY ATR and scalp/intraday distances are additionally
+        scaled by the horizon fraction (√(hold/390)-style) so intraday
+        brackets stop being sized for multi-day holds. Callers that omit
+        `trade_style` (e.g. /retune-stop, which feeds a 5-MINUTE ATR)
+        keep the exact pre-v325 behavior.
+        """
         from services.trading_bot_service import TradeDirection
 
         multiplier, is_scalp_setup, resolution = self._resolve_atr_multiplier(setup_type, bot)
@@ -2163,6 +2402,28 @@ class OpportunityEvaluator:
                     stop_distance = cap_distance
         except Exception as _cap_err:
             logger.debug(f"[atr_stop] v169 cap skipped: {_cap_err}")
+
+        # ── v325 HSBG — horizon scaling (only when trade_style passed) ─
+        if trade_style is not None:
+            try:
+                _style = self._resolve_geometry_style(
+                    {"trade_style": trade_style}, setup_type,
+                )
+                _frac = self._hsbg_horizon_frac(_style)
+                if _frac < 1.0:
+                    _raw_dist = stop_distance
+                    stop_distance = stop_distance * _frac
+                    _floor_pct = self._hsbg_min_stop_pct(_style)
+                    if entry_price > 0 and stop_distance < entry_price * _floor_pct:
+                        stop_distance = entry_price * _floor_pct
+                    logger.info(
+                        "[v325 HSBG] %s stop horizon-scaled (style=%s frac=%.2f): "
+                        "Δ$%.4f → Δ$%.4f (%.2f%% of entry)",
+                        setup_type, _style, _frac, _raw_dist, stop_distance,
+                        (stop_distance / entry_price * 100.0) if entry_price else 0.0,
+                    )
+            except Exception as _hsbg_err:
+                logger.debug("[v325 HSBG] horizon scaling skipped: %s", _hsbg_err)
 
         if direction == TradeDirection.LONG:
             return entry_price - stop_distance
@@ -2721,6 +2982,114 @@ class OpportunityEvaluator:
         if trade_style_lower == 'intraday':
             return [1.5, 2.5]
         return [1.5, 2.5, 4.0]
+
+    # ════════════════════════════════════════════════════════════════
+    # v325 HSBG — Horizon-Scaled Bracket Geometry helpers
+    # ════════════════════════════════════════════════════════════════
+    # Probe-backed (diag_pt_reachability, 2026-06-12): intraday brackets
+    # sized off the DAILY ATR put PT1 at ~2-6× the price travel a few-
+    # hour hold statistically provides → 0/101 PT1 touches. These
+    # helpers scale stop distances to the hold horizon and measure
+    # target reachability against a √time diffusion envelope.
+
+    @staticmethod
+    def _hsbg_enabled() -> bool:
+        import os as _os
+        return str(_os.environ.get("HSBG_ENABLED", "1")).strip().lower() not in (
+            "0", "false", "no", "off",
+        )
+
+    @classmethod
+    def _resolve_geometry_style(cls, alert, setup_type) -> str:
+        """Canonical trade style for geometry decisions. Uses the same
+        trade_style_classifier the rest of the stack uses (trade_2_hold
+        defers to the setup-derived style). `unknown` maps to intraday —
+        identical to the trade-create default (trade_style=trade_2_hold
+        → intraday horizon)."""
+        su = (setup_type or '').strip().lower()
+        if su in cls._SCALP_SETUPS:
+            return 'scalp'
+        ts = ((alert.get('trade_style') if isinstance(alert, dict) else None) or '')
+        try:
+            from services.trade_style_classifier import resolve_trade_style
+            style = resolve_trade_style({"trade_style": ts, "setup_type": setup_type})
+        except Exception:
+            style = str(ts).strip().lower() or "unknown"
+        if style in ("unknown", "", "trade_2_hold"):
+            return "intraday"
+        return style
+
+    @classmethod
+    def _hsbg_horizon_frac(cls, style: str) -> float:
+        """Stop-distance scaling fraction vs the DAILY ATR basis.
+        scalp ≈ √(60/390)=0.39 · intraday 0.35 · everything else 1.0
+        (multi-day holds are correctly sized off the daily ATR)."""
+        import os as _os
+        if not cls._hsbg_enabled():
+            return 1.0
+        s = (style or '').strip().lower()
+        try:
+            if s == 'scalp':
+                return max(0.05, min(1.0, float(_os.environ.get("HSBG_SCALP_FRAC", "0.39"))))
+            if s in ('intraday', 'trade_2_hold'):
+                return max(0.05, min(1.0, float(_os.environ.get("HSBG_INTRADAY_FRAC", "0.35"))))
+        except (TypeError, ValueError):
+            pass
+        return 1.0
+
+    @staticmethod
+    def _hsbg_min_stop_pct(style: str) -> float:
+        """Absolute floor on the horizon-scaled stop distance (fraction
+        of entry) so an ultra-quiet symbol can't produce a sub-noise stop."""
+        import os as _os
+        s = (style or '').strip().lower()
+        try:
+            if s == 'scalp':
+                return float(_os.environ.get("HSBG_MIN_STOP_PCT_SCALP", "0.0015"))
+            return float(_os.environ.get("HSBG_MIN_STOP_PCT_INTRADAY", "0.0035"))
+        except (TypeError, ValueError):
+            return 0.0035
+
+    @staticmethod
+    def _hsbg_hold_minutes(style: str, now_et=None) -> float:
+        """Expected remaining hold window in RTH-minute units.
+        scalp = min(SCALP_DECAY_MINUTES, time-to-close) · intraday =
+        time-to-close (full 390 premarket/weekend) · multi-day styles =
+        trading-days × 390."""
+        import os as _os
+        s = (style or '').strip().lower()
+        mins_to_close = 390.0
+        try:
+            from zoneinfo import ZoneInfo
+            _now = now_et or datetime.now(ZoneInfo("America/New_York"))
+            if _now.weekday() < 5:
+                _open = _now.replace(hour=9, minute=30, second=0, microsecond=0)
+                _close = _now.replace(hour=16, minute=0, second=0, microsecond=0)
+                if _now > _open:
+                    mins_to_close = max(15.0, (_close - _now).total_seconds() / 60.0)
+        except Exception:
+            mins_to_close = 390.0
+        if s == 'scalp':
+            try:
+                scalp_hold = float(_os.environ.get("SCALP_DECAY_MINUTES", "60") or 60)
+            except (TypeError, ValueError):
+                scalp_hold = 60.0
+            return min(scalp_hold, mins_to_close)
+        if s in ('intraday', 'trade_2_hold', ''):
+            return min(390.0, mins_to_close)
+        _days = {'swing': 10, 'multi_day': 5, 'position': 30, 'investment': 90}.get(s, 10)
+        return _days * 390.0
+
+    @classmethod
+    def _hsbg_reach_envelope(cls, daily_atr: float, style: str, now_et=None) -> float:
+        """Expected |price travel| within the remaining hold window:
+        daily_atr × √(hold_minutes / 390). The diffusion scale the reach
+        gate measures PT1 distance against."""
+        hold = cls._hsbg_hold_minutes(style, now_et=now_et)
+        try:
+            return max(0.0, float(daily_atr)) * ((hold / 390.0) ** 0.5)
+        except (TypeError, ValueError):
+            return 0.0
 
 
     @staticmethod

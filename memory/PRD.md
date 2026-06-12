@@ -868,3 +868,33 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   pytest 7/7. PENDING: user applies on DGX + restart (also activates v323b/v323c —
   live app runs several commits behind; collector is upsert-based so interrupting
   the running historical collection loses nothing).
+- 2026-06-12 v325 HSBG — HORIZON-SCALED BRACKET GEOMETRY (paste.rs/SgWMB, md5
+  c41035a8...): Root-cause fix for 0/101 PT1 touches. opportunity_evaluator.py:
+  (1) canonical DAILY-ATR basis (symbol_adv_cache.atr_pct preferred, plausibility
+  window 0.3-20% of px, alert atr only if sane, 2% last resort — stamped in meta);
+  (2) calculate_atr_based_stop(+trade_style kwarg): scalp ×HSBG_SCALP_FRAC(0.39=
+  √(60/390)), intraday ×HSBG_INTRADAY_FRAC(0.35); swing/position/investment
+  UNCHANGED; min stop floors 0.15%/0.35% of entry. CRITICAL: scaling ONLY when
+  trade_style kwarg passed — /retune-stop feeds a 5-MIN ATR and omits it (old math
+  preserved, regression-tested); (3) detector-stop horizon cap (tighten-only,
+  1.5× canonical) for scalp/intraday; (4) v19.34.45 stop-floor threshold ×frac
+  (else it would undo the fix); (5) reach gate: envelope=daily_atr×√(hold/390),
+  hold: scalp min(60,to-close), intraday to-close, swing 10d/multi_day 5d/
+  position 30d/investment 90d (×390min). pt1_env_ratio stamped in entry_context
+  .multipliers.hsbg; warn-thought >0.85; HARD BLOCK >1.5 (reason_code=
+  hsbg_pt_unreachable, user approved). Style resolution via trade_style_classifier
+  .resolve_trade_style (trade_2_hold/unknown→intraday, scalp setups via
+  _SCALP_SETUPS). Env: HSBG_ENABLED kill switch + 8 tunables. TESTED: 20 new unit
+  tests + 24 pre-existing stop regression tests pass (retune + stop-floor suites).
+- 2026-06-12 v325b BRACKET GEOMETRY OVERLAY (paste.rs/sQEqc, md5 ef4ba7e6...):
+  ChartBracketGeometryOverlay in ChartPanel.jsx (PremarketShading pattern): red/
+  green R/R zones entry→SL/PT1 anchored at entry bar→deadline; dotted cyan √time
+  reach cone; "PTn · x.xx× reach" badges (green≤0.85/amber≤1.5/red — same
+  thresholds as backend gate); dashed pink decay/EOD clock line + label. Renders
+  only when position exists for focused symbol. New GET /api/sentcom/chart/
+  reach-meta (atr_pct from symbol_adv_cache, fallback ATR14 from stored daily
+  bars — curl-verified 0.0299 on synthetic 3% ATR symbol). Frontend compiles,
+  no error boundaries, overlay dormant without position (screenshot-verified).
+  PENDING: user applies v325 + v325b on DGX, commit, restart.
+  NOTE: SmartStopService unification (merge its rules table with evaluator's,
+  wire structure-snapping into entry path) deferred to v326 by design.

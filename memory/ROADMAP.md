@@ -3919,3 +3919,20 @@ Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 
 - Then: M0 OCA ladder validation (needs live scalp fill post-restart), INT-21 IGV
   range-break guards, ELF→XLE _industry_to_etf mapping fix, thought-noise content
   filter (v323c r2).
+
+## 2026-06-12 — v325 + v325b TP/SL geometry fix (SHIPPED, user-apply pending)
+- ✅ "Deep TP/SL audit & unification" root-cause phase → apply_v325.py @
+  https://paste.rs/SgWMB (md5 c41035a81d0dfe1a567fe9290db3432c). Horizon-scaled
+  stops + canonical daily-ATR basis + detector-stop cap + reach gate (block >1.5×).
+- ✅ Bracket geometry chart overlay → apply_v325b.py @ https://paste.rs/sQEqc
+  (md5 ef4ba7e6ed26cd19fc90cfd728df3b3b). Reach cone + PT reach badges + clock line.
+- VALIDATION PLAN: after a few sessions re-run diag_pt_reachability.py — PT1
+  touch-rate must move off 0%; entry_context.multipliers.hsbg stamps enable
+  before/after cohort compare. Watch stream for ✂️ horizon-cap / ⚠️ borderline /
+  🚫 reach-block events.
+- v326 (NEXT in TP/SL track): SmartStopService unification — merge SETUP_STOP_RULES
+  with evaluator SETUP_MULTIPLIERS into one source of truth; optionally wire
+  structure-snapping (S/R, hunt zones) into entry path; fix /audit-stops +
+  /fix-stop fake atr=2% inputs.
+- Still open: M0 OCA ladder live validation, INT-21 IGV guards, ELF→XLE mapping,
+  thought-noise content filter (v323c r2), Atlas password rotation (user).
