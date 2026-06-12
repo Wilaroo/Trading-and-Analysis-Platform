@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
@@ -266,6 +267,9 @@ _INDUSTRY_TO_ETF: Dict[str, str] = {
     "food":                  "XLP",
     "household":             "XLP",
     "personal product":      "XLP",
+    "cosmetic":              "XLP",  # v330 — ELF was XLE via "oil" in "tOILetries"
+    "toiletries":            "XLP",
+    "beauty":                "XLP",
     # Healthcare — XLV
     "health":                "XLV",
     "pharmaceutical":        "XLV",
@@ -368,18 +372,30 @@ def _industry_to_etf(industry: Optional[str]) -> Optional[str]:
     if not industry:
         return None
     needle = industry.lower()
+
+    # v330 — WORD-START matching everywhere. Naked substring matching
+    # produced two operator-visible misclassifications:
+    #   • "Cosmetics & Toiletries" → XLE   ("oil" inside "tOILetries")
+    #   • "Aerospace & Defense"    → None  ("spac" inside "aeroSPACe"
+    #     hit the SPAC blocklist before any sector rule could run)
+    # Keys now only match at a word START (start-of-string or preceded
+    # by a non-word char). Suffixes still match so stem keys keep
+    # working: "utilit"→"utilities", "rail"→"railroads", "gas"→"gasoline".
+    def _hit(key: str) -> bool:
+        return re.search(r"\b" + re.escape(key), needle) is not None
+
     # 1. Explicit blocklist — UNKNOWN beats wrong sector tag.
     for blocked in _EXPLICIT_NONE:
-        if blocked in needle:
+        if _hit(blocked):
             return None
     # 2. Priority overrides — sector-conflict resolution.
     for etf, keys in _PRIORITY_OVERRIDES:
         for k in keys:
-            if k in needle:
+            if _hit(k):
                 return etf
-    # 3. Longest-substring match.
+    # 3. Longest-match (word-start) into the table.
     for key in sorted(_INDUSTRY_TO_ETF.keys(), key=len, reverse=True):
-        if key in needle:
+        if _hit(key):
             return _INDUSTRY_TO_ETF[key]
     return None
 

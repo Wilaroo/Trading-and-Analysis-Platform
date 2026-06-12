@@ -957,3 +957,21 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   all-SKIP. LESSON: v324 assumed dev-only helpers existed on DGX — future
   patchers must anchor-check every helper they call. PENDING: user runs v329,
   commits, restarts; then verify chart scrolls to Mar 2024.
+- 2026-06-12 v330 INT-21 HARDENING + SECTOR WORDSTART + THOUGHT TTL TIERS
+  (patcher paste.rs/NIPtw md5 bc5e3146588d03df9412c781f8e3e782): (1) _check_
+  range_break gains 4 guards: >=60min RTH session age, HOD-LOD >= 0.6xATR,
+  RVOL sanity band 0.2-50 (0=poisoned prior-day daily), snapshot <=5min fresh.
+  (2) _industry_to_etf word-START matching (\b+key regex) — fixes ELF→XLE
+  ("oil" inside "tOILetries") AND bonus bug "Aerospace & Defense"→None
+  ("spac" inside "aeroSPACe" hit blocklist); stems still work (rail→railroads,
+  gas→gasoline, utilit→utilities); + cosmetic/toiletries/beauty→XLP keys; DB
+  repair ELF XLE→XLP in symbol_adv_cache. (3) kind="thought" rows matching
+  _NOISE_CONTENT_RE (skipped/passing/no setup/snapshot unavailable/...) join
+  7d expires_at tier; signal thoughts keep 190d; DB retro-tag of existing
+  generic rows (255 tagged in dev DB). Ships tests/test_v330_hardening.py
+  (9 tests); patcher SELF-TESTS via pytest (33 passed incl. sector + v323c
+  regression). All TESTED on mirror: byte-identical, idempotent, retro-tag
+  noise/signal split verified, ELF repair verified, backend boots.
+  PENDING: user applies v330, commits, restarts. NEXT: watch 2026-06-15 open
+  (scalps fire? snapshots GREEN? M0 OCA ladder on fill?); Data Health HUD
+  pill offered; Atlas password rotation still outstanding.

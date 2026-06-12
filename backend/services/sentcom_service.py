@@ -16,6 +16,7 @@ Phase 2: Backend Wiring for Team Brain → SentCom
 import logging
 import asyncio
 import os
+import re
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
@@ -3186,6 +3187,16 @@ THOUGHTS_COLLECTION = "sentcom_thoughts"
 # expires_at and live the full _THOUGHTS_TTL_DAYS via the created_at TTL.
 _SCAN_NOISE_KINDS = {"scan", "skip", "filter", "info"}
 _NOISE_TTL_DAYS = 7
+# v330 — content-based noise tier. Plenty of "skipped/passing" chatter
+# is emitted with kind="thought" (not a noise kind) and was living the
+# full 190d window for no recall value. Generic no-action texts now get
+# the 7d expiry too; real decisions/signals keep 190d.
+_NOISE_CONTENT_RE = re.compile(
+    r"(skipp(?:ed|ing)|passing on|passed on|no setup|no signal|"
+    r"below floor|no intraday bars|snapshot unavailable|"
+    r"not in play|nothing actionable|no actionable)",
+    re.IGNORECASE,
+)
 # v323a — was 7. Operator wants months of decision-trail recall in chat;
 # 190d ≈ 6.3 months. NOTE: changing this constant does NOT retune an
 # already-created TTL index — apply_v323a.py ran the collMod migration.
@@ -3250,8 +3261,13 @@ async def _persist_thought(msg: "SentComMessage") -> None:
                 "created_at": _now,
                 # v323c — noise kinds expire at 7d; signal kinds omit the
                 # field and live the full created_at TTL window (190d).
+                # v330 — kind="thought" rows whose text is generic
+                # skipped/passing chatter join the 7d tier (content-based).
                 **({"expires_at": _now + timedelta(days=_NOISE_TTL_DAYS)}
-                   if _doc_kind in _SCAN_NOISE_KINDS else {}),
+                   if (_doc_kind in _SCAN_NOISE_KINDS
+                       or (_doc_kind == "thought"
+                           and _NOISE_CONTENT_RE.search(str(msg.content or ""))))
+                   else {}),
             })
 
         await asyncio.to_thread(_insert)
