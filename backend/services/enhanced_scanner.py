@@ -5286,7 +5286,40 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_range_break(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Range Break - Break of established range"""
+        """Range Break - Break of established range
+
+        v330 hardening (operator: IGV false trigger) — a "range break"
+        is meaningless until a RANGE actually exists:
+          1. ≥60 min of RTH session age (early-session HOD pokes were
+             firing as "breaks" of a 10-minute "range");
+          2. the range itself must be substantial (HOD-LOD ≥ 0.6×ATR —
+             micro-ranges break on noise);
+          3. RVOL sanity: 0 / absurd values mean prior-day daily bars
+             were missing or partial (daily-bar-leak class failure) —
+             never trade a poisoned ratio;
+          4. snapshot freshness ≤5 min — stale HOD/RVOL during a data
+             blackout must not fire entries.
+        """
+        from zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        mins_since_open = (now_et.hour * 60 + now_et.minute) - (9 * 60 + 30)
+        if mins_since_open < 60:
+            return None
+        rng = float(snapshot.high_of_day or 0) - float(snapshot.low_of_day or 0)
+        _atr = float(getattr(snapshot, "atr", 0) or 0)
+        if rng <= 0 or _atr <= 0 or rng < 0.6 * _atr:
+            return None
+        if not (0.2 <= float(snapshot.rvol or 0) <= 50.0):
+            return None
+        try:
+            snap_ts = datetime.fromisoformat(str(snapshot.timestamp).replace("Z", "+00:00"))
+            if snap_ts.tzinfo is None:
+                snap_ts = snap_ts.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - snap_ts).total_seconds() > 300:
+                return None
+        except Exception:
+            pass
+
         daily_range = snapshot.daily_range_pct
         
         if daily_range < 2.0 and daily_range > 0.5 and snapshot.rvol >= 1.5:
