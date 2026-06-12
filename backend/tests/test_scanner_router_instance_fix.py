@@ -19,9 +19,15 @@ directly so it reflects the scanner that actually emits alerts.
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
-ROUTER_PATH = Path("/app/backend/routers/scanner.py")
+ROUTER_PATH = Path((_REPO_ROOT + "/backend/routers/scanner.py"))
 
 
 def test_detector_stats_reads_enhanced_scanner_directly():

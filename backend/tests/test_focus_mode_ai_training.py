@@ -9,6 +9,12 @@ Tests for:
 5. Bat file validation - no auto-start collectors, contains focus mode docs, 9 steps
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -99,7 +105,7 @@ class TestAITrainingStartEndpoint:
     
     def test_start_training_code_imports_focus_mode_manager(self):
         """Verify ai_training.py imports focus_mode_manager"""
-        ai_training_path = "/app/backend/routers/ai_training.py"
+        ai_training_path = (_REPO_ROOT + "/backend/routers/ai_training.py")
         with open(ai_training_path, 'r') as f:
             content = f.read()
         
@@ -109,7 +115,7 @@ class TestAITrainingStartEndpoint:
     
     def test_start_training_code_calls_set_mode_training(self):
         """Verify start_training calls focus_mode_manager.set_mode('training')"""
-        ai_training_path = "/app/backend/routers/ai_training.py"
+        ai_training_path = (_REPO_ROOT + "/backend/routers/ai_training.py")
         with open(ai_training_path, 'r') as f:
             content = f.read()
         
@@ -121,7 +127,7 @@ class TestAITrainingStartEndpoint:
     
     def test_start_training_code_has_reset_to_live_in_finally(self):
         """Verify _run() has focus_mode_manager.reset_to_live() in finally block"""
-        ai_training_path = "/app/backend/routers/ai_training.py"
+        ai_training_path = (_REPO_ROOT + "/backend/routers/ai_training.py")
         with open(ai_training_path, 'r') as f:
             content = f.read()
         
@@ -138,7 +144,7 @@ class TestAITrainingStartEndpoint:
     
     def test_start_training_response_includes_focus_mode(self):
         """Verify start_training response includes focus_mode: 'training'"""
-        ai_training_path = "/app/backend/routers/ai_training.py"
+        ai_training_path = (_REPO_ROOT + "/backend/routers/ai_training.py")
         with open(ai_training_path, 'r') as f:
             content = f.read()
         
@@ -150,7 +156,7 @@ class TestAITrainingStartEndpoint:
 class TestBatFileValidation:
     """Tests for TradeCommand_AITraining.bat file"""
     
-    BAT_FILE_PATH = "/app/documents/TradeCommand_AITraining.bat"
+    BAT_FILE_PATH = (_REPO_ROOT + "/documents/TradeCommand_AITraining.bat")
     
     def test_bat_file_exists(self):
         """Bat file should exist"""
@@ -221,21 +227,21 @@ class TestFocusModeManagerModule:
     
     def test_focus_mode_manager_has_set_mode(self):
         """focus_mode_manager should have set_mode method"""
-        manager_path = "/app/backend/services/focus_mode_manager.py"
+        manager_path = (_REPO_ROOT + "/backend/services/focus_mode_manager.py")
         with open(manager_path, 'r') as f:
             content = f.read()
         assert 'def set_mode(' in content, "Missing set_mode method"
     
     def test_focus_mode_manager_has_reset_to_live(self):
         """focus_mode_manager should have reset_to_live method"""
-        manager_path = "/app/backend/services/focus_mode_manager.py"
+        manager_path = (_REPO_ROOT + "/backend/services/focus_mode_manager.py")
         with open(manager_path, 'r') as f:
             content = f.read()
         assert 'def reset_to_live(' in content, "Missing reset_to_live method"
     
     def test_focus_mode_manager_has_collecting_mode(self):
         """focus_mode_manager should have COLLECTING mode config"""
-        manager_path = "/app/backend/services/focus_mode_manager.py"
+        manager_path = (_REPO_ROOT + "/backend/services/focus_mode_manager.py")
         with open(manager_path, 'r') as f:
             content = f.read()
         assert 'COLLECTING' in content, "Missing COLLECTING mode"
@@ -243,7 +249,7 @@ class TestFocusModeManagerModule:
     
     def test_focus_mode_manager_has_training_mode(self):
         """focus_mode_manager should have TRAINING mode config"""
-        manager_path = "/app/backend/services/focus_mode_manager.py"
+        manager_path = (_REPO_ROOT + "/backend/services/focus_mode_manager.py")
         with open(manager_path, 'r') as f:
             content = f.read()
         assert 'TRAINING' in content, "Missing TRAINING mode"

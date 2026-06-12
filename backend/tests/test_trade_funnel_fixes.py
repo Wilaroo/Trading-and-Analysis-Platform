@@ -16,6 +16,12 @@ investigation:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 
 sys.path.insert(0, "/app/backend")
@@ -36,7 +42,7 @@ def test_tape_confirmation_inclusive_at_long_boundary():
     (previous strict-`>` killed 25 of 42 HIGH alerts on Tuesday Apr 28).
     """
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     # The new code uses `>= 0.2` and `<= -0.2`
     assert "confirmation_for_long=tape_score >= 0.2" in src
     assert "confirmation_for_short=tape_score <= -0.2" in src
@@ -60,7 +66,7 @@ def test_scanner_stamps_snapshot_signals_on_alerts():
     """Source-level guard — `alert.rvol = float(...)` etc. must be in
     the scan-symbol path so future alerts carry these signals."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     assert "alert.rvol = float(getattr(snapshot," in src
     assert "alert.gap_pct = float(getattr(snapshot," in src
     assert "alert.atr_percent = float(getattr(snapshot," in src
@@ -82,7 +88,7 @@ def test_grace_period_uses_floor_for_cold_start_strategies():
     when `stats.alerts_triggered < self._win_rate_grace_min_trades`
     must be present in the alert-stamping block."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     assert "_win_rate_grace_min_trades" in src
     assert "stats.alerts_triggered < self._win_rate_grace_min_trades" in src
     assert "alert.strategy_win_rate = self._auto_execute_min_win_rate" in src
@@ -92,7 +98,7 @@ def test_grace_period_yields_to_real_rate_after_threshold():
     """Once stats.alerts_triggered >= grace threshold, real win_rate
     takes over. Tested via the source structure (else branch)."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     # The else branch must use stats.win_rate
     grace_block = src.split("_win_rate_grace_min_trades:")[1][:400]
     assert "alert.strategy_win_rate = stats.win_rate" in grace_block
@@ -104,7 +110,7 @@ def test_grace_period_yields_to_real_rate_after_threshold():
 def test_rs_detector_high_threshold_now_5_pct():
     """abs(rs) >= 5.0 → HIGH (was 4.0). Source-level + literal check."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     rs_block_start = src.find("async def _check_relative_strength")
     rs_block = src[rs_block_start:rs_block_start + 2500]
     assert "abs_rs >= 5.0" in rs_block
@@ -117,7 +123,7 @@ def test_rs_detector_high_threshold_now_5_pct():
 def test_rs_detector_three_band_priority_map():
     """The new map: 2.0-3.99 → LOW, 4.0-4.99 → MEDIUM, ≥5.0 → HIGH."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     rs_block_start = src.find("async def _check_relative_strength")
     rs_block = src[rs_block_start:rs_block_start + 2500]
     # All three priorities must appear in the RS detector
@@ -129,7 +135,7 @@ def test_rs_firing_condition_unchanged():
     """Detector still fires only when abs(rs) >= 2.0 AND rvol >= 1.0 —
     we tightened the *priority*, not the firing condition."""
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     rs_block_start = src.find("async def _check_relative_strength")
     rs_block = src[rs_block_start:rs_block_start + 1000]
     assert "abs(rs) < 2.0 or snapshot.rvol < 1.0" in rs_block

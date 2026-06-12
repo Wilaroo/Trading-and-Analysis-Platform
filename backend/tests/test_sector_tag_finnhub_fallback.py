@@ -16,6 +16,12 @@ Post-fix:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
@@ -25,11 +31,11 @@ sys.path.insert(0, "/app/backend")
 import pytest  # noqa: E402
 
 SECTOR_TAG_SRC = Path(
-    "/app/backend/services/sector_tag_service.py"
+    (_REPO_ROOT + "/backend/services/sector_tag_service.py")
 ).read_text("utf-8")
 
 SECTOR_REGIME_SRC = Path(
-    "/app/backend/services/sector_regime_classifier.py"
+    (_REPO_ROOT + "/backend/services/sector_regime_classifier.py")
 ).read_text("utf-8")
 
 

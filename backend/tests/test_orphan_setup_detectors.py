@@ -30,6 +30,12 @@ These tests do NOT require live IB data — they construct fake
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import importlib
 import sys
@@ -113,7 +119,7 @@ def test_all_new_setups_registered_in_checkers_and_frozenset():
     `_check_setup` AND the class-level `REGISTERED_SETUP_TYPES`
     frozenset, so `/api/scanner/setup-coverage` reports them as
     `active_detectors` / `silent_detectors` (not `orphan_enabled_setups`)."""
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     fn_idx = src.index("async def _check_setup(self,")
     body_end = src.index("REGISTERED_SETUP_TYPES", fn_idx)
     body = src[fn_idx:body_end]

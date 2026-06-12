@@ -9,6 +9,12 @@ deterministic. HTTP behaviour is covered separately by testing_agent.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import os
 from pathlib import Path
 
@@ -17,8 +23,8 @@ import pytest
 
 # ======================== Task 1: TopMoversTile ==========================
 
-TILE_PATH = Path("/app/frontend/src/components/sentcom/v5/TopMoversTile.jsx")
-V5_VIEW_PATH = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx")
+TILE_PATH = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/TopMoversTile.jsx"))
+V5_VIEW_PATH = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx"))
 
 
 def test_top_movers_tile_exists():
@@ -81,8 +87,8 @@ def test_top_movers_clicks_open_ticker_modal():
 
 # ==================== Task 2: Phase 4 Alpaca retirement ==================
 
-SERVER_PATH = Path("/app/backend/server.py")
-IB_ROUTER_PATH = Path("/app/backend/routers/ib.py")
+SERVER_PATH = Path((_REPO_ROOT + "/backend/server.py"))
+IB_ROUTER_PATH = Path((_REPO_ROOT + "/backend/routers/ib.py"))
 
 
 def test_server_reads_enable_alpaca_fallback_env():
@@ -134,7 +140,7 @@ def test_ib_analysis_label_no_longer_hardcoded_alpaca():
 
 # ==================== Task 3: AI Chat snapshot injection =================
 
-CHAT_SERVER_PATH = Path("/app/backend/chat_server.py")
+CHAT_SERVER_PATH = Path((_REPO_ROOT + "/backend/chat_server.py"))
 
 
 def test_chat_server_injects_live_symbol_snapshot():

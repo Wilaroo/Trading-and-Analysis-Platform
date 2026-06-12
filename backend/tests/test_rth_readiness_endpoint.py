@@ -16,6 +16,12 @@ Tests cover:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -25,7 +31,7 @@ sys.path.insert(0, "/app/backend")
 import pytest  # noqa: E402
 
 DIAG_SRC = Path(
-    "/app/backend/routers/diagnostic_router.py"
+    (_REPO_ROOT + "/backend/routers/diagnostic_router.py")
 ).read_text("utf-8")
 
 
@@ -278,7 +284,7 @@ def test_check_data_request_queue_green_when_empty():
 
 
 SCANNER_SRC = Path(
-    "/app/backend/services/enhanced_scanner.py"
+    (_REPO_ROOT + "/backend/services/enhanced_scanner.py")
 ).read_text("utf-8")
 
 

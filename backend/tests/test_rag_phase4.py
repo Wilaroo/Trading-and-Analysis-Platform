@@ -13,6 +13,12 @@ Tests the RAG Knowledge Base endpoints for personalized AI context:
 - POST /api/rag/clear-cache - Clear embedding cache
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -51,7 +57,7 @@ class TestRAGStats:
         # Vector store stats
         assert "vector_store" in stats
         vector_stats = stats["vector_store"]
-        assert vector_stats["persist_directory"] == "/app/backend/data/chromadb"
+        assert vector_stats["persist_directory"] == (_REPO_ROOT + "/backend/data/chromadb")
         assert "collections" in vector_stats
         assert "document_counts" in vector_stats
         assert "total_documents" in vector_stats
@@ -478,7 +484,7 @@ class TestRAGVectorStore:
         assert stats_response.status_code == 200
         
         vector_stats = stats_response.json()["stats"]["vector_store"]
-        assert vector_stats["persist_directory"] == "/app/backend/data/chromadb"
+        assert vector_stats["persist_directory"] == (_REPO_ROOT + "/backend/data/chromadb")
 
 
 class TestRAGEdgeCases:

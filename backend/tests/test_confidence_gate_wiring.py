@@ -10,6 +10,12 @@ Tests for iteration 111 - verifying:
 Flow: Setup Detected → Smart Filter → Confidence Gate → Position Sizing → Execute or Skip
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -151,7 +157,7 @@ class TestColdStartBootstrapMode:
         # This is a code review test - we verify the logic exists by checking the file
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "COLD-START BOOTSTRAP MODE", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-n", "COLD-START BOOTSTRAP MODE", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "COLD-START BOOTSTRAP MODE" in result.stdout
@@ -159,7 +165,7 @@ class TestColdStartBootstrapMode:
         
         # Verify the bootstrap return block exists
         result2 = subprocess.run(
-            ["grep", "-A5", "completed_trades == 0", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-A5", "completed_trades == 0", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "REDUCE_SIZE" in result2.stdout
@@ -177,7 +183,7 @@ class TestConfidenceGateWiringVerification:
         """Verify _confidence_gate is initialized in TradingBotService.__init__"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "_confidence_gate = None", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-n", "_confidence_gate = None", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "_confidence_gate = None" in result.stdout
@@ -187,7 +193,7 @@ class TestConfidenceGateWiringVerification:
         """Verify set_confidence_gate method exists (lines 704-717)"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "def set_confidence_gate", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-n", "def set_confidence_gate", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "def set_confidence_gate" in result.stdout
@@ -197,7 +203,7 @@ class TestConfidenceGateWiringVerification:
         """Verify _confidence_gate.evaluate() is called in _evaluate_opportunity method"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "_confidence_gate.evaluate", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-n", "_confidence_gate.evaluate", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "_confidence_gate.evaluate" in result.stdout
@@ -207,7 +213,7 @@ class TestConfidenceGateWiringVerification:
         """Verify confidence gate is wired to trading bot in server.py (lines 615-625)"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "set_confidence_gate", "/app/backend/server.py"],
+            ["grep", "-n", "set_confidence_gate", (_REPO_ROOT + "/backend/server.py")],
             capture_output=True, text=True
         )
         assert "set_confidence_gate" in result.stdout
@@ -215,7 +221,7 @@ class TestConfidenceGateWiringVerification:
         
         # Also verify init_confidence_gate is called
         result2 = subprocess.run(
-            ["grep", "-n", "init_confidence_gate", "/app/backend/server.py"],
+            ["grep", "-n", "init_confidence_gate", (_REPO_ROOT + "/backend/server.py")],
             capture_output=True, text=True
         )
         assert "init_confidence_gate" in result2.stdout
@@ -231,7 +237,7 @@ class TestEntryContextConfidenceGate:
         """Verify _build_entry_context method accepts confidence_gate_result parameter"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-n", "confidence_gate_result: Dict = None", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-n", "confidence_gate_result: Dict = None", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "confidence_gate_result" in result.stdout
@@ -241,7 +247,7 @@ class TestEntryContextConfidenceGate:
         """Verify entry_context captures confidence_gate data (lines 2782-2790)"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-A10", 'ctx\\["confidence_gate"\\]', "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-A10", 'ctx\\["confidence_gate"\\]', (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert 'ctx["confidence_gate"]' in result.stdout
@@ -259,7 +265,7 @@ class TestEntryContextConfidenceGate:
         """Verify confidence_gate_result is passed to _build_entry_context call"""
         import subprocess
         result = subprocess.run(
-            ["grep", "-B2", "confidence_gate_result=confidence_gate_result", "/app/backend/services/trading_bot_service.py"],
+            ["grep", "-B2", "confidence_gate_result=confidence_gate_result", (_REPO_ROOT + "/backend/services/trading_bot_service.py")],
             capture_output=True, text=True
         )
         assert "confidence_gate_result=confidence_gate_result" in result.stdout

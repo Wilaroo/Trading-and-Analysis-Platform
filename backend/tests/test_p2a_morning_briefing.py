@@ -9,6 +9,12 @@ Contracts for:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -142,7 +148,7 @@ async def test_compute_batch_bounded_and_ranked(monkeypatch):
 
 # ====================== live_data_router new endpoints ==================
 
-LIVE_ROUTER_SRC = Path("/app/backend/routers/live_data_router.py").read_text(encoding="utf-8")
+LIVE_ROUTER_SRC = Path((_REPO_ROOT + "/backend/routers/live_data_router.py")).read_text(encoding="utf-8")
 
 
 def test_briefing_watchlist_endpoint_exists():
@@ -176,8 +182,8 @@ def test_watchlist_builder_uses_positions_scanner_and_indices():
 
 # ====================== Frontend wiring ==================================
 
-MODAL_SRC = Path("/app/frontend/src/components/MorningBriefingModal.jsx").read_text(encoding="utf-8")
-HOOK_SRC = Path("/app/frontend/src/components/sentcom/v5/useBriefingLiveData.js").read_text(encoding="utf-8")
+MODAL_SRC = Path((_REPO_ROOT + "/frontend/src/components/MorningBriefingModal.jsx")).read_text(encoding="utf-8")
+HOOK_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/useBriefingLiveData.js")).read_text(encoding="utf-8")
 
 
 def test_modal_uses_useBriefingLiveData_hook():
@@ -221,9 +227,9 @@ def test_hook_fetches_in_parallel():
 
 # ====================== Modal trigger wiring (fix for iter_134 bug) ======
 
-SENTCOM_SRC = Path("/app/frontend/src/components/SentCom.jsx").read_text(encoding="utf-8")
-V5_VIEW_SRC = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text(encoding="utf-8")
-BRIEFINGS_V5_SRC = Path("/app/frontend/src/components/sentcom/v5/BriefingsV5.jsx").read_text(encoding="utf-8")
+SENTCOM_SRC = Path((_REPO_ROOT + "/frontend/src/components/SentCom.jsx")).read_text(encoding="utf-8")
+V5_VIEW_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text(encoding="utf-8")
+BRIEFINGS_V5_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/BriefingsV5.jsx")).read_text(encoding="utf-8")
 
 
 def test_sentcom_mounts_morning_briefing_modal():
@@ -256,7 +262,7 @@ def test_router_exposes_yesterday_close_hours():
     """The overnight-sentiment endpoint must return how many hours the
     yesterday_close window spans so the UI can surface 'weekend catchup'
     context on Mondays."""
-    src = Path("/app/backend/routers/live_data_router.py").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/backend/routers/live_data_router.py")).read_text(encoding="utf-8")
     assert "yesterday_close_hours" in src
     assert "yesterday_close_start" in src
     assert "yesterday_close_end" in src
@@ -293,7 +299,7 @@ def test_overnight_sentiment_auto_hidden_during_rth():
 
 # ====================== NIA DataCacheProvider warning fix ================
 
-NIA_SRC = Path("/app/frontend/src/components/NIA/index.jsx").read_text(encoding="utf-8")
+NIA_SRC = Path((_REPO_ROOT + "/frontend/src/components/NIA/index.jsx")).read_text(encoding="utf-8")
 
 
 def test_nia_setCached_no_longer_inside_setData():

@@ -23,6 +23,12 @@ These tests fence both ends of the contract:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import inspect
 import pytest
 import requests
@@ -109,13 +115,13 @@ class TestPusherReportSignature:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
             "_pusher_for_test",
-            "/app/documents/scripts/ib_data_pusher.py",
+            (_REPO_ROOT + "/documents/scripts/ib_data_pusher.py"),
         )
         try:
             mod = importlib.util.module_from_spec(spec)
             # We don't actually exec the module (it has IB / Windows
             # imports). Instead just grep the source for the signature.
-            with open("/app/documents/scripts/ib_data_pusher.py") as f:
+            with open((_REPO_ROOT + "/documents/scripts/ib_data_pusher.py")) as f:
                 src = f.read()
             return src
         except Exception as exc:

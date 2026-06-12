@@ -17,6 +17,12 @@ the chip's tooltip + render paths.
 These tests pin the contract.
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 from services.account_guard import summarize_for_ui
@@ -63,7 +69,7 @@ def test_effective_mode_falls_back_to_active_when_pusher_offline():
 
 def test_account_mode_badge_removed_from_hud():
     """SentComV5View must no longer mount the deprecated AccountModeBadge."""
-    src = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text("utf-8")
     # Strip JSX comments so our reasoning-comment about the removal isn't
     # mistaken for an actual mount.
     import re
@@ -79,7 +85,7 @@ def test_account_mode_badge_removed_from_hud():
 
 def test_account_guard_chip_renders_shadow_state():
     """The guard chip must have a SHADOW render path for pusher-offline state."""
-    src = Path("/app/frontend/src/components/sentcom/v5/SafetyV5.jsx").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/SafetyV5.jsx")).read_text("utf-8")
     assert "v5-chip-shadow" in src, (
         "AccountGuardChipV5 missing the v5-chip-shadow className — SHADOW "
         "state will fall through to the wrong render path."
@@ -99,7 +105,7 @@ def test_account_guard_chip_tooltip_has_effective_mode():
     """The guard chip tooltip must include 'Next fill →' so the operator
     can spot a paper/live drift before the next trade fires.
     """
-    src = Path("/app/frontend/src/components/sentcom/v5/SafetyV5.jsx").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/SafetyV5.jsx")).read_text("utf-8")
     assert "Next fill" in src, (
         "AccountGuardChipV5 tooltip must show 'Next fill →' (effective_mode) "
         "so operators see paper/live drift before it ruins a trade."
@@ -111,7 +117,7 @@ def test_account_guard_chip_tooltip_has_effective_mode():
 
 def test_shadow_chip_css_present():
     """useV5Styles must define the .v5-chip-shadow class with sky coloring."""
-    css = Path("/app/frontend/src/components/sentcom/v5/useV5Styles.js").read_text("utf-8")
+    css = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/useV5Styles.js")).read_text("utf-8")
     assert ".v5-chip-shadow" in css, (
         "useV5Styles is missing the .v5-chip-shadow CSS class."
     )

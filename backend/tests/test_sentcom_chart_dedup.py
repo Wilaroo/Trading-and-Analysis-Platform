@@ -10,10 +10,16 @@ timestamps — the Command Center crashed at ChartPanel with index=42.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import re
 from pathlib import Path
 
-SENTCOM_CHART_PATH = Path("/app/backend/routers/sentcom_chart.py")
+SENTCOM_CHART_PATH = Path((_REPO_ROOT + "/backend/routers/sentcom_chart.py"))
 
 
 def _read(p: Path) -> str:

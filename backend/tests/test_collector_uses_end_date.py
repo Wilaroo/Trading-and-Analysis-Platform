@@ -13,13 +13,19 @@ parse the collector source instead. Fast, deterministic, no network.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import re
 from pathlib import Path
 
 import pytest
 
-COLLECTOR_PATH = Path("/app/documents/scripts/ib_historical_collector.py")
-BACKEND_PLANNER_PATH = Path("/app/backend/services/ib_historical_collector.py")
+COLLECTOR_PATH = Path((_REPO_ROOT + "/documents/scripts/ib_historical_collector.py"))
+BACKEND_PLANNER_PATH = Path((_REPO_ROOT + "/backend/services/ib_historical_collector.py"))
 
 
 def _read(p: Path) -> str:

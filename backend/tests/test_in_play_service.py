@@ -25,6 +25,12 @@ Covers:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from typing import Dict, List
@@ -316,7 +322,7 @@ def test_live_alert_has_in_play_fields():
 
 def test_scanner_uses_unified_in_play_service():
     from pathlib import Path
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     assert "get_in_play_service" in src
     assert "score_from_snapshot" in src
     assert "_symbols_skipped_in_play" in src
@@ -330,7 +336,7 @@ def test_alert_system_check_in_play_is_a_shim():
     `InPlayService.score_from_market_data` instead of duplicating the
     rubric inline."""
     from pathlib import Path
-    src = Path("/app/backend/services/alert_system.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/alert_system.py")).read_text("utf-8")
     # The shim imports + calls the unified service
     assert "from services.in_play_service import" in src
     assert "score_from_market_data" in src
@@ -356,7 +362,7 @@ def test_legacy_shim_returns_local_inplayqualification_dataclass():
 
 def test_config_endpoint_referenced_in_router():
     from pathlib import Path
-    src = Path("/app/backend/routers/scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/routers/scanner.py")).read_text("utf-8")
     assert "/in-play-config" in src
     assert "get_in_play_config" in src
     assert "update_in_play_config" in src

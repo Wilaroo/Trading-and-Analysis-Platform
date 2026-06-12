@@ -24,6 +24,12 @@ DB writes) and the cycle is async-driven by `asyncio.sleep`.
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from pathlib import Path
 
@@ -32,7 +38,7 @@ sys.path.insert(0, "/app/backend")
 import pytest  # noqa: E402
 
 SCAN_LOOP_SRC = Path(
-    "/app/backend/services/trading_bot_service.py"
+    (_REPO_ROOT + "/backend/services/trading_bot_service.py")
 ).read_text("utf-8")
 
 
@@ -139,7 +145,7 @@ def test_diagnostic_collection_mode_label_updated():
     """The diagnostic router's collection_mode_pause stage label should
     say 'pauses ALERT INTAKE only' so the operator sees that open
     positions are still being managed."""
-    src = Path("/app/backend/routers/diagnostic_router.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/routers/diagnostic_router.py")).read_text("utf-8")
     assert "pauses ALERT INTAKE only" in src
     assert "open positions still managed" in src.lower() or "open positions still managed" in src
 

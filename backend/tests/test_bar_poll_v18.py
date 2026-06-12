@@ -16,6 +16,12 @@ Server-side IB bracket regression guards:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import re
 from datetime import datetime, timezone
@@ -327,7 +333,7 @@ def test_execute_trade_calls_place_bracket_order_first():
         "place_bracket_order MUST be called BEFORE execute_entry in execute_trade. "
         "If reversed, the legacy two-step entry+stop flow becomes the default and "
         "stops/targets stop being broker-managed. See Phase 3 migration spec in "
-        "/app/memory/IB_BRACKET_ORDER_MIGRATION.md."
+        (_REPO_ROOT + "/memory/IB_BRACKET_ORDER_MIGRATION.md.")
     )
 
 

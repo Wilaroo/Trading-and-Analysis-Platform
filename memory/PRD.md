@@ -802,3 +802,21 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   logs when N>0, confirmed in code). PRE-OPEN VERDICT: GREEN. NOTE: paste.rs ALSO 500s
   on ~88KB uploads now — keep patchers compact (anchored-chunk) and always round-trip
   verify.
+- 2026-06-12 v322w SHIPPED (patcher https://paste.rs/6Wnyd, 27KB, sim+round-trip
+  verified): housekeeping batch. (1) AGENTS.md §2+§11.5 refreshed — anchored-chunk
+  hash-guarded patcher convention documented, paste.rs caps + round-trip rule, drift
+  protocol. (2) NEW scripts/fix_test_paths_portable.py — sweeps 49 test files /
+  150 hardcoded "/app/..." literals to _REPO_ROOT-relative (operator runs --check/
+  --apply on DGX; in-container validated: ast-clean, pytest before/after identical
+  17F/27P sample). (3) NEW scripts/diag_tqs_metalabel_readiness.py — read-only probe
+  gating TQS 0-100 rescale (A-vs-B sample sufficiency) + meta-labeling (closed per
+  setup ≥50/100). PROBE RESULTS (squeeze/dedupe, run 13:19Z): duplicates=NONE →
+  repair_dedupe RETIRED; squeeze violations all LEGACY, none post-v322u → fix
+  confirmed-by-design, keep watching. QUARANTINE LABEL: already done in v322j
+  (timeseries_service.py:2161-2186) → RETIRED from backlog. ML freshness retrain:
+  SUPERSEDED by 2026-06-10/11 full retrain (162 models) → RETIRED. MICRO_SETUPS:
+  recommended DROP (never shipped, no env var, PBO quarantine covers concern;
+  resurrectable from git d7c64e97) — awaiting user confirmation.
+  NEXT: user applies v322w + runs sweep + probe → probe results gate TQS rescale &
+  meta-labeling decisions. Then: Tier 2a calibration (approved, needs design),
+  IGV INT-21 guard, v322p decay rework.

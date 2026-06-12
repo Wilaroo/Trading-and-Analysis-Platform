@@ -40,6 +40,12 @@ These tests pin all three at source/behaviour level.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import inspect
 import os
@@ -317,7 +323,7 @@ def test_start_backend_sh_has_skip_if_healthy_guard():
     """The `start_backend.sh` script MUST short-circuit when /api/health
     returns 200, so the operator can't accidentally kill a healthy backend.
     """
-    with open("/app/start_backend.sh") as f:
+    with open((_REPO_ROOT + "/start_backend.sh")) as f:
         src = f.read()
     # Must check /api/health BEFORE the fuser kill step.
     assert "curl -sf -m 5 http://127.0.0.1:8001/api/health" in src
@@ -339,7 +345,7 @@ def test_start_backend_sh_has_skip_if_healthy_guard():
 
 def test_spark_start_sh_has_skip_if_healthy_guard():
     """Same guard on the orchestrator-called script."""
-    with open("/app/scripts/spark_start.sh") as f:
+    with open((_REPO_ROOT + "/scripts/spark_start.sh")) as f:
         src = f.read()
     assert "Backend already healthy" in src
     assert "--force" in src
@@ -351,7 +357,7 @@ def test_start_backend_sh_cold_boot_wait_is_120s():
     """Cold-boot wait bumped 60s → 120s. The deferred-init storm
     legitimately takes 60-90s; the watchdog catches genuine wedges.
     """
-    with open("/app/start_backend.sh") as f:
+    with open((_REPO_ROOT + "/start_backend.sh")) as f:
         src = f.read()
     # The startup wait loop bound — was {1..60}, now {1..120}.
     assert "for i in {1..120}" in src
@@ -360,7 +366,7 @@ def test_start_backend_sh_cold_boot_wait_is_120s():
 
 def test_spark_start_sh_cold_boot_wait_is_120s():
     """Same bump in the orchestrator path."""
-    with open("/app/scripts/spark_start.sh") as f:
+    with open((_REPO_ROOT + "/scripts/spark_start.sh")) as f:
         src = f.read()
     assert "for i in $(seq 1 120)" in src
     assert "120s" in src

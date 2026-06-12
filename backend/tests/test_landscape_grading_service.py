@@ -24,6 +24,12 @@ Covers:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from typing import Dict, List
@@ -649,14 +655,14 @@ def test_record_prediction_called_from_get_snapshot():
     """`SetupLandscapeService.get_snapshot` should call into the
     grading service so every snapshot is auto-persisted."""
     from pathlib import Path
-    src = Path("/app/backend/services/setup_landscape_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/setup_landscape_service.py")).read_text("utf-8")
     assert "record_prediction" in src
     assert "get_landscape_grading_service" in src
 
 
 def test_eod_scheduler_includes_landscape_grading():
     from pathlib import Path
-    src = Path("/app/backend/services/eod_generation_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/eod_generation_service.py")).read_text("utf-8")
     assert "auto_landscape_grading" in src
     assert "_run_landscape_grading" in src
     # Runs at 16:50 ET (after DRC + playbook, before reflection)

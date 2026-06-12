@@ -19,9 +19,15 @@ Background:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
-ROUTER_PATH = Path("/app/backend/routers/scanner.py")
+ROUTER_PATH = Path((_REPO_ROOT + "/backend/routers/scanner.py"))
 
 
 def test_setup_coverage_endpoint_registered():
@@ -85,7 +91,7 @@ def test_registered_set_matches_checkers_dict():
     import re
     from pathlib import Path
 
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     # 1) Pull every `"setup_name": self._check_*` pair from `_check_setup`.
     fn_idx = src.index("async def _check_setup(self,")
     body_end = src.index("REGISTERED_SETUP_TYPES", fn_idx)

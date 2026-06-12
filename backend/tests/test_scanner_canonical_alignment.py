@@ -12,6 +12,12 @@ with the AI-trained universe.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import os
 import asyncio
 from typing import Any, Dict, List
@@ -126,7 +132,7 @@ def test_wave_scanner_excludes_unqualifiable_symbols():
 
 def test_wave_scanner_no_alpaca_no_index_universe_imports():
     """The refactored wave_scanner must not import legacy ETF-universe or Alpaca."""
-    src = open("/app/backend/services/wave_scanner.py").read()
+    src = open((_REPO_ROOT + "/backend/services/wave_scanner.py")).read()
     assert "from services.index_universe" not in src, (
         "wave_scanner must no longer depend on index_universe.py."
     )

@@ -72,11 +72,24 @@ removed from the critical path to eliminate train/serve data skew.
 1. **NO Emergent "Save to Github" UI button.** `/app` (this fork) is
    disconnected from the user's GitHub repo. Instruct the user to
    `git add/commit/push` directly from the DGX terminal.
-2. **Patch deployment uses `paste.rs`.** Reason: the DGX terminal
-   corrupts bash heredocs / multi-line string replacements. Generate a
-   `.patch` file locally → upload via `curl --data-binary
-   @file https://paste.rs/` → give user a one-liner
-   `curl -o /tmp/x.patch <url> && git apply --check && git apply`.
+2. **Patch deployment uses `paste.rs` python patchers.** Reason: the
+   DGX terminal corrupts bash heredocs / multi-line string
+   replacements, and `git apply .patch` proved drift-fragile. Current
+   convention (v322t+ era, battle-tested):
+   - Generate a **compact anchored-chunk python patcher**: each edit is
+     a base64 (old, new) chunk pair + per-file SHA256 **pre** AND
+     **post** hash guards. The patcher ABORTS before writing anything
+     on drift, supports `--check` dry-run, backs up originals, and
+     refuses to write unless the post-patch hash equals the tested
+     build. Whole-file embeds only for small NEW files.
+   - **paste.rs limits**: silently truncates ~384KB uploads and 500s
+     intermittently on ~88KB ones. Keep patchers compact (<50KB) and
+     ALWAYS round-trip verify: download the returned URL and `cmp`
+     against the local file BEFORE giving the user the link.
+   - On a hash-mismatch abort, the DGX file has drifted: ask the user
+     to upload THEIR copy (`curl --data-binary @file https://paste.rs/`),
+     adopt it as the canonical baseline, rebase the edits, re-test,
+     rebuild. Never `--force` blind.
 3. **Frontend changes require `cd frontend && yarn build`** before they
    appear (FastAPI serves the static build, not dev-server).
 4. **Backend restart**: `./start_backend.sh --force` (the `--force` is
@@ -565,18 +578,21 @@ bash scripts/tail_pipeline.sh --errors  # errors-only
 bash scripts/tail_pipeline.sh --trades  # fills + closes only
 ```
 
-### Build + deploy a patch (full DGX flow)
+### Build + deploy a patch (full DGX flow — v322t+ convention)
 ```bash
-# On dev machine:
-cd /app && git diff --cached > /tmp/v19_34_XX.patch
-curl -sS --data-binary @/tmp/v19_34_XX.patch https://paste.rs/
-# → returns URL like https://paste.rs/AbCdE
+# On dev machine: build a hash-guarded anchored-chunk python patcher
+# (see §2 deploy contract item 2), then:
+curl -sS --data-binary @/tmp/patcher_vXXX.py https://paste.rs/   # → URL
+curl -sS -o /tmp/rt.py <URL> && cmp /tmp/rt.py /tmp/patcher_vXXX.py  # MUST verify
 
 # On DGX (operator):
-curl -sS -o /tmp/v19_34_XX.patch https://paste.rs/AbCdE && \
-  git apply --check /tmp/v19_34_XX.patch && \
-  git apply /tmp/v19_34_XX.patch && \
-  ./start_backend.sh --force
+curl -sS -o /tmp/patcher_vXXX.py https://paste.rs/<id>
+python3 /tmp/patcher_vXXX.py --check    # dry-run: hash + anchor guards
+python3 /tmp/patcher_vXXX.py            # apply (auto-backup)
+.venv/bin/python -m pytest <suite> -q   # verify
+# ⚠️ COMMIT BEFORE ANY RESTART (StartTrading.bat git-wipes uncommitted code):
+git add backend/ && git commit -m "vXXX: ..." && git push origin main
+./start_backend.sh --force              # or next StartTrading.bat boot
 ```
 
 ### Run the test suite

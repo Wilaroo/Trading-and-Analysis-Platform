@@ -23,6 +23,12 @@ Phases shipped:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from datetime import datetime, timezone, timedelta
@@ -300,7 +306,7 @@ def test_open_positions_renders_provenance_chip():
     """OpenPositionsV5 must render a RECONCILED chip when
     entered_by==reconciled_external, plus a ⚠ CONFLICT chip when
     prior_verdict_conflict is True."""
-    f = Path("/app/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx")).read_text()
     assert "reconciled_external" in f
     assert "RECONCILED" in f
     assert "CONFLICT" in f
@@ -313,7 +319,7 @@ def test_open_positions_renders_provenance_chip():
 def test_open_positions_legend_documents_provenance_chips():
     """The `?` legend popover must explain the BOT / RECONCILED /
     CONFLICT chips."""
-    f = Path("/app/frontend/src/components/sentcom/v5/OpenPositionsLegend.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/OpenPositionsLegend.jsx")).read_text()
     assert "_PROVENANCE_ROWS" in f
     assert "RECONCILED" in f
     assert "CONFLICT" in f

@@ -23,6 +23,12 @@ Covers:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from typing import Dict, List
@@ -470,7 +476,7 @@ def test_apply_setup_context_sector_regime_unknown_for_untagged_symbol():
 
 def test_training_path_uses_sector_hist_provider():
     from pathlib import Path
-    src = Path("/app/backend/services/ai_modules/timeseries_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/ai_modules/timeseries_service.py")).read_text("utf-8")
     assert "SectorRegimeHistoricalProvider" in src
     assert "sector_hist_provider" in src
     assert "get_sector_regime_for" in src
@@ -478,6 +484,6 @@ def test_training_path_uses_sector_hist_provider():
 
 def test_predict_path_reads_cached_sector_label():
     from pathlib import Path
-    src = Path("/app/backend/services/ai_modules/timeseries_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/ai_modules/timeseries_service.py")).read_text("utf-8")
     assert "get_sector_regime_classifier" in src
     assert "sector_label" in src
