@@ -3,6 +3,54 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## Session Summary - 2026-06-12 (sanitization probes + v322x observability; calibration PARKED)
+
+| Version | Topic | Status |
+|---|---|---|
+| sanitize_v1 probe | `diag_sanitized_closed_trades.py` (paste.rs F88ca) — 9-stage exclusion funnel | RUN on DGX 13:55Z |
+| sanitize_v2 probe | same script upgraded: + `classify_close()` hygiene layer, legacy_orphan, emergency_flatten | UPLOADED CnLiR, awaiting DGX run |
+| v322x | TQS enrichment observability thought (🧮 pre→post TQS shift in stream) | UPLOADED PzSgh, awaiting DGX apply |
+| MICRO_SETUPS | orphan applier `apply_v19_34_266.py` deleted (sandbox-only; never on DGX) | DONE — drift closed |
+
+### sanitize_v1 RESULTS (DGX run 2026-06-12 13:55Z) — raw counts were GARBAGE-INFLATED
+Raw 1594 closed → **257 survivors (16.1%)**. Exclusions: 645 no_exit_price (legacy
+"validator fail-open era" cleanups), 206 simulated, 199 provenance, 107 admin_close,
+91 learning_only, 55 sub-10s holds, 23 |R|>10.
+- **TQS rescale verdict: NO-GO ❌** — sanitized A n=13, B n=15 (needed ≥30 each).
+  The v322w probe's "A/B >30" was phantom-era debris.
+- **Meta-labeling verdict: NO-GO ❌** — `accumulation_entry` collapsed 102 → **9**
+  (May 19–26 phantom/drift crisis artifacts, exactly as `trade_outcome_hygiene.py`
+  documents). `squeeze` 490 → 82 (borderline).
+- v1 was still too lenient: 70 `orphaned_position_cleanup` (legacy reason, no current
+  code produces it), 47 `wrong_direction_phantom_swept`, 10 phantom_recovery rows
+  survived → sanitize_v2 layers canonical `classify_close()`; true core est. ~130-145.
+- Era trend healthy: May n=110 win36.4%/avgR+0.10 → June n=62 win46.8%/avgR-0.01.
+- `/tmp/sanitized_trade_ids.json` written on DGX — future calibration reuses this filter.
+
+### TQS card-vs-eval audit (SOLVED — by design, surfacing fixed by v322x)
+"🤔 Evaluating XOM (TQS 54 C)" vs card "TQS 60 B" = PRE-gate TQS (scanner, used as
+confidence-gate quality input, `opportunity_evaluator.py:705`) vs POST-gate AI-enriched
+recalc (GAP 3, line ~798) which is what gets STAMPED on the trade (line ~1453). Both
+preserved in `entry_context.tqs` with delta. v322x emits a 🧮 thought on material shift
+(≥1.0 pt or grade flip) so the trail reads "54 C → 60 B (model agrees, NN% conf)".
+
+### 🔵 PARKED (user-approved 2026-06-12) — data-sufficiency gated
+- **Tier 2a per-model probability calibration + TQS outcome-based recalibration/rescale**
+  — wait until SANITIZED A≥30 and B≥30 (est. ~6-8 weeks at current clean-data accrual).
+  Re-run `diag_sanitized_closed_trades.py` to check. Design notes: isotonic fit of
+  expected R / win-prob on tqs_score, rescale to outcome percentile (cosmetic 0-100
+  spread alone would NOT fix discrimination).
+- **v322y meta-labeling (take/skip layer)** — re-check when sanitized `squeeze` ≥100
+  (~82 at sanitize_v1; v2 will lower it). `accumulation_entry` OUT (n=9 clean).
+
+### Still pending (carried)
+- M0 ladder live validation — first SCALP fill (06-12 fills were opening_drive
+  INTRADAY/M-DAY only, ladder not exercised yet).
+- 🔴 SECURITY (user action): rotate Atlas MongoDB password.
+- IGV "Range Break" false trigger (INT-21 guard), ELF→XLE `_industry_to_etf` audit,
+  v322p decay-timer rework, chart-slow diagnosis, quarantine "MISSING"→"QUARANTINED"
+  label, EOD flatten modal / regime strip (v322q), Tier 3a drift-monitor UI tile.
+
 ## Session Summary - 2026-06-11 (v322f/g/e shipped + RETRAIN DONE + Tier 3b ENFORCED)
 
 | Version | Topic | Status |

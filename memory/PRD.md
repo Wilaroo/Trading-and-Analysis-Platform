@@ -837,3 +837,14 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
     vwap_continuation 73. v1 can start scoped to squeeze.
   PENDING: MICRO_SETUPS drop/ship decision; choose next build: Tier 2a calibration
   (incl TQS recalib) vs meta-labeling v1 (squeeze).
+- 2026-06-12 SANITIZATION PIVOT + v322x: User requested double-check of v322w probe's
+  green light → sanitize_v1 probe (9-stage funnel) run on DGX: raw 1594 closed → 257
+  clean (16.1%). TQS rescale NO-GO (A=13/B=15, needed ≥30 each); meta-labeling NO-GO
+  (accumulation_entry 102→9 — May 19-26 phantom-crisis debris; squeeze 490→82).
+  Tier 2a calibration + TQS rescale + v322y meta-labeling PARKED (user-approved),
+  data-sufficiency gated — see ROADMAP 2026-06-12 entry. sanitize_v2 (adds canonical
+  classify_close hygiene layer, legacy_orphan, emergency_flatten) uploaded CnLiR.
+  TQS card-vs-eval audit SOLVED: pre-gate (eval thought, gate input) vs post-gate
+  AI-enriched (stamped on trade) — v322x emits 🧮 enrichment-shift thought (PzSgh,
+  + test_v322x_tqs_enrichment_thought.py). MICRO_SETUPS applier deleted from sandbox
+  (pathspec error on DGX confirmed it never existed there — drift closed).

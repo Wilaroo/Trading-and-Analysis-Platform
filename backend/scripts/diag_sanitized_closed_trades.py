@@ -1,43 +1,41 @@
 #!/usr/bin/env python3
 """
-diag_sanitized_closed_trades.py — READ-ONLY sanitization funnel probe
-======================================================================
-Re-validates TQS-rescale and meta-labeling readiness on a SANITIZED
-trade set instead of the raw `status=closed` dump. Three months of
-pipeline-building left admin/bookkeeping rows, never-filled closes,
-micro learning-only fills and risk-less rows in `bot_trades`; scoring
-against those would poison the calibration.
+diag_sanitized_closed_trades.py — READ-ONLY sanitization funnel probe (v2)
+===========================================================================
+sanitize_v2: layers the codebase's CANONICAL genuineness filter
+(`trade_outcome_hygiene.classify_close`, v19.34.240/263) over the v1
+funnel, plus explicit exclusions v1 missed:
 
-Funnel (first matching reason wins, order matters):
-  1. provenance        — entered_by not bot_fired (adopted/reconciled/manual)
-  2. learning_only     — 0.1x micro data-gathering fills (top-level OR entry_context)
-  3. simulated         — notes contain [SIMULATED] or trade_type=shadow
-  4. admin_close       — close_reason is bookkeeping, not a market exit
-                         (stale_pending, phantom_sibling, consolidated,
-                          broker_rejected, guardrail_veto, cooldowns, etc.)
-  5. never_filled      — no fill/entry price or zero shares
-  6. no_exit_price     — closed row without an exit price stamp
-  7. no_risk           — risk_amount missing/<=0 (R uncomputable → unscorable)
-  8. sub_10s_hold      — held under 10 s (broker artifact / instant flip)
-  9. absurd_r          — |R| > 10 (fat-finger risk bookkeeping)
+  * legacy_orphan      — close_reason contains "orphan"
+                         (orphaned_position_cleanup: 70 rows survived v1;
+                          NO current code path produces this reason — it is
+                          a removed legacy cleanup era)
+  * emergency_flatten  — panic flatten-everything (not a per-trade exit)
+  * hygiene_artifact   — classify_close(is_genuine=False): phantom sweeps,
+                         purges, reconcile closes, operator external
+                         flattens, corrupt-R externals, corrupt P&L
+                         attribution, instant external unwinds, artifact
+                         setup_types (imported_from_ib, reconciled_*)
+
+Full funnel (first matching reason wins, order matters):
+  1. provenance     2. learning_only   3. simulated     4. admin_close
+  5. legacy_orphan  6. hygiene_artifact (tag breakdown printed)
+  7. never_filled   8. no_exit_price   9. no_risk
+ 10. sub_10s_hold  11. absurd_r
 
 Survivors = SANITIZED CORE (meta-labeling basis).
 SCORED CORE = CORE rows with tqs_score > 0 (TQS-rescale basis).
 
-Outputs:
-  * exclusion funnel with counts + 3 spot-check examples per reason
-  * monthly survivor histogram (n / win% / avgR) → pick an era cutoff
-  * close_reason mix of survivors
-  * per-grade outcomes + A/B >=30 re-verdict (SCORED CORE)
-  * tqs_score percentiles (SCORED CORE)
-  * per-setup counts + >=100 meta-label re-verdict (SANITIZED CORE)
-  * writes /tmp/sanitized_trade_ids.json (ids only — NO DB writes)
+Outputs: funnel + hygiene tag breakdown, monthly era histogram,
+close_reason mix, per-grade A/B>=30 re-verdict, per-setup >=100
+re-verdict, /tmp/sanitized_trade_ids.json (NO DB writes).
 
-Run anytime (market open OK):
+Run from repo root:
   .venv/bin/python /tmp/diag_sanitized_closed_trades.py
 """
 import json
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,31 +43,34 @@ from statistics import median
 
 BOT_PROVENANCE = {"bot_fired", "bot", "", None}
 
-# close_reason values that are bookkeeping/admin actions, NOT market exits.
 ADMIN_CLOSE_PREFIXES = (
     "stale_pending", "phantom_sibling_purge", "consolidated",
     "broker_rejected", "execution_exception", "guardrail_veto",
     "intent_already_pending", "rejection_cooldown", "symbol_cooldown",
     "paper_phase", "simulation_phase", "operator_flatten_suppression",
+    "emergency_flatten",
 )
-# external/operator closes are REAL exits with REAL P&L — they stay in,
-# but get surfaced in the close_reason mix so the operator can see them.
 
-FILTER_VERSION = "sanitize_v1"
+FILTER_VERSION = "sanitize_v2"
 OUT_PATH = "/tmp/sanitized_trade_ids.json"
 
 
-def _load_env():
-    for cand in (Path.cwd() / "backend" / ".env",
-                 Path(__file__).resolve().parents[1] / ".env"):
-        if cand.exists():
-            for line in cand.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-            return
+def _find_backend():
+    for cand in (Path.cwd() / "backend", Path(__file__).resolve().parents[1]):
+        if (cand / "services" / "trade_outcome_hygiene.py").exists():
+            return cand
+    print("ERROR: cannot locate backend/ (run from repo root)"); sys.exit(1)
+
+
+def _load_env(backend_dir):
+    env = backend_dir / ".env"
+    if env.exists():
+        for line in env.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def _f(v):
@@ -109,7 +110,7 @@ def _hold_seconds(t):
     return None
 
 
-def _exclusion_reason(t):
+def _exclusion_reason(t, classify_close, hygiene_tags):
     if t.get("entered_by") not in BOT_PROVENANCE:
         return "provenance"
     ec = t.get("entry_context") or {}
@@ -120,6 +121,25 @@ def _exclusion_reason(t):
     cr = str(t.get("close_reason") or "")
     if any(cr.startswith(p) for p in ADMIN_CLOSE_PREFIXES):
         return "admin_close"
+    if "orphan" in cr.lower():
+        return "legacy_orphan"
+    genuine, tag = classify_close(
+        close_reason=cr,
+        entered_by=str(t.get("entered_by") or ""),
+        entry_price=_f(t.get("fill_price")) or _f(t.get("entry_price")),
+        exit_price=_f(t.get("exit_price")),
+        net_pnl=_f(t.get("net_pnl")),
+        hold_seconds=_hold_seconds(t),
+        setup_type=str(t.get("setup_type") or ""),
+        direction=t.get("direction"),
+        stop_price=_f(t.get("stop_price")),
+        target_prices=t.get("target_prices"),
+        realized_pnl=_f(t.get("realized_pnl")),
+        shares=_f(t.get("shares")),
+    )
+    if not genuine:
+        hygiene_tags[tag] += 1
+        return "hygiene_artifact"
     fill = _f(t.get("fill_price")) or _f(t.get("entry_price")) or 0
     if fill <= 0 or (_f(t.get("shares")) or 0) <= 0:
         return "never_filled"
@@ -146,7 +166,10 @@ def _bucket_stats(rows):
 
 
 def main():
-    _load_env()
+    backend = _find_backend()
+    _load_env(backend)
+    sys.path.insert(0, str(backend))
+    from services.trade_outcome_hygiene import classify_close
     from pymongo import MongoClient
     db = MongoClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "tradecommand")]
 
@@ -158,23 +181,24 @@ def main():
          "shares": 1, "risk_amount": 1, "net_pnl": 1, "realized_pnl": 1,
          "pnl": 1, "hold_seconds": 1, "executed_at": 1, "closed_at": 1,
          "created_at": 1, "tqs_score": 1, "tqs_grade": 1, "unified_grade": 1,
-         "setup_type": 1, "trade_style": 1}))
+         "setup_type": 1, "trade_style": 1, "direction": 1, "stop_price": 1,
+         "target_prices": 1}))
 
     print("=" * 78)
     print(f"SANITIZED CLOSED-TRADES PROBE ({FILTER_VERSION}) — {len(closed)} raw closed rows")
     print("=" * 78)
 
-    # ── exclusion funnel ─────────────────────────────────────────────
     excluded = defaultdict(list)
+    hygiene_tags = defaultdict(int)
     core = []
     for t in closed:
-        reason = _exclusion_reason(t)
+        reason = _exclusion_reason(t, classify_close, hygiene_tags)
         (core.append(t) if reason is None else excluded[reason].append(t))
 
     print("\n[1] EXCLUSION FUNNEL (first matching reason wins):")
     order = ["provenance", "learning_only", "simulated", "admin_close",
-             "never_filled", "no_exit_price", "no_risk", "sub_10s_hold",
-             "absurd_r"]
+             "legacy_orphan", "hygiene_artifact", "never_filled",
+             "no_exit_price", "no_risk", "sub_10s_hold", "absurd_r"]
     for reason in order:
         rows = excluded.get(reason, [])
         print(f"     -{len(rows):5d}  {reason}")
@@ -185,8 +209,12 @@ def main():
     print(f"     ={len(core):5d}  SANITIZED CORE survivors "
           f"({100.0*len(core)/max(len(closed),1):.1f}% of raw)")
 
-    # ── monthly era histogram ────────────────────────────────────────
-    print("\n[2] SURVIVORS BY MONTH (era check — was early pipeline garbage?):")
+    if hygiene_tags:
+        print("\n     hygiene_artifact tag breakdown (classify_close):")
+        for tag, n in sorted(hygiene_tags.items(), key=lambda x: -x[1]):
+            print(f"       {n:5d}  {tag}")
+
+    print("\n[2] SURVIVORS BY MONTH (era check):")
     by_month = defaultdict(list)
     blank_created = 0
     for t in core:
@@ -201,7 +229,6 @@ def main():
     if blank_created:
         print(f"     ⚠ {blank_created} survivor(s) with blank created_at (v322s legacy)")
 
-    # ── close_reason mix of survivors ────────────────────────────────
     print("\n[3] SURVIVOR close_reason MIX (top 15):")
     cr_counts = defaultdict(int)
     for t in core:
@@ -209,7 +236,6 @@ def main():
     for cr, n in sorted(cr_counts.items(), key=lambda x: -x[1])[:15]:
         print(f"     {n:5d}  {cr}")
 
-    # ── TQS re-verdict on SCORED CORE ────────────────────────────────
     scored = [t for t in core if (_f(t.get("tqs_score")) or 0) > 0]
     print(f"\n[4] SCORED CORE (tqs_score>0): {len(scored)} of {len(core)} survivors")
     if scored:
@@ -230,7 +256,6 @@ def main():
     else:
         print("     → no scored survivors — TQS rescale has no clean evidence base.")
 
-    # ── meta-labeling re-verdict on SANITIZED CORE ───────────────────
     per_setup = defaultdict(int)
     for t in core:
         per_setup[str(t.get("setup_type") or "?")] += 1
@@ -241,7 +266,6 @@ def main():
     ready = sorted(k for k, v in per_setup.items() if v >= 100)
     print(f"     → meta-labeling READY after sanitization: {ready or 'NONE'}")
 
-    # ── persist the sanitized id list (local file, NO DB writes) ─────
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "filter_version": FILTER_VERSION,
@@ -253,7 +277,7 @@ def main():
     }
     Path(OUT_PATH).write_text(json.dumps(payload))
     print(f"\n[6] wrote sanitized id list → {OUT_PATH} "
-          f"(core={len(core)}, scored={len(scored)}) — v322x calibration will reuse this filter.")
+          f"(core={len(core)}, scored={len(scored)})")
 
     print("\n" + "=" * 78)
     print(f"probe complete {datetime.now(timezone.utc).isoformat()[:19]}Z — no DB writes")

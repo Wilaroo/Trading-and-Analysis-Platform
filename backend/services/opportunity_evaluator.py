@@ -813,6 +813,45 @@ class OpportunityEvaluator:
                             f"Post-gate TQS for {symbol}: {recalc_tqs.score:.1f} "
                             f"(pre-gate: {alert.get('tqs_score', 'N/A')})"
                         )
+
+                        # ── v322x — TQS enrichment observability ─────────
+                        # The "🤔 Evaluating" thought fires with the
+                        # PRE-gate TQS, but the trade card shows this
+                        # POST-gate (AI-enriched) score stamped at trade
+                        # creation. When enrichment shifts the number the
+                        # operator saw two unexplained values (e.g. XOM
+                        # eval'd "54 C" but card "60 B"). Surface the shift
+                        # explicitly so the trail reads 54 C → 60 B.
+                        try:
+                            _pre_s = float(alert.get("tqs_score") or 0)
+                            _post_s = float(recalc_tqs.score or 0)
+                            _pre_g = str(alert.get("tqs_grade") or "")
+                            _post_g = str(recalc_tqs.grade or "")
+                            if abs(_post_s - _pre_s) >= 1.0 or (_pre_g and _post_g and _pre_g != _post_g):
+                                from services.sentcom_service import emit_stream_event
+                                _pre_lbl = f"{_pre_s:.0f}" + (f" {_pre_g}" if _pre_g else "")
+                                _post_lbl = f"{_post_s:.0f}" + (f" {_post_g}" if _post_g else "")
+                                await emit_stream_event({
+                                    "kind": "evaluation",
+                                    "event": "tqs_enriched",
+                                    "symbol": symbol,
+                                    "text": (
+                                        f"🧮 {symbol} TQS enriched {_pre_lbl} → {_post_lbl} "
+                                        f"after AI consult ("
+                                        f"{'model agrees' if model_agrees else 'model disagrees'}, "
+                                        f"{float(pred_conf or 0):.0f}% conf)"
+                                    ),
+                                    "metadata": {
+                                        "setup_type": setup_type,
+                                        "pre_gate_tqs": _pre_s,
+                                        "post_gate_tqs": _post_s,
+                                        "pre_gate_grade": _pre_g,
+                                        "post_gate_grade": _post_g,
+                                        "model_agrees": model_agrees,
+                                    },
+                                })
+                        except Exception as _tqs_obs_err:
+                            logger.debug(f"v322x TQS enrichment thought error: {_tqs_obs_err}")
                 except Exception as e:
                     logger.debug(f"Post-gate TQS recalculation failed (non-critical): {e}")
 
