@@ -1344,6 +1344,63 @@ async def get_available_timeframes(
     return {"success": True, "symbol": sym, "available": available}
 
 
+@router.get("/chart/reach-meta")
+async def get_chart_reach_meta(
+    symbol: str = Query(..., min_length=1, max_length=12),
+) -> Dict[str, Any]:
+    """v325b — daily-ATR basis for the chart bracket-geometry overlay.
+
+    Returns `atr_pct` (FRACTION of price) preferring the collector's
+    symbol_adv_cache (14d daily ATR / close), falling back to a 14-bar
+    ATR computed from stored daily bars. The overlay multiplies by the
+    entry price to get $ATR and builds the √time reach cone client-side.
+    """
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    sym = symbol.upper()
+    import asyncio as _aio
+
+    def _sync():
+        try:
+            doc = _db["symbol_adv_cache"].find_one(
+                {"symbol": sym}, {"atr_pct": 1, "_id": 0})
+            if doc and doc.get("atr_pct"):
+                v = float(doc["atr_pct"])
+                if 0.001 <= v <= 0.30:
+                    return {"atr_pct": round(v, 6), "source": "symbol_adv_cache"}
+        except Exception:
+            pass
+        try:
+            rows = list(_db["ib_historical_data"].find(
+                {"symbol": sym, "bar_size": "1 day"},
+                {"_id": 0, "high": 1, "low": 1, "close": 1, "date": 1},
+            ).sort("date", -1).limit(15))
+        except Exception:
+            rows = []
+        if len(rows) >= 5:
+            rows.reverse()
+            trs = []
+            prev_close = None
+            for r in rows:
+                try:
+                    h, l, c = float(r["high"]), float(r["low"]), float(r["close"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                tr = (h - l) if prev_close is None else max(
+                    h - l, abs(h - prev_close), abs(l - prev_close))
+                trs.append(tr)
+                prev_close = c
+            if trs and prev_close:
+                atr = sum(trs[-14:]) / len(trs[-14:])
+                return {"atr_pct": round(atr / prev_close, 6), "source": "daily_bars"}
+        return None
+
+    meta = await _aio.to_thread(_sync)
+    if not meta:
+        return {"success": False, "symbol": sym, "atr_pct": None, "source": None}
+    return {"success": True, "symbol": sym, **meta}
+
+
 @router.get("/chart-diagnostic")
 async def chart_diagnostic(
     symbol: str = Query(..., min_length=1, max_length=10),
