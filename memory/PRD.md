@@ -1051,3 +1051,24 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   modal renders scorecard + demotion feed with before/after stops. 7 tests
   in test_v333_integrity.py; mirror byte-identical (13 items), idempotent.
   PENDING USER: apply v333, commit, restart backend.
+- 2026-06-12 v334 EOD POLICY FIX — FAILED SHIP (lesson): patcher generated
+  with EMPTY CHUNKS (only test file shipped). User ran it, self-test failed,
+  user committed failing test anyway. Root cause of bug itself: generic SMB
+  fallback style `trade_2_hold` short-circuited get_policy_for_trade to
+  DEFAULT_POLICY (intraday, close_at_eod=True) → 63 long-horizon positions
+  flattened at 15:45 ET in 14 days, order storm starved IB pusher.
+- 2026-06-13 v334b RE-SHIP WITH REAL PAYLOAD (patcher paste.rs/1GWyG):
+  CHUNK for backend/services/order_policy_registry.py — unknown/generic
+  styles now resolve via trade_style_classifier.resolve_trade_style (setup
+  horizon wins): daily_breakout→multi_day, stage_2_breakout→position,
+  rs_leader_break→investment, trend_continuation_short→multi_day all HOLD;
+  squeeze/orb/no-setup → intraday close. Explicit canonical styles untouched.
+  Patcher hardening: refuses to run if CHUNKS empty (exit 9), prechecks
+  resolve_trade_style exists (exit 8), prints live resolution preview before
+  pytest gate. VALIDATED on simulated pre-v334 repo: 45 pytest pass
+  (v334+v301+v302+v332), patched file byte-identical to known-good local,
+  idempotent re-run, paste.rs download round-trip diff-verified.
+  Generator kept at /tmp/gen_v334b.py pattern: ALWAYS extract CHUNKS from
+  the local passing file programmatically — never hand-assemble payloads.
+  PENDING USER: apply v334b, commit, restart backend; then evaluate
+  watch_pusher_eod.py output through 15:40-16:05 ET (Issue 2).
