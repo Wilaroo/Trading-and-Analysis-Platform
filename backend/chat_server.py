@@ -901,6 +901,21 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                     _trail_lines.append(
                         f"    [{str(_t.get('timestamp') or '')[11:19]}] "
                         f"{str(_t.get('content') or '')[:110]}")
+            else:
+                # v323a — deep recall over the FULL retention window
+                # (TTL now 190d): nothing in the last 24h, so surface
+                # the most recent older rows ("when did we last look
+                # at this name and what did we think?").
+                _old_rows = list(db["sentcom_thoughts"].find(
+                    {"symbol": _um},
+                    {"_id": 0, "content": 1, "timestamp": 1},
+                ).sort("timestamp", -1).limit(6))
+                if _old_rows:
+                    _trail_lines.append(f"  {_um} trail (older — beyond 24h):")
+                    for _t in reversed(_old_rows):
+                        _trail_lines.append(
+                            f"    [{str(_t.get('timestamp') or '')[:16]}] "
+                            f"{str(_t.get('content') or '')[:110]}")
         if _trail_lines:
             parts.append(
                 "Bot Decision Trail (my own recent evaluations/passes/fills — "
@@ -909,6 +924,53 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
         debug["thought_trail_lines"] = len(_trail_lines)
     except Exception as e:
         debug["thought_trail_error"] = str(e)
+
+    # 10.8. v323a — Symbol Trade Memory (bot_trades = PERMANENT record)
+    # sentcom_thoughts is TTL-pruned, but bot_trades never expires — it
+    # already holds the full multi-month history. For every mentioned
+    # ticker, inject the closed-trade record so "have we ever traded X /
+    # how did our SNDK trades go?" has true long-range recall.
+    try:
+        for _um in user_mentioned_tickers:
+            _hist = list(db["bot_trades"].find(
+                {"symbol": _um, "status": "closed"},
+                {"_id": 0, "direction": 1, "setup_type": 1, "net_pnl": 1,
+                 "realized_pnl": 1, "pnl": 1, "close_reason": 1,
+                 "closed_at": 1, "tqs_grade": 1, "entered_by": 1},
+            ).sort("closed_at", -1).limit(40))
+            _genuine = [
+                h for h in _hist
+                if str(h.get("entered_by") or "bot_fired") in ("bot_fired", "bot", "")
+            ]
+            if not _genuine:
+                continue
+            _pnls = []
+            for h in _genuine:
+                _p = h.get("net_pnl")
+                if _p in (None, 0):
+                    _p = h.get("realized_pnl") if h.get("realized_pnl") not in (None, 0) else h.get("pnl")
+                try:
+                    _pnls.append(float(_p or 0))
+                except (TypeError, ValueError):
+                    _pnls.append(0.0)
+            _w = sum(1 for p in _pnls if p > 0)
+            _mem_lines = [
+                f"  {_um}: {len(_genuine)} closed bot trades on record, "
+                f"{_w}W/{len(_pnls) - _w}L, net ${sum(_pnls):+,.0f}. Last 5:"]
+            for h in _genuine[:5]:
+                _p = h.get("net_pnl") or h.get("realized_pnl") or h.get("pnl") or 0
+                _g = f" TQS {h.get('tqs_grade')}" if h.get("tqs_grade") else ""
+                _mem_lines.append(
+                    f"    {str(h.get('closed_at') or '?')[:10]} "
+                    f"{str(h.get('direction') or '?').upper():5s} "
+                    f"{str(h.get('setup_type') or '?')[:22]:22s} "
+                    f"${float(_p or 0):+,.0f}{_g} "
+                    f"({str(h.get('close_reason') or '?')[:22]})")
+            parts.append(
+                "Symbol Trade Memory (permanent record — use for 'have we "
+                "traded X before / how did it go'):\n" + "\n".join(_mem_lines))
+    except Exception as e:
+        debug["trade_memory_error"] = str(e)
 
     # 11. Technical indicators for held positions (RSI, VWAP, EMAs, squeeze, etc.)
     try:
