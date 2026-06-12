@@ -8,8 +8,26 @@ Open priorities, deferred ideas, and backlog. Move items to
 | Version | Topic | Status |
 |---|---|---|
 | sanitize_v1 probe | `diag_sanitized_closed_trades.py` (paste.rs F88ca) — 9-stage exclusion funnel | RUN on DGX 13:55Z |
-| sanitize_v2 probe | same script upgraded: + `classify_close()` hygiene layer, legacy_orphan, emergency_flatten | UPLOADED CnLiR, awaiting DGX run |
-| v322x | TQS enrichment observability thought (🧮 pre→post TQS shift in stream) | UPLOADED PzSgh, awaiting DGX apply |
+| sanitize_v2 probe | same script upgraded: + `classify_close()` hygiene layer, legacy_orphan, emergency_flatten | RUN on DGX 14:09Z |
+| v322x | TQS enrichment observability thought (🧮 pre→post TQS shift in stream) | APPLIED + COMMITTED (12d4dffb), 5/5 tests pass |
+
+### sanitize_v2 RESULTS (DGX run 2026-06-12 14:09Z) — TRUE clean core = 102 trades (6.4% of raw)
+hygiene_artifact cut 241 more than v1: 118 phantom-reason, 65 external_flatten,
+52 artifact setup_types (reconciled_orphan/excess_slice/imported_from_ib), 4 corrupt-R.
+legacy_orphan 70. Scored core = 94.
+- TQS rescale: A n=12, B n=14 — INSUFFICIENT (unchanged verdict).
+- Meta-labeling: `squeeze` collapsed 82 → **14** (!) — most squeeze closes were
+  phantom/flatten artifacts. NOTHING is near the 100 threshold. accumulation_entry=6.
+- Clean accrual rate: June n=58 in 12 days ≈ 4.8/day (win 48.3%, avgR -0.02,
+  trending up from May 35.3%/-0.04). A/B≥30 unblock est. mid-July+; squeeze≥100
+  unblock is MONTHS out at current mix.
+- ⚠ FINDING — exit mix of the 102 genuine trades: eod_auto_close 40, scalp_time_decay 17,
+  manual_eod 15, operator panel 15, stop_loss 13, **target_hit = 0**. ZERO target closes
+  among genuine trades; bot edge ≈ breakeven (avgR ≈ 0). Suggests PTs are placed too far /
+  time-based exits truncate winners → makes v322p decay-timer rework (defer decay when
+  green + right side of VWAP) directly evidence-backed.
+- ⚠ HOUSEKEEPING: commit 12d4dffb accidentally pushed patcher backup dirs
+  (v322t/u/v/w_backup_*/, ~13 files). Suggest `git rm -r --cached` + .gitignore `v*_backup_*/`.
 | MICRO_SETUPS | orphan applier `apply_v19_34_266.py` deleted (sandbox-only; never on DGX) | DONE — drift closed |
 
 ### sanitize_v1 RESULTS (DGX run 2026-06-12 13:55Z) — raw counts were GARBAGE-INFLATED
