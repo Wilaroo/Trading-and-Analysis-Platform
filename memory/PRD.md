@@ -1092,3 +1092,14 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   kill-switch latch stays manual; IB_BOOT_PROBE_GRACE_S env. NOT shipped.
   Also: historical_queue yellow (3,363 pending) ↔ "no intraday bars"
   thoughts 15:09-15:30 — monitor.
+- 2026-06-13 v336 (patcher paste.rs/JPAgD): ib_boot_probe auto-recovery —
+  after boot-grace FAIL the probe re-checks every 30s in background
+  (_recovery_reprobe) and self-clears health to green ("recovered: ...");
+  KILL-SWITCH latch untouched (manual reset preserved); grace env-tunable
+  IB_BOOT_PROBE_GRACE_S (server.py). _STATE gains recovered_at. 4 new
+  tests in test_v336_boot_probe_recovery.py (incl. assert no auto-reset
+  of kill-switch); 59 pass total w/ v308+v335+v334+v301+v302+v332.
+  Sim-validated on v335-applied repo (matches user deploy order),
+  idempotent, byte-identical, round-trip verified.
+  PENDING USER: apply v335 (paste.rs/rQXvb) then v336 (paste.rs/JPAgD),
+  commit, restart backend, check kill-switch state after restart.

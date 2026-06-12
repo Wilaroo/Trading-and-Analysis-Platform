@@ -3897,8 +3897,12 @@ async def startup_event():
     # blocks startup.
     try:
         from services.ib_boot_probe import run_ib_boot_probe
-        asyncio.create_task(run_ib_boot_probe(grace_s=30.0, poll_s=2.0))
-        print("[STARTUP] v19.34.308 — IB-Gateway boot probe scheduled (30s grace, hard-block on fail).")
+        # v336 — grace env-tunable (mid-session restarts can beat the
+        # deferred IB connect at 30s); probe self-clears health on
+        # recovery, kill-switch latch stays manual.
+        _probe_grace = float(os.environ.get("IB_BOOT_PROBE_GRACE_S", "30"))
+        asyncio.create_task(run_ib_boot_probe(grace_s=_probe_grace, poll_s=2.0))
+        print(f"[STARTUP] v19.34.308 — IB-Gateway boot probe scheduled ({_probe_grace:.0f}s grace, hard-block on fail, v336 auto-recovery).")
     except Exception as _e:
         print(f"[STARTUP] WARN: IB boot probe failed to schedule: {_e}")
 

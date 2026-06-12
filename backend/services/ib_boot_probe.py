@@ -38,6 +38,7 @@ _STATE: Dict[str, Any] = {
     "order_path": None,
     "checked_at": None,
     "tripped_kill_switch": False,
+    "recovered_at": None,
 }
 
 
@@ -99,10 +100,13 @@ def _probe_once() -> Tuple[bool, str]:
         return False, f"probe error: {type(exc).__name__}: {str(exc)[:160]}"
 
 
-async def run_ib_boot_probe(grace_s: float = 30.0, poll_s: float = 2.0) -> Dict[str, Any]:
+async def run_ib_boot_probe(grace_s: float = 30.0, poll_s: float = 2.0,
+                            recovery_poll_s: float = 30.0) -> Dict[str, Any]:
     """Poll the IB execution feed for up to `grace_s` seconds. On success,
     mark the subsystem green. On persistent failure, trip the kill-switch
-    (HARD BLOCK) and mark the subsystem red. Never raises."""
+    (HARD BLOCK), mark the subsystem red, and keep re-probing in the
+    background so the HEALTH status self-clears once the feed verifies
+    live (the kill-switch latch stays manual-reset). Never raises."""
     deadline = time.monotonic() + max(0.0, grace_s)
     ok, detail = False, "probe not yet run"
     # Give the deferred IB connect a moment before the first check.
@@ -136,4 +140,44 @@ async def run_ib_boot_probe(grace_s: float = 30.0, poll_s: float = 2.0) -> Dict[
     except Exception as exc:
         logger.error("[IB-BOOT-PROBE] FAILED TO TRIP KILL-SWITCH: %s", exc)
         print(f"[STARTUP] v19.34.308 — CRITICAL: could not trip kill-switch: {exc}")
+
+    # v336 — RECOVERY RE-PROBE. The red latch previously persisted for
+    # the rest of the session even after IB came up seconds later
+    # (observed 2026-06-12: a mid-session restart beat the deferred IB
+    # connect, so overall health stayed red + "1 CRITICAL" all day while
+    # ib_gateway itself was green). Keep checking in the background and
+    # clear the HEALTH status once the execution feed verifies live.
+    # The KILL-SWITCH latch is intentionally NOT touched — resetting it
+    # stays a manual operator action (silent-start rationale above).
+    if recovery_poll_s and recovery_poll_s > 0:
+        try:
+            asyncio.create_task(_recovery_reprobe(recovery_poll_s))
+        except RuntimeError:
+            pass  # no running loop — skip background recovery
     return get_boot_probe_state()
+
+
+async def _recovery_reprobe(poll_s: float) -> None:
+    """v336 — after a boot-probe FAIL, re-check the execution feed every
+    `poll_s` seconds and flip the health status green once it verifies
+    live. Exits on success. Never raises."""
+    while _STATE["status"] == "red":
+        try:
+            await asyncio.sleep(poll_s)
+            ok, detail = await asyncio.to_thread(_probe_once)
+            if ok:
+                now = time.time()
+                _STATE["status"] = "green"
+                _STATE["recovered_at"] = now
+                _STATE["checked_at"] = now
+                _STATE["detail"] = (
+                    f"recovered: {detail} — boot probe had failed; "
+                    "kill-switch latch unchanged (reset manually if tripped)"
+                )
+                logger.warning("[IB-BOOT-PROBE] RECOVERED — %s", detail)
+                print(f"[IB-BOOT-PROBE] v336 — RECOVERED: {detail}")
+                return
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            logger.debug("[IB-BOOT-PROBE] recovery probe error: %s", exc)
