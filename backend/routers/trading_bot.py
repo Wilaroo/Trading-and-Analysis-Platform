@@ -3004,8 +3004,10 @@ def get_eod_status():
     intraday_queued = 0
     swing_holding = 0
     intraday_symbols = []
+    # v335 — policy authority, not the stale per-trade attr
+    from services.order_policy_registry import should_close_at_eod as _scae_status
     for trade in _trading_bot._open_trades.values():
-        if getattr(trade, "close_at_eod", True):
+        if _scae_status(trade):
             intraday_queued += 1
             if len(intraday_symbols) < 25:
                 intraday_symbols.append(trade.symbol)

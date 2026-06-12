@@ -2517,9 +2517,14 @@ class PositionManager:
         if getattr(bot, "_eod_t_minus_2_fired_today", None) == today_str:
             return {"escalated": [], "errors": [], "noop": True}
 
+        # v335 — select via the POLICY authority, not the stale per-trade
+        # attr (probe 2026-06-12: T-2 force-MKT flattened ORCL/SMCI
+        # multi_day holds at 15:47 via close_at_eod_attr=True while the
+        # v334b policy path correctly held them at 15:45).
+        from services.order_policy_registry import should_close_at_eod as _scae_t2
         still_open = [
             (tid, t) for tid, t in list(bot._open_trades.items())
-            if getattr(t, "close_at_eod", True)
+            if _scae_t2(t)
         ]
         if not still_open:
             bot._eod_t_minus_2_fired_today = today_str
@@ -2589,9 +2594,12 @@ class PositionManager:
             return
 
         ib_positions = self._ib_position_snapshot_safe()
+        # v335 — policy authority (stale per-trade attr falsely alarmed
+        # on legit overnight holds carried post-v334b).
+        from services.order_policy_registry import should_close_at_eod as _scae_t1
         tracked_open = [
             t for t in bot._open_trades.values()
-            if getattr(t, "close_at_eod", True)
+            if _scae_t1(t)
         ]
         ib_open = [
             (p.get("symbol"), float(p.get("position") or 0))

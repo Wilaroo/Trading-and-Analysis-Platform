@@ -386,8 +386,11 @@ def _check_open_positions_clean(db, bot=None) -> Dict[str, Any]:
     intraday_carryover_safe = 0
     swing_count = 0
 
+    # v335 — policy authority, not the stale per-trade attr (multi_day
+    # holds carried overnight post-v334b were falsely flagged "stuck").
+    from services.order_policy_registry import should_close_at_eod as _scae_morning
     for tid, trade in (bot._open_trades or {}).items():
-        close_at_eod = getattr(trade, "close_at_eod", True)
+        close_at_eod = _scae_morning(trade)
         if not close_at_eod:
             swing_count += 1
             continue
