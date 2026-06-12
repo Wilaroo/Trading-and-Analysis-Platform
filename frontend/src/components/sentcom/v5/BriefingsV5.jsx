@@ -15,6 +15,7 @@ import { useMorningBriefing } from './useMorningBriefing';
 import { useMarketState } from '../../../contexts';
 import { fmtET12 } from '../../../utils/timeET';
 import { WeekendBriefingCard } from './WeekendBriefingCard';
+import { IntegrityCardV5 } from './IntegrityCardV5';
 
 // 24h "HH:MM" string in ET — kept for internal math (split by ':' for minutes-of-day).
 const nowET = () => {
@@ -547,6 +548,13 @@ export const BriefingsV5 = ({ context, positions, totalPnl, onSymbolClick, onOpe
         onToggle={() => toggle('close')}
         onSymbolClick={onSymbolClick}
         onOpenDeepDive={onOpenDeepDive}
+      />
+      {/* v333 — always-on System Integrity scorecard (no time window):
+          scalps / data uptime / daily-bar leak / backfill gate / M0
+          ladder / regime demotions with before-after stops. */}
+      <IntegrityCardV5
+        expanded={expandedKey === 'integrity'}
+        onToggle={() => toggle('integrity')}
       />
     </div>
   );

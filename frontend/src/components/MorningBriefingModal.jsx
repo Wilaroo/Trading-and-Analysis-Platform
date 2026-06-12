@@ -25,12 +25,13 @@
  */
 import React, { memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, RefreshCw, Sun, Coffee, Zap, Moon } from 'lucide-react';
+import { X, RefreshCw, Sun, Coffee, Zap, Moon, ShieldCheck } from 'lucide-react';
 import { useMorningBriefing } from './sentcom/v5/useMorningBriefing';
 import { useV5Styles } from './sentcom/v5/useV5Styles';
 import { useBriefingLiveData } from './sentcom/v5/useBriefingLiveData';
 import GamePlanStockCard from './sentcom/v5/GamePlanStockCard';
 import PremarketGapScannerWidget from './sentcom/v5/PremarketGapScannerWidget';
+import { IntegrityBody } from './sentcom/v5/IntegrityCardV5';
 import { fmtET12 } from '../utils/timeET';
 
 // Briefing variant table — drives header label, accent colour and icon.
@@ -64,6 +65,14 @@ const BRIEFING_VARIANTS = {
     Icon:      Moon,
     timeBand:  '4:00 — 5:00 PM ET',
     blurb:     "End-of-day — closed trades, realized P&L, prediction grading.",
+  },
+  // v333 — System Integrity scorecard (always available, no window).
+  integrity: {
+    label:     'SYSTEM INTEGRITY',
+    accent:    'text-cyan-400',
+    Icon:      ShieldCheck,
+    timeBand:  'live · refreshes 60s',
+    blurb:     "Pipeline scorecard — scalps, data uptime, daily-bar leak, backfill gate, M0 ladder, regime demotions with before/after stops.",
   },
 };
 
@@ -243,6 +252,12 @@ const BriefingDeepDiveModal = memo(({ isOpen, onClose, briefingKey = 'morning' }
           </div>
 
           <div className="max-h-[64vh] overflow-y-auto v5-scroll">
+            {/* v333 — System Integrity deep-dive section (top of the
+                scroll area when briefingKey="integrity"): pass/fail
+                pipeline checklist + auditable integrity feed (regime
+                demotions show before → after stops). The standard
+                briefing sections continue below for context. */}
+            {briefingKey === 'integrity' && <IntegrityBody />}
             {loading && !data && (
               <div className="flex items-center justify-center py-12">
                 <RefreshCw className="w-4 h-4 text-violet-400 animate-spin" />
