@@ -36,8 +36,8 @@ hallucinate a fake track record). Operator hallucination concern addressed pre-d
 | Version | Topic | Status |
 |---|---|---|
 | v323a r2 | long-memory sanitized chat recall | APPLIED + COMMITTED (3d524dfa) |
-| v323b | daily-bar integrity / RVOL fix + repair | UPLOADED nfOTu, awaiting DGX apply |
-| v323c | thought retention tiering | UPLOADED fCGQH, awaiting DGX apply |
+| v323b | daily-bar integrity / RVOL fix + repair | APPLIED + COMMITTED (bebd9f35) — 3,590 partial rows deleted of 13.75M scanned |
+| v323c | thought retention tiering | APPLIED + COMMITTED (6baec970) — only 2,504 noise rows stamped of 376K (kind-mix check pending) |
 
 ### PT-REACHABILITY PROBE RESULTS (DGX run 14:26Z) — exits are NOT the only problem
 On the 102 clean trades: trade_2_hold median stop = 1.75 "ATR" / 3.46% of entry;
