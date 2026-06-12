@@ -5572,8 +5572,15 @@ async def audit_position_stops():
             if not entry_price or not stop_price:
                 continue
             
-            # Estimate ATR as 2% of price if not available
-            atr = entry_price * 0.02
+            # v326 — REAL daily ATR (was: hardcoded 2%-of-price guess
+            # that made every audit suggestion fictional). Same canonical
+            # basis as the evaluator's v325 HSBG geometry.
+            from services.smart_stop_service import resolve_daily_atr
+            _db_v326 = getattr(_trading_bot, "_db", None)
+            if _db_v326 is None:
+                _db_v326 = getattr(_trading_bot, "db", None)
+            atr, _atr_source = resolve_daily_atr(_db_v326, symbol, entry_price)
+            trade_style = trade.get('trade_style') or ''
             
             # Analyze using intelligent stop service
             try:
@@ -5584,7 +5591,8 @@ async def audit_position_stops():
                     direction=direction,
                     setup_type=setup_type,
                     position_size=trade.get('shares', 100),
-                    atr=atr
+                    atr=atr,
+                    trade_style=trade_style  # v326 — HSBG horizon parity
                 )
                 
                 optimal_stop = analysis.stop_price
@@ -5594,9 +5602,26 @@ async def audit_position_stops():
                 # Check for problems
                 problems = []
                 
-                # 1. Check if stop is too tight
+                # 1. Check if stop is too tight — v326: measured against
+                # HALF the canonical (v325 horizon-scaled) stop distance.
+                # The old flat 0.75×ATR floor (on a daily ATR) would flag
+                # every properly-sized scalp/intraday stop as CRITICAL.
                 stop_distance = abs(stop_price - entry_price)
-                min_distance = atr * 0.75  # Minimum 0.75 ATR
+                from services.opportunity_evaluator import OpportunityEvaluator as _OE_v326
+                from services.trading_bot_service import TradeDirection as _TD_v326
+                _dir_enum = _TD_v326.LONG if str(direction).lower() == 'long' else _TD_v326.SHORT
+                try:
+                    _canon_stop = _OE_v326().calculate_atr_based_stop(
+                        float(entry_price), _dir_enum, float(atr), setup_type,
+                        _trading_bot, trade_style=trade_style,
+                    )
+                    _canon_dist = abs(float(entry_price) - float(_canon_stop))
+                except Exception:
+                    _canon_dist = atr * 0.75
+                _hsbg_frac = _OE_v326._hsbg_horizon_frac(
+                    _OE_v326._resolve_geometry_style(
+                        {"trade_style": trade_style}, setup_type))
+                min_distance = 0.5 * _canon_dist
                 if stop_distance < min_distance:
                     problems.append({
                         "type": "too_tight",
@@ -5630,13 +5655,13 @@ async def audit_position_stops():
                     })
                 
                 # 5. Check if stop is much worse than optimal
-                if direction == 'long' and stop_price > optimal_stop + atr * 0.5:
+                if direction == 'long' and stop_price > optimal_stop + atr * 0.5 * _hsbg_frac:
                     problems.append({
                         "type": "suboptimal",
                         "severity": "info",
                         "message": f"{symbol} stop could be tighter. Current: ${stop_price:.2f}, Suggested: ${optimal_stop:.2f} (+{((optimal_stop - stop_price)/entry_price*100):.1f}% better risk)"
                     })
-                elif direction == 'short' and stop_price < optimal_stop - atr * 0.5:
+                elif direction == 'short' and stop_price < optimal_stop - atr * 0.5 * _hsbg_frac:
                     problems.append({
                         "type": "suboptimal",
                         "severity": "info",
@@ -5725,10 +5750,15 @@ async def fix_stop_to_recommended(trade_id: str):
         direction = trade.direction.value if hasattr(trade.direction, 'value') else trade.direction
         setup_type = trade.setup_type
         
-        # Estimate ATR as 2% of price if not available
-        atr = entry_price * 0.02
-        
-        # Calculate intelligent stop
+        # v326 — REAL daily ATR (was: hardcoded 2%-of-price guess).
+        from services.smart_stop_service import resolve_daily_atr
+        _db_v326 = getattr(_trading_bot, "_db", None)
+        if _db_v326 is None:
+            _db_v326 = getattr(_trading_bot, "db", None)
+        atr, _atr_source = resolve_daily_atr(_db_v326, symbol, entry_price)
+        trade_style = getattr(trade, 'trade_style', None) or ''
+
+        # Calculate intelligent stop (v326: horizon-aware via trade_style)
         analysis = await smart_stop.calculate_intelligent_stop(
             symbol=symbol,
             entry_price=entry_price,
@@ -5736,7 +5766,8 @@ async def fix_stop_to_recommended(trade_id: str):
             direction=direction,
             setup_type=setup_type,
             position_size=trade.shares,
-            atr=atr
+            atr=atr,
+            trade_style=trade_style
         )
         
         new_stop = analysis.stop_price
