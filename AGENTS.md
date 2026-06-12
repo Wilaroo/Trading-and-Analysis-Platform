@@ -643,8 +643,8 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
-- **Current version**: v19.34.310 (2026-06-08, "IB-Gateway boot hard-block probe (A) + fundamental absent-data→neutral-50 (B) + SMB timeframe-aware checklist & smb_5var_score persistence (C)")
-- **Last green test run**: 94/94 across v19.34.69 → v19.34.73; + 11/11 across v19.34.308 → v19.34.310 (test_v308_ib_boot_probe, test_v309_fundamental_neutral, test_v310_smb_timeframe)
+- **Current version**: v19.34.310 (2026-06-08, "IB-Gateway boot hard-block probe (A) + fundamental absent->neutral-50 (B) + SMB timeframe-aware checklist & smb_5var_score persistence (C)")
+- **Last green test run**: 94/94 across v19.34.69 -> v19.34.73; + 11/11 across v19.34.308 -> v19.34.310 (test_v308_ib_boot_probe, test_v309_fundamental_neutral, test_v310_smb_timeframe)
 - **Known issues**: see ROADMAP.md "Next session" section
 - **EOD close**: known-fixed in v19.34.73 (was failing silently in v19.34.72
   due to 4s cancel-wait timeout under load)
@@ -1159,3 +1159,6 @@ backend features after the AGENTS.md docs run: bracket-stacking
 auto-cancel endpoint + quote-resub watchdog. 14/14 tests passing,
 21/21 adjacent regression tests passing). Update this file whenever
 you learn a new convention or trap.*
+
+## ⚠️ PATCHER RULE (added 2026-06-11)
+Every patcher application MUST end with `git add` + `git commit` + `git push origin main` BEFORE the next StartTrading.bat run. Its step-2 `git checkout -- .` silently reverts any uncommitted patch (this wiped M0a/M0b on 2026-06-11).
