@@ -324,10 +324,13 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* v19.34.99 — trade-style + time-horizon chip. Always present
               even when trade_style is missing (falls back to setup-derived
               style via SETUP_TO_STYLE). Hover for full horizon text. */}
+          {/* v327 — operator wants the SETUP visible on the card face,
+              not just "INTRADAY short". TradeStyleChip already knows how
+              to render the humanised setup name. */}
           <TradeStyleChip
             row={position}
             compact={true}
-            showSetup={false}
+            showSetup={true}
             size="xs"
             testIdSuffix={`open-pos-${position.symbol}`}
           />
