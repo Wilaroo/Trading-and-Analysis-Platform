@@ -717,6 +717,19 @@ async def get_chart_bars(
             deduped.append(r)
     normalised = deduped
 
+    # v19.34.265 — bad-tick sanitization (intraday only; daily bars come
+    # from EOD historical and rarely carry transient ticks). Runs BEFORE
+    # the session filter + indicator math so a corrupt print can't poison
+    # the candle autoscale, EMAs/BB, the volume profile, OR the served
+    # bars the frontend renders.
+    if tf in {"1min", "5min", "15min", "1hour"} and normalised:
+        normalised, _bt_fixed = _sanitize_intraday_bars(normalised)
+        if _bt_fixed:
+            logger.info(
+                "[v19.34.265 bad-tick] %s %s clamped %d outlier bar(s)",
+                symbol.upper(), tf, _bt_fixed,
+            )
+
     if not normalised:
         return {
             "success": False,
@@ -1116,6 +1129,40 @@ _TF_TO_BARSIZE = {
     "1min": "1 min", "5min": "5 mins", "15min": "15 mins",
     "1hour": "1 hour", "1day": "1 day",
 }
+
+
+def _sanitize_intraday_bars(bars: List[Dict[str, Any]], tol: float = 0.5, win: int = 5):
+    """v19.34.265 — transient bad-tick guard for intraday candles.
+
+    A single corrupt IB print (e.g. a $36 tick on a $260 stock) produces a
+    bar whose wick/close deviates absurdly from its neighbours, blowing out
+    the candle autoscale and squashing every real candle into an unreadable
+    band for minutes. Clamp each bar's O/H/L/C into a ±`tol` band around the
+    LOCAL median close (±`win` bars). The median is robust to a single
+    outlier, so genuine trends/gaps are untouched — only lone spikes get
+    clipped. Mutates the dicts in place; returns (bars, fixed_count).
+    """
+    n = len(bars)
+    if n < 3:
+        return bars, 0
+    closes = [r["close"] for r in bars]   # snapshot BEFORE any mutation
+    fixed = 0
+    for i, r in enumerate(bars):
+        window = sorted(closes[max(0, i - win):min(n, i + win + 1)])
+        ref = window[len(window) // 2]
+        if ref <= 0:
+            continue
+        lob, hib = ref * (1.0 - tol), ref * (1.0 + tol)
+        o = min(max(r["open"],  lob), hib)
+        c = min(max(r["close"], lob), hib)
+        h = min(max(r["high"],  lob), hib)
+        lw = min(max(r["low"],  lob), hib)
+        h = max(h, o, c)        # restore OHLC invariants
+        lw = min(lw, o, c)
+        if (o, h, lw, c) != (r["open"], r["high"], r["low"], r["close"]):
+            r["open"], r["high"], r["low"], r["close"] = o, h, lw, c
+            fixed += 1
+    return bars, fixed
 
 
 @router.get("/chart-history")
