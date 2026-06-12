@@ -217,7 +217,12 @@ class HistoricalDataService:
             try:
                 timestamp = bar.get("timestamp", "")
                 date_str = timestamp[:10] if is_daily and isinstance(timestamp, str) else timestamp
-                
+
+                # v328 — never persist today's in-progress daily bar
+                from services.ib_historical_collector import IBHistoricalCollector
+                if IBHistoricalCollector._is_inprogress_daily_bar(bar_size, date_str):
+                    continue
+
                 self._historical_bars_col.update_one(
                     {
                         "symbol": symbol,

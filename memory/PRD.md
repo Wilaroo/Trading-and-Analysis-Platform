@@ -918,3 +918,42 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   testing: entry at exact $100 correctly triggers anti-hunt round-number buffer
   (+0.5×ATR×frac) — tests use non-round entries. PENDING: user applies on DGX
   (REQUIRES v325 applied first — patcher pre-flight checks for HSBG helpers).
+- 2026-06-12 v328 DAILY-BAR LEAK REAL FIX + RTH BACKFILL GATE (patcher
+  paste.rs/c3Rb9 md5 d59ca0941700643c5eb95c7ac0c7c7f6; probe diag_history_500
+  paste.rs/tiE4b md5 14662f3a5561a29b07678de81c557b82): probe output proved
+  v323b guard was bypassed — the IB Data Pusher uploads via router endpoints
+  (/api/ib/historical-data/result + /batch-result in routers/ib.py AND
+  ib_modules/historical_data.py) which bulk-write into ib_historical_data with
+  NO guard; slow_learning alpaca writer also unguarded. v328 adds
+  _is_inprogress_daily_bar guard to all 5 sites (TESTED live: today's daily bar
+  blocked on both single+batch endpoints, historical bars stored). FIX 2: RTH
+  deep-backfill gate in historical_data_queue_service.get_pending_requests —
+  Mon-Fri 09:25-16:05 ET deep requests (non-empty end_date chains, >=2-month/
+  year durations) held pending, auto-resume post-close; turbo "1 D".."1 M"
+  unaffected (TESTED: gate on/off + HIST_BACKFILL_RTH_GATE=0 kill switch).
+  Root-causes the "snapshot unavailable" blackout (IB 60req/10min pacing
+  starvation). FIX 3: one-shot purge of provably-partial daily bars (last 10d,
+  collected_at < own 16:15 ET close) — removes today's 40 leaked rows (TESTED:
+  partial purged, final + no-collected_at kept). CHART WALL: NOT a parse bug —
+  /chart-history throws HTTP 500 on DGX (works locally with identical mixed-
+  format data; probe A3 proved formats parse fine). diag_history_500 probe
+  replays endpoint in-process on DGX to capture the real traceback +
+  serializability check + bar value-type strata. PENDING: user runs patcher,
+  commits, restarts, runs probe, pastes output → v329 chart-wall fix.
+  STILL OPEN: 14 legacy pre-v325 PT positions (user decision a/b/c pending),
+  Atlas password rotation reminder, IGV INT-21 hardening, ELF→XLE mapping.
+- 2026-06-12 v329 CHART WALL ROOT CAUSE + FIX (patcher paste.rs/jLt7o md5
+  564a678b14608cca869c79ca422bcd2a): diag_history_500 on DGX captured the
+  traceback — NameError: _sanitize_intraday_bars not defined at sentcom_chart
+  line 1213. v324's /chart-history chunk was authored against the dev file
+  which has the v19.34.265 bad-tick sanitizer; that helper was NEVER applied
+  on DGX → every /chart-history call = HTTP 500 → frontend prepend dies →
+  charts wall at initial window. v329 inserts the byte-identical sanitizer def
+  before /chart-history (REQUIRED) + best-effort /chart parity clamp
+  (OPTIONAL, graceful skip on drift). Patcher SELF-TESTS in-process: walks 8
+  pages of ADBE 5-min via the patched module against live Mongo before user
+  restarts. TESTED here on a degraded mirror replicating the DGX state:
+  def inserted, parity inserted, self-test walks history, idempotent re-run
+  all-SKIP. LESSON: v324 assumed dev-only helpers existed on DGX — future
+  patchers must anchor-check every helper they call. PENDING: user runs v329,
+  commits, restarts; then verify chart scrolls to Mar 2024.

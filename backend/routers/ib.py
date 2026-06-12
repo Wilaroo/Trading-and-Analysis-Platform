@@ -2953,6 +2953,12 @@ async def report_historical_data_result(request: Request):
                         date_val = bar.get("date") or bar.get("time")
                         if not date_val:
                             continue
+                        # v328 — this pusher upload path bypassed the v323b
+                        # collector guard: never persist today's in-progress
+                        # daily bar (partial volume poisons RVOL → blocks
+                        # every scalp for the session).
+                        if collector._is_inprogress_daily_bar(bar_size, date_val):
+                            continue
                         bars_to_store.append({
                             "symbol": symbol,
                             "bar_size": bar_size,
@@ -3061,6 +3067,10 @@ async def report_historical_data_batch_result(request: Request):
                     for bar in data:
                         date_val = bar.get("date") or bar.get("time")
                         if not date_val:
+                            continue
+                        # v328 — never persist today's in-progress daily bar
+                        # (pusher batch path bypassed the v323b guard).
+                        if collector._is_inprogress_daily_bar(bar_size, date_val):
                             continue
                         
                         all_bulk_operations.append(

@@ -18,6 +18,51 @@ logger = logging.getLogger(__name__)
 _historical_data_queue_service = None
 
 
+def _rth_backfill_gate_active() -> bool:
+    """v328 — True during the ET cash session (Mon-Fri 09:25-16:05 ET).
+
+    Deep historical backfill (chained end_date requests, multi-month /
+    year-long durations) burns IB's 60-req/10-min historical pacing
+    budget and starves the live turbo collectors. Mongo intraday bars
+    then go stale, get_technical_snapshot(mongo_only) returns None and
+    the scanner spams "snapshot unavailable" — a full data blackout
+    (2026-06-12 incident: zero scalps fired all session). While the
+    gate is active only short live-refresh requests are served; deep
+    requests simply stay `pending` and resume automatically after the
+    close. Set HIST_BACKFILL_RTH_GATE=0 to disable.
+    """
+    import os
+    if os.environ.get("HIST_BACKFILL_RTH_GATE", "1") == "0":
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+        if now.weekday() >= 5:
+            return False
+        mins = now.hour * 60 + now.minute
+        return (9 * 60 + 25) <= mins <= (16 * 60 + 5)
+    except Exception:
+        return False
+
+
+def _deep_request_exclusion() -> List[Dict]:
+    """v328 — Mongo clauses that EXCLUDE deep-backfill queue rows.
+
+    Deep = backward-chained requests (non-empty end_date) or durations
+    of >= 2 months / any year unit. Live turbo refreshes use short
+    durations ("1 D", "2 D", "1 M" catch-ups) with no end_date and
+    keep flowing during RTH.
+    """
+    return [
+        {"$or": [{"end_date": ""}, {"end_date": None},
+                 {"end_date": {"$exists": False}}]},
+        {"duration": {"$not": {"$regex": r"^\s*\d+\s*Y\s*$",
+                               "$options": "i"}}},
+        {"duration": {"$not": {"$regex": r"^\s*([2-9]|[1-9][0-9]+)\s*M\s*$",
+                               "$options": "i"}}},
+    ]
+
+
 class HistoricalDataQueueService:
     """Service for managing historical data request queue"""
     
@@ -118,7 +163,14 @@ class HistoricalDataQueueService:
                        e.g., (0, 3) = this instance handles symbols whose hash % 3 == 0
         """
         match_filter = {"status": "pending"}
-        
+
+        # v328 — RTH deep-backfill gate: hold deep requests during the
+        # cash session so the IB pacing budget goes to live data (see
+        # _rth_backfill_gate_active docstring).
+        rth_gate = _rth_backfill_gate_active()
+        if rth_gate:
+            match_filter["$and"] = _deep_request_exclusion()
+
         # Filter by bar_sizes if specified
         if bar_sizes:
             match_filter["bar_size"] = {"$in": bar_sizes}
@@ -165,6 +217,8 @@ class HistoricalDataQueueService:
             target_symbol = candidate["_id"]
             
             find_filter = {"status": "pending", "symbol": target_symbol}
+            if rth_gate:
+                find_filter["$and"] = _deep_request_exclusion()
             if bar_sizes:
                 find_filter["bar_size"] = {"$in": bar_sizes}
             
