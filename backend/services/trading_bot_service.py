@@ -4455,6 +4455,22 @@ class TradingBotService:
                 except Exception as _sd_err:
                     print(f"⚠️ [TradingBot] _check_scalp_decay error: {_sd_err}")
 
+                # v332 — Regime demotion policy. Confirmed adverse regime
+                # flips demote conflicting intraday/swing positions
+                # (stop→BE / software-stop tighten — NO IB order surgery,
+                # so no orphan risk). Also keeps `_current_regime` live for
+                # the sizing multiplier (it was frozen at RISK_ON since
+                # boot: `_update_market_regime` was never wired into any
+                # loop). Self-throttled to 30s inside the service.
+                try:
+                    from services.regime_demotion_service import get_regime_demotion_service
+                    await asyncio.wait_for(
+                        get_regime_demotion_service().tick(self), timeout=_EOD_WALL_S)
+                except asyncio.TimeoutError:
+                    print(f"⚠️ [TradingBot] regime demotion tick exceeded {_EOD_WALL_S}s budget — skipping this cycle")
+                except Exception as _rd_err:
+                    print(f"⚠️ [TradingBot] regime demotion tick error: {_rd_err}")
+
                 # v19.34.113 — EOD setup grading. Fires once per trading
                 # day at 16:10 ET. Read-mostly; the only Mongo writes
                 # are upserts into `setup_grade_records`. Budgeted at

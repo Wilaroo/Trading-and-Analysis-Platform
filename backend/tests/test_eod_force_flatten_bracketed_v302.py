@@ -79,6 +79,10 @@ class _FakeTrade:
     def __init__(self, symbol, close_at_eod=True):
         self.symbol = symbol
         self.close_at_eod = close_at_eod
+        # v332 — the naked guard now resolves EOD policy from the trade
+        # STYLE (should_close_at_eod), matching the v19.34.245 main pass.
+        # Mirror real trades: intraday closes at EOD, swing holds.
+        self.trade_style = "intraday" if close_at_eod else "swing"
 
 
 class _FakeColl:

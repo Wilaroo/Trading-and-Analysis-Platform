@@ -1005,3 +1005,32 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   - Morning-report probe → integrate into briefings modal infrastructure
     (scores the open: scalp count, snapshot uptime, gate activity, ladder
     fills — pass/fail on the week's fixes).
+- 2026-06-12 v332 REGIME DEMOTION + EOD STYLE FIX + EOD/PUSHER PROBE (patcher
+  paste.rs/g8lhz md5 1901e3a9ca5d21d11e3ee4906220d205):
+  (1) EOD "closes everything" ROOT CAUSE: _eod_naked_flatten_guard (v301/302,
+  15:45-16:00) still read raw close_at_eod ATTRIBUTE (blanket default-True)
+  instead of should_close_at_eod policy — swing holds force-flattened at 15:56.
+  Fixed to policy resolution like the v245 main pass; v302 test fakes updated
+  to style-based contract.
+  (2) NEW services/regime_demotion_service.py (operator-approved): adverse
+  regime flip persisting REGIME_DEMOTION_CONFIRM_MIN (20min) demotes
+  conflicting intraday/swing positions — stop→BE if >=0.25R else software-stop
+  ratchet halfway to entry; NEVER IB order surgery (orphan-safe per operator's
+  explicit concern); whipsaw revert cancels pending; scalps/long-horizon
+  exempt. ALSO un-froze bot._current_regime (sizing multiplier was stuck at
+  RISK_ON forever — _update_market_regime never called). Hooked into manage
+  loop after _check_scalp_decay with 5s wall. Env: REGIME_DEMOTION_ENABLED/
+  CONFIRM_MIN/BE_R. 12 tests in test_v332_regime_demotion.py.
+  (3) scripts/diag_eod_pusher.py (read-only evidence probe): close reason x
+  style audit 15:30-16:10 ET, per-minute pusher ingest timeline (DEAD-from
+  detection), state_integrity_events, EOD heartbeats, queue gaps. 15:45
+  "pusher death" window exactly coincides with RegT machinery (15:45 hard
+  entry cut = the "safety guard" the operator suspected + EOD close pass at
+  15:45 since v19.34.154 + naked-guard ib_direct polling). VERDICT PENDING:
+  operator runs probe + watch_pusher_eod.py Monday.
+  TESTED: 35 pytest pass (v332+v301+v302), mirror byte-identical, idempotent,
+  backend boots. NOTE: ~36 PRE-EXISTING stale test failures in older eod test
+  files (e.g. test_default_eod_close_minute_is_55 expects pre-v154 value,
+  test_eod_generation needs running services) — not v332 regressions; cleanup
+  candidate for a future maintenance pass.
+  PENDING USER: apply v332, commit, restart. SPCX pinned+queued (v331 done).
