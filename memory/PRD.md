@@ -975,3 +975,33 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   PENDING: user applies v330, commits, restarts. NEXT: watch 2026-06-15 open
   (scalps fire? snapshots GREEN? M0 OCA ladder on fill?); Data Health HUD
   pill offered; Atlas password rotation still outstanding.
+- 2026-06-12 v331 MANUAL UNIVERSE PIN + SPCX (patcher paste.rs/FtUcg md5
+  185b3090512ed2d59deb7c52d6ab87be): ANSWER to operator — IPOs are NOT
+  auto-added: universe = symbol_adv_cache ADV>=$50M rebuilt from stored daily
+  bars; day-one IPO has no bars→no ADV row→invisible, AND collection only
+  targets cached symbols (chicken-and-egg). v331 adds manual_universe_pin:
+  always in get_universe/get_universe_ranked (any tier), Layer-0 unqualifiable
+  immunity, auto-flows to pusher L1 priority, pin_symbol()/unpin_symbol()
+  helpers; nightly ADV rebuild $set-only so pin survives. DB phase pins SPCX
+  + queues 5 short backfill requests (1d/1h/15m/5m/1m — not held by RTH gate).
+  TESTED: 5 functional pin tests + 6 source tests, mirror byte-identical,
+  idempotent, dev DB cleaned after test.
+- 2026-06-12 OPERATOR Q&A LOGGED: (1) INT-21 v330 guards scope = ONLY
+  _check_range_break intraday HOD/LOD detector; ORB/_check_breakout(S/R)/
+  hod_breakout/squeeze/multi-month investment range logic untouched.
+  (2) Friday backfill: no cancel needed — v328 gate holds deep reqs 09:25-
+  16:05 ET, free-runs all weekend. (3) Regime-flip position policy advised:
+  no immediate flatten; block new old-regime entries instantly, demote (BE/
+  tighten) thesis-dependent positions only after flip persists 15-30min;
+  scalps ride HSBG brackets. Implementation offered, not yet requested.
+NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
+  - EOD close sequence flattens EVERYTHING regardless of trade style/horizon
+    (swing/investment positions should survive overnight). Investigate
+    trading_bot EOD flatten path; then EOD flatten modal UX.
+  - IB pusher goes DEAD ~15:45-15:50 ET EVERY session — overload? safety
+    guard? MOC churn? Investigate pusher logs/heartbeats around that window.
+  - Regime-flip position demotion policy (see Q&A above) — design + implement
+    if operator confirms.
+  - Morning-report probe → integrate into briefings modal infrastructure
+    (scores the open: scalp count, snapshot uptime, gate activity, ladder
+    fills — pass/fail on the week's fixes).
