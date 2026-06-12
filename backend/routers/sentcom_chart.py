@@ -1022,12 +1022,15 @@ async def get_chart_tail(
     # passes `daysLoaded` on the full /chart load, so the cache key is
     # already (sym, tf, session, days). We try the tf-canonical default
     # first, then the broader windows we ship from the V5 frontend.
+    # v324 — aligned with the frontend TIMEFRAMES daysBack defaults
+    # (7/14/30/60/365) so the tail probe actually finds the cache entry
+    # the full /chart load wrote, instead of recomputing a tiny window.
     tf_default_days = {
-        "1min": 1, "5min": 5, "15min": 10, "1hour": 30, "1day": 365,
+        "1min": 7, "5min": 14, "15min": 30, "1hour": 60, "1day": 365,
     }
     candidate_days = [
         tf_default_days.get(tf, 5),
-        5, 10, 30, 90, 365,
+        5, 7, 10, 14, 30, 60, 90, 365,
     ]
     seen = set()
     cached_full = None
@@ -1129,6 +1132,263 @@ async def get_chart_tail(
         "from_cache": False,
         "cache": full.get("cache", "miss"),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v324 (2026-06-13) — Infinite history scrolling + tf availability
+# ═══════════════════════════════════════════════════════════════════
+#
+# `/chart-history` returns the next OLDER chunk of bars strictly before
+# a unix-seconds cursor, with indicators computed over a ~220-bar
+# warm-up pad so EMA-200/BB lines stay continuous across the seam. The
+# V5 ChartPanel calls this when the user scrolls/zooms near the
+# leftmost loaded bar and PREPENDS the result — no more full-window
+# doubling refetches, no 365-day ceiling.
+#
+# IMPORTANT: reads `ib_historical_data` DIRECTLY instead of
+# hybrid_data_service.get_bars() because get_bars has a staleness
+# fallback that returns the NEWEST bars when the requested (old) window
+# is empty — which would poison a prepend with duplicate recent bars.
+
+_HISTORY_CHUNK_CAPS = {
+    "1min": 1500,   # ≈2 sessions incl. premarket
+    "5min": 1500,   # ≈7 sessions
+    "15min": 1000,  # ≈20 sessions
+    "1hour": 1000,  # ≈3 months
+    "1day": 500,    # ≈2 years
+}
+_HISTORY_WARMUP_BARS = 220  # EMA-200 + BB-20 seed pad
+
+_TF_TO_BARSIZE = {
+    "1min": "1 min", "5min": "5 mins", "15min": "15 mins",
+    "1hour": "1 hour", "1day": "1 day",
+}
+
+
+@router.get("/chart-history")
+async def get_chart_history(
+    symbol: str = Query(..., min_length=1, max_length=10),
+    timeframe: str = Query("5min"),
+    before: int = Query(
+        ..., ge=1,
+        description=(
+            "Unix-seconds cursor. Returns only bars strictly OLDER than "
+            "this. Use the response's `next_before` as the cursor for the "
+            "following page — it resumes correctly even when a chunk was "
+            "entirely weekend/overnight rows."
+        ),
+    ),
+    session: str = Query("rth_plus_premarket"),
+    cap: Optional[int] = Query(None, ge=100, le=5000),
+) -> Dict[str, Any]:
+    """v324 — paginated older-history chunks for infinite chart scroll."""
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    tf = timeframe.lower()
+    if tf not in _SUPPORTED_TFS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported timeframe '{timeframe}'. Supported: {sorted(_SUPPORTED_TFS)}",
+        )
+    sym = symbol.upper()
+    chunk_cap = int(cap or _HISTORY_CHUNK_CAPS.get(tf, 1000))
+    bar_size = _TF_TO_BARSIZE[tf]
+
+    before_dt = datetime.fromtimestamp(int(before), tz=timezone.utc)
+    # `date` storage convention mirrors hybrid_data_service._get_from_cache:
+    # YYYY-MM-DD strings for daily bars, full ISO strings for intraday.
+    before_key = before_dt.strftime("%Y-%m-%d") if tf == "1day" else before_dt.isoformat()
+
+    import asyncio as _aio
+    coll = _db["ib_historical_data"]
+    fetch_n = chunk_cap + _HISTORY_WARMUP_BARS
+
+    def _sync_fetch():
+        return list(
+            coll.find(
+                {"symbol": sym, "bar_size": bar_size, "date": {"$lt": before_key}},
+                {"_id": 0},
+            ).sort("date", -1).limit(fetch_n)
+        )
+
+    docs = await _aio.to_thread(_sync_fetch)
+    has_more = len(docs) >= fetch_n
+    if not docs:
+        return {
+            "success": True, "symbol": sym, "timeframe": tf,
+            "before": int(before), "bar_count": 0, "bars": [],
+            "indicators": {}, "markers": [],
+            "has_more": False, "next_before": None, "earliest_time": None,
+        }
+
+    # Oldest doc of the RETURNED chunk (docs is newest-first). Rows older
+    # than this are the indicator warm-up pad — sliced off the response.
+    boundary_ts = _to_utc_seconds(
+        docs[min(chunk_cap, len(docs)) - 1].get("date")
+    )
+
+    docs.reverse()  # ascending
+    normalised: List[Dict[str, Any]] = []
+    for b in docs:
+        ts = _to_utc_seconds(b.get("date") or b.get("timestamp") or b.get("time"))
+        if ts is None or ts >= int(before):
+            continue
+        try:
+            normalised.append({
+                "time": ts,
+                "open": float(b["open"]),
+                "high": float(b["high"]),
+                "low": float(b["low"]),
+                "close": float(b["close"]),
+                "volume": int(b.get("volume", 0) or 0),
+            })
+        except (KeyError, ValueError, TypeError):
+            continue
+    normalised.sort(key=lambda r: r["time"])
+    deduped: List[Dict[str, Any]] = []
+    for r in normalised:
+        if deduped and deduped[-1]["time"] == r["time"]:
+            deduped[-1] = r
+        else:
+            deduped.append(r)
+    normalised = deduped
+
+    if boundary_ts is None and normalised:
+        boundary_ts = normalised[0]["time"]
+
+    if tf in {"1min", "5min", "15min", "1hour"} and normalised:
+        normalised, _ = _sanitize_intraday_bars(normalised)
+
+    # Session filter — same contract as /chart (tags session: pre|rth).
+    if tf in {"1min", "5min", "15min", "1hour"} and session != "all":
+        from zoneinfo import ZoneInfo
+        et = ZoneInfo("America/New_York")
+        if session == "rth_plus_premarket":
+            window_open, window_close = 4 * 60, 16 * 60
+        else:  # "rth"
+            window_open, window_close = 9 * 60 + 30, 16 * 60
+        kept: List[Dict[str, Any]] = []
+        for r in normalised:
+            dt_et = datetime.fromtimestamp(r["time"], tz=et)
+            if dt_et.weekday() >= 5:
+                continue
+            mod = dt_et.hour * 60 + dt_et.minute
+            if not (window_open <= mod < window_close):
+                continue
+            r["session"] = "pre" if mod < (9 * 60 + 30) else "rth"
+            kept.append(r)
+        normalised = kept
+    else:
+        for r in normalised:
+            r.setdefault("session", "rth")
+
+    if tf == "1day":
+        seen_days = set()
+        snapped: List[Dict[str, Any]] = []
+        for r in normalised:
+            day_ts = (r["time"] // 86400) * 86400
+            if day_ts in seen_days:
+                continue
+            seen_days.add(day_ts)
+            r["time"] = day_ts
+            snapped.append(r)
+        normalised = snapped
+        if boundary_ts is not None:
+            boundary_ts = (boundary_ts // 86400) * 86400
+
+    if not normalised or boundary_ts is None:
+        # Chunk was entirely weekend/overnight rows — hand back the
+        # cursor so the client immediately walks to the next older page.
+        return {
+            "success": True, "symbol": sym, "timeframe": tf,
+            "before": int(before), "bar_count": 0, "bars": [],
+            "indicators": {}, "markers": [],
+            "has_more": has_more, "next_before": boundary_ts,
+            "earliest_time": None,
+        }
+
+    # Indicators over warm-up + chunk, then slice to the chunk only.
+    times = [r["time"] for r in normalised]
+    closes = [r["close"] for r in normalised]
+    ema_20 = _ema(closes, 20)
+    ema_50 = _ema(closes, 50)
+    ema_200 = _ema(closes, 200)
+    bb_mid, bb_std = _rolling_mean_std(closes, 20)
+    bb_upper = [
+        (m + 2.0 * s) if (m is not None and s is not None) else None
+        for m, s in zip(bb_mid, bb_std)
+    ]
+    bb_lower = [
+        (m - 2.0 * s) if (m is not None and s is not None) else None
+        for m, s in zip(bb_mid, bb_std)
+    ]
+    vwap = _vwap(normalised, per_session=tf != "1day")
+
+    def _slice(series: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [p for p in series if p["time"] >= boundary_ts]
+
+    chunk = [r for r in normalised if r["time"] >= boundary_ts]
+    markers = (
+        _fetch_trade_markers(sym, chunk[0]["time"], chunk[-1]["time"])
+        if chunk else []
+    )
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "timeframe": tf,
+        "before": int(before),
+        "bar_count": len(chunk),
+        "bars": chunk,
+        "indicators": {
+            "vwap": _slice(_as_series(times, vwap)),
+            "ema_20": _slice(_as_series(times, ema_20)),
+            "ema_50": _slice(_as_series(times, ema_50)),
+            "ema_200": _slice(_as_series(times, ema_200)),
+            "bb_upper": _slice(_as_series(times, bb_upper)),
+            "bb_middle": _slice(_as_series(times, bb_mid)),
+            "bb_lower": _slice(_as_series(times, bb_lower)),
+        },
+        "markers": markers,
+        "has_more": has_more,
+        "next_before": boundary_ts,
+        "earliest_time": chunk[0]["time"] if chunk else None,
+    }
+
+
+@router.get("/chart/available-timeframes")
+async def get_available_timeframes(
+    symbol: str = Query(..., min_length=1, max_length=12),
+) -> Dict[str, Any]:
+    """v324 — bar counts per timeframe for `symbol` from
+    ib_historical_data. The V5 ChartPanel grays out timeframe buttons
+    with no collected history (Tier 2/3 investment symbols usually only
+    carry daily — sometimes hourly — bars)."""
+    if _db is None:
+        raise HTTPException(status_code=503, detail="db not initialised")
+    sym = symbol.upper()
+    barsize_to_tf = {v: k for k, v in _TF_TO_BARSIZE.items()}
+
+    import asyncio as _aio
+
+    def _sync_counts():
+        return list(_db["ib_historical_data"].aggregate([
+            {"$match": {"symbol": sym}},
+            {"$group": {"_id": "$bar_size", "n": {"$sum": 1}}},
+        ]))
+
+    try:
+        rows = await _aio.to_thread(_sync_counts)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("available-timeframes failed for %s: %s", sym, exc)
+        return {"success": False, "symbol": sym, "available": {}, "error": str(exc)}
+
+    available: Dict[str, int] = {}
+    for r in rows:
+        tf_val = barsize_to_tf.get(r.get("_id"))
+        if tf_val:
+            available[tf_val] = int(r.get("n", 0) or 0)
+    return {"success": True, "symbol": sym, "available": available}
 
 
 @router.get("/chart-diagnostic")

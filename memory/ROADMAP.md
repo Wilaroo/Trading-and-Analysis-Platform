@@ -3909,3 +3909,13 @@ Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 
 - 🟡 P-RETIRE/fix: risk_of_ruin (6/6 collapsed), sector_relative (3/3), exit_timing (0.455 dead).
 - Separation discipline CONFIRMED: training pipeline (clean historical CV) must NOT
   ingest live trade PnL; learning loop adapts posture via SHADOW mode only.
+
+## 2026-06-12 — v324 chart infinite history (SHIPPED, user-apply pending)
+- ✅ Issue "Chart historical lazy-loading/scrolling" → apply_v324.py @ https://paste.rs/peUbU
+  (md5 a77306d517c25cc540de613f1e673a69). Removes daysLoaded doubling; /chart-history
+  cursor pagination + per-symbol timeframe graying + auto-hop. Sandbox e2e PASSED.
+- NEXT UP: Deep TP/SL + Trade Management audit & unification (PT geometry off daily
+  ATR = unreachable; SmartStopService/BRACKET_V2 disconnected from evaluator).
+- Then: M0 OCA ladder validation (needs live scalp fill post-restart), INT-21 IGV
+  range-break guards, ELF→XLE _industry_to_etf mapping fix, thought-noise content
+  filter (v323c r2).

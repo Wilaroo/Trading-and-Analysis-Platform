@@ -848,3 +848,23 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   AI-enriched (stamped on trade) — v322x emits 🧮 enrichment-shift thought (PzSgh,
   + test_v322x_tqs_enrichment_thought.py). MICRO_SETUPS applier deleted from sandbox
   (pathspec error on DGX confirmed it never existed there — drift closed).
+- 2026-06-12 v324 INFINITE CHART HISTORY (paste.rs/peUbU, md5 a77306d5...): User
+  rejected day-toggle concept — wants pure zoom/scroll history streaming. Built
+  apply_v324.py: (1) backend GET /api/sentcom/chart-history — cursor-paginated
+  (before=unix-sec, next_before resume cursor) older-bar chunks read DIRECTLY from
+  ib_historical_data (get_bars staleness fallback would poison prepends with newest
+  bars), 220-bar warm-up pad keeps EMA200/BB continuous across seams, per-tf chunk
+  caps (1m/5m:1500, 15m/1h:1000, 1d:500); (2) GET /chart/available-timeframes —
+  per-symbol bar counts so UI grays out timeframes with <50 bars (tier 2/3 symbols);
+  (3) /chart-tail default-days probe aligned to frontend 7/14/30/60/365 lookbacks
+  (was recomputing 1-day windows on tail cache-miss); (4) ChartPanel.jsx: daysLoaded
+  doubling REMOVED, fetchOlderHistory prepends bars/indicators/markers on
+  subscribeVisibleLogicalRangeChange (from<10), hasMoreHistoryRef + historyCursorRef
+  + depth-guarded recursion for weekend-only chunks, cyan "Loading older history…"
+  pill, timeframe buttons disabled+tooltip when unavailable, auto-hop to coarsest
+  available tf. SANDBOX E2E VERIFIED: seeded 40d synthetic SPYTEST — scroll-drag
+  walked May 29 → Apr 20 (start of data), pagination terminated has_more=false,
+  no overlaps, indicators seam-continuous, 1m grayed for 5m-only symbol, backend
+  pytest 7/7. PENDING: user applies on DGX + restart (also activates v323b/v323c —
+  live app runs several commits behind; collector is upsert-based so interrupting
+  the running historical collection loses nothing).
