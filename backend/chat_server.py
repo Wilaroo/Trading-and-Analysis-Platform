@@ -83,6 +83,44 @@ class ChatHistory(BaseModel):
     limit: int = 50
 
 
+# ── v322z — known-symbol cache for lowercase ticker extraction ──────────────
+_KNOWN_SYMBOLS_CACHE: dict = {"at": 0.0, "symbols": set()}
+
+# Lowercase English words that collide with real tickers — never promote
+# these from a lowercase pass ("it" → IT, "on" → ON, "all" → ALL, ...).
+_LOWERCASE_STOPWORDS = {
+    "a", "an", "all", "am", "and", "any", "are", "as", "at", "be", "big",
+    "bid", "but", "buy", "by", "can", "day", "did", "do", "for", "get",
+    "go", "good", "had", "has", "he", "her", "him", "his", "hold", "how",
+    "if", "in", "is", "it", "its", "just", "key", "last", "let", "like",
+    "long", "low", "main", "make", "may", "me", "min", "more", "most",
+    "my", "new", "next", "no", "not", "now", "of", "off", "ok", "on",
+    "one", "or", "our", "out", "over", "own", "per", "post", "pre",
+    "real", "run", "see", "sell", "so", "some", "stop", "take", "than",
+    "that", "the", "them", "then", "they", "this", "to", "top", "trade",
+    "two", "up", "us", "very", "was", "we", "well", "were", "what",
+    "when", "who", "why", "will", "with", "yes", "you", "your",
+}
+
+
+def _known_symbols_cached(ttl_s: float = 3600.0) -> set:
+    """v322z — cached set of symbols the platform has bar data for.
+    Validates lowercase ticker mentions ("thoughts on sndk?") without
+    promoting plain English words to tickers. Best-effort: returns an
+    empty set on failure, which simply disables the lowercase pass."""
+    now = time.time()
+    if _KNOWN_SYMBOLS_CACHE["symbols"] and now - _KNOWN_SYMBOLS_CACHE["at"] < ttl_s:
+        return _KNOWN_SYMBOLS_CACHE["symbols"]
+    try:
+        syms = set(db["ib_historical_data"].distinct("symbol"))
+        if syms:
+            _KNOWN_SYMBOLS_CACHE["symbols"] = syms
+            _KNOWN_SYMBOLS_CACHE["at"] = now
+    except Exception as e:
+        logger.debug(f"v322z known-symbol cache refresh failed: {e}")
+    return _KNOWN_SYMBOLS_CACHE["symbols"]
+
+
 def _extract_user_mentioned_tickers(user_message: Optional[str], limit: int = 5) -> list:
     """v19.26 Bug-2 fix — extract ticker-shaped tokens from the user's
     last message so the chat context can hydrate live data for symbols
@@ -143,6 +181,24 @@ def _extract_user_mentioned_tickers(user_message: Optional[str], limit: int = 5)
         out.append(token)
         if len(out) >= limit:
             break
+
+    # ── v322z — lowercase mention rescue ("thoughts on sndk today?") ──
+    # The uppercase-only regex missed entirely-lowercase messages. Only
+    # runs when NO uppercase candidate was found, and every candidate
+    # must clear the stopword list AND exist in the known-symbol set.
+    if not out:
+        known = _known_symbols_cached()
+        if known:
+            for match in re.findall(r"\b[a-z][a-z0-9.]{1,4}\b", user_message or ""):
+                if match in _LOWERCASE_STOPWORDS:
+                    continue
+                token = match.upper()
+                if token in denylist or token in seen or token not in known:
+                    continue
+                seen.add(token)
+                out.append(token)
+                if len(out) >= limit:
+                    break
     return out
 
 
@@ -309,6 +365,10 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                             "shares": 1,
                             "status": 1,
                             "created_at": 1,
+                            # v322z — grade/style so chat matches the card
+                            "tqs_grade": 1,
+                            "unified_grade": 1,
+                            "trade_style": 1,
                         },
                     )
                 except Exception as lazy_err:
@@ -330,6 +390,8 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                             + (bt_doc.get("status", "?")) + ")"
                         ).strip(),
                         "shares": int(abs(qty)) or bt_doc.get("shares", 0),
+                        "tqs_grade": bt_doc.get("tqs_grade") or bt_doc.get("unified_grade") or "",
+                        "trade_style": bt_doc.get("trade_style") or "",
                         "_lazy_reconciled": True,
                     }]
                     debug.setdefault("lazy_reconciled", []).append(sym)
@@ -344,10 +406,15 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                     targets = bt.get("target_prices", [])
                     setup = bt.get("setup_type", "")
                     shares = bt.get("shares", 0)
+                    # v322z — surface TQS grade + trade style so the chat
+                    # describes the trade the same way the position card does.
+                    grade = bt.get("tqs_grade") or bt.get("unified_grade") or ""
+                    style = bt.get("trade_style") or ""
+                    extra = (f", TQS {grade}" if grade else "") + (f", {style}" if style else "")
                     target_str = ", ".join([f"${t:.2f}" for t in targets[:2]]) if targets else "none"
                     bot_lines.append(
                         f"  {sym} ({d}): {shares} shares, entry=${entry:.2f}, "
-                        f"stop=${stop:.2f}, targets=[{target_str}] — {setup}"
+                        f"stop=${stop:.2f}, targets=[{target_str}] — {setup}{extra}"
                     )
                 parts.append(
                     f"Bot-Tracked Trades ({len(bot_trades)} open):\n"
@@ -462,8 +529,8 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                    "symbol": {"$not": {"$regex": "^TEST"}}},
                   {"_id": 0, "symbol": 1, "direction": 1, "entry_price": 1,
                    "exit_price": 1, "pnl": 1, "status": 1, "setup_type": 1,
-                   "close_reason": 1, "created_at": 1})
-            .sort("created_at", -1)
+                   "close_reason": 1, "created_at": 1, "closed_at": 1})
+            .sort("closed_at", -1)  # v322z — recency of CLOSE, not creation
             .limit(15)
         )
         all_trades = recent_trades + bot_closed
@@ -681,12 +748,38 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
     except Exception:
         pass
 
-    # 10. Bot risk parameters
+    # 10. Bot risk parameters — v322z: LIVE from the trading bot's actual
+    # config instead of a hardcoded string. The old static "$2,500 max
+    # risk/trade, 1.5:1 min R:R" line drifted from reality and the
+    # assistant recited it as gospel (SNDK conversation, 2026-06-12).
     try:
-        parts.append(
-            "Risk Parameters: $2,500 max risk/trade, 1.5:1 min R:R, "
-            "50% max position size, 10 max open positions, 1% max daily loss"
-        )
+        _rp = {}
+        try:
+            _rp_resp = requests.get(
+                "http://127.0.0.1:8001/api/trading-bot/status", timeout=3)
+            if _rp_resp.status_code == 200:
+                _rp = (_rp_resp.json() or {}).get("risk_params") or {}
+        except Exception:
+            _rp = {}
+        if _rp:
+            _rp_bits = []
+            if _rp.get("max_risk_per_trade") is not None:
+                _rp_bits.append(f"max risk/trade ${float(_rp['max_risk_per_trade']):,.0f}")
+            if _rp.get("min_risk_reward") is not None:
+                _rp_bits.append(f"min R:R {_rp['min_risk_reward']}:1")
+            if _rp.get("max_open_positions") is not None:
+                _rp_bits.append(f"max open positions {_rp['max_open_positions']}")
+            if _rp.get("max_daily_loss") is not None:
+                _rp_bits.append(f"max daily loss ${float(_rp['max_daily_loss']):,.0f}")
+            if _rp_bits:
+                parts.append(
+                    "Bot Risk Parameters (LIVE config — quote THESE numbers, "
+                    "they override any defaults): " + ", ".join(_rp_bits))
+        if not _rp:
+            parts.append(
+                "Bot Risk Parameters: live config fetch failed — do NOT quote "
+                "specific risk numbers; say the live config is temporarily "
+                "unavailable.")
     except Exception:
         pass
 
@@ -727,13 +820,19 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
             if _idx not in _live_snapshot_targets:
                 _live_snapshot_targets.append(_idx)
         _snap_lines = []
+        _snap_failed = []  # v322z — user-mentioned symbols whose fetch failed
         # Bumped from 10 → 15 so the user-mentioned tickers don't get
         # truncated when the operator already has 6+ open positions.
         for _sym in _live_snapshot_targets[:15]:
+            _got_line = False
             try:
+                # v322z — user-mentioned tickers get a 6s budget: a cold
+                # symbol (not held/subscribed) must round-trip the pusher
+                # RPC to IB and routinely needs >2s. 2s stays for the
+                # held/index bulk so a dead pusher can't stall the chat.
                 _r = _live_req.get(
                     f"http://127.0.0.1:8001/api/live/symbol-snapshot/{_sym}",
-                    timeout=2,
+                    timeout=(6 if _sym in user_mentioned_tickers else 2),
                 )
                 if _r.status_code == 200:
                     _d = _r.json()
@@ -749,8 +848,22 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
                                 f"  {_sym} ${_price:.2f} {_sign}{_chg:.2f}% "
                                 f"(bar {_bar_ts}, {_state}, {_src})"
                             )
+                            _got_line = True
             except Exception:
                 pass
+            if not _got_line and _sym in user_mentioned_tickers:
+                _snap_failed.append(_sym)
+        if _snap_failed:
+            # v322z — tell the LLM the fetch FAILED instead of silence.
+            # Silence + the "never guess prices" rule made the assistant
+            # imply it doesn't track the symbol at all (SNDK incident).
+            parts.append(
+                "LIVE QUOTE FETCH FAILED for: " + ", ".join(_snap_failed)
+                + " — the live data fetch timed out or errored; the symbol "
+                  "itself may be fine. Say the live quote fetch failed just "
+                  "now and to ask again in a moment — do NOT imply the "
+                  "symbol is untracked or unknown."
+            )
         if _snap_lines:
             parts.append(
                 "Live Snapshots (Phase 3 live-data — IB pusher RPC, freshest "
@@ -759,6 +872,43 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
             )
     except Exception:
         pass
+
+    # 10.7. v322z — Bot decision trail (sentcom_thoughts recall)
+    # The operator watches the "Bot thoughts" stream in the UI, but the
+    # chat assistant had NO access to it — "why did you pass on ADBE?"
+    # was unanswerable. Inject the recent global trail plus a deeper
+    # per-symbol trail for tickers the operator just mentioned.
+    try:
+        _trail_lines = []
+        _cut_1h = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        _glob_thoughts = list(db["sentcom_thoughts"].find(
+            {"timestamp": {"$gte": _cut_1h}},
+            {"_id": 0, "content": 1, "symbol": 1, "timestamp": 1},
+        ).sort("timestamp", -1).limit(12))
+        for _t in reversed(_glob_thoughts):
+            _trail_lines.append(
+                f"  [{str(_t.get('timestamp') or '')[11:19]}] "
+                f"{str(_t.get('content') or '')[:110]}")
+        _cut_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        for _um in user_mentioned_tickers:
+            _sym_rows = list(db["sentcom_thoughts"].find(
+                {"symbol": _um, "timestamp": {"$gte": _cut_24h}},
+                {"_id": 0, "content": 1, "timestamp": 1},
+            ).sort("timestamp", -1).limit(8))
+            if _sym_rows:
+                _trail_lines.append(f"  {_um} trail (last 24h):")
+                for _t in reversed(_sym_rows):
+                    _trail_lines.append(
+                        f"    [{str(_t.get('timestamp') or '')[11:19]}] "
+                        f"{str(_t.get('content') or '')[:110]}")
+        if _trail_lines:
+            parts.append(
+                "Bot Decision Trail (my own recent evaluations/passes/fills — "
+                "use these to answer 'why did you pass/enter/skip X'):\n"
+                + "\n".join(_trail_lines))
+        debug["thought_trail_lines"] = len(_trail_lines)
+    except Exception as e:
+        debug["thought_trail_error"] = str(e)
 
     # 11. Technical indicators for held positions (RSI, VWAP, EMAs, squeeze, etc.)
     try:
@@ -783,7 +933,12 @@ def _get_portfolio_context(user_message: Optional[str] = None) -> dict:
         # tickers don't get truncated when there's a busy book.
         for sym in held_symbols[:15]:
             try:
-                resp = requests.get(f"http://127.0.0.1:8001/api/technicals/{sym}", timeout=2)
+                # v322z — 6s budget for user-mentioned tickers (cold-symbol
+                # technicals can exceed 2s), 2s for the held/index bulk.
+                resp = requests.get(
+                    f"http://127.0.0.1:8001/api/technicals/{sym}",
+                    timeout=(6 if sym in user_mentioned_tickers else 2),
+                )
                 if resp.status_code == 200:
                     t = resp.json()
                     if t.get("success") and t.get("snapshot"):
@@ -1406,7 +1561,7 @@ Setup Evaluation Framework:
 - Breakout entries: need volume confirmation (RVOL > 1.3x minimum). No volume = false breakout
 
 Risk Management Rules (these scale with live account equity — compute from the "Net Liq" figure in LIVE DATA below):
-- Per-trade risk cap: `max(0.01 × equity, $2,500)`. Example: at $237K equity, max risk ≈ $2,370 → use $2,500. At $400K equity, max risk = $4,000.
+- Per-trade risk cap: when the LIVE DATA includes "Bot Risk Parameters (LIVE config)", use THAT max-risk figure — it is the bot's actual setting. Only if the live line is missing, fall back to `max(0.01 × equity, $2,500)`.
 - Minimum R:R is 1.5:1 — never take a trade where the reward doesn't justify the risk.
 - Daily loss circuit-breaker: if today's realized P&L ≤ -0.01 × equity, recommend stopping for the day.
 - Position-count soft cap: `max(10, floor(equity / $25K))`. Example: $237K equity → 10 positions before warning. Treat this as ADVISORY — when at/over the cap and operator wants to add another, ASK ("we're already at 11 positions — should I close something first or are you OK adding another?") rather than refusing outright. NEVER hard-block a manually-requested entry just because we're at the count.

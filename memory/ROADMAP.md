@@ -5,6 +5,36 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## Session Summary - 2026-06-12 (sanitization probes + v322x observability; calibration PARKED)
 
+### PT-REACHABILITY PROBE RESULTS (DGX run 14:26Z) — exits are NOT the only problem
+On the 102 clean trades: trade_2_hold median stop = 1.75 "ATR" / 3.46% of entry;
+median PT1 = 2.54R = ~4.85 ATR units; top offenders PT1 = 15-42 ATR (entry_context.atr
+units are heterogeneous — some rows clearly store intraday ATR — treat ATR columns as
+directional, R columns as exact). MFE: median 0.00R, only 6% ever reached +0.5R;
+PT1 touched by 0/101 trades. Clock closes (73): only 21% were ever ≥+0.25R; avg R left
+on table just +0.17R. COUNTERFACTUAL SWEEP: no PT placement (0.5-2.0R) flips avgR
+positive (baseline -0.066). CONCLUSION: brackets are so wide that ALL price action is
+noise within them — the R-DENOMINATOR is mis-scaled (stop from DAILY ATR ~1.3-2.5x on
+intraday holds → shares collapse → P&L ±$20). v322p decay-deferral alone won't fix this;
+the evidence-backed fix is HORIZON-SCALED BRACKET GEOMETRY (intraday stop ≈ fraction of
+daily ATR / k× intraday ATR, PT within expected hold-window range) → queued as the next
+major trading patch after v322z.
+
+### v322z — chat data-trust fixes (audit of SNDK conversation)
+Full chat_server.py audit: 16 context sections inventoried. GAPS FOUND+FIXED (patcher
+Hk2wg, 11 anchored chunks, test_v322z_chat_context.py 7 tests):
+1. Cold-symbol hydration: 2s timeout + SILENT skip → "I don't have a quote on SNDK".
+   Fixed: 6s budget for user-mentioned tickers (snapshot+technicals) + explicit
+   "LIVE QUOTE FETCH FAILED for: X" context line.
+2. Stale hardcoded "Risk Parameters: $2,500/1.5:1/10 positions" (line 687) → now LIVE
+   from /api/trading-bot/status risk_params; prompt risk-cap rule defers to live figure.
+3. NO decision-trail recall ("why did you pass on ADBE?" unanswerable) → new section
+   10.7 injects sentcom_thoughts: 1h global (12) + 24h per-mentioned-symbol (8).
+4. Lowercase mentions ("thoughts on sndk?") missed by uppercase-only regex → lowercase
+   rescue pass, gated on no-uppercase-found + stopword list + known-symbol cache
+   (ib_historical_data.distinct, 1h TTL).
+Minor: closed-trades context sorts by closed_at; bot-trade lines carry TQS grade+style.
+NOTE: chat server is a SEPARATE process (port 8002) — needs its own restart after apply.
+
 | Version | Topic | Status |
 |---|---|---|
 | sanitize_v1 probe | `diag_sanitized_closed_trades.py` (paste.rs F88ca) — 9-stage exclusion funnel | RUN on DGX 13:55Z |
