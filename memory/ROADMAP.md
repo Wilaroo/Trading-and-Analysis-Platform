@@ -5,6 +5,40 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## Session Summary - 2026-06-12 (sanitization probes + v322x observability; calibration PARKED)
 
+### v323b — RVOL ROOT CAUSE SOLVED (no-scalps incident)
+Probe r2 convicted: morning catch-up IB collection (DGX boots after missed nightly run)
+persisted TODAY'S IN-PROGRESS daily bar as complete — OXY 06-11 vol=589,273 collected
+9:50 ET (full day ~6-8M). Scanner F7 guard treats prior-day bar as complete (tf=1.0) →
+RVOL = 0.09x → ALL setups blocked all session; scalps die first (stricter floor).
+SPY 06-09 row (collected 12:24 ET) same poison; nightly daily collection also erratic
+(SPY 3 days stale). FIX (patcher nfOTu): `_is_inprogress_daily_bar()` guard on ALL 3
+bar-write sites (daily bar dated today only persisted >= 16:15 ET) + repair scan that
+DELETES existing partial rows (collected same-ET-day before 16:15). Morning catch-ups
+now safe. Follow-up idea (backlog): live today-RVOL from pusher quote day_volume.
+Charts: intraday 1m/5m collection proven healthy (900 bars/day, 6m max gaps) — ADBE
+chart issue is in the chart data path/rendering, NOT collection; EEM entered universe
+mid-day. Chart investigation still open.
+
+### v323c — thought retention tiering (operator-approved)
+sentcom_thoughts: noise kinds (scan/skip/filter/info ≈ bulk of 371K rows/week) now get
+per-doc expires_at +7d (TTL(0) index `expires_at_ttl`); signal kinds (thought/alert/
+evaluation/fill/rejection/system/brain) live full 190d via created_at TTL backstop.
+Patcher fCGQH migrates existing noise rows. bot_trades/bracket_lifecycle_events
+untouched (permanent).
+
+### v323a r2 — long-memory chat recall (APPLIED on DGX, commit 3d524dfa)
+TTL 7d→190d collMod'd live (371,019 rows ≈ 7d volume). Deep per-symbol thought recall
+beyond 24h + "Symbol Trade Memory" from bot_trades — r2 SANITIZED inline (mirrors
+sanitize_v2 funnel: artifact close-reasons/setups, learning_only, [SIMULATED], shadow,
+no-exit-price all excluded; artifact count disclosed in-context so the LLM can't
+hallucinate a fake track record). Operator hallucination concern addressed pre-deploy.
+
+| Version | Topic | Status |
+|---|---|---|
+| v323a r2 | long-memory sanitized chat recall | APPLIED + COMMITTED (3d524dfa) |
+| v323b | daily-bar integrity / RVOL fix + repair | UPLOADED nfOTu, awaiting DGX apply |
+| v323c | thought retention tiering | UPLOADED fCGQH, awaiting DGX apply |
+
 ### PT-REACHABILITY PROBE RESULTS (DGX run 14:26Z) — exits are NOT the only problem
 On the 102 clean trades: trade_2_hold median stop = 1.75 "ATR" / 3.46% of entry;
 median PT1 = 2.54R = ~4.85 ATR units; top offenders PT1 = 15-42 ATR (entry_context.atr

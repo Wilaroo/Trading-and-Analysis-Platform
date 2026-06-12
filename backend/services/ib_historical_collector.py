@@ -1821,6 +1821,9 @@ class IBHistoricalCollector:
             
             for bar in bars:
                 try:
+                    # v323b — never persist today's in-progress daily bar
+                    if self._is_inprogress_daily_bar(bar_size, bar.get("date") or bar.get("time")):
+                        continue
                     self._data_col.update_one(
                         {
                             "symbol": symbol,
@@ -1847,6 +1850,29 @@ class IBHistoricalCollector:
             # Mark this data as processed by clearing it from queue
             # (The queue will auto-cleanup old completed requests)
             
+    @staticmethod
+    def _is_inprogress_daily_bar(bar_size: str, bar_date) -> bool:
+        """v323b — True when this DAILY bar is TODAY'S still-in-progress ET
+        session. Persisting it poisons RVOL: a catch-up collection running
+        after the open wrote e.g. OXY 2026-06-11 vol=589,273 (the cumulative
+        volume at 9:50 ET) as a COMPLETE day; the scanner's F7 prior-day
+        guard then computed RVOL = partial/avg = 0.09x and blocked every
+        setup for the whole session (2026-06-12 no-scalps incident).
+        Today's daily bar is only safe after the close (>= 16:15 ET)."""
+        try:
+            if "day" not in str(bar_size).lower():
+                return False
+            s = str(bar_date or "")[:10].replace("/", "-")
+            if len(s) >= 8 and s[:8].isdigit():
+                s = f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+            from zoneinfo import ZoneInfo
+            now_et = datetime.now(ZoneInfo("America/New_York"))
+            if s[:10] != now_et.strftime("%Y-%m-%d"):
+                return False
+            return (now_et.hour, now_et.minute) < (16, 15)
+        except Exception:
+            return False
+
     async def _collect_symbol_data(
         self, 
         symbol: str, 
@@ -1897,6 +1923,9 @@ class IBHistoricalCollector:
                     if self._data_col is not None:
                         for bar in bars:
                             try:
+                                # v323b — never persist today's in-progress daily bar
+                                if self._is_inprogress_daily_bar(bar_size, bar.get("date") or bar.get("time")):
+                                    continue
                                 self._data_col.update_one(
                                     {
                                         "symbol": symbol,
@@ -2082,6 +2111,9 @@ class IBHistoricalCollector:
             
             for bar in bars:
                 try:
+                    # v323b — never persist today's in-progress daily bar
+                    if self._is_inprogress_daily_bar(bar_size, bar.get("date") or bar.get("time")):
+                        continue
                     self._data_col.update_one(
                         {
                             "symbol": symbol,

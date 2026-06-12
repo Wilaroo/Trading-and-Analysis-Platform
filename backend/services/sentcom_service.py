@@ -3179,6 +3179,13 @@ _VALID_KINDS = {
 }
 
 THOUGHTS_COLLECTION = "sentcom_thoughts"
+# v323c — retention tiers. Scanner noise (scan/skip/filter/info) is ~90%
+# of write volume and has no recall value past a few sessions: it gets a
+# per-doc `expires_at` (+7d, pruned by the expires_at_ttl index). Signal
+# kinds (thought/alert/evaluation/fill/rejection/system/brain) carry no
+# expires_at and live the full _THOUGHTS_TTL_DAYS via the created_at TTL.
+_SCAN_NOISE_KINDS = {"scan", "skip", "filter", "info"}
+_NOISE_TTL_DAYS = 7
 # v323a — was 7. Operator wants months of decision-trail recall in chat;
 # 190d ≈ 6.3 months. NOTE: changing this constant does NOT retune an
 # already-created TTL index — apply_v323a.py ran the collMod migration.
@@ -3201,6 +3208,9 @@ def _ensure_thoughts_indexes():
             name="created_at_ttl",
         )
         col.create_index([("symbol", 1), ("created_at", -1)], name="symbol_recent")
+        # v323c — per-doc expiry for noise kinds (docs without the field
+        # are ignored by this TTL index and fall back to created_at_ttl).
+        col.create_index("expires_at", expireAfterSeconds=0, name="expires_at_ttl")
         col.create_index([("kind", 1), ("created_at", -1)], name="kind_recent")
         _thoughts_index_initialised = True
     except Exception as e:
@@ -3226,6 +3236,8 @@ async def _persist_thought(msg: "SentComMessage") -> None:
         sym_norm = (msg.symbol or "").upper() or None
 
         def _insert():
+            _doc_kind = str(msg.type or "")
+            _now = datetime.now(timezone.utc)
             db[THOUGHTS_COLLECTION].insert_one({
                 "id": msg.id,
                 "kind": msg.type,
@@ -3235,7 +3247,11 @@ async def _persist_thought(msg: "SentComMessage") -> None:
                 "confidence": msg.confidence,
                 "metadata": msg.metadata or {},
                 "timestamp": msg.timestamp,
-                "created_at": datetime.now(timezone.utc),
+                "created_at": _now,
+                # v323c — noise kinds expire at 7d; signal kinds omit the
+                # field and live the full created_at TTL window (190d).
+                **({"expires_at": _now + timedelta(days=_NOISE_TTL_DAYS)}
+                   if _doc_kind in _SCAN_NOISE_KINDS else {}),
             })
 
         await asyncio.to_thread(_insert)
