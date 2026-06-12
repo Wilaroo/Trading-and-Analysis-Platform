@@ -3549,3 +3549,4 @@ scripts/watch_*.sh
 # applier backups
 *.bak
 *.bak.*
+v*_backup_*/
