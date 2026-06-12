@@ -3179,13 +3179,16 @@ _VALID_KINDS = {
 }
 
 THOUGHTS_COLLECTION = "sentcom_thoughts"
-_THOUGHTS_TTL_DAYS = 7
+# v323a — was 7. Operator wants months of decision-trail recall in chat;
+# 190d ≈ 6.3 months. NOTE: changing this constant does NOT retune an
+# already-created TTL index — apply_v323a.py ran the collMod migration.
+_THOUGHTS_TTL_DAYS = 190
 _thoughts_index_initialised = False
 
 
 def _ensure_thoughts_indexes():
     """Create indexes on `sentcom_thoughts` once per process. Idempotent.
-    `created_at` TTL prunes 7+ day old rows automatically."""
+    `created_at` TTL prunes rows older than `_THOUGHTS_TTL_DAYS` (v323a: 190d)."""
     global _thoughts_index_initialised
     if _thoughts_index_initialised:
         return
