@@ -1429,7 +1429,20 @@ class PositionManager:
             result["checked"] += 1
             sym = (p.get("symbol") or "").upper()
             tracked = bot_open.get(sym)
-            close_at_eod = bool(getattr(tracked, "close_at_eod", True)) if tracked else True
+            # v332 — resolve close_at_eod from the trade-style POLICY, exactly
+            # like the main EOD pass (v19.34.245). This guard was still reading
+            # the raw per-trade attribute, which carries a blanket default-True
+            # fallback — so swing/position holds with a stale attribute were
+            # treated as intraday and FORCE-FLATTENED by the v302 sweep
+            # ("EOD closes everything regardless of trade style").
+            if tracked is not None:
+                try:
+                    from services.order_policy_registry import should_close_at_eod as _scae_guard
+                    close_at_eod = bool(_scae_guard(tracked))
+                except Exception:
+                    close_at_eod = bool(getattr(tracked, "close_at_eod", True))
+            else:
+                close_at_eod = True
             is_swing_hold = (tracked is not None and not close_at_eod)
             naked = _ib_position_is_naked(qty, sym, open_orders)
 
