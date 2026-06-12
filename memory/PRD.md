@@ -1034,3 +1034,20 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   test_eod_generation needs running services) — not v332 regressions; cleanup
   candidate for a future maintenance pass.
   PENDING USER: apply v332, commit, restart. SPCX pinned+queued (v331 done).
+- 2026-06-12 v333 SYSTEM INTEGRITY BRIEFING + AUDITABLE FEED (patcher
+  paste.rs/EFeBv md5 c202e330524d5f98bb81d0374bdc6413), operator-approved:
+  BACKEND new routers/integrity_router.py (registered in server.py after
+  sentcom_chart include): GET /api/integrity/morning-report = live PASS/WARN/
+  FAIL scorecard with 8 checks (scalps_fired, data_uptime %RTH-minutes,
+  ingest_freshness, daily_bar_leak v328, backfill_gate v328+deep-held count,
+  m0_ladder trades+legs filled, regime+demotions v332, integrity_events by
+  severity); GET /api/integrity/feed = state_integrity_events merged with
+  per-trade regime-demotion stop moves (old→new stop @ price from bot_trades.
+  trailing_stop_config.stop_adjustments). FRONTEND: 5th "Integrity" shield
+  button in BriefingsCompactStrip (no time window, static style, never
+  pulses) → deep-dive modal briefingKey="integrity" renders IntegrityBody
+  (checklist+feed) atop standard sections; IntegrityCardV5 also in BriefingsV5
+  panel; shared useIntegrityReport hook (60s poll). VERIFIED via screenshot:
+  modal renders scorecard + demotion feed with before/after stops. 7 tests
+  in test_v333_integrity.py; mirror byte-identical (13 items), idempotent.
+  PENDING USER: apply v333, commit, restart backend.

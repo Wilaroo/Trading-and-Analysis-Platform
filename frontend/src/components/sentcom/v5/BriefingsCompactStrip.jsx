@@ -24,7 +24,7 @@
  * rendering for morning / midday / powerhour / eod variants.
  */
 import React from 'react';
-import { Sun, Coffee, Zap, Moon } from 'lucide-react';
+import { Sun, Coffee, Zap, Moon, ShieldCheck } from 'lucide-react';
 import { statusFor } from './BriefingsV5';
 
 const BRIEFINGS = [
@@ -63,6 +63,17 @@ const BRIEFINGS = [
     // Active 16:00 - 17:00 ET.
     windowStart: 16 * 60,
     windowEnd: 17 * 60,
+  },
+  {
+    // v333 — System Integrity scorecard: always available (no time
+    // window). Deep-dive shows the pass/fail pipeline checklist +
+    // the integrity feed (regime demotions with before/after stops).
+    key: 'integrity',
+    label: 'Integrity',
+    short: 'INT',
+    icon: ShieldCheck,
+    windowStart: null,
+    windowEnd: null,
   },
 ];
 
@@ -121,7 +132,11 @@ export const BriefingsCompactStrip = ({
       className={`flex items-center gap-2 flex-wrap ${className}`}
     >
       {BRIEFINGS.map((def) => {
-        const state = statusFor(def.windowStart, def.windowEnd);
+        // v333 — the Integrity button has no time window: render it in
+        // the static "passed" style (always clickable, never pulses).
+        const state = def.windowStart == null
+          ? 'passed'
+          : statusFor(def.windowStart, def.windowEnd);
         return (
           <BriefingButton
             key={def.key}

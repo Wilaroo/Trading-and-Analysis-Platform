@@ -1503,6 +1503,14 @@ from routers.setup_grades import router as setup_grades_router
 app.include_router(setup_grades_router)
 app.include_router(sentcom_chart_router)
 
+# v333 — System Integrity briefing card + auditable integrity feed
+# (morning-report scorecard: scalps/data uptime/daily-bar leak/backfill
+# gate/M0 ladder/regime demotions with before-after stops).
+from routers.integrity_router import (  # noqa: E402
+    router as integrity_router, init_integrity_router)
+app.include_router(integrity_router)
+init_integrity_router(db)
+
 # Phase 1 — Live Data Architecture: pusher RPC + live-bar cache visibility
 try:
     from routers.live_data_router import router as live_data_router
