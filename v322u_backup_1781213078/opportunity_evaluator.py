@@ -20,38 +20,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ── v322u — Taxonomy coherence: timeframe follows trade_style ────────
-# STRATEGY_CONFIG[setup_type]["timeframe"] and the scanner-stamped
-# trade_style (trade_style_classifier.SETUP_TO_STYLE / SMB registry
-# default_style) are two PARALLEL per-setup tables that drift
-# independently. Probe 2026-06-11 found bot_trades rows with
-# style=swing + tf=intraday; the inverse (style=scalp + tf=intraday)
-# silently exempts scalps from the v19.34.171 scalp-decay sweep, and
-# a swing mislabeled tf=scalp would get wrongly flattened at 60 min.
-# The style is the policy-bearing axis (order_policy_registry, EOD
-# policy and sizing key on it), so on conflict the style-derived
-# horizon wins. Legacy/generic SMB styles (trade_2_hold, move_2_move,
-# a_plus, reconciled, ...) carry no horizon info → table value kept.
-STYLE_TO_TIMEFRAME: Dict[str, str] = {
-    "scalp": "scalp",
-    "intraday": "intraday",
-    "multi_day": "swing",
-    "swing": "swing",
-    "position": "position",
-    "investment": "position",
-}
-
-
-def reconcile_timeframe_with_style(timeframe_str, trade_style) -> Tuple[str, bool]:
-    """v322u — Return (timeframe, changed). Style-derived horizon wins
-    on conflict; styles without a canonical horizon leave it untouched."""
-    style = str(trade_style or "").strip().lower()
-    tf_from_style = STYLE_TO_TIMEFRAME.get(style)
-    if tf_from_style and tf_from_style != str(timeframe_str or "").lower():
-        return tf_from_style, True
-    return timeframe_str, False
-
-
 # ── v19.34.247 (2026-06-03) — EOD no-new-entries cut resolver ───────
 # Pure helper so the EOD gate's time math is unit-testable and its
 # operator-facing strings stay in lockstep with the bot's ACTUAL
@@ -813,45 +781,6 @@ class OpportunityEvaluator:
                             f"Post-gate TQS for {symbol}: {recalc_tqs.score:.1f} "
                             f"(pre-gate: {alert.get('tqs_score', 'N/A')})"
                         )
-
-                        # ── v322x — TQS enrichment observability ─────────
-                        # The "🤔 Evaluating" thought fires with the
-                        # PRE-gate TQS, but the trade card shows this
-                        # POST-gate (AI-enriched) score stamped at trade
-                        # creation. When enrichment shifts the number the
-                        # operator saw two unexplained values (e.g. XOM
-                        # eval'd "54 C" but card "60 B"). Surface the shift
-                        # explicitly so the trail reads 54 C → 60 B.
-                        try:
-                            _pre_s = float(alert.get("tqs_score") or 0)
-                            _post_s = float(recalc_tqs.score or 0)
-                            _pre_g = str(alert.get("tqs_grade") or "")
-                            _post_g = str(recalc_tqs.grade or "")
-                            if abs(_post_s - _pre_s) >= 1.0 or (_pre_g and _post_g and _pre_g != _post_g):
-                                from services.sentcom_service import emit_stream_event
-                                _pre_lbl = f"{_pre_s:.0f}" + (f" {_pre_g}" if _pre_g else "")
-                                _post_lbl = f"{_post_s:.0f}" + (f" {_post_g}" if _post_g else "")
-                                await emit_stream_event({
-                                    "kind": "evaluation",
-                                    "event": "tqs_enriched",
-                                    "symbol": symbol,
-                                    "text": (
-                                        f"🧮 {symbol} TQS enriched {_pre_lbl} → {_post_lbl} "
-                                        f"after AI consult ("
-                                        f"{'model agrees' if model_agrees else 'model disagrees'}, "
-                                        f"{float(pred_conf or 0):.0f}% conf)"
-                                    ),
-                                    "metadata": {
-                                        "setup_type": setup_type,
-                                        "pre_gate_tqs": _pre_s,
-                                        "post_gate_tqs": _post_s,
-                                        "pre_gate_grade": _pre_g,
-                                        "post_gate_grade": _post_g,
-                                        "model_agrees": model_agrees,
-                                    },
-                                })
-                        except Exception as _tqs_obs_err:
-                            logger.debug(f"v322x TQS enrichment thought error: {_tqs_obs_err}")
                 except Exception as e:
                     logger.debug(f"Post-gate TQS recalculation failed (non-critical): {e}")
 
@@ -1438,19 +1367,6 @@ class OpportunityEvaluator:
             strategy_cfg = STRATEGY_CONFIG.get(setup_type, DEFAULT_STRATEGY_CONFIG)
             timeframe_val = strategy_cfg["timeframe"]
             timeframe_str = timeframe_val.value if isinstance(timeframe_val, TradeTimeframe) else timeframe_val
-            # v322u — taxonomy coherence: when the scanner-resolved
-            # trade_style maps to a canonical horizon that conflicts with
-            # the per-setup STRATEGY_CONFIG table, the style wins (it
-            # drives order policy / EOD / decay). See STYLE_TO_TIMEFRAME.
-            timeframe_str, _tf_reconciled = reconcile_timeframe_with_style(
-                timeframe_str, alert.get("trade_style"))
-            if _tf_reconciled:
-                logger.info(
-                    "[v322u TAXONOMY] %s %s: timeframe → %r "
-                    "(follows trade_style=%r, STRATEGY_CONFIG said %r)",
-                    symbol, setup_type, timeframe_str,
-                    alert.get("trade_style"), strategy_cfg["timeframe"],
-                )
             trail_pct = strategy_cfg.get("trail_pct", 0.02)
             scale_pcts = strategy_cfg.get("scale_out_pcts", [0.33, 0.33, 0.34])
             # v19.34.245 — derive close_at_eod from the trade-style POLICY when
