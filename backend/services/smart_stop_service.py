@@ -340,6 +340,56 @@ ARCHETYPE_STOP_RULES = {
 
 
 # ============================================================================
+# v326 — Unified stop-rule helpers
+# ============================================================================
+# `resolve_daily_atr` gives every SmartStop consumer the SAME canonical
+# DAILY-ATR basis the evaluator's v325 geometry uses (the /audit-stops &
+# /fix-stop endpoints previously hardcoded atr = entry × 2%, making every
+# suggestion fictional). Preference order:
+#   1. collector's symbol_adv_cache.atr_pct × ref_price (0.3%–20% window)
+#   2. caller-provided fallback_atr if plausibly daily
+#   3. 2% of price (last resort, flagged)
+
+def resolve_daily_atr(db, symbol, ref_price, fallback_atr=None):
+    """Returns (daily_atr_dollars, source_str)."""
+    try:
+        px = float(ref_price or 0)
+    except (TypeError, ValueError):
+        px = 0.0
+    if px <= 0:
+        return (float(fallback_atr) if fallback_atr else 0.0, "invalid_ref_price")
+    if db is not None and symbol:
+        try:
+            doc = db["symbol_adv_cache"].find_one(
+                {"symbol": str(symbol).upper()}, {"atr_pct": 1, "_id": 0})
+            if doc and doc.get("atr_pct"):
+                cand = float(doc["atr_pct"]) * px
+                if 0.003 * px <= cand <= 0.20 * px:
+                    return cand, "symbol_adv_cache"
+        except Exception:
+            pass
+    try:
+        if fallback_atr and 0.003 * px <= float(fallback_atr) <= 0.20 * px:
+            return float(fallback_atr), "caller_fallback"
+    except (TypeError, ValueError):
+        pass
+    return px * 0.02, "fallback_2pct"
+
+
+class _EvalRiskShimRP:
+    base_atr_multiplier = 1.5
+
+
+class _EvalRiskShimBot:
+    """Minimal bot stand-in so OpportunityEvaluator._resolve_atr_multiplier
+    can run its fallback paths outside the live bot context."""
+    risk_params = _EvalRiskShimRP()
+
+
+_EVAL_RISK_SHIM = _EvalRiskShimBot()
+
+
+# ============================================================================
 # MAIN SERVICE CLASS
 # ============================================================================
 
@@ -458,7 +508,8 @@ class SmartStopService:
         float_shares: float = None,
         avg_volume: float = None,
         max_risk_dollars: float = None,
-        max_risk_percent: float = 0.02
+        max_risk_percent: float = 0.02,
+        trade_style: str = None
     ) -> SmartStopResult:
         """
         Full intelligent stop calculation with all analysis factors.
@@ -484,6 +535,33 @@ class SmartStopService:
         # 1. Get setup rules
         rules = self._get_setup_rules(setup_type)
         factors.append(f"Setup: {rules.setup_type}")
+
+        # v326 — v325 HSBG horizon parity. When the caller passes
+        # trade_style, scalp/intraday suggested stops shrink by the SAME
+        # √(hold/390) fraction live entries use, and the legacy 2%
+        # min-stop constraint is swapped for the HSBG floors so it can't
+        # undo the scaling. Trailing/breakeven triggers scale
+        # automatically (they derive from initial_stop_atr_mult).
+        # Callers that omit trade_style get pre-v326 daily-basis behavior.
+        hsbg_frac = 1.0
+        if trade_style is not None:
+            try:
+                from dataclasses import replace as _dc_replace
+                from services.opportunity_evaluator import OpportunityEvaluator as _OE
+                _geo_style = _OE._resolve_geometry_style(
+                    {"trade_style": trade_style}, setup_type)
+                hsbg_frac = _OE._hsbg_horizon_frac(_geo_style)
+                if hsbg_frac < 1.0:
+                    rules = _dc_replace(
+                        rules,
+                        initial_stop_atr_mult=rules.initial_stop_atr_mult * hsbg_frac,
+                        min_stop_pct=_OE._hsbg_min_stop_pct(_geo_style),
+                        max_stop_pct=max(0.005, rules.max_stop_pct * hsbg_frac),
+                    )
+                    factors.append(f"HSBG horizon ×{hsbg_frac:.2f} ({_geo_style})")
+            except Exception as _hsbg_exc:
+                logger.debug("v326 HSBG parity skipped: %s", _hsbg_exc)
+                hsbg_frac = 1.0
         
         # 2. Volume profile analysis
         volume_profile = None
@@ -552,7 +630,9 @@ class SmartStopService:
         
         # Anti-hunt buffer for high risk
         if hunt_risk['level'] == 'HIGH':
-            anti_hunt_buffer = atr * self.config.anti_hunt_extra_atr
+            # v326 — buffer scales with the horizon fraction so a daily-
+            # ATR sized buffer can't dwarf a horizon-scaled scalp stop.
+            anti_hunt_buffer = atr * self.config.anti_hunt_extra_atr * hsbg_frac
             adjusted_stop = adjusted_stop - anti_hunt_buffer if direction == 'long' else adjusted_stop + anti_hunt_buffer
             factors.append(f"Anti-hunt buffer: ${anti_hunt_buffer:.2f}")
         
@@ -809,17 +889,52 @@ class SmartStopService:
                 from services.exit_archetype_service import resolve_exit_archetype
                 arch = resolve_exit_archetype(setup_type)
                 if arch in ARCHETYPE_STOP_RULES:
-                    return ARCHETYPE_STOP_RULES[arch]
+                    # v326 — archetype keeps owning the EXIT shape
+                    # (trailing mode, scale-out, runner); the evaluator's
+                    # SETUP_MULTIPLIERS owns the INITIAL stop distance.
+                    return self._with_unified_mult(ARCHETYPE_STOP_RULES[arch], setup_type)
             except Exception:  # pragma: no cover - fall back to legacy map
                 pass
 
         normalized = setup_type.lower().replace(" ", "_").replace("-", "_")
         if normalized in self.setup_rules:
-            return self.setup_rules[normalized]
+            return self._with_unified_mult(self.setup_rules[normalized], setup_type)
         for key in self.setup_rules:
             if key in normalized or normalized in key:
-                return self.setup_rules[key]
-        return self.setup_rules["default"]
+                return self._with_unified_mult(self.setup_rules[key], setup_type)
+        return self._with_unified_mult(self.setup_rules["default"], setup_type)
+
+    def _with_unified_mult(self, rules: SetupStopRules, setup_type: str) -> SetupStopRules:
+        """v326 — ONE source of truth for initial-stop sizing.
+
+        The evaluator's SETUP_MULTIPLIERS (the LIVE, v112-tuned ~80-setup
+        table that actually sizes every bot entry) overrides the local
+        tables' `initial_stop_atr_mult`, so /audit-stops, /fix-stop and
+        the smart-stops API can never disagree with live trade geometry
+        again (pre-fix divergence: mean_reversion 2.5× here vs 1.0× live,
+        momentum 1.0× vs 1.5× live). Local tables keep owning trailing /
+        breakeven / scale-out / runner behavior.
+
+        Returns a COPY via dataclasses.replace — the shared rule
+        singletons are never mutated. UNIFIED_STOP_RULES_ENABLED=0
+        reverts to the legacy split tables.
+        """
+        import os
+        if str(os.environ.get("UNIFIED_STOP_RULES_ENABLED", "1")).strip().lower() in (
+            "0", "false", "no", "off",
+        ):
+            return rules
+        try:
+            from dataclasses import replace
+            from services.opportunity_evaluator import OpportunityEvaluator
+            mult, _is_scalp, _resolution = OpportunityEvaluator._resolve_atr_multiplier(
+                setup_type, _EVAL_RISK_SHIM,
+            )
+            if mult and float(mult) > 0 and abs(float(mult) - rules.initial_stop_atr_mult) > 1e-9:
+                return replace(rules, initial_stop_atr_mult=float(mult))
+        except Exception as exc:
+            logger.debug("v326 unified-mult resolve failed for %s: %s", setup_type, exc)
+        return rules
     
     def _calculate_volume_profile(self, df: pd.DataFrame) -> VolumeProfile:
         """Calculate volume profile from price data"""

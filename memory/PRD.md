@@ -898,3 +898,23 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   PENDING: user applies v325 + v325b on DGX, commit, restart.
   NOTE: SmartStopService unification (merge its rules table with evaluator's,
   wire structure-snapping into entry path) deferred to v326 by design.
+- 2026-06-12 v326 UNIFIED STOP-RULE SSOT + REAL-ATR AUDITS (paste.rs/tM454, md5
+  7844fa6c...): (1) smart_stop_service._get_setup_rules now overrides initial_stop_
+  atr_mult from evaluator SETUP_MULTIPLIERS on BOTH archetype(BRACKET_V2) + legacy
+  paths via _with_unified_mult (dataclasses.replace, singletons never mutated;
+  divergences fixed: mean_reversion 2.5→1.0, momentum 1.0→1.5; kill switch
+  UNIFIED_STOP_RULES_ENABLED=0). Archetype tables keep owning trailing/BE/scale-out/
+  runner shape. (2) calculate_intelligent_stop(+trade_style kwarg): v325 HSBG
+  horizon parity — scalp/intraday rules scaled ×frac, legacy 2% min_stop_pct swapped
+  for HSBG floors, anti-hunt buffer ×frac; triggers scale automatically (derive from
+  initial mult). Omitting trade_style = old behavior (smart_stops router API
+  unaffected). (3) NEW module helper resolve_daily_atr(db,symbol,ref_price) —
+  canonical daily basis (adv_cache pref, 0.3-20% plausibility, 2% last resort).
+  (4) trading_bot /audit-stops + /fix-stop: fake atr=entry*0.02 ERADICATED →
+  resolve_daily_atr + trade_style passthrough; too-tight check now = HALF canonical
+  v325 stop distance (was flat 0.75×daily-ATR which would flag every v325 scalp as
+  critical); suboptimal slack ×frac. TESTED: 15 new tests + 20 v325 + 24 legacy
+  regression all pass; backend boots; /audit-stops responds. GOTCHA found in
+  testing: entry at exact $100 correctly triggers anti-hunt round-number buffer
+  (+0.5×ATR×frac) — tests use non-round entries. PENDING: user applies on DGX
+  (REQUIRES v325 applied first — patcher pre-flight checks for HSBG helpers).

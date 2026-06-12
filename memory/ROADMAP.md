@@ -3936,3 +3936,11 @@ Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 
   /fix-stop fake atr=2% inputs.
 - Still open: M0 OCA ladder live validation, INT-21 IGV guards, ELF→XLE mapping,
   thought-noise content filter (v323c r2), Atlas password rotation (user).
+
+## 2026-06-12 — v326 SmartStop unification (SHIPPED, user-apply pending)
+- ✅ One SSOT for initial-stop sizing (evaluator SETUP_MULTIPLIERS), real daily ATR
+  in /audit-stops + /fix-stop, HSBG horizon parity in calculate_intelligent_stop.
+  apply_v326.py @ https://paste.rs/tM454 (md5 7844fa6c6a1286adddee49284e1ff12c).
+- TP/SL track remaining (later): optional structure-snapping into evaluator entry
+  path (S/R + hunt zones at trade creation); trailing-mode unification with
+  StopManager (smart_stop trailing modes still independent of stop_manager.py).
