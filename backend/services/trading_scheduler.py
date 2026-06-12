@@ -812,7 +812,17 @@ class TradingScheduler:
             collector = get_ib_collector()
             
             # Check IB connection
-            ib_connected = ib_service.is_connected if ib_service else False
+            # v322v — IBService has no `is_connected` attribute (the flag
+            # lives on its worker thread); this raised AttributeError on
+            # every 2:15 AM auto-resume run, silently killing IB
+            # collection resume. Use the public status accessor.
+            ib_connected = False
+            if ib_service:
+                try:
+                    ib_connected = bool(
+                        ib_service.get_connection_status().get("connected"))
+                except Exception:
+                    ib_connected = False
             
             if not ib_connected:
                 result.result_summary = "IB Gateway not connected - skipping resume"
