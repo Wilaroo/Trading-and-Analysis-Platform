@@ -38,10 +38,22 @@ def test_deep_symbol_trail_fallback():
 def test_symbol_trade_memory_section():
     assert "Symbol Trade Memory" in CHAT
     i = CHAT.index("10.8. v323a")
-    block = CHAT[i:i + 2600]
+    block = CHAT[i:i + 7000]
     assert 'db["bot_trades"].find(' in block
     # provenance-filtered: adopted/reconciled rows must not pollute recall
     assert '"bot_fired", "bot", ""' in block
+
+
+def test_trade_memory_is_sanitized():
+    # r2 — raw bot_trades is ~94% artifacts; the chat must never quote them.
+    i = CHAT.index("10.8. v323a")
+    block = CHAT[i:i + 7000]
+    assert "_ARTIFACT_CR" in block
+    assert '"phantom"' in block and '"orphan"' in block
+    assert "learning_only" in block
+    assert "[SIMULATED]" in block
+    assert "GENUINE closed bot trades" in block
+    assert "rows excluded" in block
 
 
 def test_files_compile():

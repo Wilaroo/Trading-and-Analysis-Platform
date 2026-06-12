@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-apply_v323a.py — Idempotent applier for v323a (long-memory chat recall)
+apply_v323a.py — Idempotent applier for v323a r2 (long-memory chat recall, SANITIZED)
 =======================================================================
 Operator request: "increase decision-trail recall dramatically — last 6
 months or more."
@@ -24,6 +24,14 @@ wires in the collections that were never pruned:
      ticker: closed-trade count, W/L, net P&L, and the last 5 trades
      with setup/close_reason. This gives TRUE 6-month recall today,
      not in 6 months.
+
+  r2 (operator review): the trade memory is SANITIZED inline — the raw
+     collection is ~94% pipeline artifacts (sanitize_v2: 1594 raw → 102
+     genuine). Phantom sweeps, orphan/reconciliation cleanups, micro
+     learning fills, simulated rows and no-exit-price rows are excluded
+     before ANY stat reaches the LLM, and the excluded count is
+     disclosed in-context so the assistant cannot hallucinate a track
+     record that never traded.
 
 Touches backend/services/sentcom_service.py + backend/chat_server.py,
 runs the TTL collMod against Mongo, writes
@@ -118,22 +126,71 @@ _THOUGHTS_TTL_DAYS = 190
     # already holds the full multi-month history. For every mentioned
     # ticker, inject the closed-trade record so "have we ever traded X /
     # how did our SNDK trades go?" has true long-range recall.
+    #
+    # SANITIZED (r2): the raw collection is ~94% pipeline artifacts
+    # (phantom sweeps, orphan cleanups, reconciliation slices, micro
+    # learning fills, simulated rows — sanitize_v2 probe 2026-06-12:
+    # 1594 raw closed → 102 genuine). Quoting raw rows would make the
+    # assistant hallucinate a track record that never traded. The
+    # sanitize_v2 funnel is mirrored inline before ANY stat reaches
+    # the LLM, and the artifact count is disclosed so the assistant
+    # can say so explicitly.
     try:
+        _ARTIFACT_CR = (
+            "stale_pending", "phantom", "consolidated", "broker_rejected",
+            "execution_exception", "guardrail_veto", "intent_already_pending",
+            "rejection_cooldown", "symbol_cooldown", "paper_phase",
+            "simulation_phase", "operator_flatten_suppression",
+            "emergency_flatten", "orphan", "sweep", "purge", "reconcile",
+            "external_flatten", "operator_external",
+        )
+        _ARTIFACT_SETUP = ("reconciled", "imported", "phantom", "orphan")
         for _um in user_mentioned_tickers:
             _hist = list(db["bot_trades"].find(
                 {"symbol": _um, "status": "closed"},
                 {"_id": 0, "direction": 1, "setup_type": 1, "net_pnl": 1,
                  "realized_pnl": 1, "pnl": 1, "close_reason": 1,
-                 "closed_at": 1, "tqs_grade": 1, "entered_by": 1},
-            ).sort("closed_at", -1).limit(40))
-            _genuine = [
-                h for h in _hist
-                if str(h.get("entered_by") or "bot_fired") in ("bot_fired", "bot", "")
-            ]
-            if not _genuine:
+                 "closed_at": 1, "tqs_grade": 1, "entered_by": 1,
+                 "learning_only": 1, "entry_context.learning_only": 1,
+                 "notes": 1, "trade_type": 1, "exit_price": 1,
+                 "fill_price": 1, "entry_price": 1},
+            ).sort("closed_at", -1).limit(120))
+            _clean = []
+            _artifacts = 0
+            for h in _hist:
+                _cr = str(h.get("close_reason") or "").lower()
+                _st = str(h.get("setup_type") or "").lower()
+                _ec = h.get("entry_context") or {}
+                try:
+                    _xp = float(h.get("exit_price") or 0)
+                    _fp = float(h.get("fill_price") or 0)
+                    _ep = float(h.get("entry_price") or 0)
+                except (TypeError, ValueError):
+                    _xp = _fp = _ep = 0.0
+                if (
+                    str(h.get("entered_by") or "bot_fired") not in ("bot_fired", "bot", "")
+                    or h.get("learning_only") is True
+                    or _ec.get("learning_only") is True
+                    or "[SIMULATED]" in (h.get("notes") or "")
+                    or h.get("trade_type") == "shadow"
+                    or any(p in _cr for p in _ARTIFACT_CR)
+                    or any(p in _st for p in _ARTIFACT_SETUP)
+                    or _xp <= 0
+                    or (_fp <= 0 and _ep <= 0)
+                ):
+                    _artifacts += 1
+                    continue
+                _clean.append(h)
+            if not _clean:
+                if _artifacts:
+                    parts.append(
+                        f"Symbol Trade Memory: {_um} has NO genuine closed bot "
+                        f"trades on record ({_artifacts} bookkeeping/artifact "
+                        f"rows were excluded — never describe those as real "
+                        f"trades).")
                 continue
             _pnls = []
-            for h in _genuine:
+            for h in _clean:
                 _p = h.get("net_pnl")
                 if _p in (None, 0):
                     _p = h.get("realized_pnl") if h.get("realized_pnl") not in (None, 0) else h.get("pnl")
@@ -143,9 +200,10 @@ _THOUGHTS_TTL_DAYS = 190
                     _pnls.append(0.0)
             _w = sum(1 for p in _pnls if p > 0)
             _mem_lines = [
-                f"  {_um}: {len(_genuine)} closed bot trades on record, "
+                f"  {_um}: {len(_clean)} GENUINE closed bot trades "
+                f"({_artifacts} artifact/bookkeeping rows excluded), "
                 f"{_w}W/{len(_pnls) - _w}L, net ${sum(_pnls):+,.0f}. Last 5:"]
-            for h in _genuine[:5]:
+            for h in _clean[:5]:
                 _p = h.get("net_pnl") or h.get("realized_pnl") or h.get("pnl") or 0
                 _g = f" TQS {h.get('tqs_grade')}" if h.get("tqs_grade") else ""
                 _mem_lines.append(
@@ -155,8 +213,9 @@ _THOUGHTS_TTL_DAYS = 190
                     f"${float(_p or 0):+,.0f}{_g} "
                     f"({str(h.get('close_reason') or '?')[:22]})")
             parts.append(
-                "Symbol Trade Memory (permanent record — use for 'have we "
-                "traded X before / how did it go'):\\n" + "\\n".join(_mem_lines))
+                "Symbol Trade Memory (permanent record, SANITIZED to genuine "
+                "bot-fired strategy exits — use for 'have we traded X before "
+                "/ how did it go'):\\n" + "\\n".join(_mem_lines))
     except Exception as e:
         debug["trade_memory_error"] = str(e)
 ''',
@@ -205,10 +264,22 @@ def test_deep_symbol_trail_fallback():
 def test_symbol_trade_memory_section():
     assert "Symbol Trade Memory" in CHAT
     i = CHAT.index("10.8. v323a")
-    block = CHAT[i:i + 2600]
+    block = CHAT[i:i + 7000]
     assert 'db["bot_trades"].find(' in block
     # provenance-filtered: adopted/reconciled rows must not pollute recall
     assert '"bot_fired", "bot", ""' in block
+
+
+def test_trade_memory_is_sanitized():
+    # r2 — raw bot_trades is ~94% artifacts; the chat must never quote them.
+    i = CHAT.index("10.8. v323a")
+    block = CHAT[i:i + 7000]
+    assert "_ARTIFACT_CR" in block
+    assert '"phantom"' in block and '"orphan"' in block
+    assert "learning_only" in block
+    assert "[SIMULATED]" in block
+    assert "GENUINE closed bot trades" in block
+    assert "rows excluded" in block
 
 
 def test_files_compile():
