@@ -272,7 +272,33 @@ def get_policy_for_trade(trade) -> OrderPolicy:
 
     style = _attr(trade, "trade_style")
     if style:
-        return get_policy(style)
+        s = str(style).strip().lower()
+        if s in ORDER_POLICIES:
+            return ORDER_POLICIES[s]
+        # v334 — ROOT CAUSE of "EOD closes everything regardless of
+        # style" (probe 2026-06-12): the backend stamps the GENERIC SMB
+        # fallback `trade_2_hold` on most non-scalp entries
+        # (opportunity_evaluator trade-create default). That string is
+        # truthy but unknown here, so it short-circuited to the intraday
+        # DEFAULT_POLICY (close_at_eod=True) — 63 trade_2_hold positions
+        # flattened at 15:45 in 14 days, INCLUDING real holds
+        # (daily_breakout, stage_2_breakout, rs_leader_break,
+        # trend_continuation). Unknown/generic styles now resolve through
+        # the canonical classifier, where the setup-derived horizon wins
+        # (e.g. daily_breakout→multi_day → HOLD overnight).
+        try:
+            from services.trade_style_classifier import resolve_trade_style
+            resolved = resolve_trade_style({
+                "trade_style": s,
+                "setup_type": _attr(trade, "setup_type"),
+                "setup_variant": _attr(trade, "setup_variant"),
+                "timeframe": _attr(trade, "timeframe"),
+            })
+            if resolved in ORDER_POLICIES:
+                return ORDER_POLICIES[resolved]
+        except Exception:
+            pass
+        return get_policy(s)
 
     setup_type = _attr(trade, "setup_type")
     if setup_type:
