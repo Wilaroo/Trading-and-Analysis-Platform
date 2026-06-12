@@ -16,6 +16,12 @@ Tests cover:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from pathlib import Path
@@ -254,7 +260,7 @@ def test_chart_ws_emits_heartbeat_on_silence():
 
 
 def test_use_chart_tail_ws_hook_exists():
-    p = Path("/app/frontend/src/hooks/useChartTailWs.js")
+    p = Path((_REPO_ROOT + "/frontend/src/hooks/useChartTailWs.js"))
     assert p.exists()
     content = p.read_text()
     assert "useChartTailWs" in content
@@ -266,7 +272,7 @@ def test_use_chart_tail_ws_hook_exists():
 
 def test_chart_panel_uses_ws_hook():
     """ChartPanel must import and call useChartTailWs."""
-    f = Path("/app/frontend/src/components/sentcom/panels/ChartPanel.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/panels/ChartPanel.jsx")).read_text()
     assert "useChartTailWs" in f
     assert "wsStatus" in f
     assert "chart-ws-status" in f
@@ -274,13 +280,13 @@ def test_chart_panel_uses_ws_hook():
 
 def test_chart_panel_polling_paused_when_ws_connected():
     """The polling loop must skip ticks when `wsStatus === 'connected'`."""
-    f = Path("/app/frontend/src/components/sentcom/panels/ChartPanel.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/panels/ChartPanel.jsx")).read_text()
     assert "wsStatus === 'connected'" in f
 
 
 def test_scanner_cards_warm_chart_cache_on_change():
     """ScannerCardsV5 must POST to /api/sentcom/chart/warm when the
     visible card list changes."""
-    f = Path("/app/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx")).read_text()
     assert "/api/sentcom/chart/warm" in f
     assert "lastWarmedRef" in f

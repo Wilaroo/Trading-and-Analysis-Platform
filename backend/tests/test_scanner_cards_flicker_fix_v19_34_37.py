@@ -15,12 +15,18 @@ Fix: respect the caller's `limit` in get_recent_alerts(), and add a
 client-side anti-flicker guard so REST never downgrades fresh WS state.
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 
 def test_recent_alerts_respects_caller_limit():
     """get_recent_alerts must use `limit`, not the legacy hardcoded 5."""
-    src = Path("/app/backend/services/sentcom_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/sentcom_service.py")).read_text("utf-8")
     # Locate the get_recent_alerts function
     idx = src.index("async def get_recent_alerts")
     block = src[idx:idx + 3000]
@@ -38,7 +44,7 @@ def test_recent_alerts_respects_caller_limit():
 
 def test_frontend_anti_flicker_guard_present():
     """useSentComAlerts must skip REST overwrites while WS is fresh."""
-    src = Path("/app/frontend/src/components/sentcom/hooks/useSentComAlerts.js").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/hooks/useSentComAlerts.js")).read_text("utf-8")
     # Anti-flicker guard must exist
     assert "lastWsUpdateAt" in src, (
         "useSentComAlerts no longer tracks last WS update time — REST poll "
@@ -66,7 +72,7 @@ def test_setups_watching_has_no_artificial_caps():
     All three are removed; the scanner's own enabled-setup / timeframe-fit /
     per-symbol qualification filters are the source of truth.
     """
-    src = Path("/app/backend/services/sentcom_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/sentcom_service.py")).read_text("utf-8")
     idx = src.index("async def get_setups_watching")
     end = src.index("async def get_recent_alerts", idx)
     block = src[idx:end]
@@ -91,7 +97,7 @@ def test_setups_watching_has_no_artificial_caps():
 
 def test_scanner_card_just_arrived_pulse_wired():
     """v19.34.38d — scanner cards get a 1.5s pulse the first time they appear."""
-    src = Path("/app/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx")).read_text("utf-8")
     # The tracker refs must exist
     assert "seenRef" in src and "newKeys" in src, (
         "ScannerCardsV5 lost the first-seen tracker (seenRef / newKeys). "
@@ -109,7 +115,7 @@ def test_scanner_card_just_arrived_pulse_wired():
     )
 
     # CSS animation must exist
-    css = Path("/app/frontend/src/components/sentcom/v5/useV5Styles.js").read_text("utf-8")
+    css = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/useV5Styles.js")).read_text("utf-8")
     assert "v5-card-arrive" in css, (
         "useV5Styles is missing the @keyframes v5-card-arrive animation."
     )

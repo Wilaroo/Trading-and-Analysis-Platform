@@ -22,10 +22,16 @@ running the actual pusher requires Windows + IB Gateway + ib_insync.
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import re
 from pathlib import Path
 
-PUSHER_PATH = Path("/app/documents/scripts/ib_data_pusher.py")
+PUSHER_PATH = Path((_REPO_ROOT + "/documents/scripts/ib_data_pusher.py"))
 
 
 def _read():

@@ -4,6 +4,12 @@ v19.31.14 (2026-05-04) — Tests for boot-reconcile status pill endpoint
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -141,7 +147,7 @@ def test_funnel_endpoint_exposes_drift_warning_field():
 
 def test_funnel_ui_renders_drift_warning():
     """Frontend must surface the drift_warning chip."""
-    f = Path("/app/frontend/src/pages/DiagnosticsPage.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/pages/DiagnosticsPage.jsx")).read_text()
     assert "funnel-drift-warning" in f
     assert "Shadow drift" in f
     assert "fired_via_shadow" in f
@@ -161,7 +167,7 @@ def test_vote_breakdown_aggregator_exists_in_backend():
 def test_vote_breakdown_panel_wired_in_diagnostics_page():
     """The Module Scorecard tab must render `<ModuleVoteBreakdownPanel>`
     when the backend payload includes vote_breakdown."""
-    f = Path("/app/frontend/src/pages/DiagnosticsPage.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/pages/DiagnosticsPage.jsx")).read_text()
     assert "ModuleVoteBreakdownPanel" in f
     assert "vote-breakdown-panel" in f
     assert "vote_breakdown" in f
@@ -171,7 +177,7 @@ def test_vote_breakdown_panel_wired_in_diagnostics_page():
 
 
 def test_boot_reconcile_pill_component_exists():
-    p = Path("/app/frontend/src/components/sentcom/v5/BootReconcilePill.jsx")
+    p = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/BootReconcilePill.jsx"))
     assert p.exists()
     content = p.read_text()
     assert "boot-reconcile-pill" in content
@@ -179,6 +185,6 @@ def test_boot_reconcile_pill_component_exists():
 
 
 def test_boot_reconcile_pill_wired_in_sentcom_v5_view():
-    f = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text()
     assert "BootReconcilePill" in f
     assert "import BootReconcilePill" in f

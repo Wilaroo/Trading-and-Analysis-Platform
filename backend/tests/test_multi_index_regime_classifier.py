@@ -15,6 +15,12 @@ Covers:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from typing import Dict, List
@@ -318,7 +324,7 @@ def test_combined_feature_names_in_training_path_includes_labels():
     """The training entrypoint references ALL_LABEL_FEATURE_NAMES so the
     feature vector grows on the next retrain. Source-level guard."""
     from pathlib import Path
-    src = Path("/app/backend/services/ai_modules/timeseries_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/ai_modules/timeseries_service.py")).read_text("utf-8")
     assert "ALL_LABEL_FEATURE_NAMES" in src
     assert "build_label_features" in src
     assert "label_feat_names" in src
@@ -328,7 +334,7 @@ def test_predict_path_uses_label_features_when_model_expects_them():
     """predict_for_setup gate-checks the model's _feature_names for
     ALL_LABEL_FEATURE_NAMES before computing the label features."""
     from pathlib import Path
-    src = Path("/app/backend/services/ai_modules/timeseries_service.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/ai_modules/timeseries_service.py")).read_text("utf-8")
     # Look for the prediction-side block
     assert "model_expects_labels" in src
     assert "build_label_features" in src

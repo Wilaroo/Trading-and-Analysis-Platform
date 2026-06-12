@@ -7,14 +7,20 @@ or Windows pusher. All tests are deterministic and run in < 200 ms.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-BACKEND = Path("/app/backend")
-PUSHER_PATH = Path("/app/documents/scripts/ib_data_pusher.py")
+BACKEND = Path((_REPO_ROOT + "/backend"))
+PUSHER_PATH = Path((_REPO_ROOT + "/documents/scripts/ib_data_pusher.py"))
 
 
 # ----------------------- live_bar_cache contracts -----------------------

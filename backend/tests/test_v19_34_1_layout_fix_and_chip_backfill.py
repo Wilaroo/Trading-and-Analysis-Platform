@@ -27,6 +27,12 @@ Operator pain-points addressed:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -45,7 +51,7 @@ def test_v5_root_uses_overflow_hidden_not_auto():
     """The V5 root must be `overflow-hidden`, not `overflow-y-auto`,
     so accumulating Unified Stream messages can't drag the chart
     container taller via outer-page scroll."""
-    f = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text()
     # Locate the className attribute on the root element by data-testid.
     root_idx = f.index('data-testid="sentcom-v5-root"')
     # Walk forward to find `className="..."` after this attribute.
@@ -60,7 +66,7 @@ def test_main_row_uses_flex1_min_h_0_not_min_h_1120():
     """The main-row must use `flex-1 min-h-0` so it claims remaining
     viewport height (and no more), instead of `flex-shrink-0 min-h-[1120px]`
     which let the row grow with content."""
-    f = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text()
     main_idx = f.index('data-testid="sentcom-v5-main-row"')
     cls_start = f.index('className="', main_idx)
     cls_end = f.index('"', cls_start + len('className="'))
@@ -74,7 +80,7 @@ def test_grid_uses_flex1_min_h_0_not_min_h_800():
     """The chart+sidebar grid must use `flex-1 min-h-0` so it claims
     remaining column height (no more), instead of `flex-shrink-0
     min-h-[800px]`."""
-    f = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text()
     grid_idx = f.index('data-testid="sentcom-v5-grid"')
     cls_start = f.index('className="', grid_idx)
     cls_end = f.index('"', cls_start + len('className="'))
@@ -126,7 +132,7 @@ def test_open_positions_chip_no_longer_hides_unknown():
     type is 'unknown' so reconciled-orphan rows still get a mode tag.
     Pusher-account fallback in sentcom_service should normally fill
     this in with paper/live."""
-    f = Path("/app/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx")).read_text()
     # The OPEN-POSITIONS chip block uses testIdSuffix=`open-pos-...`
     # (backtick template literal). Locate that block by the chip's
     # marker comment.

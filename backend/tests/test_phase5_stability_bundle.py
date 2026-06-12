@@ -9,16 +9,22 @@ Covers:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 import pytest
 
 
-BOUNDARY_SRC = Path("/app/frontend/src/components/sentcom/v5/PanelErrorBoundary.jsx").read_text(encoding="utf-8")
-CHIP_SRC = Path("/app/frontend/src/components/sentcom/v5/HealthChip.jsx").read_text(encoding="utf-8")
-INSPECTOR_SRC = Path("/app/frontend/src/components/sentcom/v5/FreshnessInspector.jsx").read_text(encoding="utf-8")
-PALETTE_SRC = Path("/app/frontend/src/components/sentcom/v5/CommandPalette.jsx").read_text(encoding="utf-8")
-V5_VIEW_SRC = Path("/app/frontend/src/components/sentcom/SentComV5View.jsx").read_text(encoding="utf-8")
+BOUNDARY_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/PanelErrorBoundary.jsx")).read_text(encoding="utf-8")
+CHIP_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/HealthChip.jsx")).read_text(encoding="utf-8")
+INSPECTOR_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/FreshnessInspector.jsx")).read_text(encoding="utf-8")
+PALETTE_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/CommandPalette.jsx")).read_text(encoding="utf-8")
+V5_VIEW_SRC = Path((_REPO_ROOT + "/frontend/src/components/sentcom/SentComV5View.jsx")).read_text(encoding="utf-8")
 
 
 # -------------------- PanelErrorBoundary --------------------------------

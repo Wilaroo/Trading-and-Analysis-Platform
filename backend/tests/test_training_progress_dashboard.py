@@ -8,6 +8,12 @@ Tests for:
 5. GET /api/ai-training/model-inventory returns 108 models with regime_conditional (28)
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -218,7 +224,7 @@ class TestFrontendConstants:
         """Frontend ALL_PHASES should have 10 entries matching backend"""
         # Read frontend file and check ALL_PHASES
         import re
-        with open('/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx', 'r') as f:
+        with open((_REPO_ROOT + '/frontend/src/components/NIA/TrainingPipelinePanel.jsx'), 'r') as f:
             content = f.read()
         
         # Find ALL_PHASES array
@@ -232,7 +238,7 @@ class TestFrontendConstants:
 
     def test_phase_tracker_component_exists(self):
         """PhaseTracker component should exist with data-testid='phase-tracker'"""
-        with open('/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx', 'r') as f:
+        with open((_REPO_ROOT + '/frontend/src/components/NIA/TrainingPipelinePanel.jsx'), 'r') as f:
             content = f.read()
         
         assert "data-testid='phase-tracker'" in content or 'data-testid="phase-tracker"' in content, \
@@ -240,7 +246,7 @@ class TestFrontendConstants:
 
     def test_phase_row_has_data_testid(self):
         """PhaseRow should have data-testid='phase-row-{key}'"""
-        with open('/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx', 'r') as f:
+        with open((_REPO_ROOT + '/frontend/src/components/NIA/TrainingPipelinePanel.jsx'), 'r') as f:
             content = f.read()
         
         assert "data-testid={`phase-row-${phase.key}`}" in content, \
@@ -248,7 +254,7 @@ class TestFrontendConstants:
 
     def test_auto_poll_useeffect_exists(self):
         """Auto-poll useEffect with isTraining dependency should exist"""
-        with open('/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx', 'r') as f:
+        with open((_REPO_ROOT + '/frontend/src/components/NIA/TrainingPipelinePanel.jsx'), 'r') as f:
             content = f.read()
         
         # Check for auto-poll pattern
@@ -260,7 +266,7 @@ class TestFrontendConstants:
 
     def test_no_tdz_error_isTraining_declared_before_use(self):
         """isTraining should be declared before being used in useEffect"""
-        with open('/app/frontend/src/components/NIA/TrainingPipelinePanel.jsx', 'r') as f:
+        with open((_REPO_ROOT + '/frontend/src/components/NIA/TrainingPipelinePanel.jsx'), 'r') as f:
             content = f.read()
         
         # Find isTraining declaration

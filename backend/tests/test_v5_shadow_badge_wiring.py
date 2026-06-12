@@ -17,18 +17,24 @@ shadow decisions to live alerts, not just aggregates.
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 HOOK_SRC = Path(
-    "/app/frontend/src/components/sentcom/v5/useRecentShadowDecisions.js"
+    (_REPO_ROOT + "/frontend/src/components/sentcom/v5/useRecentShadowDecisions.js")
 ).read_text("utf-8")
 
 BADGE_SRC = Path(
-    "/app/frontend/src/components/sentcom/v5/ShadowDecisionBadge.jsx"
+    (_REPO_ROOT + "/frontend/src/components/sentcom/v5/ShadowDecisionBadge.jsx")
 ).read_text("utf-8")
 
 STREAM_SRC = Path(
-    "/app/frontend/src/components/sentcom/v5/UnifiedStreamV5.jsx"
+    (_REPO_ROOT + "/frontend/src/components/sentcom/v5/UnifiedStreamV5.jsx")
 ).read_text("utf-8")
 
 

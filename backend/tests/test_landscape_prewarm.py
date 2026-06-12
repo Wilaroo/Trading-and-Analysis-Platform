@@ -20,14 +20,20 @@ that are awkward to invoke in CI.
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 SCANNER_SRC = Path(
-    "/app/backend/services/enhanced_scanner.py"
+    (_REPO_ROOT + "/backend/services/enhanced_scanner.py")
 ).read_text("utf-8")
 
 EOD_SRC = Path(
-    "/app/backend/services/eod_generation_service.py"
+    (_REPO_ROOT + "/backend/services/eod_generation_service.py")
 ).read_text("utf-8")
 
 

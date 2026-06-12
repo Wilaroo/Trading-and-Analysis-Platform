@@ -8,6 +8,12 @@ Tests for:
 - Backend API endpoints for NIA panels
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -138,7 +144,7 @@ class TestSmartFilterExtraction:
     def test_smart_filter_file_exists(self):
         """smart_filter.py should exist at /app/backend/services/smart_filter.py"""
         import os
-        path = "/app/backend/services/smart_filter.py"
+        path = (_REPO_ROOT + "/backend/services/smart_filter.py")
         assert os.path.exists(path), f"smart_filter.py not found at {path}"
     
     def test_smart_filter_has_class(self):
@@ -209,27 +215,27 @@ class TestWebSocketStreamRegistration:
     def test_server_has_stream_confidence_gate(self):
         """server.py should have stream_confidence_gate function"""
         import importlib.util
-        spec = importlib.util.spec_from_file_location("server", "/app/backend/server.py")
+        spec = importlib.util.spec_from_file_location("server", (_REPO_ROOT + "/backend/server.py"))
         # Just check the file contains the function definition
-        with open("/app/backend/server.py", "r") as f:
+        with open((_REPO_ROOT + "/backend/server.py"), "r") as f:
             content = f.read()
         assert "async def stream_confidence_gate" in content, "Missing stream_confidence_gate function"
     
     def test_server_has_stream_training_status(self):
         """server.py should have stream_training_status function"""
-        with open("/app/backend/server.py", "r") as f:
+        with open((_REPO_ROOT + "/backend/server.py"), "r") as f:
             content = f.read()
         assert "async def stream_training_status" in content, "Missing stream_training_status function"
     
     def test_server_has_stream_market_regime(self):
         """server.py should have stream_market_regime function"""
-        with open("/app/backend/server.py", "r") as f:
+        with open((_REPO_ROOT + "/backend/server.py"), "r") as f:
             content = f.read()
         assert "async def stream_market_regime" in content, "Missing stream_market_regime function"
     
     def test_startup_registers_new_streams(self):
         """startup_event should register all 3 new WS streams"""
-        with open("/app/backend/server.py", "r") as f:
+        with open((_REPO_ROOT + "/backend/server.py"), "r") as f:
             content = f.read()
         
         # Check that startup event creates tasks for new streams
@@ -239,7 +245,7 @@ class TestWebSocketStreamRegistration:
     
     def test_startup_log_mentions_new_streams(self):
         """startup_event print should mention new streams"""
-        with open("/app/backend/server.py", "r") as f:
+        with open((_REPO_ROOT + "/backend/server.py"), "r") as f:
             content = f.read()
         
         # The print statement should mention the new streams

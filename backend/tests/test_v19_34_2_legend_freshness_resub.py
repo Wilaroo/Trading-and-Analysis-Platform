@@ -11,6 +11,12 @@ v19.34.2 (2026-05-04) — Tests for the operator-clarity bundle:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -28,7 +34,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 def test_quote_freshness_chip_component_exists():
-    p = Path("/app/frontend/src/components/sentcom/v5/QuoteFreshnessChip.jsx")
+    p = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/QuoteFreshnessChip.jsx"))
     assert p.exists()
     src = p.read_text()
     assert "FRESH" in src and "AMBER" in src and "STALE" in src
@@ -40,7 +46,7 @@ def test_quote_freshness_chip_component_exists():
 
 
 def test_open_positions_legend_component_exists():
-    p = Path("/app/frontend/src/components/sentcom/v5/OpenPositionsLegend.jsx")
+    p = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/OpenPositionsLegend.jsx"))
     assert p.exists()
     src = p.read_text()
     # Covers the 5 mode chips + 3 freshness states + Shadow Decisions hint
@@ -54,7 +60,7 @@ def test_open_positions_legend_component_exists():
 
 
 def test_open_positions_v5_uses_legend_and_freshness_chip():
-    f = Path("/app/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx").read_text()
+    f = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/OpenPositionsV5.jsx")).read_text()
     # Wired into header
     assert "OpenPositionsLegend" in f
     assert "<OpenPositionsLegend />" in f
@@ -158,7 +164,7 @@ async def test_position_manager_resub_no_op_when_no_stale_set():
 
 def test_quote_freshness_chip_has_5s_and_30s_thresholds():
     """Visual thresholds must match the backend's classification."""
-    p = Path("/app/frontend/src/components/sentcom/v5/QuoteFreshnessChip.jsx")
+    p = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/QuoteFreshnessChip.jsx"))
     src = p.read_text()
     # Pulse animation when < 2s; classification handled server-side
     # so the chip just renders state. Server uses 5s/30s. We assert

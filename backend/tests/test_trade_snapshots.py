@@ -2,13 +2,19 @@
 Trade Snapshots API Tests
 Tests for chart snapshot generation with AI annotations for trades.
 """
+
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
 import pytest
 import os
 import sys
 sys.path.insert(0, '/app/backend')
 
 from dotenv import load_dotenv
-load_dotenv('/app/backend/.env')
+load_dotenv((_REPO_ROOT + '/backend/.env'))
 
 from pymongo import MongoClient
 from services.trade_snapshot_service import TradeSnapshotService

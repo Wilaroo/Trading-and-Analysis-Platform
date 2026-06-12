@@ -10,6 +10,12 @@ Tests:
 6. Key endpoints respond under 2s
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 import requests
 import os
@@ -68,7 +74,7 @@ class TestDeadCodeRemoval:
         """Verify background_scanner.py is deleted from /app/backend/services/"""
         import subprocess
         result = subprocess.run(
-            ["ls", "-la", "/app/backend/services/background_scanner.py"],
+            ["ls", "-la", (_REPO_ROOT + "/backend/services/background_scanner.py")],
             capture_output=True,
             text=True
         )

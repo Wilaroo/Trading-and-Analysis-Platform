@@ -8,6 +8,12 @@ ENABLE_LIVE_BAR_RPC=false so subscribe/unsubscribe stay in-process.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import os
 import time
 from pathlib import Path
@@ -199,7 +205,7 @@ def test_list_subscriptions_has_required_fields():
 
 # ---------------------- Windows pusher RPC source contracts --------------
 
-PUSHER_PATH = Path("/app/documents/scripts/ib_data_pusher.py")
+PUSHER_PATH = Path((_REPO_ROOT + "/documents/scripts/ib_data_pusher.py"))
 
 
 def _pusher_src() -> str:
@@ -237,7 +243,7 @@ def test_pusher_unsubscribe_cancels_mkt_data_and_cleans_buffers():
 
 # ---------------------- DGX router endpoint contracts --------------------
 
-LIVE_ROUTER_PATH = Path("/app/backend/routers/live_data_router.py")
+LIVE_ROUTER_PATH = Path((_REPO_ROOT + "/backend/routers/live_data_router.py"))
 
 
 def test_router_has_phase2_endpoints():
@@ -253,7 +259,7 @@ def test_router_has_phase2_endpoints():
 
 # ---------------------- frontend hook contracts --------------------------
 
-HOOK_PATH = Path("/app/frontend/src/hooks/useLiveSubscription.js")
+HOOK_PATH = Path((_REPO_ROOT + "/frontend/src/hooks/useLiveSubscription.js"))
 
 
 def test_hook_exists_and_exports_both_variants():
@@ -282,21 +288,21 @@ def test_hook_heartbeat_is_2_minutes():
 
 
 def test_hook_wired_into_chartpanel():
-    src = Path("/app/frontend/src/components/sentcom/panels/ChartPanel.jsx").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/panels/ChartPanel.jsx")).read_text(encoding="utf-8")
     assert "useLiveSubscription" in src, (
         "ChartPanel must import + call useLiveSubscription for focused symbol"
     )
 
 
 def test_hook_wired_into_enhanced_ticker_modal():
-    src = Path("/app/frontend/src/components/EnhancedTickerModal.jsx").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/EnhancedTickerModal.jsx")).read_text(encoding="utf-8")
     assert "useLiveSubscription" in src, (
         "EnhancedTickerModal must import + call useLiveSubscription"
     )
 
 
 def test_scanner_auto_subs_top_10():
-    src = Path("/app/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx")).read_text(encoding="utf-8")
     assert "useLiveSubscriptions" in src, (
         "Scanner must use multi-sub hook for top-10 auto-subscribe"
     )

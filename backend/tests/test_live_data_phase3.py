@@ -5,6 +5,12 @@ snapshot, and trade-journal immutable close-price snapshot.
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 from pathlib import Path
 
@@ -83,7 +89,7 @@ async def test_snapshot_computes_change_pct_correctly(monkeypatch):
 def test_scanner_service_has_live_bars_topup():
     """market_scanner_service must call fetch_latest_session_bars for
     intraday scans (Phase 3 contract)."""
-    src = Path("/app/backend/services/market_scanner_service.py").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/market_scanner_service.py")).read_text(encoding="utf-8")
     assert "fetch_latest_session_bars" in src, (
         "Scanner must call fetch_latest_session_bars for intraday top-up"
     )
@@ -96,7 +102,7 @@ def test_scanner_service_has_live_bars_topup():
 
 def test_scanner_topup_does_not_break_non_intraday():
     """Swing / investment timeframe scans must not trigger the top-up."""
-    src = Path("/app/backend/services/market_scanner_service.py").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/market_scanner_service.py")).read_text(encoding="utf-8")
     # The guard "if filters.trade_style == TradeStyle.INTRADAY:" must wrap the fetch
     idx_guard = src.find("filters.trade_style == TradeStyle.INTRADAY")
     idx_fetch = src.find("fetch_latest_session_bars")
@@ -109,7 +115,7 @@ def test_scanner_topup_does_not_break_non_intraday():
 # ---------------------- trade journal immutable close --------------------
 
 def test_trade_journal_captures_close_price_snapshot():
-    src = Path("/app/backend/services/trade_journal.py").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/trade_journal.py")).read_text(encoding="utf-8")
     assert "close_price_snapshot" in src, (
         "Trade journal must persist close_price_snapshot on close_trade"
     )
@@ -127,7 +133,7 @@ def test_trade_journal_captures_close_price_snapshot():
 def test_trade_journal_snapshot_failure_does_not_abort_close():
     """Snapshot failure must be swallowed — a trade close must NEVER fail
     just because the live data service is unreachable."""
-    src = Path("/app/backend/services/trade_journal.py").read_text(encoding="utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/trade_journal.py")).read_text(encoding="utf-8")
     # try/except around the snapshot call
     assert "except Exception as _snap_exc" in src or "snapshot_error" in src, (
         "close_trade must swallow snapshot exceptions so a live-data outage "
@@ -137,7 +143,7 @@ def test_trade_journal_snapshot_failure_does_not_abort_close():
 
 # ---------------------- router endpoints ---------------------------------
 
-LIVE_ROUTER = Path("/app/backend/routers/live_data_router.py").read_text(encoding="utf-8")
+LIVE_ROUTER = Path((_REPO_ROOT + "/backend/routers/live_data_router.py")).read_text(encoding="utf-8")
 
 
 def test_router_has_symbol_snapshot_endpoint():

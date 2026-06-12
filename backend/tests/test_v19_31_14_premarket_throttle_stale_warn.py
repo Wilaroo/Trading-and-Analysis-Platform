@@ -17,6 +17,12 @@ v19.31.14 (2026-05-04) — tests for the small operator-feedback bundle:
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -294,7 +300,7 @@ async def test_throttle_policy_endpoint_returns_payload():
 def test_live_pending_route_applies_throttle():
     """The live /api/ib/historical-data/pending route must lookup
     `_rth_throttle_decision()` and cap `limit` when RTH is active."""
-    src = Path("/app/backend/routers/ib.py").read_text()
+    src = Path((_REPO_ROOT + "/backend/routers/ib.py")).read_text()
     # The function `get_pending_historical_data_requests` should now
     # reference _rth_throttle_decision and rth_active.
     assert "_rth_throttle_decision" in src
@@ -308,7 +314,7 @@ def test_live_pending_route_applies_throttle():
 def test_premarket_banner_module_exists():
     """The frontend banner component must exist and export the
     classifier so we can document the time windows here."""
-    p = Path("/app/frontend/src/components/sentcom/v5/PreMarketModeBanner.jsx")
+    p = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/PreMarketModeBanner.jsx"))
     assert p.exists(), "PreMarketModeBanner.jsx must exist"
     content = p.read_text()
     assert "classifyEtMinute" in content
@@ -316,5 +322,5 @@ def test_premarket_banner_module_exists():
     assert "rth" in content
     assert "v19.31.14" in content
     # Must be wired into ScannerCardsV5
-    sc = Path("/app/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx").read_text()
+    sc = Path((_REPO_ROOT + "/frontend/src/components/sentcom/v5/ScannerCardsV5.jsx")).read_text()
     assert "PreMarketModeBanner" in sc

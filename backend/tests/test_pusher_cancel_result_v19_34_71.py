@@ -33,6 +33,12 @@ easy CI inclusion.
 Run from /app:
   python -m pytest backend/tests/test_pusher_cancel_result_v19_34_71.py -v
 """
+
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
 import os
 import sys
 import time
@@ -54,7 +60,7 @@ def _locate_pusher():
     if env_override:
         candidates.append(env_override)
     # 1. Emergent workspace
-    candidates.append("/app/documents/scripts/ib_data_pusher.py")
+    candidates.append((_REPO_ROOT + "/documents/scripts/ib_data_pusher.py"))
     # 2. Relative to this test file (backend/tests/ → ../../documents/scripts/)
     here = os.path.dirname(os.path.abspath(__file__))
     rel = os.path.normpath(os.path.join(

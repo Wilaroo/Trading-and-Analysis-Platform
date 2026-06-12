@@ -7,6 +7,12 @@ Tests the new features:
 4. Scheduler Schedule API - POST /api/scheduler/premarket/schedule
 5. Scheduler Stop API - DELETE /api/scheduler/premarket/stop
 """
+
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
 import pytest
 import requests
 import os
@@ -262,7 +268,7 @@ class TestQualityPanelDeleted:
     def test_quality_panel_file_not_exists(self):
         """Verify QualityPanel.jsx file has been deleted"""
         import os
-        quality_panel_path = "/app/frontend/src/components/QualityPanel.jsx"
+        quality_panel_path = (_REPO_ROOT + "/frontend/src/components/QualityPanel.jsx")
         assert not os.path.exists(quality_panel_path), "QualityPanel.jsx should be deleted"
 
 

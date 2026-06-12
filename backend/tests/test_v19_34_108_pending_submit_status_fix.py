@@ -43,10 +43,16 @@ imported in the Linux test env (Windows ib_insync + Win32 imports).
 """
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import pytest
 
 
-PUSHER_PATH = "/app/documents/scripts/ib_data_pusher.py"
+PUSHER_PATH = (_REPO_ROOT + "/documents/scripts/ib_data_pusher.py")
 
 
 @pytest.fixture(scope="module")

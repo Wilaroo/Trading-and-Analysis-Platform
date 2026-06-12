@@ -11,6 +11,12 @@ Covers:
 
 from __future__ import annotations
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 import asyncio
 import sys
 from pathlib import Path
@@ -405,7 +411,7 @@ class MockAlert:
 
 def test_the_3_30_trade_registered_in_scanner():
     """the_3_30_trade must be wired into checkers, REGISTERED, _enabled, time-windows."""
-    src = Path("/app/backend/services/enhanced_scanner.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/services/enhanced_scanner.py")).read_text("utf-8")
     assert '"the_3_30_trade":' in src                # in checkers dict
     assert '"the_3_30_trade",' in src                # in REGISTERED + _enabled
     assert '"the_3_30_trade":' in src                # in STRATEGY_TIME_WINDOWS

@@ -18,6 +18,12 @@ These tests pin:
   4. The chat AI system prompt advertises them with examples.
 """
 
+# v322w — portable test paths: this file previously hardcoded "/app/..."
+# (dev-container path) which crashes on the DGX. Auto-fixed by
+# scripts/fix_test_paths_portable.py.
+import pathlib as _pl
+_REPO_ROOT = str(_pl.Path(__file__).resolve().parents[2])
+
 from pathlib import Path
 
 import pytest
@@ -139,7 +145,7 @@ def test_operator_stop_and_targets_combine():
 
 def test_adjust_trade_endpoint_registered():
     """The chat-AI-friendly /api/trading-bot/adjust-trade endpoint must exist."""
-    src = Path("/app/backend/routers/trading_bot.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/routers/trading_bot.py")).read_text("utf-8")
     assert '@router.post("/adjust-trade")' in src, (
         "trading_bot router lost the /adjust-trade endpoint."
     )
@@ -153,7 +159,7 @@ def test_adjust_trade_endpoint_registered():
 
 
 def test_chat_executor_knows_extended_actions():
-    src = Path("/app/backend/chat_server.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/chat_server.py")).read_text("utf-8")
     for action in ("move_stop", "move_target", "partial_close", "cancel_orders"):
         assert f'action == "{action}"' in src, (
             f"chat_server._execute_trade_action no longer knows the `{action}` action"
@@ -167,7 +173,7 @@ def test_chat_executor_knows_extended_actions():
 def test_chat_system_prompt_advertises_new_actions():
     """Operator mental-model: the AI must KNOW it can do these things,
     otherwise it falls back to the old "I can't" message."""
-    src = Path("/app/backend/chat_server.py").read_text("utf-8")
+    src = Path((_REPO_ROOT + "/backend/chat_server.py")).read_text("utf-8")
     prompt_idx = src.index("Available actions (v19.34.40)")
     prompt_block = src[prompt_idx:prompt_idx + 3000]
     for action in ("move_stop", "move_target", "partial_close", "cancel_orders"):
