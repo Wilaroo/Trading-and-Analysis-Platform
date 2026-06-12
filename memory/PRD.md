@@ -794,3 +794,11 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   (~25 files w/ hardcoded /app — NEVER include unswept files in recommended suites
   without grepping for '"/app' first), AGENTS.md §2 refresh (compact anchored-chunk
   patcher convention + paste.rs 384KB cap + round-trip verify rule).
+- 2026-06-12 ~08:30: v322v shipped (patcher a2o1f, commit bf96951c) — fixed nightly
+  2:15AM IB collection auto-resume AttributeError (ib_service.is_connected →
+  get_connection_status()["connected"]). Backend restarted 08:29:56 AFTER all patches →
+  v322t/u/v ALREADY LIVE pre-open. Fresh log: 0 Tracebacks, 0 missed-EOD carryovers
+  (boot sweep silent = correct), 0 open trades restored (flat book — "Restored N" only
+  logs when N>0, confirmed in code). PRE-OPEN VERDICT: GREEN. NOTE: paste.rs ALSO 500s
+  on ~88KB uploads now — keep patchers compact (anchored-chunk) and always round-trip
+  verify.
