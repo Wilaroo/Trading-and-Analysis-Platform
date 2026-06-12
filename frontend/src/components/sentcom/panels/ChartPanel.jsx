@@ -189,15 +189,28 @@ export const ChartPanel = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
-  // How many days of history are currently loaded. Starts at the timeframe
-  // default and grows when the user scrolls/zooms past the leftmost bar so
-  // older context is fetched on demand (lazy-load).
-  const [daysLoaded, setDaysLoaded] = useState(null);
-  // Internal flag: true while a backfill (older-history) fetch is in flight.
-  // Prevents duplicate fetches when the user keeps scrolling left.
+  // v324 — true infinite history scrolling. The old mechanism doubled a
+  // days-loaded window (capped at 365d) and re-fetched the ENTIRE chart
+  // each time the user neared the left edge. Replaced by /chart-history
+  // pagination: scroll left → fetch ONLY the next older chunk (keyed by a
+  // unix-seconds cursor) → PREPEND. lightweight-charts keeps the viewport
+  // anchored relative to the right edge, so the prepend is seamless and
+  // unbounded (back to the start of collected data).
+  // Internal flag: true while an older-history fetch is in flight.
   const backfillInFlightRef = useRef(false);
-  // Hard ceiling on how far back we will lazy-load (matches backend cap).
-  const MAX_DAYS_BACK = 365;
+  // Whether the backend says more (older) history exists for this
+  // (symbol, timeframe). Reset on symbol/timeframe change.
+  const hasMoreHistoryRef = useRef(true);
+  // Cursor for the next older-history page. null → derive from the
+  // earliest loaded bar. The backend returns `next_before` (oldest RAW
+  // row it inspected) so weekend-only chunks can't stall pagination.
+  const historyCursorRef = useRef(null);
+  // Visible pill while an older-history chunk is loading.
+  const [historyLoading, setHistoryLoading] = useState(false);
+  // v324 — per-symbol timeframe availability ({ tfValue: barCount }).
+  // null = unknown → all timeframes enabled. Lower-tier symbols without
+  // collected 1m/5m history get those buttons grayed out.
+  const [availableTfs, setAvailableTfs] = useState(null);
   // Freshness flags from backend — surface when the chart is rendering stale
   // cache or partial coverage so the user doesn't mistake old bars for live.
   const [staleInfo, setStaleInfo] = useState(null);  // { stale, reason, latest, partial, coverage }
@@ -375,17 +388,23 @@ export const ChartPanel = ({
     };
   }, [height]);
 
-  // Reset the lazy-load window whenever the timeframe changes — each
-  // timeframe has its own sensible default. Also reset the "fit" flag so
-  // the new dataset gets framed once before lazy-loading takes over.
+  // v324 — reset history pagination whenever the timeframe changes. Also
+  // reset the "fit" flag so the new dataset gets framed once before
+  // infinite-scroll takes over.
   useEffect(() => {
-    setDaysLoaded(active.daysBack);
+    hasMoreHistoryRef.current = true;
+    historyCursorRef.current = null;
     hasFittedRef.current = false;
-  }, [active.daysBack]);
+  }, [active.daysBack, active.value]);
 
-  // Reset the fit flag when the symbol changes too — otherwise switching
-  // symbols would inherit the previous symbol's pan position.
-  useEffect(() => { hasFittedRef.current = false; }, [symbol]);
+  // Reset the fit flag + history cursor when the symbol changes too —
+  // otherwise switching symbols would inherit the previous symbol's pan
+  // position and pagination cursor.
+  useEffect(() => {
+    hasFittedRef.current = false;
+    hasMoreHistoryRef.current = true;
+    historyCursorRef.current = null;
+  }, [symbol]);
 
   // ── v19.25 Tier 1: in-component bars cache so symbol switches feel
   // instant. Keyed by `${symbol}|${timeframe}|${days}`. Read on mount,
@@ -395,8 +414,8 @@ export const ChartPanel = ({
   // the live compute path. ────────────────────────────────────────────
   const lastBarsCacheRef = useRef(new Map()); // Map<key, {bars, indicators, markers, ts}>
   const cacheKey = useMemo(
-    () => `${symbol || ''}|${active.value}|${daysLoaded || active.daysBack}`,
-    [symbol, active, daysLoaded],
+    () => `${symbol || ''}|${active.value}`,
+    [symbol, active],
   );
 
   // Hydrate from in-component cache the moment the cacheKey changes.
@@ -415,13 +434,13 @@ export const ChartPanel = ({
     }
   }, [cacheKey]);
 
-  // Fetch bars for current symbol + timeframe. Honours the lazy-loaded
-  // `daysLoaded` window so subsequent refetches keep older bars on screen.
+  // Fetch bars for current symbol + timeframe (initial window only —
+  // older history streams in via /chart-history as the user scrolls).
   // Important: only show the spinner on COLD loads (no cached data) so
   // hot-path refetches don't blank the chart.
   const fetchBars = useCallback(async () => {
     if (!symbol) return;
-    const days = daysLoaded || active.daysBack;
+    const days = active.daysBack;
     const cached = lastBarsCacheRef.current.get(cacheKey);
     if (!cached) {
       setLoading(true);
@@ -472,9 +491,8 @@ export const ChartPanel = ({
       if (!cached) setError(err?.message || 'Failed to fetch bars');
     } finally {
       setLoading(false);
-      backfillInFlightRef.current = false;
     }
-  }, [symbol, active, daysLoaded, cacheKey]);
+  }, [symbol, active, cacheKey]);
 
   // Refetch whenever symbol / timeframe changes
   useEffect(() => { fetchBars(); }, [fetchBars]);
@@ -701,32 +719,92 @@ export const ChartPanel = ({
     }
   }, [bars]);
 
-  // Lazy-load older history when user scrolls/pans/zooms past the leftmost
-  // loaded bar. Uses lightweight-charts `subscribeVisibleLogicalRangeChange`
-  // which fires on every pan + scroll-wheel zoom. When the visible logical
-  // range's `from` index goes below a small threshold (i.e. user is near
-  // the leftmost bar), we double the loaded window (capped at MAX_DAYS_BACK)
-  // and refetch — preserving on-screen position via the unchanged time
-  // scale visible range.
+  // ── v324: infinite history scrolling ────────────────────────────────
+  // Fetch the next OLDER chunk via /chart-history and PREPEND it. The
+  // viewport stays anchored relative to the right edge in lightweight-
+  // charts, so the prepend never yanks the user's pan/zoom position.
+  // `depth` guards the rare recursion when a chunk was entirely
+  // weekend/overnight rows (bars empty but has_more=true).
+  const fetchOlderHistory = useCallback(async (depth = 0) => {
+    if (!symbol || depth > 3) return;
+    if (!hasMoreHistoryRef.current) return;
+    const cursor = historyCursorRef.current
+      ?? (bars.length > 0 ? Number(bars[0]?.time) : null);
+    if (!cursor || !Number.isFinite(cursor)) return;
+    if (depth === 0) {
+      if (backfillInFlightRef.current) return;
+      backfillInFlightRef.current = true;
+      setHistoryLoading(true);
+    }
+    try {
+      const resp = await safeGet(
+        `/api/sentcom/chart-history?symbol=${encodeURIComponent(symbol)}` +
+        `&timeframe=${encodeURIComponent(active.value)}&before=${cursor}`
+      );
+      if (!resp || resp.success === false) return;
+      hasMoreHistoryRef.current = !!resp.has_more;
+      if (Number.isFinite(Number(resp.next_before)) && Number(resp.next_before) > 0) {
+        historyCursorRef.current = Number(resp.next_before);
+      }
+      const older = Array.isArray(resp.bars) ? resp.bars : [];
+      if (older.length === 0) {
+        // Chunk was all weekend/overnight rows — keep walking back.
+        if (resp.has_more) await fetchOlderHistory(depth + 1);
+        return;
+      }
+      setBars(prev => {
+        const prevEarliest = prev.length > 0 ? Number(prev[0].time) : Infinity;
+        const prepend = older.filter(b => Number(b.time) < prevEarliest);
+        return prepend.length > 0 ? [...prepend, ...prev] : prev;
+      });
+      if (resp.indicators && typeof resp.indicators === 'object') {
+        setIndicators(prev => {
+          const next = { ...prev };
+          for (const [key, points] of Object.entries(resp.indicators)) {
+            if (!Array.isArray(points) || points.length === 0) continue;
+            const existing = Array.isArray(next[key]) ? next[key] : [];
+            const existingTimes = new Set(existing.map(p => Number(p.time)));
+            next[key] = [
+              ...points.filter(p => !existingTimes.has(Number(p.time))),
+              ...existing,
+            ];
+          }
+          return next;
+        });
+      }
+      if (Array.isArray(resp.markers) && resp.markers.length > 0) {
+        setMarkers(prev => {
+          const have = new Set(prev.map(m => `${m.time}|${m.text || ''}`));
+          return [
+            ...resp.markers.filter(m => !have.has(`${m.time}|${m.text || ''}`)),
+            ...prev,
+          ];
+        });
+      }
+    } catch (_) {
+      /* transient — the next scroll event retries */
+    } finally {
+      if (depth === 0) {
+        backfillInFlightRef.current = false;
+        setHistoryLoading(false);
+      }
+    }
+  }, [symbol, active, bars]);
+
+  // Trigger: lightweight-charts `subscribeVisibleLogicalRangeChange`
+  // fires on every pan + scroll-wheel zoom. When the visible logical
+  // range's `from` index comes within 10 bars of the leftmost loaded bar
+  // (or past it), fetch the next older chunk.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return undefined;
 
     const handleRangeChange = (range) => {
       if (!range) return;
-      if (backfillInFlightRef.current) return;
-      if (loading) return;
-      // `from` is a fractional logical index. Negative means the user has
-      // panned past the leftmost loaded bar. Anything within the first
-      // 5 bars also triggers a backfill so the chart never feels capped.
-      const threshold = 5;
-      if (range.from > threshold) return;
-      if (!daysLoaded) return;
-      if (daysLoaded >= MAX_DAYS_BACK) return;
-      const next = Math.min(MAX_DAYS_BACK, daysLoaded * 2);
-      if (next === daysLoaded) return;
-      backfillInFlightRef.current = true;
-      setDaysLoaded(next);
+      if (backfillInFlightRef.current || loading) return;
+      if (!hasMoreHistoryRef.current) return;
+      if (range.from > 10) return;
+      fetchOlderHistory();
     };
 
     try {
@@ -737,7 +815,46 @@ export const ChartPanel = ({
         chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRangeChange);
       } catch (_) { /* noop */ }
     };
-  }, [daysLoaded, loading]);
+  }, [fetchOlderHistory, loading]);
+
+  // v324 — per-symbol timeframe availability. Lower-tier symbols may only
+  // carry daily (or daily+hourly) history; gray out timeframes with no
+  // collected bars so the operator never clicks into an empty pane.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchAvailability = async () => {
+      if (!symbol) return;
+      try {
+        const resp = await safeGet(
+          `/api/sentcom/chart/available-timeframes?symbol=${encodeURIComponent(symbol)}`,
+          { timeout: 6000 },
+        );
+        if (!cancelled) setAvailableTfs(resp?.success ? (resp.available || null) : null);
+      } catch (_) {
+        if (!cancelled) setAvailableTfs(null); // unknown → leave all enabled
+      }
+    };
+    fetchAvailability();
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  const MIN_BARS_FOR_TF = 50;
+  const isTfAvailable = useCallback((tfValue) => {
+    if (!availableTfs) return true; // unknown → don't gray anything out
+    return Number(availableTfs[tfValue] || 0) >= MIN_BARS_FOR_TF;
+  }, [availableTfs]);
+
+  // Auto-hop to the closest available timeframe when the active one has
+  // no data for this symbol (e.g. moving from a Tier-1 scalp symbol on
+  // 1m to an investment-tier symbol that only carries daily bars).
+  useEffect(() => {
+    const cur = TIMEFRAMES.find(t => t.label === timeframe);
+    if (!cur || isTfAvailable(cur.value)) return;
+    const fallback = ['1d', '1h', '15m', '5m', '1m']
+      .map(lbl => TIMEFRAMES.find(t => t.label === lbl))
+      .find(t => t && isTfAvailable(t.value));
+    if (fallback && fallback.label !== timeframe) setTimeframe(fallback.label);
+  }, [timeframe, isTfAvailable]);
 
   // Push indicator series data whenever `indicators` changes.
   useEffect(() => {
@@ -1299,20 +1416,31 @@ export const ChartPanel = ({
 
           {/* Timeframe + refresh */}
           <div className="flex items-center gap-1">
-            {TIMEFRAMES.map((t) => (
-              <button
-                key={t.label}
-                data-testid={`chart-timeframe-${t.label}`}
-                onClick={() => setTimeframe(t.label)}
-                className={`px-2.5 py-0.5 text-[13px] rounded-md transition-colors ${
-                  t.label === timeframe
-                    ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/30'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+            {TIMEFRAMES.map((t) => {
+              // v324 — gray out timeframes with no collected history for
+              // this symbol (Tier 2/3 symbols usually lack 1m/5m bars).
+              const available = isTfAvailable(t.value);
+              return (
+                <button
+                  key={t.label}
+                  data-testid={`chart-timeframe-${t.label}`}
+                  onClick={() => available && setTimeframe(t.label)}
+                  disabled={!available}
+                  title={available
+                    ? undefined
+                    : `No ${t.label} history collected for ${symbol} — lower-tier symbols only carry coarser bars`}
+                  className={`px-2.5 py-0.5 text-[13px] rounded-md transition-colors ${
+                    !available
+                      ? 'text-zinc-700 opacity-40 cursor-not-allowed'
+                      : t.label === timeframe
+                      ? 'bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/30'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
             <button
               data-testid="chart-refresh"
               onClick={fetchBars}
@@ -1398,6 +1526,16 @@ export const ChartPanel = ({
           className="absolute inset-0 flex items-center justify-center bg-black/20"
         >
           <span className="text-xs text-zinc-400">Loading bars...</span>
+        </div>
+      )}
+      {/* v324 — older-history chunk in flight (infinite scroll-back) */}
+      {historyLoading && (
+        <div
+          data-testid="chart-history-loading"
+          className="absolute top-12 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-cyan-500/40 bg-cyan-950/80 text-[11px] text-cyan-300"
+        >
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          Loading older history…
         </div>
       )}
       {!loading && !bars.length && !error && (
