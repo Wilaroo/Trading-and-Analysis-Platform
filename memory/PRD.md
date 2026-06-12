@@ -1072,3 +1072,23 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   the local passing file programmatically — never hand-assemble payloads.
   PENDING USER: apply v334b, commit, restart backend; then evaluate
   watch_pusher_eod.py output through 15:40-16:05 ET (Issue 2).
+- 2026-06-13 v334b CONFIRMED LIVE: 06-12 close held all multi_day book at
+  15:45 (intraday-only batch), pusher ingest GREEN full session (216k bars
+  vs 13-28k prior), only 45s stall at 15:47 then recovered. Issue 2
+  (pusher starvation) effectively resolved.
+- 2026-06-13 v335 (patcher paste.rs/rQXvb): T-2 force-MKT escalation
+  (_eod_t_minus_2_escalate) flattened ORCL/SMCI multi_day at 15:47 via the
+  STALE per-trade close_at_eod attr — same bug class at 4 sites, all now
+  routed through should_close_at_eod(): T-2 escalate, T-1 alert,
+  EOD status endpoint counts, morning readiness stuck-classifier (would
+  have RED-flagged CPB/PENN/DKNG holds next morning). 7 new tests in
+  test_v335_eod_policy_consumers.py; 52 pass total w/ v334/v301/v302/v332.
+  Sim-validated pre-v335, idempotent, byte-identical, round-trip verified.
+  PENDING USER: apply v335, commit, restart backend.
+- KNOWN/DEFERRED (user chose A-only): Bug B ib_boot_probe latches RED
+  forever after mid-session restart (30s grace lost vs deferred IB
+  connect; caused overall=red + "1 CRITICAL" all session 06-12). Proposed
+  fix ready: background re-probe after FAIL → auto-clear health green,
+  kill-switch latch stays manual; IB_BOOT_PROBE_GRACE_S env. NOT shipped.
+  Also: historical_queue yellow (3,363 pending) ↔ "no intraday bars"
+  thoughts 15:09-15:30 — monitor.
