@@ -820,3 +820,20 @@ Consolidated patch: https://paste.rs/q0CT1 (supersedes A+B-only paste.rs/p8mys).
   NEXT: user applies v322w + runs sweep + probe → probe results gate TQS rescale &
   meta-labeling decisions. Then: Tier 2a calibration (approved, needs design),
   IGV INT-21 guard, v322p decay rework.
+- 2026-06-12 v322w DEPLOYED+VERIFIED (commit 5c87284e): AGENTS.md refreshed (rebased on
+  DGX copy k63G0, operator's PATCHER RULE section preserved), 49 test files/150 literals
+  swept portable, probes committed. COLLECTION QUESTION ANSWERED: NIA collect button does
+  NOT pause bot (collection_mode INACTIVE, separate IB client) — safe during RTH.
+  PROBE RESULTS (1594 closed, 1395 bot-fired, 1010 TQS-scored):
+  * TQS: severe clustering CONFIRMED (p25=55.5/p50=57.8/p75=59.8 — half of all trades in
+    a 4.3pt band). Grades have ~NO discriminative power: A n=38 +0.01avgR/39.5%win vs
+    B n=38 -0.23/34.2% (NOT statistically significant at n=38, z≈0.5); C+ holds 706 rows
+    (70%) and is the WORST bucket (-0.40 avgR); D (n=12) outperforms B and C+.
+    VERDICT: cosmetic 0-100 rescale would NOT fix discrimination — fold into Tier 2a as
+    outcome-based recalibration (isotonic fit of expected R / win prob on tqs_score,
+    rescale to outcome percentile).
+  * META-LABELING: READY ≥100: squeeze (490!), accumulation_entry (102). Borderline
+    50-99: vwap_fade_long 98, vwap_fade_short 94, gap_fade 80, vwap_bounce 73,
+    vwap_continuation 73. v1 can start scoped to squeeze.
+  PENDING: MICRO_SETUPS drop/ship decision; choose next build: Tier 2a calibration
+  (incl TQS recalib) vs meta-labeling v1 (squeeze).
