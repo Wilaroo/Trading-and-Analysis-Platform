@@ -191,6 +191,49 @@ LATER_HORIZON_STYLES = {"swing", "position", "investment", "multi_day"}
 LATER_HORIZON_START_ET = (10, 15)  # (hour, minute) ET — inclusive start
 
 
+# v19.34.313 — Alert Cadence Governor.
+# The 8%-drift eviction in _cleanup_expired_alerts was killing daily/swing
+# alerts intraday (their trigger=daily-close drifts >8% naturally during
+# an open trending day). The next _scan_daily_setups cycle then re-fired
+# them because the in-memory dedup at _process_new_alert only checks
+# `self._live_alerts` and the row had been evicted (Mongo still
+# status='active'). Three layered fixes:
+#   Layer 1: only price-drift-evict scalp/intraday tier alerts.
+#   Layer 2: persistent-dedup fallback queries `live_alerts` collection.
+#   Layer 3: per-tier env-tunable refire cooldown windows.
+# Plus EOD eviction for daily-tier alerts at >= EOD_EVICTION_ET_HOUR so
+# they don't accumulate across sessions.
+SCALP_INTRADAY_STYLES = {"scalp", "intraday"}
+DAILY_TIER_STYLES = {"multi_day", "swing", "position", "investment"}
+EOD_EVICTION_ET_HOUR = 16  # daily-tier evicted at >= 16:00 ET
+
+try:
+    _COOLDOWN_S_SCALP = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_SCALP_S", "300"))      # 5 min default
+except (TypeError, ValueError):
+    _COOLDOWN_S_SCALP = 300
+try:
+    _COOLDOWN_S_INTRADAY = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_INTRADAY_S", "1800"))  # 30 min default
+except (TypeError, ValueError):
+    _COOLDOWN_S_INTRADAY = 1800
+try:
+    _COOLDOWN_S_DAILY = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_DAILY_S", "86400"))    # 24 h default
+except (TypeError, ValueError):
+    _COOLDOWN_S_DAILY = 86400
+
+
+def refire_cooldown_seconds(trade_style: str) -> int:
+    """Pick the per-tier refire cooldown by trade_style (v19.34.313)."""
+    ts = (trade_style or "").lower()
+    if ts == "scalp":
+        return _COOLDOWN_S_SCALP
+    if ts in DAILY_TIER_STYLES:
+        return _COOLDOWN_S_DAILY
+    return _COOLDOWN_S_INTRADAY
+
+
 # Strategy market regime preferences.
 #
 # 2026-04-29 architectural decision (post Setup-landscape v3): this map
@@ -8443,7 +8486,42 @@ class EnhancedBackgroundScanner:
                     filter="dedup_same_setup",
                 )
                 return
-        
+
+        # v19.34.313 — persistent dedup fallback (catches eviction races).
+        # The in-memory check above misses cases where the prior alert was
+        # evicted from self._live_alerts (e.g. by the 8%-drift cleanup) but
+        # remains status='active' in Mongo. Without this, the next scan
+        # cycle re-fires the same (symbol, setup) and the operator sees
+        # 10-25x duplicate cards on a normal trending day. Per-tier
+        # cooldown so scalp setups can legitimately re-arm after 5 min
+        # while daily setups stay one-per-session.
+        if self.db is not None:
+            cooldown_s = refire_cooldown_seconds(getattr(alert, "trade_style", None))
+            cutoff_iso = (datetime.now(timezone.utc)
+                          - timedelta(seconds=cooldown_s)).isoformat()
+            try:
+                persistent_hit = self.db["live_alerts"].find_one(
+                    {"symbol": alert.symbol,
+                     "setup_type": alert.setup_type,
+                     "status": "active",
+                     "created_at": {"$gte": cutoff_iso}},
+                    {"_id": 0, "alert_id": 1, "created_at": 1},
+                )
+            except Exception:
+                persistent_hit = None
+            if persistent_hit:
+                await self._emit_scanner_thought(
+                    symbol=alert.symbol, kind="skip",
+                    text=(
+                        f"🔁 {alert.symbol} {alert.setup_type} dedup — "
+                        f"persistent active alert within {cooldown_s}s cooldown"
+                    ),
+                    setup_type=alert.setup_type,
+                    direction=getattr(alert, 'direction_bias', None),
+                    filter="dedup_persistent_cooldown",
+                )
+                return
+
         # Per-symbol dedup: if another active alert exists for this symbol,
         # only keep the higher priority one (replaces if new is better)
         existing_for_symbol = [
@@ -8783,6 +8861,14 @@ class EnhancedBackgroundScanner:
         now = datetime.now(timezone.utc)
         to_remove = []
         
+        # v19.34.313 — resolve ET hour once per cleanup pass for EOD eviction.
+        now_et = None
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = now.astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            pass
+
         for alert_id, alert in self._live_alerts.items():
             # Check expiration
             if alert.expires_at:
@@ -8793,7 +8879,26 @@ class EnhancedBackgroundScanner:
                         continue
                 except Exception:
                     pass
-            
+
+            alert_style = (getattr(alert, "trade_style", None) or "").lower()
+
+            # v19.34.313 — EOD eviction for daily-tier alerts at >= 16:00 ET
+            # so they don't accumulate across sessions. The Mongo `created_at`
+            # cooldown lookup in _process_new_alert still blocks intraday
+            # re-fires within the 24h cooldown window.
+            if alert_style in DAILY_TIER_STYLES and now_et is not None \
+                    and now_et.hour >= EOD_EVICTION_ET_HOUR:
+                to_remove.append(alert_id)
+                continue
+
+            # v19.34.313 — ONLY apply the 8% price-drift eviction to fresh-
+            # trigger scalp/intraday tiers. Daily/swing/position/investment
+            # alerts have a stale daily-close trigger by design; intraday
+            # drift >8% is NORMAL and was causing legitimate alerts to be
+            # evicted then re-fired by the next _scan_daily_setups pass.
+            if alert_style not in SCALP_INTRADAY_STYLES:
+                continue
+
             # Check price drift: if live IB price available, compare to trigger
             # Remove alerts where price has moved >8% from trigger (stale data)
             try:
