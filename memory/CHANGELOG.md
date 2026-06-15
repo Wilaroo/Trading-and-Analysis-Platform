@@ -1,3 +1,29 @@
+## 2026-06-15 — v19.34.319: gap-vs-yesterday + M0 ladder regression test
+
+**DEPLOYED+VERIFIED on DGX — commit f7762c7b pushed. 13/13 tests green (6 v319 + 7 v318 regression).**
+
+### What ships
+- `morning_readiness_service.py::_held_overnight_summary` — each held row now
+  has `gap_pct` field (latest-close vs prior-close, 2-bar aggregation on
+  `ib_historical_data`). None when data unavailable.
+- NEW `tests/test_v19_34_319_gap_and_m0_validation.py` (6 green):
+  - 3 v318b tests (gap calc happy/null/single-bar paths)
+  - 3 M0 ladder regression tests pinned to DVN's production tape today:
+    883 sh sold across 10 fills, sum realized ~$329.50, prices ≥ entry,
+    bracket reissue invariant (legs sum = remaining_shares, all `working`),
+    no phantom qty after scale-out
+
+### Known issue surfaced post-deploy (v319a candidate fix)
+At least one held position reported `gap_pct: 666.499` — stale/unadjusted
+prior bar (likely split or sparse-history IPO). Need:
+  - Cap |gap_pct| at ±25%, null otherwise
+  - Add `gap_stale` flag if bar dates are >2 trading days apart
+  - Optionally: source prior close from `symbol_adv_cache.latest_close` as
+    secondary verification
+
+---
+
+
 ## 2026-06-15 — v19.34.318: Morning Readiness "Held Overnight" section
 
 **DEPLOYED+VERIFIED on DGX — commit 3e0a85df pushed. 7/7 tests green. Live endpoint serves 15 holds.**
