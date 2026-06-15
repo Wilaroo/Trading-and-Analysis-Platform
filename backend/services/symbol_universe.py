@@ -55,6 +55,18 @@ DOLLAR_VOL_THRESHOLDS: Dict[str, int] = {
     "investment": INVESTMENT_THRESHOLD,
 }
 
+# ---- Secondary share-volume gate (v19.34.311, 2026-06-15) ------------
+# Dollar-volume alone cannot catch the high-priced/low-share-count tail
+# (e.g. ALX at ~$265/share x 7,577 shares = $2M ADV but functionally
+# untradeable). This secondary floor requires at least MIN_SHARE_VOLUME
+# shares/day on top of the dollar-volume tier floor. `manual_universe_pin`
+# rows bypass this gate so day-one IPOs / operator pins are unaffected.
+import os as _os_v311
+try:
+    MIN_SHARE_VOLUME = int(_os_v311.environ.get("SENTCOM_MIN_SHARE_VOLUME", "100000"))
+except Exception:
+    MIN_SHARE_VOLUME = 100_000
+
 
 # 2026-04-28f — single-source-of-truth accessor. ALL consumers that
 # need ADV tier thresholds (`enhanced_scanner`, `data_inventory_service`,
@@ -139,6 +151,39 @@ ALL_TIERS = ("intraday", "swing", "investment")
 
 # ---- Public API -------------------------------------------------------
 
+def get_qualified_filter(
+    tier: str = "intraday",
+    *,
+    include_unqualifiable: bool = False,
+) -> Dict[str, Any]:
+    """Canonical Mongo filter for a qualified-symbol query.
+
+    v19.34.311 single source of truth: every collector / scanner that
+    wants "the tradeable universe at or above tier X" calls this helper
+    so the share-volume secondary gate (MIN_SHARE_VOLUME) is applied
+    consistently. `manual_universe_pin: true` rows ALWAYS pass.
+    """
+    tier_key = "investment" if tier == "all" else tier
+    if tier_key not in DOLLAR_VOL_THRESHOLDS:
+        raise ValueError(
+            f"Unknown tier: {tier!r}; must be one of "
+            f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}"
+        )
+    threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
+    q: Dict[str, Any] = {"$or": [
+        {"$and": [
+            {"avg_dollar_volume": {"$gte": threshold}},
+            {"avg_volume": {"$gte": MIN_SHARE_VOLUME}},
+        ]},
+        {"manual_universe_pin": True},
+    ]}
+    if not include_unqualifiable:
+        q["unqualifiable"] = {"$ne": True}
+    return q
+
+
+
+
 def get_universe(
     db,
     tier: str = "intraday",
@@ -165,14 +210,10 @@ def get_universe(
     if tier_key not in DOLLAR_VOL_THRESHOLDS:
         raise ValueError(f"Unknown tier: {tier!r}; must be one of "
                          f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}")
-    threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
-
-    query: Dict[str, Any] = {"$or": [
-        {"avg_dollar_volume": {"$gte": threshold}},
-        {"manual_universe_pin": True},
-    ]}
-    if not include_unqualifiable:
-        query["unqualifiable"] = {"$ne": True}
+    # v19.34.311 - share-volume gate applied via get_qualified_filter().
+    query = get_qualified_filter(
+        tier_key, include_unqualifiable=include_unqualifiable
+    )
 
     cursor = db["symbol_adv_cache"].find(query, {"symbol": 1, "_id": 0})
     return {d["symbol"] for d in cursor if d.get("symbol")}
@@ -202,15 +243,11 @@ def get_universe_ranked(
     if tier_key not in DOLLAR_VOL_THRESHOLDS:
         raise ValueError(f"Unknown tier: {tier!r}; must be one of "
                          f"{list(DOLLAR_VOL_THRESHOLDS) + ['all']}")
-    threshold = DOLLAR_VOL_THRESHOLDS[tier_key]
-
-    # v331 — manual pins always included (sort by ADV puts no-ADV pins last).
-    query: Dict[str, Any] = {"$or": [
-        {"avg_dollar_volume": {"$gte": threshold}},
-        {"manual_universe_pin": True},
-    ]}
-    if not include_unqualifiable:
-        query["unqualifiable"] = {"$ne": True}
+    # v331 - manual pins always included (sort by ADV puts no-ADV pins last).
+    # v19.34.311 - share-volume gate applied via get_qualified_filter().
+    query = get_qualified_filter(
+        tier_key, include_unqualifiable=include_unqualifiable
+    )
 
     cursor = (db["symbol_adv_cache"]
               .find(query, {"symbol": 1, "_id": 0})

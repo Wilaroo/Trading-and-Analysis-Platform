@@ -2657,12 +2657,14 @@ class IBHistoricalCollector:
         from .symbol_universe import (
             DOLLAR_VOL_THRESHOLDS as _UNI_THRESHOLDS,
             classify_tier as _classify_tier,
+            get_qualified_filter as _qual_filter,  # v19.34.311 share-volume gate
         )
         min_dv = _UNI_THRESHOLDS["investment"]
         qualified: Dict[str, List[str]] = {"intraday": [], "swing": [], "investment": []}
+        # v19.34.311 - qualified filter applies BOTH dollar-vol AND share-vol gates
+        # so thin high-priced names (ALX, NIHI, EDGF, ...) are skipped at planning.
         for doc in adv.find(
-            {"avg_dollar_volume": {"$gte": min_dv},
-             "unqualifiable": {"$ne": True}},
+            _qual_filter("investment"),
             {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1},
         ):
             sym = doc.get("symbol")

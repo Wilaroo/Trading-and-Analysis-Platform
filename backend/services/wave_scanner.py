@@ -28,7 +28,10 @@ from typing import Dict, List, Optional
 import logging
 
 from services.smart_watchlist_service import get_smart_watchlist, SmartWatchlistService
-from services.symbol_universe import get_universe_stats
+from services.symbol_universe import (
+    get_universe_stats,
+    get_qualified_filter,  # v19.34.311 share-volume gate
+)
 from services.user_viewed_tracker import get_viewed_symbols
 from data.mega_cap_watchlist import get_mega_cap_watchlist
 
@@ -137,24 +140,24 @@ class WaveScanner:
         try:
             adv = self._db["symbol_adv_cache"]
 
-            # Tier 2 — top-N intraday symbols ranked by avg_dollar_volume desc
+            # Tier 2 - top-N intraday symbols ranked by avg_dollar_volume desc
+            # v19.34.311 - get_qualified_filter() applies the share-vol gate.
             self._tier2_pool = [
                 d["symbol"]
                 for d in adv.find(
-                    {"avg_dollar_volume": {"$gte": 50_000_000},
-                     "unqualifiable": {"$ne": True}},
+                    get_qualified_filter("intraday"),
                     {"symbol": 1, "avg_dollar_volume": 1, "_id": 0},
                 ).sort("avg_dollar_volume", -1).limit(self._tier2_pool_size)
                 if d.get("symbol")
             ]
 
-            # Tier 3 — full canonical swing universe, ADV desc (most-liquid
+            # Tier 3 - full canonical swing universe, ADV desc (most-liquid
             # first so wave 0 covers the biggest names).
+            # v19.34.311 - get_qualified_filter() applies the share-vol gate.
             self._tier3_roster = [
                 d["symbol"]
                 for d in adv.find(
-                    {"avg_dollar_volume": {"$gte": 10_000_000},
-                     "unqualifiable": {"$ne": True}},
+                    get_qualified_filter("swing"),
                     {"symbol": 1, "_id": 0},
                 ).sort("avg_dollar_volume", -1)
                 if d.get("symbol")
