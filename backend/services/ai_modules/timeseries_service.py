@@ -2156,38 +2156,25 @@ class TimeSeriesAIService:
         # reaching predict_for_setup.
         try:
             diag = self.diagnose_model_load_consistency()
-            if diag["missing_count"] > 0:
-                missing = list(diag["missing_models"])
-                # v322j — split deliberate quarantines (PBO sweep) from genuine
-                # load failures so the boot warning only fires on real bugs.
-                quarantined = []
-                if self._db is not None:
-                    try:
-                        quarantined = [d["name"] for d in self._db["timeseries_models"].find(
-                            {"name": {"$in": missing}, "quarantined": True},
-                            {"_id": 0, "name": 1})]
-                    except Exception:
-                        pass
-                genuinely_missing = [m for m in missing if m not in quarantined]
-                if quarantined:
-                    logger.info(
-                        f"Model load consistency: {len(quarantined)} model(s) "
-                        f"QUARANTINED (intentional, PBO sweep): {quarantined}"
-                    )
-                if genuinely_missing:
-                    logger.warning(
-                        f"Model load consistency: {diag['loaded_count']}/{diag['trained_in_db_count']} "
-                        f"trained models reachable. MISSING: {genuinely_missing}"
-                    )
-                else:
-                    logger.info(
-                        f"Model load consistency OK: {diag['loaded_count']}/{diag['trained_in_db_count']} "
-                        "reachable (all gaps are intentional quarantines)."
-                    )
-            else:
+            # v19.34.317 — the diagnostic now classifies quarantined vs
+            # genuinely missing itself; we just render. Pre-v317 this block
+            # duplicated the DB query, which drifted from the diagnostic.
+            quarantined = list(diag.get("quarantined_models", []))
+            genuinely_missing = list(diag.get("missing_models", []))  # v317: GENUINELY missing only
+            if quarantined:
+                logger.info(
+                    f"Model load consistency: {len(quarantined)} model(s) "
+                    f"QUARANTINED (intentional, PBO sweep): {quarantined}"
+                )
+            if genuinely_missing:
+                logger.warning(
+                    f"Model load consistency: {diag['loaded_count']}/{diag['trained_in_db_count']} "
+                    f"trained models reachable. MISSING: {genuinely_missing}"
+                )
+            elif diag.get("trained_in_db_count", 0) > 0:
                 logger.info(
                     f"Model load consistency OK: {diag['loaded_count']}/{diag['trained_in_db_count']} "
-                    "trained models loaded into memory."
+                    f"reachable{' (all gaps are intentional quarantines)' if quarantined else ''}."
                 )
         except Exception as e:
             logger.warning(f"Could not run model load consistency diagnostic: {e}")
@@ -2282,14 +2269,48 @@ class TimeSeriesAIService:
         # it's a profile model we can't explain.
         extra = sorted(loaded_model_names - trained_names)
 
+        # v19.34.317 — Quarantine relabel. Split `missing` into intentionally
+        # quarantined (PBO-sweep drops; expected) and genuinely missing (real
+        # load bugs). Pre-v317 every gap was lumped under "missing_models" and
+        # operators had to scan the log to figure out which were intentional.
+        # `missing_models` now means GENUINELY missing only; intentional drops
+        # surface as `quarantined_models`.
+        quarantined_set = set()
+        if missing and self._db is not None:
+            try:
+                for _q_doc in self._db["timeseries_models"].find(
+                    {"name": {"$in": missing}, "quarantined": True},
+                    {"_id": 0, "name": 1, "quarantined": 1},
+                ):
+                    # Defensive: real Mongo filters via query, but stub colls
+                    # may not — verify quarantined IS truthy on the doc.
+                    if _q_doc.get("quarantined") is True:
+                        _qn = _q_doc.get("name")
+                        if _qn and _qn in missing:
+                            quarantined_set.add(_qn)
+            except Exception:
+                pass
+        quarantined_models = sorted(quarantined_set)
+        genuinely_missing = [_m for _m in missing if _m not in quarantined_set]
+
+        # Reclassify per_setup_rows so the UI/diagnostic surface shows the
+        # correct status. Pre-v317 quarantined models read as "missing_in_memory".
+        for _row in per_setup_rows:
+            if (_row.get("status") == "missing_in_memory"
+                    and _row.get("model_name") in quarantined_set):
+                _row["status"] = "quarantined"
+
         report["trained_in_db"] = sorted(trained_in_profiles)
         report["loaded_in_memory"] = sorted(loaded_model_names & profile_expected)
-        report["missing_models"] = missing
+        # v19.34.317 — semantics: `missing_models` = GENUINELY missing (the red flag).
+        report["missing_models"] = genuinely_missing
+        report["quarantined_models"] = quarantined_models
         report["extra_models"] = extra
         report["by_setup"] = per_setup_rows
         report["trained_in_db_count"] = len(trained_in_profiles)
         report["loaded_count"] = len(loaded_model_names & profile_expected)
-        report["missing_count"] = len(missing)
+        report["missing_count"] = len(genuinely_missing)
+        report["quarantined_count"] = len(quarantined_models)
         return report
     
     def get_setup_models_status(self) -> Dict[str, Any]:
