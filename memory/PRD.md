@@ -1,5 +1,15 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-15 — v19.34.320a + 320b DEPLOYED+VERIFIED. Pre-listing pollution
+> guard (compute-time helper + recycled-ticker quarantine) shipped end-to-end:
+> SPCX cleaned from 25 daily bars → 1, avg_volume 11.3M → 227M; 42 TRUE_RECYCLE
+> symbols moved 35,524 polluted rows into `ib_historical_data_quarantine`
+> (reversible). Classifier-refined sweep correctly skipped 33 LIKELY_INGEST_GAP
+> symbols clustered on 2026-06-01 (separate ingest-pipeline issue to investigate).
+> Mid-flight symbol-field repair script restored quarantine indexability.
+> Backlog: v320c ingest-time prevention (head_timestamp guard); v320 daily-bar
+> setup gate; diag_ingest_continuity.py; diag_bot_trades_hygiene.py.**
+
 > **🔜 2026-06-12 — v322r APPLIED+COMMITTED on DGX (7b12a984). ACMR root cause PROVEN
 > (backend down during Friday EOD window → weekend carry; created_at="" hid the row).
 > v322s (missed-EOD boot sweep + created_at fix + repair script) built/tested, patcher at

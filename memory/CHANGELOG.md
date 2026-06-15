@@ -1,3 +1,99 @@
+## 2026-06-15 — v19.34.320a + 320b: pre-listing pollution guard + cleanup sweep
+
+**DEPLOYED+VERIFIED on DGX (full chain: probes → patch → cleanup → repair).**
+
+### Story
+v319a's gap_stale flag surfaced a +666% gap_pct on the new SPCX IPO held overnight.
+Initial hypothesis: split-unadjusted `whatToShow="TRADES"`. Probes disproved that
+(0/21 held symbols showed real split signatures). Deep-dive on SPCX revealed the
+true bug class: **IB recycles delisted tickers**. The old SPCX (SpaceX SPAC ETF
+wound down 2026-Q1) left 24 dormant daily bars at ~$22 with ~200 vol in
+`ib_historical_data`; the new SPCX IPO (2026-06-12, $167.94 / 227M vol) inherited
+them under the same symbol. Daily-bar aggregation `(IPO + 19 stale)/20 = 11.36M`
+produced wildly polluted `avg_volume`. Intraday bars (1min/5min/15min/1hour)
+were clean — only daily history exhibited the pollution.
+
+### v19.34.320a — DOWNSTREAM compute-time guard (additive, low-risk)
+File: `backend/services/ib_historical_collector.py` (post-SHA `e5888e38…`)
+- Inject `IBHistoricalCollector._filter_pre_listing_pollution(...)` staticmethod
+  that walks bars newest→oldest, finds the largest time-gap >30 days where
+  post-gap median volume ≥50× pre-gap median, truncates pre-gap rows. Strips
+  `tzinfo` on date parsing so naive (BSON Date) + tz-aware (ISO string) inputs
+  mix cleanly (hotfix2 — caught by integration testing on real Mongo data).
+- Modify `rebuild_adv_from_ib_data` aggregation to push `dates` and cap at 200
+  raw bars per symbol; apply Python filter before slicing to 20 for the rolling
+  avg / ATR.
+- Stamp `symbol_adv_cache` rows with new `data_window_start` (ISO) and
+  `pre_listing_filter_applied: bool` so v311 share-volume gate, gap_pct consumers,
+  and future ADV-aware code can see what was excised.
+- Tests: `backend/tests/test_v19_34_320a_adv_filter.py` (5 pass — SPCX-shape,
+  clean, short, gap-without-volume, mixed-tz).
+- Verified live: SPCX `avg_volume` 11,364,832 → **227,267,555**
+  (exactly 1 IPO bar averaged), `pre_listing_filter_applied: True`,
+  `data_window_start: 2026-06-12`.
+
+### v19.34.320b — One-time STORAGE cleanup sweep (reversible quarantine)
+File: `/tmp/apply_v19_34_320b_quarantine.py` (standalone sweep tool)
+- Re-uses the canonical helper from v320a (detection can never drift).
+- Pre-execution classifier surfaced two patterns in the 88 raw candidates:
+  - **TRUE_RECYCLE** (42 symbols, 35,524 rows) — large `price_ratio` between
+    pre/post-gap median close, no clustering by `window_start`.
+  - **LIKELY_INGEST_GAP** (33 symbols, 70,780 rows) — all sharing
+    `window_start: 2026-06-01`, indicating a systemic ingest gap in May→June
+    2026 daily-bar history. **Correctly skipped.**
+  - **AMBIGUOUS** (13 symbols, 4,087 rows) — price_ratio <3×, no clustering,
+    needs manual review. **Skipped.**
+- Refined classification: `TRUE_RECYCLE` = NOT_IN_CLUSTER AND `price_ratio ≥ 3.0`.
+- Quarantines pre-gap docs to NEW collection `ib_historical_data_quarantine`
+  with audit metadata (`_original_id`, `_quarantined_at`, `_quarantined_reason`,
+  `_quarantined_by_patch`, `_quarantine_window_start`, `_quarantine_price_ratio`).
+- Flat-file safety net: `/tmp/v19_34_320b_quarantine_<utc>.jsonl` (35,524 docs).
+- Triggers ADV rebuild automatically post-sweep.
+- Reversible: `--restore SYM` (per-symbol) or `--restore-all` (full undo).
+- Executed clean: 42 symbols, 35,524 inserted = 35,524 deleted (zero divergence).
+
+### v19.34.320b mid-flight repair (subsequent same-session)
+Caught: the v320b scan projection omitted `symbol` and `bar_size` →
+quarantined docs lacked those fields → `--restore` and audit queries broken.
+- `/tmp/repair_v320b_symbol_field.py` — embeds 42-row canonical mapping from
+  the execution table; backfills `symbol` + `bar_size` by deterministic
+  (`_quarantine_window_start`, `_quarantine_price_ratio`) match (±2% tolerance).
+- Pre-check passed all 42 rows exactly; execute updated 35,524 docs / 0 missing.
+- Restore paths and audit queries now functional.
+
+### Surface-level final state for SPCX
+| metric | pre v320 | post v320a | post v320b |
+|---|---|---|---|
+| `ib_historical_data` 1-day bars | 25 | 25 | **1** |
+| `avg_volume` | 11,364,832 | 227,267,555 | 227,267,555 |
+| `pre_listing_filter_applied` | n/a | True | False (clean source) |
+| `bar_count` | n/a | 25 | 1 |
+| `days_used` | n/a | 1 | 1 |
+| 91-day gap warning | ⚠️ flagged | ⚠️ flagged | ✅ gone |
+
+### Follow-up surfaced (separate work)
+- **May→June 2026 daily-bar ingestion gap** affecting 33 symbols at
+  `window_start: 2026-06-01`. Not pollution — likely a stalled backfill or
+  ingestion loop pause. Track via future `diag_ingest_continuity.py`.
+- **SPCX `bot_trades` row** missing `entry_time`, `size`, `conid`. Separate
+  v315 ib_executions persister hygiene gap.
+- **AMBIGUOUS 13** — manual review (ARR, POWW, UROY, OLB, DFTX, ODV, CBAT,
+  DGXX, BCAL, CETX, CGC, QYLD, CLSK). Most likely real recycles with small
+  price discontinuities, but defer until needed.
+
+### Patcher artifacts (paste.rs round-trip-verified)
+- diag_splits_unadjusted.py        `7xxO6`  sha `e22fb21d…`
+- diag_spcx_forensics.py           `sdGBC`  sha `72fc511a…`
+- apply_v19_34_320a.py             `KTm1o`  sha `c87f2540…`
+- apply_v19_34_320a_hotfix.py      `5cFRJ`  sha `899b45c1…`  (self → self.)
+- apply_v19_34_320a_hotfix2.py     `zZNf9`  sha `10f8e1c3…`  (tz-naive normalize)
+- diag_v320b_classify.py           `qgsfs`  sha `306b7253…`  (READ-ONLY)
+- apply_v19_34_320b_quarantine.py  `UohJ1`  sha `58945485…`  (with classifier refinement)
+- repair_v320b_symbol_field.py     `H6ndP`  sha `69bc5704…`
+
+---
+
+
 ## 2026-06-15 — v19.34.319a: gap sanity guard + PWIRE shadow off
 
 **DEPLOYED+VERIFIED on DGX.**
