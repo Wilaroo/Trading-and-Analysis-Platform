@@ -1,6 +1,6 @@
 ## 2026-06-15 — v19.34.320a + 320b: pre-listing pollution guard + cleanup sweep
 
-**DEPLOYED+VERIFIED on DGX (full chain: probes → patch → cleanup → repair).**
+**DEPLOYED+VERIFIED+COMMITTED on DGX. Commits: `355a1cc5` (v320a code + tests), `56a8bd30` (operator scripts).**
 
 ### Story
 v319a's gap_stale flag surfaced a +666% gap_pct on the new SPCX IPO held overnight.
