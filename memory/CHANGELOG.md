@@ -1,3 +1,38 @@
+## 2026-06-15 — v19.34.318: Morning Readiness "Held Overnight" section
+
+**DEPLOYED+VERIFIED on DGX — commit 3e0a85df pushed. 7/7 tests green. Live endpoint serves 15 holds.**
+
+Operator P1 backlog item: at the open the operator had to scan 3 panels to know
+what carries with them today. v318 surfaces every long-horizon hold in one
+section of the existing `/api/system/morning-readiness` payload.
+
+### What ships
+- `services/morning_readiness_service.py`:
+  - NEW `_held_overnight_summary(db, bot)` — walks `bot._open_trades`,
+    picks holds (`should_close_at_eod(trade) == False`), and emits per-row
+    `{symbol, shares, direction, trade_style, setup_type, policy_horizon,
+    bracket_tif, stop_price, target_prices, opened_at}`. Yellow when any
+    held position is missing a stop; green otherwise.
+  - NEW `_infer_bracket_tif()` mapping: `swing/multi_day/investment/
+    position/trade_2_hold → GTC`; everything else → `DAY`.
+  - Registered as new check `held_overnight` in `compute_morning_readiness`.
+
+### Tests
+NEW `tests/test_v19_34_318_held_overnight.py` (7 green): section present,
+empty book → green, multi_day → GTC, intraday excluded, no_stop → yellow,
+detail string contains horizon breakdown, no-bot yellows gracefully.
+
+### Live verification
+GET `/api/system/morning-readiness` → `checks.held_overnight.held_count = 15`
+(13 multi_day + 2 swing). Every row has stop+targets; bracket_tif inferred
+GTC for all 15.
+
+### NOT in v318 (deferred)
+Gap-vs-yesterday's-close calculation. Clean follow-up patch if requested.
+
+---
+
+
 ## 2026-06-15 — v19.34.316: scale-out attribution + HUD "S" sub-chip
 
 **DEPLOYED+VERIFIED on DGX — commit 3337693d pushed. Active at boot. Tests 4/4 green.**
