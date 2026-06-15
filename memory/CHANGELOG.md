@@ -1,3 +1,85 @@
+## 2026-06-15 — v19.34.316: scale-out attribution + HUD "S" sub-chip
+
+**DEPLOYED+VERIFIED on DGX — commit 3337693d pushed. Active at boot. Tests 4/4 green.**
+
+Operator-visible bug: HUD showed `R $0` (no closed trades today) but the day-PnL chip
+read +$329.50. Root cause (proven via 4 diagnostic probes through paste.rs):
+DVN scaled out 883/939 sh today via 10 IB-side fills (14:51-15:07 ET), booking
+$329.50 realized at the broker. The bot's `bot_trades` row correctly stayed
+`status=open` (56 sh remaining), so the HUD's "Close Today" tile saw nothing.
+The R chip was reading IB-side `realized_pnl` from `useCommandCenterData.js:218`;
+the close-count was reading bot-side. Both correct, neither aware of the other.
+
+### Backend
+- `ib_service.py::_do_get_executions` — surfaces broker-reported `realized_pnl`
+  (from `fill.commissionReport.realizedPNL`) per fill. Half-bug: this lived on
+  the fill object but was silently dropped from the REST payload pre-v316.
+  Also added `perm_id` and `account` for parity with the v315 persister schema.
+- `routers/sentcom.py::get_positions` — walks today's `ib_executions` SELL fills
+  (now reliable thanks to v315), buckets by symbol, stamps every open position
+  with `partial_realized_today` / `partial_shares_closed_today` / `partial_fills_today`
+  and exposes top-level `total_partial_realized_today` + `partial_realized_by_symbol`.
+
+### Frontend
+- `useSentComPositions.js` — picks up the new fields, state/cache plumbing.
+- `SentCom.jsx` + `SentComV5View.jsx` — pass-through.
+- `PipelineHUDV5.jsx` — new "S" sub-chip beside R/U, conditionally rendered when
+  non-zero, tooltip lists per-symbol contributions sorted by |realized| descending.
+
+### Tests
+NEW `tests/test_v19_34_316_scale_out_attribution.py` (4 green): per-symbol bucketing
++ BUY exclusion, API contract for `realized_pnl` key, UI render condition for the
+chip, and a ground-truth assertion that the 10 DVN SELL fills sum to ~$329.50.
+
+### Verified end-to-end
+`/api/sentcom/positions` returns `total_partial_realized_today: 329.5` and
+`partial_realized_by_symbol: {"DVN": {"realized": 329.5, "shares_closed": 883, "fills": 10}}`.
+HUD "S" chip live.
+
+### AGENTS.md compliance
+- 15 chunks across 6 modify files + 1 new test file
+- Per-file SHA256 pre/post drift guards (rebased 2x against DGX drift)
+- Anchored base64 chunks, ABORT on missing/non-unique anchor
+- Compile check on every .py modified
+- Backup files (.bak_v19_34_316) created; `--revert` clean
+- NO touch to safety-critical paths (close_trade / submit_with_bracket / kill-switch / m0_ladder_manager / bracket_reissue_service)
+- No testing_agent, no `git` from bash (operator-driven via paste.rs)
+
+---
+
+## 2026-06-15 — v19.34.315: ib_executions persister (R2 background poll)
+
+**DEPLOYED+VERIFIED on DGX — Mongo collection back-filled today's 35 fills on first tick.**
+
+`ib_executions` collection was confirmed empty (0 rows of all time, despite IB
+having 29 fills live) — `diag_v311_ib_executions_writer_status` proved the
+writer never existed in current code; every reader (`unmatched_short_close_service`,
+`audit_ups_31s_close`) was silently blind.
+
+### New service
+- `services/ib_executions_persister.py` — 30s background coroutine.
+  `await asyncio.to_thread(ibd._ib.fills)` → `update_one({exec_id}, $setOnInsert, upsert=True)`.
+  Idempotent. Skips silently if IB disconnected (watchdog handles). Persists
+  exec_id, order_id, perm_id, account, symbol, side, shares, price, time,
+  last_liquidity, commission, realized_pnl (= `commissionReport.realizedPNL`),
+  written_at, source. Creates `exec_id` unique index on first tick. Exposes
+  `get_persister_stats()` for diagnostics.
+- `server.py` — `asyncio.create_task(ib_executions_persist_loop(db, ...), name="ib_executions_persister")`
+  appended after the order-queue dead-letter loop at startup, wrapped in try/except.
+
+### Tests
+NEW `tests/test_v19_34_315_ib_executions_persister.py` (6 green): doc-shape with
+SLD→SELL normalization, empty `execId` skip, missing `commissionReport` safety,
+side normalization table, idempotency (1 insert + 1 dupe-skip), stats schema.
+
+### Operator-side validation
+- `realized_pnl` flows through correctly on the persister (`commissionReport.realizedPNL`
+  IS populated when ib_insync provides it — verified by DVN SELLs summing to $329.51,
+  matching IB account-level $329.50 within 1¢).
+
+---
+
+
 ## 2026-06-11 — v322u: broker-rejection default-deny cooldown + style/timeframe coherence
 
 **v322u patcher: https://paste.rs/sKOpP — PENDING user apply (then git add/commit/push BEFORE restart; restart via ./start_backend.sh --force or next StartTrading.bat boot).**
