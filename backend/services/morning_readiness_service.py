@@ -550,7 +550,9 @@ def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
                                  getattr(trade, "shares", 0)) or 0)
             # v19.34.319 — gap_pct vs prior daily close. Reads last 2
             # daily bars from ib_historical_data. None if unavailable.
+            # v19.34.319a — `gap_stale` true when prior bar >2 trading days old.
             gap_pct = None
+            gap_stale = False
             try:
                 if db is not None:
                     bars = list(db["ib_historical_data"].aggregate([
@@ -566,10 +568,41 @@ def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
                     ], allowDiskUse=True))
                     if len(bars) >= 2:
                         latest, prior = bars[0]["close"], bars[1]["close"]
+                        latest_date = bars[0].get("_id")
+                        prior_date = bars[1].get("_id")
                         if prior and prior > 0:
                             gap_pct = round(
                                 100.0 * (float(latest) - float(prior))
                                 / float(prior), 3)
+                            # v19.34.319a — sanity guards on the gap calc.
+                            # 1) Cap at ±50% — anything beyond is almost always
+                            #    split-unadjusted data or a sparse-history IPO.
+                            # 2) Mark `gap_stale=True` if the two bars are more
+                            #    than 4 calendar days apart (>2 trading days),
+                            #    which means the "prior close" isn't really
+                            #    yesterday.
+                            try:
+                                if abs(gap_pct) > 50.0:
+                                    gap_pct = None
+                            except Exception:
+                                gap_pct = None
+                            try:
+                                from datetime import date as _date316a
+                                if latest_date and prior_date:
+                                    ld = _date316a.fromisoformat(str(latest_date)[:10])
+                                    pd_ = _date316a.fromisoformat(str(prior_date)[:10])
+                                    if (ld - pd_).days > 4:
+                                        gap_stale = True
+                                    else:
+                                        gap_stale = False
+                                else:
+                                    gap_stale = False
+                            except Exception:
+                                gap_stale = False
+                        else:
+                            gap_stale = False
+                    else:
+                        gap_stale = False
             except Exception as _gap_exc:
                 logger.debug(f"[v19.34.319] gap calc skip {tid}: {_gap_exc}")
 
@@ -586,6 +619,9 @@ def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
                 "target_prices": [round(float(t), 4) for t in targets if t],
                 "opened_at": getattr(trade, "opened_at", None),
                 "gap_pct": gap_pct,
+                # v19.34.319a — True when the prior bar is >2 trading days
+                # old, meaning the gap calc isn't literally "since yesterday".
+                "gap_stale": gap_stale,
             }
             if row["stop_price"] is None:
                 warnings.append(f"{row['symbol']}:no_stop")
