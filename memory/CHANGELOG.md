@@ -1,6 +1,80 @@
-## 2026-06-15 — v19.34.320a + 320b: pre-listing pollution guard + cleanup sweep
+## 2026-06-15 — End-of-day session wrap
 
-**DEPLOYED+VERIFIED+COMMITTED on DGX. Commits: `355a1cc5` (v320a code + tests), `56a8bd30` (operator scripts).**
+### Findings from today's deep-dive
+
+**🚨 Active issue — pusher RPC quote stream dead since ~12:28 ET**
+- `manage` loop is RUNNING but SKIPPING all stop-checks because quotes
+  for all 10 held positions are **>14,400 seconds (4 hours) stale**.
+- Server-side IB brackets are the only thing protecting stops tonight.
+- Bar ingestion (`ib_direct.reqHistoricalData`) is INDEPENDENT and STILL
+  WORKING — newest 1-min bar timestamp confirms data is fresh.
+- This is why no positions closed at EOD (stop-check skipped). User's
+  "pusher dead" popup observation was accurate. Re-subscribe requests
+  in the manage loop are advisory; they didn't restart the daemon.
+- **Action tomorrow AM**: hard restart of the pusher process.
+
+**📊 28-model status: partial retrain, NOT done this weekend**
+- 99 docs in `timeseries_models`. Regime variants ARE present but
+  encoded in name (e.g. `direction_predictor_5min_bullquiet`), not in
+  separate `regime`/`timeframe` fields.
+- Two cohorts visible:
+  - Fresh: ~2026-06-11 (Thursday) — last training run was 4 days ago
+  - Stale: 2026-04-21 / -23 / -26 — these regime variants ~2 months old
+- The "28 models not fully trained" the user remembered = the stale
+  cohort. A full re-training run still needed.
+- Training entrypoints found:
+  - `backend/services/training_mode.py`
+  - `backend/services/ai_modules/training_pipeline.py`
+  - `backend/services/ai_modules/training_subprocess.py`
+- `confidence_gate_log` has 88k historical docs but **0 in last 24h** —
+  worth investigating tomorrow.
+
+**📥 Backfill status: today's daily bars in-progress**
+- 48/3,400 `2026-06-15` 1-day docs landed at 20:28 UTC probe.
+- `ib_collection_jobs`: 19 completed · 3 cancelled · **2 still running**.
+- Don't trigger another backfill yet — wait for running jobs to finish.
+- The 33 LIKELY_INGEST cohort still has Mar-May gaps; this morning's
+  backfill did not cover them.
+
+**🔍 SPCX status changed mid-session**
+- Earlier today: `status: open`, entry $172.42, degraded row (no
+  entry_time/size/conid).
+- Now: NOT in open list, `closed_today` count = 0.
+- Either manually closed before the EOD window, or row got
+  cleaned/overwritten without setting `close_time`. Needs follow-up
+  with `diag_spcx_resolution.py`.
+
+### v19.34.320d — bar_size mislabel prevention patch
+File: `backend/services/slow_learning/historical_data_service.py`
+(post-SHA `a8bb20445f1182be7da3395661c7774e666d4aad08998ed7f4c302a8740f5cba`)
+- Replaced 4 occurrences of `bar_size_map.get(timeframe, "1 day")`
+  silent default with explicit `ValueError` on unmapped timeframes.
+- Audited the bug: 386,919 mislabeled `bar_size="1 day"` docs (2.82% of
+  daily corpus) exist from a single 2026-03-13 bulk event affecting
+  ~198 symbols. Exact OHLCV duplicates of corresponding `bar_size="1 min"`
+  rows — inert and outside the rolling-20 ADV window.
+- Cleanup deferred to v19.34.320e (low priority, safe to delete length-25
+  docs from the 1-day collection).
+- I overstated the scope in mid-session ("97% of AMC 2026 polluted") and
+  retracted clearly when the universe-wide audit ran. Real scope: 2.82%.
+
+### Patcher artifacts (paste.rs round-trip-verified, all run today)
+- diag_ingest_continuity.py        `GhKlC`  sha `8869c720…`
+- diag_ingest_continuity_v2.py     `oFrvr`  sha `3413309b…`
+- diag_dedup_check.py              `FoEn9`  sha `afed6afb…`
+- diag_amc_date_format.py          `WDv2x`  sha `25609f88…`
+- diag_bar_size_mislabel_audit.py  `WtaPG`  sha `4c28c167…`
+- apply_v19_34_320d.py             `gHQKz`  sha `7ea89cf7…`
+- diag_eod_2026_06_15.py           `aseTL`  sha `9b61d010…`
+- diag_data_backfill_status.py     `C2gPB`  sha `e16dd28e…`
+- diag_28_models_status.py         `4XAHW`  sha `c4ed272d…`
+
+---
+
+
+## 2026-06-15 — v19.34.320a + 320b + 320d: pre-listing pollution stack + bar_size mislabel prevention
+
+**DEPLOYED+VERIFIED+COMMITTED on DGX. Commits: `355a1cc5` (v320a code + tests), `56a8bd30` (operator scripts), v320d code change pending commit.**
 
 ### Story
 v319a's gap_stale flag surfaced a +666% gap_pct on the new SPCX IPO held overnight.
