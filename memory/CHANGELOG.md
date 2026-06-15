@@ -74,7 +74,7 @@ File: `backend/services/slow_learning/historical_data_service.py`
 
 ## 2026-06-15 — v19.34.320a + 320b + 320d: pre-listing pollution stack + bar_size mislabel prevention
 
-**DEPLOYED+VERIFIED+COMMITTED on DGX. Commits: `355a1cc5` (v320a code + tests), `56a8bd30` (operator scripts), v320d code change pending commit.**
+**DEPLOYED+VERIFIED+COMMITTED on DGX. Commits: `355a1cc5` (v320a code + tests), `56a8bd30` (operator scripts), `418903bb` (v320d code change).**
 
 ### Story
 v319a's gap_stale flag surfaced a +666% gap_pct on the new SPCX IPO held overnight.
