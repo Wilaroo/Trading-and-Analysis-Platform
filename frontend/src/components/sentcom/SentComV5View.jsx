@@ -225,6 +225,9 @@ export const SentComV5View = ({
   adoptedPnlToday,
   botRealizedPnlToday,
   adoptedRealizedPnlToday,
+  // v19.34.316 — Scale-out attribution for HUD "S" chip.
+  totalPartialRealizedToday,
+  partialRealizedBySymbol,
   positionsLoading,
   setupsLoading,
   contextLoading,
@@ -496,6 +499,8 @@ export const SentComV5View = ({
         adoptedPnlToday={adoptedPnlToday}
         botRealizedPnlToday={botRealizedPnlToday}
         adoptedRealizedPnlToday={adoptedRealizedPnlToday}
+        totalPartialRealizedToday={totalPartialRealizedToday}
+        partialRealizedBySymbol={partialRealizedBySymbol}
         // v19.31.9 — per-stage drill-down rows + meta
         scanRows={counts.drilldown?.scan}
         evalRows={counts.drilldown?.eval}

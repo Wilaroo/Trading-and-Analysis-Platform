@@ -118,6 +118,9 @@ const SentCom = ({ embedded = false }) => {
     adoptedPnlToday,
     botRealizedPnlToday,
     adoptedRealizedPnlToday,
+    // v19.34.316 — Scale-out attribution for HUD "S" chip.
+    totalPartialRealizedToday,
+    partialRealizedBySymbol,
     loading: positionsLoading,
   } = useSentComPositions();
   const { setups, loading: setupsLoading } = useSentComSetups();
@@ -421,6 +424,8 @@ const SentCom = ({ embedded = false }) => {
           adoptedPnlToday={adoptedPnlToday}
           botRealizedPnlToday={botRealizedPnlToday}
           adoptedRealizedPnlToday={adoptedRealizedPnlToday}
+          totalPartialRealizedToday={totalPartialRealizedToday}
+          partialRealizedBySymbol={partialRealizedBySymbol}
           positionsLoading={positionsLoading}
           setupsLoading={setupsLoading}
           contextLoading={contextLoading}

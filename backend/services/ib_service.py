@@ -696,12 +696,25 @@ class IBWorkerThread(threading.Thread):
                 executions.append({
                     "exec_id": fill.execution.execId,
                     "order_id": fill.execution.orderId,
+                    # v19.34.316 — surface perm_id+account so the V5 HUD
+                    # can disambiguate live vs paper-channel executions.
+                    "perm_id": getattr(fill.execution, "permId", 0) or 0,
+                    "account": getattr(fill.execution, "acctNumber", "") or "",
                     "symbol": fill.contract.symbol,
                     "side": fill.execution.side,
                     "shares": fill.execution.shares,
                     "price": fill.execution.price,
                     "time": fill.execution.time.isoformat() if fill.execution.time else None,
-                    "commission": fill.commissionReport.commission if fill.commissionReport else 0
+                    "commission": fill.commissionReport.commission if fill.commissionReport else 0,
+                    # v19.34.316 — broker-reported realized PnL per fill.
+                    # Pre-v316 this was silently dropped from the payload
+                    # even though it lives on `commissionReport.realizedPNL`.
+                    # See diag_v311_partial_fill_attribution_today probe:
+                    # DVN scale-out attribution was invisible because of this.
+                    "realized_pnl": (
+                        getattr(fill.commissionReport, "realizedPNL", 0)
+                        if fill.commissionReport else 0
+                    ),
                 })
             
             return IBResponse(success=True, data=executions)

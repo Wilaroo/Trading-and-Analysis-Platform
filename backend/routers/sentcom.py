@@ -766,6 +766,68 @@ async def get_positions():
                 "trade_type": row_trade_type,
             })
 
+        # v19.34.316 — Scale-out attribution. The bot keeps a row
+        # `status="open"` while remaining_shares > 0, so a ladder
+        # scale-out that books real $$ at IB is invisible in the HUD.
+        # Walk today's SELL fills out of `ib_executions` (populated by
+        # v19.34.315 persister), bucket by symbol, and stamp each open
+        # position with its partial realized PnL.
+        partial_realized_by_symbol = {}
+        try:
+            from datetime import datetime as _dt316, timezone as _tz316
+            try:
+                from zoneinfo import ZoneInfo as _ZI316
+                _et316 = _ZI316("America/New_York")
+                _now_et316 = _dt316.now(_tz316.utc).astimezone(_et316)
+                _midnight316 = _now_et316.replace(
+                    hour=0, minute=0, second=0, microsecond=0,
+                ).astimezone(_tz316.utc).isoformat()
+            except Exception:
+                _midnight316 = _dt316.now(_tz316.utc).replace(
+                    hour=4, minute=0, second=0, microsecond=0,
+                ).isoformat()
+            _open_symbols316 = [p.get("symbol") for p in positions if p.get("symbol")]
+            if _open_symbols316:
+                for _row316 in _db["ib_executions"].find(
+                    {
+                        "symbol": {"$in": _open_symbols316},
+                        "side": "SELL",
+                        "$or": [{"time":      {"$gte": _midnight316}},
+                                {"timestamp": {"$gte": _midnight316}}],
+                    },
+                    {"_id": 0, "symbol": 1, "shares": 1, "realized_pnl": 1},
+                ):
+                    _sym316 = _row316.get("symbol")
+                    _rp316 = float(_row316.get("realized_pnl") or 0)
+                    _sh316 = float(_row316.get("shares") or 0)
+                    _b316 = partial_realized_by_symbol.setdefault(
+                        _sym316,
+                        {"realized": 0.0, "shares_closed": 0.0, "fills": 0},
+                    )
+                    _b316["realized"] += _rp316
+                    _b316["shares_closed"] += _sh316
+                    _b316["fills"] += 1
+            for _p316 in positions:
+                _bx316 = partial_realized_by_symbol.get(_p316.get("symbol"))
+                if _bx316:
+                    _p316["partial_realized_today"] = round(_bx316["realized"], 2)
+                    _p316["partial_shares_closed_today"] = int(_bx316["shares_closed"])
+                    _p316["partial_fills_today"] = _bx316["fills"]
+                else:
+                    _p316["partial_realized_today"] = 0.0
+                    _p316["partial_shares_closed_today"] = 0
+                    _p316["partial_fills_today"] = 0
+        except Exception as _scale_exc316:
+            logger.warning(f"[v19.34.316] scale-out attribution failed: {_scale_exc316}")
+            for _p316 in positions:
+                _p316.setdefault("partial_realized_today", 0.0)
+                _p316.setdefault("partial_shares_closed_today", 0)
+                _p316.setdefault("partial_fills_today", 0)
+        total_partial_realized_today = round(
+            sum(_v316["realized"] for _v316 in partial_realized_by_symbol.values()),
+            2,
+        )
+
         total_unrealized_pnl = sum(p.get("pnl", 0) for p in positions)
         # v19.34.262 — bot-edge vs adopted split on the OPEN book (by source).
         bot_unrealized_pnl = sum(p.get("pnl", 0) for p in positions if p.get("source") == "bot")
@@ -799,6 +861,20 @@ async def get_positions():
             # Diagnostics — used by the HUD tooltip + the audit drilldown.
             "realized_pnl_synthetic_count": synthetic_realized_count,
             "realized_pnl_synthetic_sum": round(synthetic_realized_sum, 2),
+            # v19.34.316 — Scale-out attribution. `total_partial_realized_today`
+            # is the sum of realized PnL booked TODAY against still-open
+            # positions (ladder scale-outs that haven't fully closed).
+            # `partial_realized_by_symbol` maps symbol → {realized,
+            # shares_closed, fills}. The HUD's "S" sub-chip renders this.
+            "total_partial_realized_today": total_partial_realized_today,
+            "partial_realized_by_symbol": {
+                _s316: {
+                    "realized": round(_v316["realized"], 2),
+                    "shares_closed": int(_v316["shares_closed"]),
+                    "fills": _v316["fills"],
+                }
+                for _s316, _v316 in partial_realized_by_symbol.items()
+            },
             "total_pnl_today": round(total_unrealized_pnl + total_realized_pnl_today, 2),
             "total_market_value": round(total_market_value, 2),
             "total_cost_basis": round(total_cost_basis, 2),
