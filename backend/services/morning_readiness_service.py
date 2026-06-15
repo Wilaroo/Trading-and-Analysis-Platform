@@ -548,6 +548,31 @@ def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
             targets = list(getattr(trade, "target_prices", None) or [])
             shares = int(getattr(trade, "remaining_shares",
                                  getattr(trade, "shares", 0)) or 0)
+            # v19.34.319 — gap_pct vs prior daily close. Reads last 2
+            # daily bars from ib_historical_data. None if unavailable.
+            gap_pct = None
+            try:
+                if db is not None:
+                    bars = list(db["ib_historical_data"].aggregate([
+                        {"$match": {"symbol": getattr(trade, "symbol", "?"),
+                                     "bar_size": "1 day"}},
+                        {"$addFields": {"date_key": {"$substr":
+                            [{"$toString": "$date"}, 0, 10]}}},
+                        {"$sort": {"date": -1}},
+                        {"$group": {"_id": "$date_key",
+                                     "close": {"$first": "$close"}}},
+                        {"$sort": {"_id": -1}},
+                        {"$limit": 2},
+                    ], allowDiskUse=True))
+                    if len(bars) >= 2:
+                        latest, prior = bars[0]["close"], bars[1]["close"]
+                        if prior and prior > 0:
+                            gap_pct = round(
+                                100.0 * (float(latest) - float(prior))
+                                / float(prior), 3)
+            except Exception as _gap_exc:
+                logger.debug(f"[v19.34.319] gap calc skip {tid}: {_gap_exc}")
+
             row = {
                 "trade_id": tid,
                 "symbol": getattr(trade, "symbol", "?"),
@@ -560,6 +585,7 @@ def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
                 "stop_price": (round(float(stop), 4) if stop else None),
                 "target_prices": [round(float(t), 4) for t in targets if t],
                 "opened_at": getattr(trade, "opened_at", None),
+                "gap_pct": gap_pct,
             }
             if row["stop_price"] is None:
                 warnings.append(f"{row['symbol']}:no_stop")
