@@ -1,3 +1,29 @@
+## 2026-06-15 — v19.34.319a: gap sanity guard + PWIRE shadow off
+
+**DEPLOYED+VERIFIED on DGX.**
+
+### `_held_overnight_summary` gap calc hardening
+- Cap |gap_pct| at ±50% — anything beyond returns `None` (was producing
+  +666% spikes from split-unadjusted bars on recent IPOs).
+- New `gap_stale` boolean — `True` when the two daily bars used in the
+  calc are >4 calendar days apart (>2 trading days), meaning "prior close"
+  isn't literally yesterday's close.
+- Both fields added to every row in `held_overnight.held[]`.
+
+### PWIRE shadow logging disabled
+- `PWIRE_SHADOW_ENABLED=false` in `backend/.env`.
+- Stops polluting `confidence_gate_log` with regime_shadow records that
+  compare the generic model to itself (28 specialized models don't exist).
+- Re-enable AFTER training the regime-specialized models.
+
+### Verified live output
+The +666% outlier we saw post-v319 now reads:
+   `"gap_pct": null, "gap_stale": true`
+Legitimate ±11% gaps preserved. Clean.
+
+---
+
+
 ## 2026-06-15 — v19.34.319: gap-vs-yesterday + M0 ladder regression test
 
 **DEPLOYED+VERIFIED on DGX — commit f7762c7b pushed. 13/13 tests green (6 v319 + 7 v318 regression).**
