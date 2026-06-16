@@ -3,35 +3,24 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
-## 🟢 P2 (added 2026-06-16) — Timeframe-aware style resolution for multi-timeframe setups
-Investigated the open-book inconsistency where `trend_continuation_short` showed as
-BOTH multi_day (GLD/MSTR) and intraday (TSLA/META/NOK). VERDICT: not a bug — the
-per-trade stamps are timeframe-aware (resolve_trade_style precedence: trade_style →
-tiers → timeframe → setup-map). The static `SETUP_TO_STYLE["trend_continuation"] =
-"multi_day"` (trade_style_classifier.py L78) is only a LAST-RESORT fallback, and
-`style_of(setup)` (setup_taxonomy.py) passes ONLY the setup name so it always returns
-that static value — which is why the v320s static audit false-positived TSLA/META/NOK
-as "MISLABELED_INTRA→CARRY". The trades themselves are fine.
-LATENT RISK to fix: for genuinely multi-timeframe setups (trend_continuation, and any
-setup that legitimately spans intraday & daily), if an alert ever fails to stamp
-trade_style/timeframe, resolution falls through to the static `multi_day` default →
-the trade CARRIES OVERNIGHT even when it was an intraday signal — the unsafe direction
-for the intraday mandate.
-OPTIONS (pick after data check):
-  (a) Make trend_continuation (et al.) resolve by firing timeframe explicitly — ensure
-      the entry-stamp path ALWAYS sets timeframe/trade_style for these setups so the
-      static fallback is never reached. (lowest risk; just guarantees context.)
-  (b) Split the static map: `trend_continuation_intraday` vs `trend_continuation_daily`
-      canonical names, each with its own bucket.
-  (c) Flip the multi-timeframe FALLBACK default from multi_day→intraday (flatten-at-EOD
-      is the safe default for an intraday mandate); daily-timeframe trend continuations
-      keep multi_day only when timeframe is explicitly daily. (changes behavior — needs
-      care so genuine swing trend-continuations aren't prematurely flattened.)
-PRE-WORK DIAG (build first): audit all trend_continuation trades (open + recent closed)
-for what timeframe/trade_style they actually carry, to measure how often the static
-fallback is even reached (if ~never, option (a) is trivial; if often, (c) matters).
-Also update diag_v320s to feed timeframe/trade_style into style_of so its INTRA→CARRY
-flag stops false-positiving on multi-timeframe setups.
+## 🟢 P3 (added 2026-06-16, DATA-RESOLVED — no behavioral fix) — Timeframe-aware style resolution
+RESOLVED by diag_v320v (paste.rs/K7urU) on live data: of 21 trend_continuation trades
+(open + 7d), RISK METRIC = 0/21 (0%) — NONE rely on the static `multi_day` fallback;
+every row carries a style-resolvable `timeframe` (intraday ×19, swing ×2). 0 fragile.
+So the latent "missing-context → unsafe multi_day carry" risk is NOT materializing; the
+entry path reliably stamps a real style-timeframe (not raw bar sizes). Options (a)/(b)/(c)
+are therefore UNNECESSARY as a behavioral change. The GLD/MSTR/TSLA/META/NOK "split" is
+correct timeframe-aware stamping; the v320s INTRA→CARRY flag is a pure style_of-static
+artifact.
+REMAINING (low-value, optional):
+  • Defensive: a startup assert / unit test that trend_continuation alerts always carry a
+    style-resolvable timeframe (so the 0% never regresses).
+  • Cosmetic: GLD/MSTR are stamped multi_day while timeframe=swing (carry-vs-carry; both
+    hold overnight, different trail/target policy) — could normalize to swing.
+  • Diag polish: feed timeframe/trade_style into style_of inside diag_v320s so its
+    INTRA→CARRY flag stops false-positiving on multi-timeframe setups.
+Re-run diag_v320v with a 2nd arg (e.g. `daily_breakout`) to spot-check other no-config
+setups if ever concerned.
 
 
 ## 🟡 P1 ACTION ITEM (added 2026-06-16) — Intraday HIGH-priority gate audit (secondary lever)
