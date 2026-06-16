@@ -1058,8 +1058,21 @@ def get_default_trade_style(setup_name: str, context: Dict = None) -> TradeStyle
         # Override based on SMB score if available
         smb_score = context.get("smb_score")
         if smb_score and isinstance(smb_score, SMBVariableScore):
+            # v19.34.320u — A+ is a QUALITY grade, NOT a horizon (see this
+            # enum's own docstring: "A scalp can be A+ quality"). The old
+            # `if is_a_plus: return MULTI_DAY` hijacked EVERY intraday/scalp
+            # setup (gap_fade, squeeze, second_chance, ...) into an overnight
+            # carry. This path runs at LiveAlert populate (enhanced_scanner
+            # L723-725) BEFORE the v320p guard, so it silently NEUTRALIZED
+            # v320p. Now A+ only promotes when the setup is ALREADY carry-
+            # natured; intraday/scalp keep their horizon. (A+ quality/priority
+            # still flows via smb_is_a_plus.)
             if smb_score.is_a_plus:
-                return TradeStyle.MULTI_DAY
+                if str(default_style.value).lower() in (
+                    "multi_day", "swing", "position", "investment"
+                ):
+                    return TradeStyle.MULTI_DAY
+                return default_style
             elif smb_score.total_score >= 35:
                 return TradeStyle.INTRADAY
         
