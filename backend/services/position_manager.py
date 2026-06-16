@@ -399,6 +399,114 @@ class PositionManager:
                                     _trade.remaining_shares = 0
                                 except Exception:
                                     pass
+                                # ── v19.34.320h — OCA close-path accounting finalize ── BEGIN ──
+                                # The v19.31 external-close sweep above marks the trade CLOSED and
+                                # claims realized_pnl, but historically left exit_price unset, net_pnl
+                                # stuck at the -$1.00 commission-min sentinel, and pnl_pct stale.
+                                # Source exit_price from the matching IB execution (±15m of close),
+                                # recompute net_pnl = realized_pnl - total_commissions, and pnl_pct
+                                # off the entry basis. Gated by V320H_OCA_FIX_POLICY
+                                # (observe|fix|off, default observe).
+                                try:
+                                    import os as _os_v320h
+                                    _v320h_policy = (_os_v320h.environ.get(
+                                        "V320H_OCA_FIX_POLICY", "observe")
+                                        or "observe").lower().strip()
+                                    if _v320h_policy not in ("observe", "fix", "off"):
+                                        _v320h_policy = "observe"
+                                    if _v320h_policy != "off":
+                                        _entry_basis = float(
+                                            getattr(_trade, "fill_price", None)
+                                            or getattr(_trade, "entry_price", 0) or 0)
+                                        _v320h_dir = _dir
+                                        _close_side = "BUY" if _v320h_dir == "short" else "SELL"
+                                        _exit_px = None
+                                        _exit_src = None
+                                        try:
+                                            from datetime import datetime as _dt_v320h, timezone as _tz_v320h, timedelta as _td_v320h
+                                            _closed_raw = getattr(_trade, "closed_at", None)
+                                            if isinstance(_closed_raw, str):
+                                                _closed_dt = _dt_v320h.fromisoformat(_closed_raw.replace("Z", "+00:00"))
+                                            elif _closed_raw is not None:
+                                                _closed_dt = _closed_raw
+                                            else:
+                                                _closed_dt = _dt_v320h.now(_tz_v320h.utc)
+                                            if _closed_dt.tzinfo is None:
+                                                _closed_dt = _closed_dt.replace(tzinfo=_tz_v320h.utc)
+                                            _lo = (_closed_dt - _td_v320h(minutes=15)).isoformat()
+                                            _hi = (_closed_dt + _td_v320h(minutes=15)).isoformat()
+                                            _db_v320h = (getattr(bot, "_db", None)
+                                                         if getattr(bot, "_db", None) is not None
+                                                         else getattr(bot, "db", None))
+                                            if _db_v320h is not None:
+                                                _q = {
+                                                    "symbol": (_trade.symbol or "").upper(),
+                                                    "$or": [
+                                                        {"time": {"$gte": _lo, "$lte": _hi}},
+                                                        {"timestamp": {"$gte": _lo, "$lte": _hi}},
+                                                        {"exec_time": {"$gte": _lo, "$lte": _hi}},
+                                                    ],
+                                                }
+                                                _execs = await asyncio.to_thread(
+                                                    lambda: list(_db_v320h["ib_executions"].find(_q, {"_id": 0})))
+                                                _want = int(getattr(_trade, "shares", 0) or 0)
+                                                _best = None
+                                                _best_score = None
+                                                for _ex in _execs:
+                                                    _eside = str(_ex.get("side") or _ex.get("action") or "").upper()
+                                                    if _close_side == "SELL" and not _eside.startswith(("S",)):
+                                                        continue
+                                                    if _close_side == "BUY" and not _eside.startswith(("B",)):
+                                                        continue
+                                                    _epx = float(_ex.get("price") or _ex.get("avg_price")
+                                                                 or _ex.get("fill_price") or 0)
+                                                    if _epx <= 0:
+                                                        continue
+                                                    _eqty = int(abs(float(_ex.get("shares") or _ex.get("qty") or 0)))
+                                                    _score = abs(_eqty - _want)
+                                                    if _best_score is None or _score < _best_score:
+                                                        _best_score = _score
+                                                        _best = _epx
+                                                if _best is not None:
+                                                    _exit_px = round(_best, 4)
+                                                    _exit_src = "ib_executions"
+                                        except Exception as _v320h_lk:
+                                            logger.debug("[v19.34.320h] ib_executions probe threw: %s", _v320h_lk)
+                                        if _exit_px is None:
+                                            _cp = float(getattr(_trade, "current_price", 0) or 0)
+                                            if _cp > 0:
+                                                _exit_px = round(_cp, 4)
+                                                _exit_src = "current_price_fallback"
+                                        _new_net = round(float(getattr(_trade, "realized_pnl", 0) or 0)
+                                                         - float(getattr(_trade, "total_commissions", 0) or 0), 2)
+                                        _new_pct = None
+                                        if _exit_px is not None and _entry_basis > 0:
+                                            if _v320h_dir == "short":
+                                                _new_pct = round((_entry_basis - _exit_px) / _entry_basis * 100, 4)
+                                            else:
+                                                _new_pct = round((_exit_px - _entry_basis) / _entry_basis * 100, 4)
+                                        if _v320h_policy == "fix":
+                                            if _exit_px is not None:
+                                                _trade.exit_price = _exit_px
+                                            _trade.net_pnl = _new_net
+                                            if _new_pct is not None:
+                                                _trade.pnl_pct = _new_pct
+                                            logger.info(
+                                                "🔧 [v19.34.320h FIX] %s %s finalized: exit_price=%s (%s) "
+                                                "net_pnl=%.2f pnl_pct=%s trade_id=%s",
+                                                _trade.symbol, _v320h_dir.upper(), _exit_px, _exit_src,
+                                                _new_net, _new_pct, _trade.id)
+                                        else:
+                                            logger.info(
+                                                "👁️ [v19.34.320h OBSERVE] %s %s would finalize: exit_price=%s (%s) "
+                                                "net_pnl=%.2f pnl_pct=%s (cur net_pnl=%s exit_price=%s) trade_id=%s",
+                                                _trade.symbol, _v320h_dir.upper(), _exit_px, _exit_src,
+                                                _new_net, _new_pct,
+                                                getattr(_trade, "net_pnl", None),
+                                                getattr(_trade, "exit_price", None), _trade.id)
+                                except Exception as _v320h_err:
+                                    logger.debug("[v19.34.320h] finalize block threw (non-fatal): %s", _v320h_err)
+                                # ── v19.34.320h — OCA close-path accounting finalize ── END ──
                                 try:
                                     await asyncio.to_thread(bot._persist_trade, _trade)
                                 except Exception:
