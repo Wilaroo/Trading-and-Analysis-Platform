@@ -27,19 +27,21 @@ Two read-only diags delivered + run on DGX:
   overnight carries before they fire intraday. One bug, both symptoms. TQS grade is
   NOT biased against intraday (A/A+ 16.7% vs 12%).
 
-### v19.34.320p — A+ quality flag no longer hijacks intraday horizon (paste.rs/VSYBy)
-`services/enhanced_scanner.py`, PRE `bf5cf446…` → POST `ef34f69f…`. Fix (operator
-chose option A): the A+ branch promotes to `multi_day` + 5R ONLY when the setup is
-already carry-natured (`multi_day/swing/position/investment`); intraday/scalp setups
-keep their natural horizon + target and flatten at EOD. `smb_is_a_plus` quality/
-priority benefit still flows (set earlier, untouched). Alert-stamping only — no
-close/bracket/kill-switch paths; net = fewer overnight carries (safe direction).
-§2.2 patcher (PRE/POST SHA, base64 anchored chunk, auto-backup,
---check/--apply/--rollback/--status, py_compile gate). paste.rs round-trip IDENTICAL.
-8/8 pytest (test_v320p_aplus_horizon_patcher + test_v320m). Generator:
-`scripts/_build_v320p_patcher.py`. NOT yet applied on DGX.
-Post-deploy verify (RTH): re-run v320n/v320o — multi_day count drops, intraday fills
-rise, v320o override footprint should fall from ~97 toward ~0.
+### v19.34.320p — A+ quality flag no longer hijacks intraday horizon — ✅ APPLIED + COMMITTED (7011ab04)
+`services/enhanced_scanner.py`. Fix (operator chose option A): the A+ branch
+promotes to `multi_day` + 5R ONLY when the setup is already carry-natured
+(`multi_day/swing/position/investment`); intraday/scalp setups keep their natural
+horizon + target and flatten at EOD. `smb_is_a_plus` quality/priority benefit still
+flows (set earlier, untouched). Alert-stamping only — no close/bracket/kill-switch
+paths; net = fewer overnight carries (safe direction).
+DGX file had DRIFTED (anchor moved L748→L791, byte-identical block); patcher
+rebased onto operator baseline PRE `6064040a…` (drift-rebase mode: exact-PRE guard
++ unique-anchor + py_compile gate; POST deterministic, resulting sha `89555e59…`).
+paste.rs/ki1bS, round-trip IDENTICAL. 8/8 pytest (container baseline) + full
+drift-rebase validation (check/apply/compile/idempotent/rollback/drift-guard).
+Generator: `scripts/_build_v320p_patcher.py` (now supports `--pre <sha>` drift mode).
+Post-deploy verify (next RTH): re-run v320n/v320o — multi_day count drops, intraday
+fills rise, v320o override footprint should fall from ~105 toward ~0.
 
 ---
 
