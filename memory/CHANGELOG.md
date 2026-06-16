@@ -1,3 +1,36 @@
+## 2026-06-17 — v320q priority-attribution diag DELIVERED (read-only) + PWIRE shadow re-enable guidance
+
+### v320q — PRIORITY ATTRIBUTION BY STYLE (READ-ONLY, paste.rs/5WwmW)
+`scripts/diag_v320q_priority_attribution.py`. Task 1 (P1) secondary intraday-frequency
+lever after the v320p/v320u A+ horizon-hijack fix. Decomposes WHY intraday alerts
+under-reach the HIGH auto-fire gate (~20% vs CARRY ~55%, per v320o). Key arch fact
+(verified in enhanced_scanner detector branches): priority is NOT one formula — each
+detector hard-codes its ceiling, overwhelmingly `HIGH if tape.confirmation else MEDIUM`,
+and several setups are HARD-CAPPED at MEDIUM (no HIGH branch). So the diag splits the
+non-HIGH population into 3 separable causes per INTRADAY/CARRY group:
+  • ceiling_medium — setup's detector never emits HIGH/CRIT anywhere in window (STRUCTURAL)
+  • tape_gate_miss — HIGH-capable setup failed tape_confirmation (tape lever)
+  • residual       — HIGH-capable + tape-confirmed but still < HIGH (other in-branch gate)
+Empirical per-setup ceiling derived FROM the data (max priority observed), so it tracks
+live wiring without a hard-coded map. Reports per-style funnel + scorer-input means
+(tape_score/in_play_score/tqs_score/smb_big_picture/smb_is_a_plus) to reveal whether the
+gate keys on quality or on tape/ceiling. `--days N` (default 5 RTH); per-day breakdown
+flags post-v320p (★) days so calibration is gated on a post-fix sample. NOTHING WRITTEN;
+all reads project {"_id":0}. py_compile OK, paste.rs round-trip IDENTICAL, local smoke
+test passed (synthetic intraday vwap_fade ceiling-capped + tape-gated opening_drive vs
+carry squeeze → attribution correctly 71% ceiling / 29% tapeMiss for intraday). AWAITING
+operator DGX run to choose the lever (add HIGH branch to medium-capped intraday detectors
+vs recalibrate the tape gate — NOT a sizing change).
+
+### P-WIRE Phase 2 — shadow logging re-enable (no code change)
+Re-affirmed (diag_v320x): regime classifier is ACCURATE; 1.3 vol threshold correct;
+"91% high_vol" was a sampling artifact worsened by `PWIRE_SHADOW_ENABLED=false`. To unblock
+Phase 2, operator flips the flag true in backend/.env + restart, so ~200 resolved shadow
+decisions accrue across normal/trend/vol days for a representative pwire_shadow_eval.
+
+---
+
+
 ## 2026-06-16 (later6) — v320 cleanup committed (b4ad8c87)
 
 - diag_v320s polished to CONTEXT-AWARE (resolve_trade_style with setup+timeframe, no

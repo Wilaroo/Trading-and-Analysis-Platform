@@ -44,7 +44,17 @@ Re-run diag_v320v with a 2nd arg (e.g. `daily_breakout`) to spot-check other no-
 setups if ever concerned.
 
 
-## 🟡 P1 ACTION ITEM (added 2026-06-16) — Intraday HIGH-priority gate audit (secondary lever)
+## 🟡 P1 ACTION ITEM (added 2026-06-16; diag DELIVERED 2026-06-17) — Intraday HIGH-priority gate audit
+✅ DIAG DELIVERED: `diag_v320q_priority_attribution.py` (paste.rs/5WwmW, read-only,
+smoke-tested). AWAITING operator DGX run (`--days 5`, post-v320p sample). The diag
+decomposes the non-HIGH intraday population into ceiling_medium (structural — detector
+has no HIGH branch) vs tape_gate_miss (failed tape_confirmation) vs residual, per
+INTRADAY/CARRY group, with scorer-input means. NEXT after run: choose the lever —
+add a tape/in-play/RR-gated HIGH branch to medium-capped intraday detectors, OR
+recalibrate the tape gate. NOT a sizing change. Verify lever: v320o INTRADAY HIGH%
+should rise toward CARRY%.
+
+--- original note (context) ---
 After v320p (A+ horizon-hijack fix, commit 7011ab04) is confirmed via RTH diag rerun,
 investigate the SECONDARY intraday-frequency lever: the HIGH-priority gate itself.
 v320o data: CARRY alerts reach HIGH priority 55% of the time vs INTRADAY only 20% —
