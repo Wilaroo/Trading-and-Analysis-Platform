@@ -292,6 +292,10 @@ async def _reclaim_silently_filled_trade_v322l(
                 trade.stop_order_id = oca.get("stop_order_id")
                 if oca.get("target_order_id"):
                     trade.target_order_id = oca.get("target_order_id")
+                    # v19.34.320i — keep the plural list in sync (see entry path).
+                    _tids_320i = (oca.get("target_order_ids")
+                                  or [oca.get("target_order_id")])
+                    trade.target_order_ids = [str(_x) for _x in _tids_320i if _x]
                 trade.oca_group = oca.get("oca_group")
             else:
                 attach_err = (oca or {}).get("error", "unknown")
@@ -994,6 +998,7 @@ class TradeExecution:
                     "bracket": True,  # flag so we skip the separate stop placement
                     "stop_order_id": bracket_result.get("stop_order_id"),
                     "target_order_id": bracket_result.get("target_order_id"),
+                    "target_order_ids": bracket_result.get("target_order_ids"),
                     "oca_group": bracket_result.get("oca_group"),
                 }
             print(f"   📤 [_execute_trade] Result: {result}")
@@ -1109,6 +1114,14 @@ class TradeExecution:
                 if result.get('bracket'):
                     trade.stop_order_id = result.get('stop_order_id')
                     trade.target_order_id = result.get('target_order_id')
+                    # v19.34.320i — also populate the plural target_order_ids
+                    # list (leg-id source for close/EOD cancel paths + the
+                    # stop-vs-target classifier). Entry historically set only
+                    # the singular id, leaving target_order_ids=[] (SATS
+                    # 2026-06: target hit but list empty -> classifier blind).
+                    _tids_320i = (result.get('target_order_ids')
+                                  or ([result.get('target_order_id')] if result.get('target_order_id') else []))
+                    trade.target_order_ids = [str(_x) for _x in _tids_320i if _x]
                     if result.get('oca_group'):
                         trade.notes = (trade.notes or "") + f" [OCA:{result['oca_group']}]"
                 else:
