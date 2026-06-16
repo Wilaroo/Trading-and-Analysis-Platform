@@ -1,4 +1,27 @@
-## 2026-06-16 (later) — v320i target_order_ids + v320j unrealized_pnl persist + v320k diag
+## 2026-06-16 (later) — v320L naked-sweep datetime UnboundLocalError fix
+
+### v19.34.320L — `_naked_position_sweep` datetime scoping bug (paste.rs/ikyui)
+`trading_bot_service.py`, PRE `b4cb8a7d` → POST `b3a9ae29`. Found via operator
+gate-log review: `[v19.34.163 naked-sweep] telemetry update failed ... cannot
+access local variable 'datetime'` firing every cycle (UNH, MCD…). Root cause
+(pre-existing, v19.34.31): a conditional function-local
+`from datetime import datetime, timezone` at L5958 made those names LOCAL to the
+whole `_naked_position_sweep`, so the telemetry write at ~L6530
+(`datetime.now(timezone.utc)`) raised UnboundLocalError when the
+pusher-snapshot branch wasn't taken — silently skipping the
+`last_bracket_attach_at` churn-audit field + spamming logs. Fix: remove the
+redundant local import (module already imports it at L19); bare uses resolve to
+the global. NOT caused by v320h/i/j (those use aliased imports — verified).
+1-chunk §2.2 patcher, validated. 11/11 pytest green.
+
+### Issue 2 — daily-bar gate (still observe)
+Operator gate-log review (mid-day RTH) showed ZERO `[v19.34.320]` OBSERVE/BLOCK
+decisions — gate only fires pre-10:00 ET on daily-bar setups. Verdict: keep
+`observe`; re-tail 9:30–10:00 ET to capture real decisions before flipping.
+
+---
+
+
 
 ### v19.34.320i — target_order_ids capture (Issue 5, paste.rs/nbSL7)
 `trade_execution.py`. Entry/bracket path stamped only the SINGULAR

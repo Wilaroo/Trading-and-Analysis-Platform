@@ -185,3 +185,25 @@ def test_v320j_round_trip(tmp_path):
     assert _run_patch(patcher, ["--rollback"], target, "V320H_PM_TARGET").returncode == 0
     assert _sha(target) == PM_DGX_PRE
 
+
+TBS = ROOT / "services" / "trading_bot_service.py"
+TBS_PRE = "b4cb8a7dfcabe6fb02108b0f40283dc05f596351bcdb3ec45a17960604c2d8b6"
+TBS_POST = "b3a9ae2929c31b9ed427fe1de059c17b3e413fcf8eb73859b89ea229ef98e19d"
+
+
+@pytest.mark.skipif(_sha(TBS) != TBS_PRE, reason="trading_bot_service.py not at canonical baseline")
+def test_v320L_round_trip(tmp_path):
+    patcher = ROOT / "scripts" / "patch_v320L_naked_sweep_datetime_fix.py"
+    target = tmp_path / "trading_bot_service.py"
+    shutil.copy2(TBS, target)
+    assert _run_patch(patcher, ["--check"], target, "V320L_TBS_TARGET").returncode == 0
+    assert _run_patch(patcher, ["--apply"], target, "V320L_TBS_TARGET").returncode == 0
+    assert _sha(target) == TBS_POST
+    body = target.read_text(encoding="utf-8")
+    compile(body, "trading_bot_service.py", "exec")
+    assert "v19.34.320L" in body
+    # the function-local bare import must be gone
+    assert "                from datetime import datetime, timezone\n" not in body
+    assert _run_patch(patcher, ["--rollback"], target, "V320L_TBS_TARGET").returncode == 0
+    assert _sha(target) == TBS_PRE
+
