@@ -94,7 +94,7 @@ def main():
                   f"{(r.get('fill_price') or r.get('entry_price') or 0):>9.2f} "
                   f"{(r.get('current_price') or 0):>9.2f} "
                   f"{(r.get('stop_price') or 0):>9.2f} "
-                  f"{(tgt0 or 0):>9.2f if tgt0 else 0:>9}  "
+                  f"{(tgt0 or 0):>9.2f}  "
                   f"${unreal:>+10.2f}  {age:>5}  "
                   f"{r.get('setup_type','-'):>15}/{r.get('trade_style','-')}")
 
