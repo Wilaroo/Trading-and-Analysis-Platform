@@ -1,3 +1,66 @@
+## 2026-06-16 — v320f mislabel cleanup APPLIED + v320g SPCX surgical repair APPLIED
+
+### v19.34.320f-fix1 — Mislabeled-bar relabel/dedup/quarantine (paste.rs/uB64p, sha 7b4812b2)
+
+Resolves Issue 2 from prior fork (handoff): 386,919 `bar_size='1 day'` rows in
+`ib_historical_data` whose `date` field was a full timestamp (len > 10) —
+i.e., 1-minute bars wearing a daily label. Prior sample diag projected that
+a bulk DELETE would have lost ~250k unique 1-min records.
+
+**Outcome (FINISHED block):**
+- pre: 386,919 → post: 0 mislabeled rows
+- `unique_relabel`: **251,551** — rows with no 1-min sibling; `bar_size` flipped to `'1 min'`
+- `exact_delete`: **95,242** — true OHLCV-identical duplicates of an existing 1-min sibling
+- `partial_stage`: **40,126** — sibling exists but OHLCV drifts (likely consolidated-tape vs single-exchange feed; ~9–11% of population); QUARANTINED via `bar_size='partial_review_v320f'`, full doc copied to `ib_historical_data_partial_review` (preserving the potentially-better high-volume data for operator triage)
+- audit: `mislabel_relabel_audit_v320f` collection holds all 386,919 actions with `_v320f_id`, original snapshots, drift_keys → full `--rollback` available
+- Runtime: ~10 min @ ~600/s on the DGX
+
+**Drift analysis (from `diag_mislabeled_bars_relabel_plan.py`):** top-25 symbols
+each had exactly 1,950 rows (= 5 trading days × 390 RTH minutes), proving a
+single systematic bad backfill batch in mid-March 2026. Partial-bucket rows
+all showed mislabeled volume 2–10× higher than 1-min siblings — consistent
+with a consolidated-tape feed vs single-exchange canonical.
+
+**Design:** `--check / --apply / --resume / --rollback / --status`, batched
+in 1,000-row chunks with `/tmp/v320f_relabel_checkpoint.json` resumability,
+per-row sibling re-probe at apply time (handles race conditions), unique-idx
+collision auto-downgrade-to-delete branch. Self-SHA256 stamped on audit
+rows.
+
+### v19.34.320g — SPCX `id=31651c71` surgical close-side rebuild (paste.rs/BhyZn, sha 9713042a)
+
+Resolves Issue 1 from prior fork: a single SPCX `bot_trades` row closed by
+the v19.31-era OCA-external close path which updated `realized_pnl`
+(using `fill_price=172.59` as the entry basis) but left `exit_price`,
+`net_pnl`, and `pnl_pct` un-finalized.
+
+**Outcome (read-back verified):**
+- `exit_price`: None → **189.30** (canonical from `ib_executions` order_id=408355, exec_id=00025b49.6a36c069.01.01, SELL 42sh @ 189.30 @ 2026-06-15T19:50:00Z)
+- `net_pnl`: -1.00 → **698.65** (= realized_pnl 699.65 − total_commissions 1.00)
+- `pnl_pct`: 9.0909 → **9.68** (= (189.30 − 172.59) / 172.59 × 100)
+- `realized_pnl=699.65` left unchanged (already internally consistent: `(189.25−172.59)*42=699.72` within 5¢ rounding of IB exec)
+- audit `_id=6a30e419caab658cd0b24668` in `bot_trades_repair_audit_v320g` with embedded IB exec ref + full before/after + `expected_before` snapshot for replay
+
+**Safety:** Apply verified all 13 preconditions (`symbol/direction/shares/status/entry_price/fill_price/exit_price/realized_pnl/net_pnl/pnl_pct/total_commissions/entered_by/close_reason`) before any write. Update filter included `EXPECTED_BEFORE` values as a race-guard. Audit row inserted BEFORE the update for crash-safety. Read-back verify PASS.
+
+### Both repairs are reversible
+```bash
+.venv/bin/python backend/scripts/repair_v320f_relabel_mislabeled_bars.py --rollback
+.venv/bin/python backend/scripts/repair_v320g_spcx_exit_backfill.py --rollback
+```
+
+### Scripts delivered this session
+- `backend/scripts/diag_v320g_spcx_exit_lookup.py` (paste.rs/4Roce, sha 02f7f76c) — READ-ONLY SPCX exit_price triangulation across ib_executions + bot_orders + back-calc.
+- `backend/scripts/repair_v320f_relabel_mislabeled_bars.py` (paste.rs/uB64p, sha 7b4812b2) — applied to 386,919 rows.
+- `backend/scripts/repair_v320g_spcx_exit_backfill.py` (paste.rs/BhyZn, sha 9713042a) — applied to 1 row.
+
+### Pending follow-up
+- Operator review of the 40,126 quarantined rows in `ib_historical_data_partial_review`. Each has full `ohlcv_1min_existing` snapshot — operator decides which feed (high-volume mislabeled vs low-volume canonical) should be promoted.
+- Issue 3 (Atlas credentials rotation) — still USER VERIFICATION PENDING.
+
+---
+
+
 ## 2026-06-15 (evening) — P-WIRE Phase 2 investigation + Issue 2 backfill enqueued
 
 ### Why this session existed

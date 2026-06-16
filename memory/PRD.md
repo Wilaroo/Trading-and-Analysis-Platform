@@ -1,5 +1,24 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-16 — Issue 1 + Issue 2 from prior fork BOTH RESOLVED.
+> (1) v320f-fix1 cleanup applied to 386,919 mislabeled `ib_historical_data`
+> rows: 251,551 unique 1-min bars RESCUED (relabeled), 95,242 true duplicates
+> removed, 40,126 partial-OHLCV-drift rows QUARANTINED to
+> `bar_size='partial_review_v320f'` (full doc preserved in
+> `ib_historical_data_partial_review` — likely consolidated-tape feed vs
+> single-exchange canonical, awaiting operator triage). Pre→post: 386,919→0
+> mislabeled. Full `--rollback` available via `mislabel_relabel_audit_v320f`.
+> (2) v320g surgical rebuild applied to SPCX `id=31651c71`:
+> `exit_price` None→189.30 (from `ib_executions` order_id=408355),
+> `net_pnl` -1.00→698.65, `pnl_pct` 9.09→9.68; `realized_pnl=699.65` left
+> unchanged (internally consistent w/ fill_price basis); audit
+> `6a30e419caab658cd0b24668`; read-back verified. Next priorities
+> per backlog: P-WIRE Phase 2 (BLOCKED on ~146 more resolved shadow
+> decisions), [P-TARGET] rare-regime label realignment, multi-bar-size
+> shadow logging, v320c ingest-time prevention (`reqHeadTimeStamp`),
+> v321 EOD Flatten Modal in V5 UI. Atlas rotation still USER VERIFICATION
+> PENDING.**
+
 > **🔜 2026-06-15 — P-WIRE Phase 2 INVESTIGATION COMPLETE. Phase 2 is NOT
 > code-blocked; it is *calibration + data-accumulation* blocked. (1) Regime-
 > conditional retrain ran (`force_retrain=true phases=["regime"]`): 11 cells
