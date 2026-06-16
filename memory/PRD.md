@@ -1,5 +1,15 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **✅ 2026-06-16 (later) — P0/P1 OCA + observability batch DEPLOYED & COMMITTED:
+> v320h (observe, e7b9c682) → v320h.1 implied-primary (b259038a) + historical
+> backfill (470 rows, net_pnl 29→−23,508 corrected) → v320i target_order_ids
+> capture (f32593f7) → v320j unrealized_pnl DB-persist (08b53a51). All in `fix`,
+> persisted in `backend/.env` (V320H_OCA_FIX_POLICY=fix, V320_DAILY_BAR_GATE_POLICY=observe).
+> Issue 3 CLOSED via v320k diag (ib_executions = ~1.5-day retention, ±15m window
+> correct, implied-primary validated). Issue 2 (gate observe→block) operator-gated
+> on Windows log review. 10/10 pytest green.**
+
+
 > **🔜 2026-06-16 (later) — v320h OCA close-path accounting PATCHER DELIVERED
 > (DGX deploy pending operator). Fixes the recurring P0: the v19.31 external-
 > close sweep in `position_manager.py` (`oca_closed_externally_v19_31`) marks

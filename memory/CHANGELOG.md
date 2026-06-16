@@ -30,6 +30,14 @@ as a cross-check, so this is observability, not a blocker).
 (survives reboots). Flip to `block` is operator-gated on Windows-side
 `tail-v320-gate.ps1` log review.
 
+### Issue 3 — VERDICT (v320k diag run 2026-06-16)
+ib_executions holds only ~1.5 days (134 docs / 36 symbols, 06-15→06-16). Of 470
+OCA rows: 446 symbol_absent (execs aged out), 12 nearest>1d, 9 matched@15m, 3
+no_close_side, 0 case-mismatch, **0 matched@60m/@1d**. → NOT a window problem
+(±15m is correct); it's pure data retention. Validates implied-primary
+(v320h.1). No action needed; optional future lever = extend ib_executions
+retention. **CLOSED.**
+
 Tests: 10/10 green incl. v320i/v320j patcher round-trips
 (`tests/test_v320h_oca_close_finalize_patcher.py`).
 
