@@ -1,3 +1,43 @@
+## 2026-06-16 (later4) — open-position style audit (v320s) + corrective re-stamp (v320t) + trend_continuation taxonomy investigation
+
+### v320s — OPEN-POSITION STYLE AUDIT (read-only, committed 1300bee0-adjacent; paste.rs/ISPSu)
+`scripts/diag_v320s_open_position_style_audit.py`. For each status=open bot_trades row,
+resolves natural style via the SSOT `setup_taxonomy.style_of` and compares to stamped
+trade_style. Live result (19 open): 5 MISLABELED_CARRY→INTRADAY, 3 (false-positive)
+INTRA→CARRY, 8 OK, 1 OK~, 2 adopted.
+★ 5 genuinely mislabeled (carry-stamped, natively intraday/scalp):
+  DKNG (squeeze→intraday), XOM/CVX/COP/DVN (gap_fade→scalp) — the pre-v320p
+  A+→multi_day hijack class, carrying overnight when they should EOD-flatten.
+
+### v320t — CORRECTIVE RE-STAMP (paste.rs/GEwoW) — DELIVERED, awaiting operator dry-run/apply
+`scripts/patch_v320t_restyle_open.py`. Re-stamps the mislabeled-carry open rows to their
+SSOT natural style + close_at_eod=True so should_close_at_eod (order-policy:
+trade_style→policy.close_at_eod; scalp/intraday=True) flattens them at today's EOD.
+SAFE mid-session: re-stamp does NOT strip GTC brackets — the EOD intraday sweep
+(orphan_gtc_reconciler.classify_intraday_entries_for_eod_sweep L436) skips status=open
+rows and only targets pending DAY *entry* orders; matched bracket legs aren't orphans.
+Dry-run default; self-validates each row LIVE via style_of (only touches currently-
+mislabeled CARRY→INTRADAY); audit-backup → bot_trades_restyle_audit_v320t; --rollback.
+CLOBBER-RACE: live bot persists in-memory trade_style back to Mongo, so apply MUST be
+chained with an immediate restart: `--apply && ./start_backend.sh --force` (restore →
+hydrate_trade_from_doc loads new style into _open_trades). Confirm with diag_v320s after.
+
+### trend_continuation style inconsistency — INVESTIGATED (not a bug) → ROADMAP P2
+GLD/MSTR=multi_day vs TSLA/META/NOK=intraday for the SAME setup is timeframe-aware
+per-trade stamping (resolve_trade_style precedence: trade_style→tiers→timeframe→
+setup-map→unknown). Static `SETUP_TO_STYLE["trend_continuation"]="multi_day"`
+(trade_style_classifier.py L78) is only a last-resort fallback; `style_of(setup)` passes
+ONLY the setup name so it always returns that static value → v320s INTRA→CARRY flag is a
+FALSE POSITIVE; the trades are fine. Latent risk (logged P2 in ROADMAP): if a
+multi-timeframe setup ever fails to stamp timeframe/trade_style, it falls through to the
+static multi_day default and CARRIES OVERNIGHT — unsafe for the intraday mandate.
+Options (a) guarantee timeframe stamping, (b) split canonical names, (c) flip fallback
+to intraday; build a timeframe-coverage diag first. Also: feed timeframe/trade_style into
+style_of in v320s so it stops false-positiving on multi-timeframe setups.
+
+---
+
+
 ## 2026-06-16 (later3) — v320m APPLIED · Issue 3 ROOT-CAUSED · v320p A+ horizon fix READY
 
 ### v19.34.320m — PATCH-L2a event-loop spam — ✅ APPLIED + COMMITTED on DGX (f741a2a1)

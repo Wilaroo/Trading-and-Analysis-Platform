@@ -3,6 +3,37 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🟢 P2 (added 2026-06-16) — Timeframe-aware style resolution for multi-timeframe setups
+Investigated the open-book inconsistency where `trend_continuation_short` showed as
+BOTH multi_day (GLD/MSTR) and intraday (TSLA/META/NOK). VERDICT: not a bug — the
+per-trade stamps are timeframe-aware (resolve_trade_style precedence: trade_style →
+tiers → timeframe → setup-map). The static `SETUP_TO_STYLE["trend_continuation"] =
+"multi_day"` (trade_style_classifier.py L78) is only a LAST-RESORT fallback, and
+`style_of(setup)` (setup_taxonomy.py) passes ONLY the setup name so it always returns
+that static value — which is why the v320s static audit false-positived TSLA/META/NOK
+as "MISLABELED_INTRA→CARRY". The trades themselves are fine.
+LATENT RISK to fix: for genuinely multi-timeframe setups (trend_continuation, and any
+setup that legitimately spans intraday & daily), if an alert ever fails to stamp
+trade_style/timeframe, resolution falls through to the static `multi_day` default →
+the trade CARRIES OVERNIGHT even when it was an intraday signal — the unsafe direction
+for the intraday mandate.
+OPTIONS (pick after data check):
+  (a) Make trend_continuation (et al.) resolve by firing timeframe explicitly — ensure
+      the entry-stamp path ALWAYS sets timeframe/trade_style for these setups so the
+      static fallback is never reached. (lowest risk; just guarantees context.)
+  (b) Split the static map: `trend_continuation_intraday` vs `trend_continuation_daily`
+      canonical names, each with its own bucket.
+  (c) Flip the multi-timeframe FALLBACK default from multi_day→intraday (flatten-at-EOD
+      is the safe default for an intraday mandate); daily-timeframe trend continuations
+      keep multi_day only when timeframe is explicitly daily. (changes behavior — needs
+      care so genuine swing trend-continuations aren't prematurely flattened.)
+PRE-WORK DIAG (build first): audit all trend_continuation trades (open + recent closed)
+for what timeframe/trade_style they actually carry, to measure how often the static
+fallback is even reached (if ~never, option (a) is trivial; if often, (c) matters).
+Also update diag_v320s to feed timeframe/trade_style into style_of so its INTRA→CARRY
+flag stops false-positiving on multi-timeframe setups.
+
+
 ## 🟡 P1 ACTION ITEM (added 2026-06-16) — Intraday HIGH-priority gate audit (secondary lever)
 After v320p (A+ horizon-hijack fix, commit 7011ab04) is confirmed via RTH diag rerun,
 investigate the SECONDARY intraday-frequency lever: the HIGH-priority gate itself.
