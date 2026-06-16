@@ -1,5 +1,30 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-15 — P-WIRE Phase 2 INVESTIGATION COMPLETE. Phase 2 is NOT
+> code-blocked; it is *calibration + data-accumulation* blocked. (1) Regime-
+> conditional retrain ran (`force_retrain=true phases=["regime"]`): 11 cells
+> promoted, 5 cells (5min/15min/1hour × bull_trend/range_bound) had candidates
+> CORRECTLY REJECTED by the v312 P0 collapse gate (recall_up well below the
+> 0.10 floor; April version preserved). (2) Shadow eval @ 54 resolved decisions
+> (need ~200) returned `GENERIC HOLDS` on a statistically thin sample. (3) Root
+> cause for low shadow-trend data: `classify_regime` returns `high_vol` in ~91%
+> of decisions because `vol_expansion > 1.3` preempts trend evaluation — that
+> gate is too sensitive for SPY's current vol regime. (4) The 60.3%
+> `regime_model_available=False` rate is fully explained by v322i quarantine
+> of `5min_high_vol` (PBO=1.00) combined with 100% of shadow decisions firing
+> at `bar_size=5 mins`. (5) Diag confirmed 28 regime variants exist
+> (7 timeframes × 4 regimes), 3 quarantined: `1min_bear_trend`, `5min_bear_trend`,
+> `5min_high_vol`. Issue 2 (May→June 2026 daily-bar gap, 183 symbols /
+> 6,158 bars) — repair patcher v320c APPLIED, queue enqueued; collector
+> processing. NO WIRE BUGS — system is design-correct. Next priorities:
+> P0-CLASSIFIER (recalibrate vol threshold 1.3→~1.5 in
+> `regime_conditional_model.py:96`), P1-TARGET (rare-regime label realignment
+> for 5 stale + 3 PBO-quarantined cells), P1-MULTI-TF (let shadow logging
+> fire across more bar_sizes than just 5min). Verified false alarms today:
+> "base direction_predictors are LightGBM" was misleading log noise
+> (`xgboost_json_zlib` not recognized by `timeseries_service.py:234` warm-reload
+> but secondary loader handles it correctly).**
+
 > **🔜 2026-06-15 — v19.34.320a + 320b DEPLOYED+VERIFIED. Pre-listing pollution
 > guard (compute-time helper + recycled-ticker quarantine) shipped end-to-end:
 > SPCX cleaned from 25 daily bars → 1, avg_volume 11.3M → 227M; 42 TRUE_RECYCLE

@@ -1,3 +1,153 @@
+## 2026-06-15 (evening) — P-WIRE Phase 2 investigation + Issue 2 backfill enqueued
+
+### Why this session existed
+User pending question from prior fork: "But did these [15 stale models] not retrain because
+they are deprecated / or badly designed models? I think we found something out about them.
+Please doing a deeper investigation from previous agents' work before we choose a path
+forward." Plus an unfinished `grep` of CHANGELOG.md examining stale regime models.
+
+### What we proved (in order of investigation)
+
+**1. Initial verification — diag_stale_regime_variants.py (paste.rs/320CJ)**
+- 16 regime variants in DB (regex-limited to `(1min|5min|15min|1hour)` — INCOMPLETE; actual = 28).
+- 5 STALE at 50-55d age: `direction_predictor_{5min_bull_trend, 5min_range_bound,
+  15min_bull_trend, 1hour_bull_trend, 1hour_range_bound}`.
+- All deprecated families (`risk_of_ruin`, `sector_relative`, `gap_fill_daily/weekly`) confirmed
+  zero docs in collection (clean retirement).
+
+**2. Rejection hypothesis test — diag_regime_promotion_history.py (paste.rs/zbLEP)**
+- All 5 stale + 4 control models present in `models_trained` lists of June 9-10 big runs.
+- ZERO archive entries in `timeseries_model_archive` since May 1 for any of them.
+- Initially suggested "silent resume" theory, but `_check_resume_model` requires age<24h —
+  doesn't fit 55-day-old April models.
+
+**3. Code archaeology — the v322 P7 fix story**
+- User pointed out (correctly) that this maps to known yesterday backlog.
+- CHANGELOG line 561-564 documents v19.34.322 P7 BUG FIX:
+  > regime-conditional skip check compared `len(X_list)` (SYMBOL-CHUNK count) against
+  > MIN_REGIME_SAMPLES=100 — silently skipping rare regimes (explains 0/28 in Test Mode
+  > and ~18/28 in past full runs). Apply BEFORE the full retrain.
+- Verified fix IS live on DGX `training_pipeline.py:2898-2913` (`n_regime_samples`).
+- Dev tree commit `d4cc7d12` (2026-06-10 17:43 UTC) was the first carrying the fix string.
+- Three big June runs all happened PRE-fix on the DGX → 5 stale survived as silent-skips.
+
+**4. Force retrain → DEFINITIVE outcome**
+- User kicked `POST /api/ai-training/start {"force_retrain": true, "phases": ["regime"]}`
+  (NOTE: phase key is `"regime"`, NOT `"regime_conditional"` — initial typo lost 3ms of run).
+- Phase 7 trained 28 (tf × regime) cells. Per-cell verdict from training_subprocess.log:
+  | Model | Samples | UP/FLAT/DOWN % | recall_up | recall_down | PBO | Verdict |
+  | `5min_bull_trend` | 6.3M | 26/18/56 | 0.024 | 0.851 | 0.43 | REJECTED collapse |
+  | `5min_range_bound` | 5.5M | 24/17/59 | 0.024 | 0.852 | **1.00** | REJECTED collapse |
+  | `15min_bull_trend` | 3.0M | 20/32/48 | 0.084 | 0.593 | 0.00 | REJECTED collapse |
+  | `1hour_bull_trend` | 4.6M | 24/27/49 | 0.054 | 0.818 | 0.00 | REJECTED collapse |
+  | `1hour_range_bound` | 4.0M | 22/25/52 | 0.071 | 0.834 | 0.29 | REJECTED collapse |
+  | `15min_range_bound` | 2.5M | — | 0.13 | 0.58 | 0.00 | PROMOTED v0.7.0 |
+- **VERDICT**: All 5 stale models had June 15 candidates SUBMITTED + REJECTED by v312 P0
+  collapse gate. April versions preserved (no regression risk). System working as designed.
+
+**5. Phase 2 unlock criteria verification**
+- Shadow infrastructure: `pwire_shadow_verify.py` → ALL CHECKS PASSED.
+- Shadow data accumulation: 88,126 total decisions, **3,575 with regime_shadow field,
+  only 54 with resolved trade_outcome** (need ~200 for `pwire_shadow_eval.py --min` default).
+- Eval verdict on thin sample: `GENERIC HOLDS — keep regime models dead` (regime n=7,
+  generic n=44 — statistically meaningless at this sample size).
+
+**6. Regime classifier distribution diag (paste.rs/VRuj7)**
+- 100% of shadow decisions are `bar_size = 5 mins`.
+- Regime distribution: `{high_vol: 3255, range_bound: 320}` — ZERO bull_trend, ZERO bear_trend.
+- Upstream regime collections (`market_regime_history`, `multi_tf_state`, etc.) ALL MISSING
+  — classifier runs inline per-decision, nothing persisted.
+
+**7. The actual root cause of "no bull/bear" — calibration, not code gap**
+- Read `classify_regime` in `regime_conditional_model.py:44-107`.
+- Code DOES support bull_trend (line 102-103) and bear_trend (line 104-105).
+- But `vol_expansion > 1.3` (line 96) returns `HIGH_VOL` first, preempting trend evaluation.
+- Over June 9-15, SPY's 5-day ATR / 20-day ATR was > 1.3 in 91% of decision points.
+- **Threshold is mis-calibrated for the current SPY vol regime — not a code bug.**
+
+**8. Quarantine sweep audit**
+- Total regime variants in DB: **28** (7 timeframes × 4 regimes — not 16 as initial regex showed).
+- Quarantined (v322i PBO sweep): **3 of 28**:
+  - `1min_bear_trend` (PBO 0.57, OOS edge ≤ 0)
+  - `5min_bear_trend` (PBO 0.71)
+  - `5min_high_vol`   (PBO **1.00** — in-sample/OOS ranking completely inverts)
+- All 3 quarantined models correctly refused at load time by
+  `timeseries_gbm.py:_load_model` → `regime_model_available=False`.
+
+**9. The 60.3% unavailable rate decomposed**
+- `mongosh`-equivalent cross-tab on bar_size × regime × avail:
+  | bar_size | regime | avail | count |
+  | 5 mins | high_vol    | False | 2,154 |  ← `5min_high_vol` post-quarantine
+  | 5 mins | high_vol    | True  | 1,101 |  ← pre-quarantine window (June 10)
+  | 5 mins | range_bound | True  |   320 |
+- **All unavailable cases = the single PBO=1.00 quarantine.** Loader is design-correct.
+
+### Issues / claims VERIFIED + RETRACTED today
+
+| Earlier claim | Reality |
+|---|---|
+| "Base direction_predictors are LightGBM" | FALSE. Models are `xgboost_json_zlib`. `timeseries_service.py:234` warm-reload check is incomplete (doesn't match the compressed format) and emits "Legacy LightGBM" warning misleadingly. Secondary loader (line 254-266 → GBM internal at 594) handles both formats. Models DO load. |
+| "Live MODEL_CONFIGS doesn't register regime variants" | FALSE. `_get_shadow_model` uses `TimeSeriesGBM().set_db()` which triggers `_load_model` — the path that DOES handle xgboost_json_zlib. The "NOT TRAINED — falls back" verify message is the result of the QUARANTINE check refusing the candidate, not a loader bug. |
+| "Phase 2 has wire bugs" | FALSE. Phase 2 is calibration- and data-accumulation-blocked. No wire bugs. |
+| "5 stale models indicate a system bug" | FALSE. Five specific (slow-TF × bull/range) cells produce candidates with recall_up below the 0.10 floor. The v312 gate correctly rejects + preserves April. |
+
+### Issue 2 (May→June 2026 daily-bar gap) — APPLIED ✅
+
+- Inventory diag (`diag_may_june_gap_inventory.py`, paste.rs/vlZM5) found **183 symbols**
+  (handoff said 33 — was undercount), all `1 day` bar_size only, 6,158 total bars,
+  March-April → 2026-06-01 resume signature.
+- Repair patcher `repair_v320c_may_june_backfill.py` (paste.rs/oSujr) applied:
+  `enqueued: 183, skipped (dup): 0`. Tagged `callback_id="v320c_may_june_repair"`
+  so rollback is `--clear`. Collector @ `client_id=16` will process at ~58 req/10min
+  (turbo: ~10m total).
+
+### Action items going forward (priority order)
+
+**P0** — Recalibrate `classify_regime` vol threshold.
+`/app/backend/services/ai_modules/regime_conditional_model.py:96`:
+`if vol_expansion > 1.3` → `if vol_expansion > 1.5` (or empirical from SPY ATR ratio dist).
+1-line patch. Effect: trend regimes get to fire on normal-vol days → bull/bear shadow data starts.
+Verify the new threshold against last 60-90 days SPY data before pushing.
+
+**P1** — `P-TARGET` workstream: rare-regime label realignment.
+5 stale (5min/15min/1hour × bull_trend/range_bound) + 3 PBO-quarantined cells. Three candidate fixes:
+shorter forward horizon for slow-TF cells / aggressive class weight scheme (linear inverse-freq) /
+widen regime threshold to admit more two-sided patterns.
+
+**P1** — Multi-bar-size shadow logging.
+Currently 100% of shadow decisions are 5min. Other bar_sizes' regime variants have NO path to
+validation. Need to find the decision loop entry point that calls `_compute_regime_shadow` and
+ensure it fires per relevant bar_size or extend to a sweep mode.
+
+**P1** — Promotion gate macro_F1 slack audit.
+Today's `1min_bull_trend` v0.5.0 promoted with macro_F1 0.4753 vs prior 0.4898 (~3% worse),
+UP recall dropped 0.142 → 0.105. `MACRO_F1_FLOOR = 0.92` (8% slack) may be too permissive.
+Audit post-this-run: distribution of promotion macro_F1 deltas across all retrained cells.
+Consider tightening to 0.97.
+
+**P2** — `timeseries_service.py:234` label cleanup.
+Add `"xgboost_json_zlib"` to recognized formats so the "Legacy LightGBM" false-positive warning
+stops firing on every warm-reload. Pure log-noise fix, no behavior change.
+
+**P2** — Issue 3 (SPCX degraded `bot_trades` row hygiene). Diag patcher not yet drafted.
+
+**P2** — Issue 4 (386,919 mislabeled 1-min bars cleanup, v320e). Cleanup script not yet drafted.
+
+### Scripts produced this session (all on paste.rs, all read-only except v320c repair)
+- `diag_stale_regime_variants.py`        paste.rs/320CJ
+- `diag_regime_promotion_history.py`     paste.rs/zbLEP
+- `diag_may_june_gap_inventory.py`       paste.rs/vlZM5
+- `repair_v320c_may_june_backfill.py`    paste.rs/oSujr   ← APPLIED
+- `diag_regime_classifier_distribution.py`  paste.rs/VRuj7
+
+### Health
+- Pusher recovered earlier today; trading flat (paper).
+- Training pipeline phase 7 ran clean; v312 P0 gate fired correctly on 5 cells.
+- Backfill queue (~32m at default cadence; turbo ~10m) running through client_id=16.
+- DGX HEAD = `418903bb` (origin/main, v19.34.320d).
+
+---
+
 ## 2026-06-15 — End-of-day session wrap
 
 ### Findings from today's deep-dive
