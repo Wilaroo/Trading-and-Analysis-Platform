@@ -1,4 +1,41 @@
-## 2026-06-16 (later) — v320h.1 implied-primary + historical backfill DELIVERED
+## 2026-06-16 (later) — v320i target_order_ids + v320j unrealized_pnl persist + v320k diag
+
+### v19.34.320i — target_order_ids capture (Issue 5, paste.rs/nbSL7)
+`trade_execution.py`. Entry/bracket path stamped only the SINGULAR
+`trade.target_order_id` and left the PLURAL `trade.target_order_ids=[]` (SATS
+2026-06: OCA target hit but list empty → stop-vs-target leg classifier blind;
+also why the v320h backfill leg classifier was unreliable). Fix: carry
+`target_order_ids` through the translated `result` dict (L985-998) and populate
+`trade.target_order_ids` at both the entry-stamp (L1109-1113) and the v322l
+reclaim (L293-294) sites. §2.2 3-chunk patcher, PRE `f8037748` → POST
+`5a349f9d`. check→apply→compile→rollback validated.
+
+### v19.34.320j — unrealized_pnl DB persistence (Issue 4, paste.rs/E1rZo)
+`position_manager.py` (targets the v320h.1-applied state, PRE `90c45132`).
+`manage_open_trades` computed `trade.unrealized_pnl` / `pnl_pct` in-memory each
+tick but only persisted on state-change → Mongo showed $0 for all opens. Fix:
+THROTTLED (~20s/trade) targeted `update_one` of {unrealized_pnl, pnl_pct,
+current_price, unrealized_pnl_synced_at} after the pnl_pct computation. No new
+asyncio loop. POST `6752423e`. Validated.
+
+### v19.34.320k — unmatched-OCA window diag (Issue 3, paste.rs/5RWu1)
+READ-ONLY. Buckets why ib_executions matches/doesn't (matched@15m/60m/1d,
+symbol_absent → data retention, symbol_has_execs_but_no_close_side →
+side/partial-fill) + reports ib_executions coverage and symbol-case mismatches.
+Informs whether to widen the ±15m window (live v320h.1 uses ib_executions only
+as a cross-check, so this is observability, not a blocker).
+
+### Issue 2 — daily-bar gate
+`V320_DAILY_BAR_GATE_POLICY=observe` confirmed persisted in `backend/.env`
+(survives reboots). Flip to `block` is operator-gated on Windows-side
+`tail-v320-gate.ps1` log review.
+
+Tests: 10/10 green incl. v320i/v320j patcher round-trips
+(`tests/test_v320h_oca_close_finalize_patcher.py`).
+
+---
+
+
 
 ### v19.34.320h.1 — OCA finalize implied-primary (paste.rs/VkvQm)
 Diag (paste.rs/ip7Bb) over 469 `oca_closed_externally_v19_31` rows: 100%

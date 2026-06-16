@@ -128,3 +128,60 @@ def test_needs_repair_detects_sentinel_and_missing_exit():
     # already correct → no repair
     assert needs_repair(118.65, 136.12, 4.18, 118.65, 136.12, 4.18) is False
 
+
+# ── v320i / v320j multi-chunk patcher round-trips ─────────────────────────
+def _run_patch(patcher, args, target, env_key):
+    env = {**os.environ, env_key: str(target)}
+    return subprocess.run([sys.executable, str(patcher), *args],
+                          capture_output=True, text=True, env=env)
+
+
+TE = ROOT / "services" / "trade_execution.py"
+TE_PRE = "f8037748a65d4dde4ca2435f6826f837726653fe8c10423702cd0a7c5aa7eeb4"
+TE_POST = "5a349f9deb62ca192134b61cd3ba76d8905003ed2341efaeb291370b30c35a01"
+
+
+@pytest.mark.skipif(_sha(TE) != TE_PRE, reason="trade_execution.py not at canonical baseline")
+def test_v320i_round_trip(tmp_path):
+    patcher = ROOT / "scripts" / "patch_v320i_target_order_ids_capture.py"
+    target = tmp_path / "trade_execution.py"
+    shutil.copy2(TE, target)
+    assert _run_patch(patcher, ["--check"], target, "V320I_TE_TARGET").returncode == 0
+    assert _run_patch(patcher, ["--apply"], target, "V320I_TE_TARGET").returncode == 0
+    assert _sha(target) == TE_POST
+    body = target.read_text(encoding="utf-8")
+    compile(body, "trade_execution.py", "exec")
+    assert "v19.34.320i" in body
+    assert "trade.target_order_ids = [str(_x) for _x in _tids_320i if _x]" in body
+    assert _run_patch(patcher, ["--rollback"], target, "V320I_TE_TARGET").returncode == 0
+    assert _sha(target) == TE_PRE
+
+
+PM_DGX_PRE = "90c451329b766f369e03bb0bffb2fcc385e604dd765fb49f5ef9431d0503495d"
+PM_DGX_POST = "6752423e3694ef2a93875bed1f00c99035eb27ae29ad7d87ab6a56e4a67b9126"
+
+
+def _reconstruct_dgx_pm():
+    import _build_v320h_patcher as v0
+    import _build_v320h1_patcher as v1
+    base = (ROOT / "services" / "position_manager.py").read_text(encoding="utf-8")
+    return base.replace(v0.OLD, v0.NEW, 1).replace(v0.FINALIZE, v1.FINALIZE_V2, 1)
+
+
+@pytest.mark.skipif(_sha(PM) != PRE_SHA, reason="position_manager.py not at canonical baseline")
+def test_v320j_round_trip(tmp_path):
+    import hashlib as _h
+    dgx = _reconstruct_dgx_pm()
+    assert _h.sha256(dgx.encode()).hexdigest() == PM_DGX_PRE
+    patcher = ROOT / "scripts" / "patch_v320j_unrealized_pnl_persist.py"
+    target = tmp_path / "position_manager.py"
+    target.write_text(dgx, encoding="utf-8")
+    assert _run_patch(patcher, ["--check"], target, "V320H_PM_TARGET").returncode == 0
+    assert _run_patch(patcher, ["--apply"], target, "V320H_PM_TARGET").returncode == 0
+    assert _sha(target) == PM_DGX_POST
+    body = target.read_text(encoding="utf-8")
+    compile(body, "position_manager.py", "exec")
+    assert "v19.34.320j" in body and "unrealized_pnl_synced_at" in body
+    assert _run_patch(patcher, ["--rollback"], target, "V320H_PM_TARGET").returncode == 0
+    assert _sha(target) == PM_DGX_PRE
+
