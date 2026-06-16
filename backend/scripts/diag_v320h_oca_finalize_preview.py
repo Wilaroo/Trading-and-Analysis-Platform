@@ -178,11 +178,13 @@ def main():
 
     n_corrupt = 0
     n_from_exec = 0
+    n_from_implied = 0
     n_from_fallback = 0
     n_unresolved = 0
     total_net_before = 0.0
     total_net_after = 0.0
     leg_counts = {}
+    cross_deltas = []   # |ib_exec_price - implied_from_realized| where both exist
     shown = 0
 
     for r in rows:
@@ -205,12 +207,33 @@ def main():
             continue
 
         exit_px, src, exec_doc = _find_close_exec(db, sym, direction, closed_dt, shares)
+
+        # Implied exit from the (IB-synced, trustworthy) realized_pnl:
+        #   long : realized = (exit - entry)*shares  -> exit = entry + realized/shares
+        #   short: realized = (entry - exit)*shares  -> exit = entry - realized/shares
+        implied = None
+        if entry_basis > 0 and shares and realized is not None:
+            if direction == "short":
+                implied = round(entry_basis - realized / float(shares), 4)
+            else:
+                implied = round(entry_basis + realized / float(shares), 4)
+
+        # Cross-validate ib_executions vs implied where BOTH exist.
+        if src == "ib_executions" and exit_px is not None and implied is not None:
+            cross_deltas.append(abs(exit_px - implied))
+
+        # Backfill exit-price tiers: ib_executions > implied_from_realized > current_price.
+        if exit_px is None and implied is not None:
+            exit_px, src = implied, "implied_from_realized"
         if exit_px is None:
             cp = float(r.get("current_price") or 0)
             if cp > 0:
                 exit_px, src = round(cp, 4), "current_price_fallback"
+
         if src == "ib_executions":
             n_from_exec += 1
+        elif src == "implied_from_realized":
+            n_from_implied += 1
         elif src == "current_price_fallback":
             n_from_fallback += 1
         else:
@@ -239,19 +262,28 @@ def main():
             shown += 1
             print(f"\n  [{r.get('id')}] {sym} {direction.upper()} x{shares}  closed={r.get('closed_at')}")
             print(f"      entry_basis={entry_basis}  realized_pnl={realized}  commissions={commissions}")
-            print(f"      exit_price : {cur_exit!r:>14}  →  {exit_px!r}   ({src})")
+            print(f"      exit_price : {cur_exit!r:>14}  →  {exit_px!r}   ({src})   [implied={implied!r}]")
             print(f"      net_pnl    : {cur_net!r:>14}  →  {new_net!r}")
             print(f"      pnl_pct    : {cur_pct!r:>14}  →  {new_pct!r}")
             print(f"      leg        : {leg}")
 
     hr("SUMMARY")
-    print(f"  rows examined            : {len(rows)}")
+    print(f"  rows examined              : {len(rows)}")
     print(f"  corrupt (net==-1 / no exit): {n_corrupt}")
-    print(f"  exit resolvable from ib_executions : {n_from_exec}")
-    print(f"  exit from current_price fallback   : {n_from_fallback}")
-    print(f"  exit UNRESOLVED (no exec, no mark) : {n_unresolved}")
+    print(f"  exit from ib_executions          : {n_from_exec}")
+    print(f"  exit from implied_from_realized  : {n_from_implied}")
+    print(f"  exit from current_price fallback : {n_from_fallback}")
+    print(f"  exit UNRESOLVED (no basis at all): {n_unresolved}")
     print(f"  net_pnl total  before → after : {round(total_net_before,2)}  →  {round(total_net_after,2)}  "
           f"(Δ {round(total_net_after-total_net_before,2)})")
+    if cross_deltas:
+        cross_deltas.sort()
+        n = len(cross_deltas)
+        mean = round(sum(cross_deltas) / n, 4)
+        p50 = cross_deltas[n // 2]
+        mx = max(cross_deltas)
+        print(f"  cross-val |ib_exec - implied| (n={n}): mean={mean}  median={round(p50,4)}  max={round(mx,4)}")
+        print(f"    → validates implied_from_realized as a backfill source for rows lacking ib_executions.")
     print(f"  leg classification:")
     for k, v in sorted(leg_counts.items(), key=lambda x: -x[1]):
         print(f"      {k:>34} : {v}")
