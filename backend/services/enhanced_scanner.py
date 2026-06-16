@@ -789,8 +789,25 @@ class LiveAlert:
                     self.smb_is_a_plus = smb_score.is_a_plus
 
                     if smb_score.is_a_plus:
-                        self.trade_style = "multi_day"
-                        self.target_r_multiple = 5.0
+                        # v19.34.320p — A+ is a QUALITY flag, NOT a HORIZON
+                        # flag. Previously ANY A+ alert was force-stamped
+                        # trade_style="multi_day" + 5R, which hijacked
+                        # intraday/scalp-natured setups (gap_fade,
+                        # second_chance, backside, opening_drive, ...) into
+                        # 5R OVERNIGHT carries — simultaneously inflating the
+                        # multi-day count AND draining the best signals out of
+                        # the intraday book before they could fire intraday
+                        # (v320n/v320o diag: ~97 intraday setups/day relabeled;
+                        # INTRADAY smbA+=0% vs CARRY smbA+=43%). Now we only
+                        # promote to a multi-day hold when the setup is ALREADY
+                        # carry-natured; intraday/scalp setups keep their
+                        # natural horizon + target (option A) so A+ scalps stay
+                        # intraday and flatten at EOD per the intraday mandate.
+                        # smb_is_a_plus (quality/priority benefit) still flows.
+                        _natural_style = (self.trade_style or "").strip().lower()
+                        if _natural_style in ("multi_day", "swing", "position", "investment"):
+                            self.trade_style = "multi_day"
+                            self.target_r_multiple = 5.0
 
                 # Earnings score if available
                 if "earnings_score" in context:
