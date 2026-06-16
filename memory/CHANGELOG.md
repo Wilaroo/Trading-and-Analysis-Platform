@@ -1,3 +1,49 @@
+## 2026-06-16 (later3) — v320m APPLIED · Issue 3 ROOT-CAUSED · v320p A+ horizon fix READY
+
+### v19.34.320m — PATCH-L2a event-loop spam — ✅ APPLIED + COMMITTED on DGX (f741a2a1)
+Operator applied paste.rs/TbQWp, committed, pushed, restarted clean.
+`grep -c "PATCH-L2a.*soft-failed\|no current event loop" /tmp/backend.log` = **0**.
+Spam eliminated; working-order refresh now uses the native
+`reqAllOpenOrdersAsync()` coroutine in both `get_open_orders` and
+`cancel_all_open_orders_for_symbol`. Issue 1 CLOSED.
+
+### Issue 3 — "too many multi-day, not enough scalp/intraday" — ROOT CAUSED
+Two read-only diags delivered + run on DGX:
+- `scripts/diag_v320n_trade_mix.py` (paste.rs/2VybV) — open-book/cap/fills/alerts/drops.
+- `scripts/diag_v320o_alert_funnel.py` (paste.rs/v3vNu) — per-style priority/grade/A+ funnel.
+
+**Findings (live, 2026-06-16):**
+- NOT a cap problem (headroom 6/25). NOT a detection problem (intraday is the
+  MOST-generated class: 416 intraday + 56 scalp = 472 vs 442 carry).
+- CONVERSION gap: intraday fires ~1.8% vs carry ~5.3% (~3×).
+- **PRIMARY DRIVER = `enhanced_scanner.py` L748-750.** The `smb_score.is_a_plus`
+  branch force-stamped `trade_style="multi_day"` + 5R on ANY A+ alert. v320o proved
+  it: INTRADAY group `smbA+=0.0%` vs CARRY `smbA+=43.2%` (impossible by nature →
+  A+ intraday alerts were being MOVED into the multi_day bucket). **97 intraday-
+  natured setups/day** relabeled multi_day (gap_fade 21, second_chance 19,
+  fashionably_late 16, opening_drive 8, backside 7, …). Double-whammy: A+ correlates
+  with HIGH priority (the auto-fire gate; CARRY hits HIGH 55% vs INTRADAY 20%), so the
+  override grabs exactly the intraday alerts most likely to fire and converts them to
+  overnight carries before they fire intraday. One bug, both symptoms. TQS grade is
+  NOT biased against intraday (A/A+ 16.7% vs 12%).
+
+### v19.34.320p — A+ quality flag no longer hijacks intraday horizon (paste.rs/VSYBy)
+`services/enhanced_scanner.py`, PRE `bf5cf446…` → POST `ef34f69f…`. Fix (operator
+chose option A): the A+ branch promotes to `multi_day` + 5R ONLY when the setup is
+already carry-natured (`multi_day/swing/position/investment`); intraday/scalp setups
+keep their natural horizon + target and flatten at EOD. `smb_is_a_plus` quality/
+priority benefit still flows (set earlier, untouched). Alert-stamping only — no
+close/bracket/kill-switch paths; net = fewer overnight carries (safe direction).
+§2.2 patcher (PRE/POST SHA, base64 anchored chunk, auto-backup,
+--check/--apply/--rollback/--status, py_compile gate). paste.rs round-trip IDENTICAL.
+8/8 pytest (test_v320p_aplus_horizon_patcher + test_v320m). Generator:
+`scripts/_build_v320p_patcher.py`. NOT yet applied on DGX.
+Post-deploy verify (RTH): re-run v320n/v320o — multi_day count drops, intraday fills
+rise, v320o override footprint should fall from ~97 toward ~0.
+
+---
+
+
 ## 2026-06-16 (later2) — Issue 2 re-armed · v320m L2a event-loop fix · v320n trade-mix diag
 
 ### Issue 2 — starting_capital INTEGRITY watchdog RE-ARMED (no code change) ✅
