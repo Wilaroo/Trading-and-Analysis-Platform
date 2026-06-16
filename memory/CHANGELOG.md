@@ -1,3 +1,54 @@
+## 2026-06-16 (later2) — Issue 2 re-armed · v320m L2a event-loop fix · v320n trade-mix diag
+
+### Issue 2 — starting_capital INTEGRITY watchdog RE-ARMED (no code change) ✅
+Operator ran `POST /api/trading-bot/force-resync {"rearm_demoted": true}` on the DGX.
+Response: `resolved:1`, the `starting_capital` drift resolved `memory→mongo`
+(policy `memory_wins`, memory 200866.40 → mongo 200826.82) — i.e. it actively
+resolved instead of `detect_only`/`demoted_loop`, proving the field is no longer
+demoted. The endpoint (`routers/trading_bot.py:1529`) already supported re-arming
+via `svc.reset_loop_state()`; nothing to patch. CLOSED.
+
+### v19.34.320m — PATCH-L2a "no current event loop" log-spam fix (paste.rs/TbQWp)
+`services/ib_direct_service.py`, PRE_SHA `f0247a6f…` → POST_SHA `3ccd0501…`.
+Root cause: two methods refreshed IB's working-order cache with
+`await asyncio.to_thread(self._ib.reqAllOpenOrders)`. `reqAllOpenOrders()` is a
+SYNC ib_async method whose internals call `util.run()/get_event_loop()`;
+`to_thread` ran it in a ThreadPoolExecutor worker with NO event loop, so every
+call raised `RuntimeError: no current event loop in thread 'ThreadPoolExecutor-N'`:
+  1. `get_open_orders()` — the recurring `[v19.34.28 PATCH-L2a] … soft-failed`
+     spam (naked-sweep / working-order audit cadence); refresh silently no-op'd.
+  2. `cancel_all_open_orders_for_symbol()` — same bug on the v19.34.46 order-cancel
+     refresh (silently fell back to the per-clientId trades cache).
+Fix: call the NATIVE coroutine `self._ib.reqAllOpenOrdersAsync()` directly on the
+running loop (same convention as `get_positions_fresh→reqPositionsAsync` and
+`get_account_summary→accountSummaryAsync` already in this file), with a defensive
+getattr fallback that logs once if the async variant is absent. ib_async 2.1.0
+confirms `reqAllOpenOrdersAsync` exists. The `reqPositions` AttributeError fallback
+(L3126) is left untouched — unreachable on 2.1.0+ (`reqPositionsAsync` present).
+SAFETY: read/refresh + diagnostic paths only; does NOT touch close_trade /
+submit_with_bracket / _cancel_ib_bracket_orders / kill-switch / _open_trades.
+§2.2 patcher: 2 base64 anchored chunks, PRE/POST SHA guards, auto-backup,
+`--check/--apply/--rollback/--status`, py_compile gate. paste.rs round-trip
+IDENTICAL. 4/4 pytest (`tests/test_v320m_l2a_event_loop_patcher.py`).
+Generator: `scripts/_build_v320m_patcher.py`. NOT yet applied on DGX.
+
+### Issue 3 — multi-day vs scalp/intraday bias: READ-ONLY diag delivered (paste.rs/2VybV)
+`scripts/diag_v320n_trade_mix.py` (no writes). Reports, from live Mongo:
+(1) open-book composition by trade_style + INTRADAY vs CARRY group; (2) effective
+`max_open_positions` cap + headroom + % of cap consumed by overnight carries;
+(3) today's fills by style/setup + entry hour-of-day; (4) alerts generated today
+by style (detection funnel); (5) trade_drops today by gate × style (where scalp
+entries are blocked). Leading hypothesis (NEEDS DATA): position-cap saturation —
+v318 already showed 15 holds (13 multi_day + 2 swing) consuming 15/25 slots AT THE
+OPEN, leaving scalps to fight over ~10. The diag confirms cause before any tuning.
+AWAITING operator run to choose the lever (reserve intraday slots vs cap carries
+vs a specific gate fix). Time-windows ruled out as the cause: scalp/intraday
+setups already run all-day (or morning-only for opening plays) per
+`STRATEGY_TIME_WINDOWS`.
+
+---
+
+
 ## 2026-06-16 (later) — v320L naked-sweep datetime UnboundLocalError fix
 
 ### v19.34.320L — `_naked_position_sweep` datetime scoping bug (paste.rs/ikyui)
