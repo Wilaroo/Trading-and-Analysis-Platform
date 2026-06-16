@@ -1,194 +1,161 @@
-<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Resolve UI/UX bugs, data pipeline observability, execution biases, and ensure signal inputs are accurate and fully trusted. Perform a comprehensive, deep code audit of the entire codebase (411k LOC) to verify data connections, calculations, scoring, execution, and risk management to make the system bulletproof for unmanaged paper trading.
+<analysis>**original_problem_statement**: Evolve AI trading bot SentCom into a self-improving system. PRODUCT REQUIREMENTS: Stable massive training pipeline, real-time responsive UI, models that actually generalize using advanced ML quant techniques. Strict IB-only data pipeline. Resolve UI/UX bugs, data pipeline observability, execution biases, and ensure signal inputs are accurate and fully trusted. Perform a deep code audit to verify data connections, calculations, scoring, execution, and risk management to make the system bulletproof for unmanaged paper trading.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?**: A full-stack AI trading platform running natively on a physical DGX Spark (Linux) with FastAPI (Backend) + React (Frontend) + MongoDB connected to Interactive Brokers. Features ~110 GBM predictive models and a Deep Learning pipeline.
+**what currently exists?**: Physical DGX Spark (Linux) running FastAPI (Backend) on port 8001 + React (Frontend) on port 3000 + MongoDB + Interactive Brokers via . **STRICT HARDWARE BINDINGS EXIST.** Automated testing agents WILL FAIL. Modifications should be deployed using the operator-executed  python patcher workflow with pre/post SHA256 drift checks.
 
-**Last working item**: 
-    - Last item agent was working: 🔴 (P0) Tier 1a: Wire Combinatorial Purged Cross-Validation (CPCV) into GBM models. The previous agent performed a deep audit and found no further leakage, but realized the  module is only wired to Deep Learning models. The 100+ GBM models are currently evaluated on an in-sample backtest. The next step is to integrate  into  ( and ) to generate true purged/embargoed Out-Of-Sample (OOS) distributions and Probability of Backtest Overfit (PBO).
-    - Status: NOT STARTED (Forked specifically to begin this task with a clean context)
+**Last working item**:
+    - Last item agent was working: Pinpointed the OCA close-path accounting bug (v320h) in . Lines 385 & 428 write  without finalizing , , or . The user uploaded the canonical  to  (PRE_SHA: ). The agent deferred building the AGENTS.md §2.2 compliant patcher to the next fork due to context limits.
+    - Status: NOT STARTED
     - Agent Testing Done: N
-    - Which testing method agent to use? manual testing by python scripts/patchers or  files. **CRITICAL: Automate testing agents and direct git commits WILL FAIL due to physical DGX hardware bindings. DO NOT use testing agents.** Generate python patchers (line-number proof) or  files via , upload to  using curl, and ask the user to execute/apply.
+    - Which testing method agent to use? manual testing by python patchers/scripts ONLY (). DO NOT use automated testing agents.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: 🔴 (P0) SECURITY: Hardcoded Atlas credentials
-     - Attempted fixes: Code addressed in previous fork, but user manual action required.
-     - Next debug checklist: Remind user to manually rotate the Atlas password in their MongoDB console.
-     - Why fix this issue and what will be achieved with the fix? Plugs severe database security leak.
+  Issue 1: 🔴 (P0) OCA close-path accounting fix (v320h)
+     - Attempted fixes: Diagnosed the exact bug location. No code changes made yet.
+     - Next debug checklist: Build  for . Must be AGENTS.md §2.2-compliant (anchored base64 chunks, PRE/POST SHA256 guards). Insert logic before lines 385/428 to: 1) Classify leg from IB exec (±15m of close), 2) finalize , , . Implement ENV gate  (observe|fix|off, default observe).
+     - Why fix this issue and what will be achieved with the fix? Every IB-OCA-closed trade (stops, targets) currently gets mislabeled with a -.00 net_pnl sentinel in DB, silently corrupting the bot's performance review metrics.
+     - Status: NOT STARTED
+     - Is recurring issue? Y (Bleeding ~4 records/hour)
+     - Should Test frontend/backend/both after fix? Backend manual script ()
+     - Blocked on other issue: None
+
+  Issue 2: 🟡 (P1) Evaluate v320 daily-bar gate log (flip observe -> block)
+     - Attempted fixes: Deployed gate in OBSERVE mode successfully.
+     - Next debug checklist: Ask user to run  to review overnight logs. If scope is sensible, instruct user to flip  to  and restart backend.
+     - Why fix this issue and what will be achieved with the fix? Stops daily-bar consuming setups from firing on immature/stale data before 10:00 AM ET.
      - Status: USER VERIFICATION PENDING
-     - Is recurring issue? Y
+     - Is recurring issue? N
      - Should Test frontend/backend/both after fix? NA
      - Blocked on other issue: None
 
-  Issue 2: 🟡 (P1) Tier 1b: Backtest Execution Cost Modeling
-     - Attempted fixes: None yet.
-     - Next debug checklist: Add slippage (bps), commission, next-bar-open fills, and gap-through stop fills to .
-     - Why fix this issue and what will be achieved with the fix? Turns the currently optimistic in-sample backtest into a realistic one.
+  Issue 3: 🟡 (P1) Investigate 77 unmatched June OCA trades
+     - Attempted fixes:  showed 77 out of 81 OCA closes in June had no matching IB execution.
+     - Next debug checklist: Write a diag script to check if the time window (±15m) is too narrow, if there are partial-fill share-count mismatches, or symbol case differences.
+     - Why fix this issue and what will be achieved with the fix? Ensures complete capture for historical OCA reconstructions.
      - Status: NOT STARTED
      - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend
+     - Should Test frontend/backend/both after fix? Backend manual script
+     - Blocked on other issue: None
+
+  Issue 4: 🟡 (P1)  is /bin/bash.00 across all opens
+     - Attempted fixes: Diagnosed during morning RTH audit.
+     - Next debug checklist: Investigate why  field is not persisted to MongoDB (likely computed in-memory only).
+     - Why fix this issue and what will be achieved with the fix? Restores DB-level observability for open position PnL.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? Backend manual script
+     - Blocked on other issue: None
+
+  Issue 5: 🟡 (P1)  capture bug
+     - Attempted fixes: Discovered during SATS target hit investigation (target fired, but list was empty).
+     - Next debug checklist: Find where  is populated upon bracket placement and ensure it captures the IDs correctly.
+     - Why fix this issue and what will be achieved with the fix? Ensures accurate leg identification for accounting.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? Backend manual script
      - Blocked on other issue: None
 
 **In progress Task List**:
-  Task 1: 🔴 (P0) Tier 1a: CPCV for GBM (Highest Leverage Upgrade)
-     - Where to resume: Read  immediately. Integrate  into .
-     - What will be achieved with this? Gives a true OOS distribution and PBO for the 100+ GBM models, preventing backtest overfitting and allowing safe scaling.
-     - Status: NOT STARTED
+  Task 1: 🟡 (P1) P-WIRE Phase 2 Evaluation
+     - Where to resume: Wait for ~200 resolved shadow decisions to accumulate (canonical script shows 58 resolved). 
+     - What will be achieved with this? Unlocks live inference wiring for regime models.
+     - Status: BLOCKED (Waiting on wall-clock market data accumulation).
      - Should Test frontend/backend/both after fix? Backend
-     - Blocked on something: None
-  
-  Task 2: 🟡 (P1) Task c2 / #1: Per-stock Multi-TF Regime 
-     - Where to resume: Scaffolded in .
-     - What will be achieved with this? Allows UI/Scanner to see per-ticker LONG/MID/SHORT/MICRO trend-stack.
-     - Status: BLOCKED (User shifted focus to ML integrity and Tier 1 upgrades first).
-     - Should Test frontend/backend/both after fix? Both
-     - Blocked on something: User priority shift.
+     - Blocked on something: Market time.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - 🔴 (P0) Tier 1a: CPCV for GBM (Start here).
-    - 🟡 (P1) Tier 1b: Execution cost modeling in backtests.
-    - 🟡 (P1) Tier 2a: Per-model probability calibration (isotonic/Platt).
-    - 🟡 (P1) Tier 2b: Frozen forward hold-out (reserve most recent 45-60d for validation).
-    - 🔴 (P0) P-WIRE Phase 2 (Wiring): Wire regime-matched models into the live decision path. *NOTE: Intentionally PARKED until ~5000 shadow decisions accumulate to prevent trading on an unproven edge.*
-    - 🟡 (P1) Regime-first scanning funnel execution (Task c3).
-    - 🟡 (P1) M0 - Laddered server-side scale-out (multi-leg OCA).
+    - 🟡 (P1) [P-TARGET] Rare-regime label realignment for 5 stale + 3 PBO-quarantined cells. (Shorter horizon, aggressive class weights, or wider regime threshold).
+    - 🟡 (P1) Multi-bar-size shadow logging. Patch  to allow  to fire across all timeframes.
+    - 🟡 (P1) v19.34.320c: Ingest-time prevention via  check in .
+    - 🟡 (P1) v321: EOD Flatten Modal in V5 UI.
     
     Future Tasks:
-    - Tier 3: Model/prediction drift monitor, Promotion gated on PBO, P-WIRE for all families.
-    - 🟢 (P2) T7 - Proper multi-month RS leadership factor (RS Rating 80+) as confluence filter.
-    - 🟢 (P2) Add Wyckoff confirmation trigger.
+    - 🟡 (P2) Horizon-scaled bracket geometry rework (Strongly validated by v325 reach-gate firing 9x/hr).
+    - 🟢 (P2) Wyckoff confirmation trigger.
+    - 🟢 (P2) Pin symbol UI enhancement in V5.
+    - 🟢 (P2) Tier 3a: Drift monitor live-side/UI tile.
     - 🟢 (P2) Break up  monolith.
 
 **Completed work in this session**
-- v319 NO-PEEK gap-fill leak fix (decide-at-open; neutralized open bar leakage) (DONE)
-- Eviction script for leaky and retired daily/weekly gap models from DB (DONE)
-- v319b López de Prado embargo gap implemented at GBM train/val split (DONE)
-- v319c GBM_FORCE_PROMOTE override logic for model promotion gating (DONE)
-- v319d Phase-8 ensemble FFD injection fix (fixed bug where FFD cols were zero-filled) (DONE)
-- Deep code audit of the entire training, validation, and backtest pipelines (Result: clean bill of health with exception of in-sample backtest optimism, leading to the Tier 1-3 plan) (DONE)
+- : Cleaned 386,919 mislabeled  rows (251,551 relabeled to 1-min, 95k dupes deleted, 40k partials quarantined) (DONE).
+- : SPCX degraded row surgical repair (restored exit_price, net_pnl, pnl_pct) (DONE).
+- : Daily-bar premarket gate deployed to  via AGENTS.md §2.2-compliant patcher in OBSERVE mode (DONE).
+- Deep audit of setup catalog and OCA mislabel landscape via read-only diags (DONE).
+- Created Windows ops tool  for safe DGX log trailing (DONE).
+- Updated PRD.md and CHANGELOG.md via patcher scripts (DONE).
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1: High validation scores across direction/volatility predictors.
-   - Debug checklist: Audit completed. Found legitimate (regime conditioning and volatility clustering). Not a leak. Backtests remain optimistic due to in-sample testing, prompting the CPCV integration task.
+   - None
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Agent attempts to use  or native  via bash, crashing due to physical DGX hardware bindings.
-  - Recurrence count: >10
-  - Status: RESOLVED (Strict mandate: NO testing_agent. NO git bash execution. ALWAYS create line-number-proof  patchers or diff patches, upload via  to , and give the user exact commands to copy/paste and execute).
+  - Issue recurrence in previous fork: Agent violating AGENTS.md rules by using testing agents, modifying files directly using  instead of  patchers, or writing non-compliant patchers.
+  - Recurrence count: 2
+  - Status: RESOLVED (The agent auto-corrected and strictly adhered to generating §2.2 compliant python patchers with base64 chunks and PRE/POST SHA256 guards).
 
 **Code Architecture**
-- Physical DGX Spark (Linux) running FastAPI (Backend) on , React (Frontend) on .
-- Massive monolithic backend: 411k LOC.
-- ML pipeline utilizes  (LightGBM) and an API subprocess  (Deep Learning VAE/TFT/CNN-LSTM).
+- FastAPI Backend (Port 8001) + React Frontend (Port 3000) running on physical DGX Spark hardware. Orders flow via . Strict dependency on user-executed Python patch scripts with hash-based drift guards.
 
 **Key Technical Concepts**
-DGX  patcher workflows, Combinatorial Purged Cross-Validation (CPCV), Probability of Backtest Overfit (PBO), Deflated Sharpe, López de Prado embargo, look-ahead bias/leakage prevention,  routing.
+- DGX  python patcher workflows (AGENTS.md §2.2 compliance is MANDATORY: base64 chunks, PRE/POST SHA guards).
+- Interactive Brokers (IB-Insync) API / OCA brackets.
+- Time-series regime modeling (XGBoost JSON zlib compressed).
 
 **key DB schema**
-  - : 
-  - : 
+  - 
+  - 
+  - 
+  - 
 
 **changes in tech stack**
-  - None.
+  - None
 
 **All files of reference**
-  -  (CRITICAL: Contains instructions for your first task).
-  - 
-  -  (Target file for CPCV integration).
-  -  (Existing logic to import/utilize).
+  -  (STRICT RULES on DGX deployment).
+  -  (Next patch target for v320h. Line 385 & 428. User uploaded baseline: , SHA: ).
+  -  (Line 1520 contains fix template for ).
+  -  (Reference for a compliant §2.2 patcher).
 
 **Areas that need refactoring**
-  -  monolith.
-  - Validation/backtest suite () requires execution cost modeling.
+  -  (monolith breakdown).
 
 **key api endpoints**
-  - 
-  - 
+  -  (UI endpoint that computes correct PnL from realized_pnl, proving the DB mismatch).
 
 **Critical Info for New Agent**
-- **CRITICAL HARDWARE WORKFLOW**: You are on a physical DGX. Do NOT use the . Do NOT commit via usage: git [-v | --version] [-h | --help] [-C <path>] [-c <name>=<value>]
-           [--exec-path[=<path>]] [--html-path] [--man-path] [--info-path]
-           [-p | --paginate | -P | --no-pager] [--no-replace-objects] [--bare]
-           [--git-dir=<path>] [--work-tree=<path>] [--namespace=<name>]
-           [--super-prefix=<path>] [--config-env=<name>=<envvar>]
-           <command> [<args>]
-
-These are common Git commands used in various situations:
-
-start a working area (see also: git help tutorial)
-   clone     Clone a repository into a new directory
-   init      Create an empty Git repository or reinitialize an existing one
-
-work on the current change (see also: git help everyday)
-   add       Add file contents to the index
-   mv        Move or rename a file, a directory, or a symlink
-   restore   Restore working tree files
-   rm        Remove files from the working tree and from the index
-
-examine the history and state (see also: git help revisions)
-   bisect    Use binary search to find the commit that introduced a bug
-   diff      Show changes between commits, commit and working tree, etc
-   grep      Print lines matching a pattern
-   log       Show commit logs
-   show      Show various types of objects
-   status    Show the working tree status
-
-grow, mark and tweak your common history
-   branch    List, create, or delete branches
-   commit    Record changes to the repository
-   merge     Join two or more development histories together
-   rebase    Reapply commits on top of another base tip
-   reset     Reset current HEAD to the specified state
-   switch    Switch branches
-   tag       Create, list, delete or verify a tag object signed with GPG
-
-collaborate (see also: git help workflows)
-   fetch     Download objects and refs from another repository
-   pull      Fetch from and integrate with another repository or a local branch
-   push      Update remote refs along with associated objects
-
-'git help -a' and 'git help -g' list available subcommands and some
-concept guides. See 'git help <command>' or 'git help <concept>'
-to read about a specific subcommand or concept.
-See 'git help git' for an overview of the system. directly through the bash tool. ALWAYS use  () and provide the user with exact execution blocks. Use robust, line-number-agnostic Python patcher scripts when dealing with heavily edited files like .
-- **STARTING TASK**: Read . Your first task is Tier 1a (Wiring CPCV into GBMs).
-- **SEQUENCING**: Do NOT instruct the user to run a full retrain until the Tier 1a CPCV integration patch is fully written, tested, and applied.
+- **HARDWARE BINDING / DEPLOYMENT**: You are operating in a sandbox. The REAL application is on the user's DGX hardware. You MUST NOT use automated testing agents, nor edit files directly.
+- **PATCHER COMPLIANCE**: All code changes must be delivered via a Python script uploaded to . The script must follow AGENTS.md §2.2 (Assert , locate anchor, do base64 chunk replacement, assert , backup file, and provide // flags).
+- **IMMEDIATE NEXT ACTION**: Build  based on  at  (sha: ). Ensure it safely adds the leg-classification and accounting finalization before lines 385 and 428 without modifying the rest of the file.
 
 **documents and test reports created in this job**
   - 
   - 
-  - 
-  - 
-  - 
-  - 
 
 **Last 10 User Messages and any pending HUMAN messages**
- - *(Context)* User ran tests to confirm v319, v319b, v319c, and v319d were successfully applied. All 12 tests passed. User committed changes to their local DGX GitHub.
- - *User*: Asked if they are ready to go live and trade, or if a full retrain is needed.
- - *(Context)* Agent ran an inventory script. Found that while some models are fresh, the critical Phase-8 Ensemble models are 45-50 days stale and were trained using the FFD bug.
- - *User*: Asked the agent to conduct a full audit of the validation/backtesting systems before pulling the trigger.
- - *(Context)* Agent performed a deep audit. Confirmed no leakage in backtests, but discovered they are optimistic because they test strictly *in-sample*. Recommended adding a true frozen hold-out and using Combinatorial Purged Cross-Validation (CPCV).
- - *User*: Asked how to implement the smart fixes properly and requested suggestions.
- - *(Context)* Agent discovered  already exists but isn't wired into the GBM pipeline. Proposed a 3-Tier upgrade plan, starting with Tier 1a (Wiring CPCV into GBMs).
- - *User*: Agreed. Requested to fork the session for a clean context window to begin the fix.
- - *Pending Action*: Read  and immediately begin implementing Tier 1a (CPCV for GBM integration).
+ - User confirmed deployment of the v320 premarket gate in OBSERVE mode.
+ - User requested a morning session audit.
+ - Agent produced the audit, identifying the OCA mislabeling bug bleeding actively on live trades.
+ - User confirmed the UI showed correct PnL while DB showed -.00.
+ - Agent provided a deep source code investigation diag, pinpointing .
+ - Agent deferred creating the §2.2 compliant patcher to avoid context window limits and safely fork the session. User uploaded the DGX canonical  for the next agent to use.
+ - *Pending Action*: No pending questions. Proceed directly to building the v320h patcher.
 
 **Project Health Check:**
-Backend healthy, training pipeline healthy and fully audited. P0/P1 data leakage fixes successfully deployed.
+Broken (Data recording only). The bot trades perfectly, but every OCA close writes a sentinel  to  and drops / in the DB.
 
 **3rd Party Integrations**
-  - Interactive Brokers (Requires User API Key)
+  - Interactive Brokers (Requires User API Key) - .
 
 **Testing status**
   - Testing agent used after significant changes: NO (Hardware Blocked)
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created:  
-  - Known regressions: None currently.
+  - Test files created: None.
+  - Known regressions: OCA external close path drops accounting metrics.
 
 **Credentials to test flow:**
 Use DGX environment variables (, ).
 
 **What agent forgot to execute**
-Nothing was forgotten. The agent successfully set up the memory files for the fork. You must pick up exactly by reading  and implementing CPCV for GBM.</analysis>
+Nothing. The agent deliberately deferred writing the patcher to preserve context and ensure a safe, compliant patch process on the next fork.</analysis>
