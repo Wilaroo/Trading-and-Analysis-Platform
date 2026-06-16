@@ -3,6 +3,27 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## ✅ RESOLVED (2026-06-16, diag_v320x) — "91% high_vol" debunked; regime classifier is ACCURATE; DO NOT recalibrate the 1.3 threshold
+diag_v320x_regime_validation.py (paste.rs/lWcsD) backtested the PRODUCTION classify_regime
+on 175 clean SPY daily bars (last ~180td). True distribution: range_bound 37%, bull_trend
+37%, high_vol 14%, bear_trend 13% — NOT 91% high_vol. The 91% in the P-WIRE shadow log is a
+SAMPLING ARTIFACT: shadow records are per-decision (~900/day), logging ran over a short,
+genuinely-volatile window, and each high_vol day was amplified ~900×. The classifier is fed
+correct SPY daily bars at every live site (confidence_gate._get_ai_regime,
+timeseries.classify_current_regime — 5-min cached). The 1.3 vol_expansion (atr5/atr20)
+threshold is well-calibrated: high_vol=14% of days and those days are PREDICTIVE (largest
+forward |moves|, +1.17% fwd5; bear→negative; range→quiet). Threshold sensitivity 1.3→14%,
+1.5→3%. ⇒ The 1.3→1.5 recalibration is RETRACTED PERMANENTLY (not a miscalibration).
+MTF directional panel (TrendSignalBlock._score_index): correct directional TILT (SPY BULL
+61% positive vs BEAR 45%) but weak magnitude predictiveness + bouncy BEAR bucket over a
+180d uptrend — sound as a cautious context FILTER (its actual use), not a return predictor.
+PHASE 2 implication: the "GENERIC HOLDS / keep regime dead" verdict rests on only n≈9
+resolved regime records from the skewed high_vol window — NOT trustworthy. A real Phase-2
+test needs a REPRESENTATIVE shadow sample across all 4 regimes → re-enable
+PWIRE_SHADOW_ENABLED and accumulate across normal/trend/vol days, THEN re-run
+pwire_shadow_eval. Until then Phase 2 stays parked (not on bad evidence, just on no evidence).
+
+
 ## 🟢 P3 (added 2026-06-16, DATA-RESOLVED — no behavioral fix) — Timeframe-aware style resolution
 RESOLVED by diag_v320v (paste.rs/K7urU) on live data: of 21 trend_continuation trades
 (open + 7d), RISK METRIC = 0/21 (0%) — NONE rely on the static `multi_day` fallback;
