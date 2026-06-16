@@ -1,4 +1,32 @@
-## 2026-06-16 (later) — v320h OCA close-path accounting finalize PATCHER DELIVERED
+## 2026-06-16 (later) — v320h.1 implied-primary + historical backfill DELIVERED
+
+### v19.34.320h.1 — OCA finalize implied-primary (paste.rs/VkvQm)
+Diag (paste.rs/ip7Bb) over 469 `oca_closed_externally_v19_31` rows: 100%
+coverage (7 ib_executions / 461 implied), cross-val |ib_exec − implied| median
+**3.7¢**, mean 15¢. BUT ib_executions best-qty-match can CONTRADICT realized_pnl
+on stacked closes (DVN: ib exit 43.69 ⇒ loss, while realized=+301.94). So
+v320h.1 makes **`implied_from_realized` the PRIMARY** exit-price source
+(entry ± realized/shares — internally consistent, exit_price/pnl_pct always
+agree with net_pnl); ib_executions kept as a logged cross-check (`d=` in the
+FIX/OBSERVE log line), used as the source only when the implied basis is
+unavailable. §2.2 patcher PRE_SHA `e5cec8f9` (v320h applied) → POST_SHA
+`90c45132`; refuses to run on the raw baseline (`ee4f3f2e`) — patch_v320h must
+be applied first. Locally validated check→apply→rollback.
+
+### v19.34.320h backfill — historical OCA accounting repair (paste.rs/wSwVu)
+Mongo data-repair for ALL 469 corrupted rows. Writes only `exit_price` /
+`net_pnl` / `pnl_pct` (implied-primary, same tiers); **`close_reason` UNTOUCHED**
+(the price-proximity leg classifier is unreliable — tagged 463/469 winners as
+"stop"). Per-row audit in `bot_trades_repair_audit_v320h` (before/after +
+source + ib cross-check + `needs_review` when |ib−implied|/entry > 0.5%),
+inserted before each update with the before-values as a race-guard. Idempotent,
+`--check/--apply/--rollback/--status`, `--days/--symbol/--limit` filters.
+net_pnl population corrects the ~−668 → −24,080 understatement. 8/8 pytest green
+(`tests/test_v320h_oca_close_finalize_patcher.py`).
+
+---
+
+
 
 ### v19.34.320h — OCA externally-closed accounting finalize (paste.rs/n609C)
 
