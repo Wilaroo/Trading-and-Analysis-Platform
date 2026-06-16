@@ -1,3 +1,36 @@
+## 2026-06-16 (later5) — v320u: completes the A+ horizon-hijack fix (2nd path) — ✅ APPLIED (fb979de5)
+
+### Discovery: v320p was silently NEUTRALIZED by a second A+ path
+While investigating trend_continuation, found `smb_integration.get_default_trade_style()`
+L1061 has its OWN `if smb_score.is_a_plus: return TradeStyle.MULTI_DAY`. enhanced_scanner
+L723-725 calls it and assigns the result BEFORE the v320p-gated block (L791) runs — so for
+config-bearing intraday/scalp setups, A+ set trade_style="multi_day" first, then v320p's
+guard read "multi_day" and KEPT it. Verified empirically: pre-fix, A+ context returned
+multi_day for gap_fade/squeeze/second_chance. (The TradeStyle enum docstring itself says
+"A+ refers to GRADE not STYLE.")
+
+### v19.34.320u — smb_integration.get_default_trade_style A+ fix (paste.rs/tSpZH)
+PRE `26e1f9f6…` → POST `c62efc43…`. Same option-A logic as v320p: A+ only promotes to
+multi_day when default_style is already carry-natured (multi_day/swing/position/
+investment); intraday/scalp setups keep their horizon. The mid-grade (total>=35)
+scalp→intraday upgrade is preserved (intraday-group, still EOD-flat). Verified post-fix:
+gap_fade A+→scalp, squeeze A+→intraday, second_chance A+→scalp (sandbox apply→probe→
+rollback clean). §2.2 patcher (PRE/POST SHA, base64 anchor, auto-backup, --check/--apply/
+--rollback/--status, py_compile gate, drift-rebase via --pre). Generator:
+scripts/_build_v320u_patcher.py. Only real caller is enhanced_scanner L723 (smb_router /
+smb_unified_scoring just import). v320p + v320u together = A+ hijack fully closed.
+Next RTH: diag_v320o override footprint should collapse toward ~0.
+
+### trend_continuation — confirmed not a bug (P2 logged)
+No registry config → never hits get_default_trade_style; style comes from
+resolve_trade_style (explicit trade_style/timeframe → else static multi_day fallback).
+GLD/MSTR=multi_day vs TSLA/META/NOK=intraday is correct timeframe-aware stamping. Latent
+risk = missing-context fallback to multi_day (overnight carry). P2 in ROADMAP w/ timeframe-
+coverage diag as pre-work.
+
+---
+
+
 ## 2026-06-16 (later4) — open-position style audit (v320s) + corrective re-stamp (v320t) + trend_continuation taxonomy investigation
 
 ### v320s — OPEN-POSITION STYLE AUDIT (read-only, committed 1300bee0-adjacent; paste.rs/ISPSu)
