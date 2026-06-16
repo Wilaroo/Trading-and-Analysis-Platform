@@ -400,13 +400,12 @@ class PositionManager:
                                 except Exception:
                                     pass
                                 # ── v19.34.320h — OCA close-path accounting finalize ── BEGIN ──
-                                # The v19.31 external-close sweep above marks the trade CLOSED and
-                                # claims realized_pnl, but historically left exit_price unset, net_pnl
-                                # stuck at the -$1.00 commission-min sentinel, and pnl_pct stale.
-                                # Source exit_price from the matching IB execution (±15m of close),
-                                # recompute net_pnl = realized_pnl - total_commissions, and pnl_pct
-                                # off the entry basis. Gated by V320H_OCA_FIX_POLICY
-                                # (observe|fix|off, default observe).
+                                # v320h.1: implied_from_realized is PRIMARY (internally consistent —
+                                # exit_price / pnl_pct always agree with net_pnl). ib_executions is a
+                                # logged cross-check only; it is used as the exit_price source ONLY
+                                # when the realized-implied basis is unavailable. Recomputes
+                                # net_pnl = realized_pnl - total_commissions. Gated by
+                                # V320H_OCA_FIX_POLICY (observe|fix|off, default observe).
                                 try:
                                     import os as _os_v320h
                                     _v320h_policy = (_os_v320h.environ.get(
@@ -419,9 +418,18 @@ class PositionManager:
                                             getattr(_trade, "fill_price", None)
                                             or getattr(_trade, "entry_price", 0) or 0)
                                         _v320h_dir = _dir
+                                        _realized = float(getattr(_trade, "realized_pnl", 0) or 0)
+                                        _shares_v = int(getattr(_trade, "shares", 0) or 0)
+                                        # PRIMARY: implied exit from realized_pnl (consistent by construction).
+                                        _implied = None
+                                        if _entry_basis > 0 and _shares_v:
+                                            if _v320h_dir == "short":
+                                                _implied = round(_entry_basis - _realized / _shares_v, 4)
+                                            else:
+                                                _implied = round(_entry_basis + _realized / _shares_v, 4)
+                                        # CROSS-CHECK: best-qty-match ib_executions close-side fill ±15m.
+                                        _ib_px = None
                                         _close_side = "BUY" if _v320h_dir == "short" else "SELL"
-                                        _exit_px = None
-                                        _exit_src = None
                                         try:
                                             from datetime import datetime as _dt_v320h, timezone as _tz_v320h, timedelta as _td_v320h
                                             _closed_raw = getattr(_trade, "closed_at", None)
@@ -449,36 +457,39 @@ class PositionManager:
                                                 }
                                                 _execs = await asyncio.to_thread(
                                                     lambda: list(_db_v320h["ib_executions"].find(_q, {"_id": 0})))
-                                                _want = int(getattr(_trade, "shares", 0) or 0)
                                                 _best = None
                                                 _best_score = None
                                                 for _ex in _execs:
                                                     _eside = str(_ex.get("side") or _ex.get("action") or "").upper()
-                                                    if _close_side == "SELL" and not _eside.startswith(("S",)):
+                                                    if _close_side == "SELL" and not _eside.startswith("S"):
                                                         continue
-                                                    if _close_side == "BUY" and not _eside.startswith(("B",)):
+                                                    if _close_side == "BUY" and not _eside.startswith("B"):
                                                         continue
                                                     _epx = float(_ex.get("price") or _ex.get("avg_price")
                                                                  or _ex.get("fill_price") or 0)
                                                     if _epx <= 0:
                                                         continue
                                                     _eqty = int(abs(float(_ex.get("shares") or _ex.get("qty") or 0)))
-                                                    _score = abs(_eqty - _want)
+                                                    _score = abs(_eqty - _shares_v)
                                                     if _best_score is None or _score < _best_score:
                                                         _best_score = _score
                                                         _best = _epx
                                                 if _best is not None:
-                                                    _exit_px = round(_best, 4)
-                                                    _exit_src = "ib_executions"
+                                                    _ib_px = round(_best, 4)
                                         except Exception as _v320h_lk:
-                                            logger.debug("[v19.34.320h] ib_executions probe threw: %s", _v320h_lk)
-                                        if _exit_px is None:
+                                            logger.debug("[v19.34.320h] ib_executions cross-check threw: %s", _v320h_lk)
+                                        # Resolve exit_price: implied (primary) > ib_executions > current_price.
+                                        if _implied is not None:
+                                            _exit_px, _exit_src = _implied, "implied_from_realized"
+                                        elif _ib_px is not None:
+                                            _exit_px, _exit_src = _ib_px, "ib_executions"
+                                        else:
                                             _cp = float(getattr(_trade, "current_price", 0) or 0)
-                                            if _cp > 0:
-                                                _exit_px = round(_cp, 4)
-                                                _exit_src = "current_price_fallback"
-                                        _new_net = round(float(getattr(_trade, "realized_pnl", 0) or 0)
-                                                         - float(getattr(_trade, "total_commissions", 0) or 0), 2)
+                                            _exit_px = round(_cp, 4) if _cp > 0 else None
+                                            _exit_src = "current_price_fallback" if _cp > 0 else None
+                                        _xdelta = (round(abs(_ib_px - _implied), 4)
+                                                   if (_ib_px is not None and _implied is not None) else None)
+                                        _new_net = round(_realized - float(getattr(_trade, "total_commissions", 0) or 0), 2)
                                         _new_pct = None
                                         if _exit_px is not None and _entry_basis > 0:
                                             if _v320h_dir == "short":
@@ -493,17 +504,16 @@ class PositionManager:
                                                 _trade.pnl_pct = _new_pct
                                             logger.info(
                                                 "🔧 [v19.34.320h FIX] %s %s finalized: exit_price=%s (%s) "
-                                                "net_pnl=%.2f pnl_pct=%s trade_id=%s",
+                                                "net_pnl=%.2f pnl_pct=%s ib_xcheck=%s d=%s trade_id=%s",
                                                 _trade.symbol, _v320h_dir.upper(), _exit_px, _exit_src,
-                                                _new_net, _new_pct, _trade.id)
+                                                _new_net, _new_pct, _ib_px, _xdelta, _trade.id)
                                         else:
                                             logger.info(
                                                 "👁️ [v19.34.320h OBSERVE] %s %s would finalize: exit_price=%s (%s) "
-                                                "net_pnl=%.2f pnl_pct=%s (cur net_pnl=%s exit_price=%s) trade_id=%s",
+                                                "net_pnl=%.2f pnl_pct=%s ib_xcheck=%s d=%s (cur net_pnl=%s) trade_id=%s",
                                                 _trade.symbol, _v320h_dir.upper(), _exit_px, _exit_src,
-                                                _new_net, _new_pct,
-                                                getattr(_trade, "net_pnl", None),
-                                                getattr(_trade, "exit_price", None), _trade.id)
+                                                _new_net, _new_pct, _ib_px, _xdelta,
+                                                getattr(_trade, "net_pnl", None), _trade.id)
                                 except Exception as _v320h_err:
                                     logger.debug("[v19.34.320h] finalize block threw (non-fatal): %s", _v320h_err)
                                 # ── v19.34.320h — OCA close-path accounting finalize ── END ──
