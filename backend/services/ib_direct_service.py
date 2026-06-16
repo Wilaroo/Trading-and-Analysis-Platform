@@ -3162,9 +3162,24 @@ class IBDirectService:
             return []
         try:
             try:
-                await asyncio.to_thread(self._ib.reqAllOpenOrders)
-                # Brief settle for openOrder callbacks to land in cache.
-                await asyncio.sleep(0.5)
+                # v19.34.320m — call the NATIVE async coroutine ON the event
+                # loop. The previous code wrapped the SYNC reqAllOpenOrders()
+                # in asyncio.to_thread(), running it in a worker thread that
+                # has NO event loop, so ib_async's internal util.run() /
+                # get_event_loop() raised "no current event loop in thread
+                # 'ThreadPoolExecutor-N'" on EVERY call (recurring log spam,
+                # and the working-orders refresh silently no-op'd).
+                _req_async = getattr(self._ib, "reqAllOpenOrdersAsync", None)
+                if _req_async is not None:
+                    await _req_async()
+                    # Brief settle for openOrder callbacks to land in cache.
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(
+                        "[v19.34.320m PATCH-L2a] reqAllOpenOrdersAsync missing "
+                        "on this ib_async build; using cached trades (the sync "
+                        "reqAllOpenOrders() is unsafe inside a running loop)"
+                    )
             except Exception as e:
                 logger.warning(
                     "[v19.34.28 PATCH-L2a] get_open_orders reqAllOpenOrders "
@@ -3302,9 +3317,20 @@ class IBDirectService:
             # account — including the pusher's ghost OCA children that
             # are blocking BMNR closes via the 15-order cap.
             try:
-                await asyncio.to_thread(self._ib.reqAllOpenOrders)
-                # Brief settle so callbacks populate self._ib.trades()
-                await asyncio.sleep(0.5)
+                # v19.34.320m — native async coroutine on the loop (was a
+                # SYNC reqAllOpenOrders() wrapped in asyncio.to_thread, which
+                # ran in a worker thread with no event loop -> RuntimeError
+                # "no current event loop in thread 'ThreadPoolExecutor-N'").
+                _req_async = getattr(self._ib, "reqAllOpenOrdersAsync", None)
+                if _req_async is not None:
+                    await _req_async()
+                    # Brief settle so callbacks populate self._ib.trades()
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(
+                        "v19.34.320m [IB-DIRECT] reqAllOpenOrdersAsync missing "
+                        "for %s; using cached trades", symbol,
+                    )
             except Exception as e:
                 logger.warning(
                     "v19.34.46 [IB-DIRECT] reqAllOpenOrders failed for %s: %s",
