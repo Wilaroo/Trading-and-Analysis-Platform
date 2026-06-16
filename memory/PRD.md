@@ -1,5 +1,24 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-16 (PM) — v19.34.320 daily-bar premarket gate APPLIED in OBSERVE mode.
+> Anchored §2.2-compliant patcher (paste.rs/h5qCR, sha 0d37639c) inserted gate
+> in `opportunity_evaluator.evaluate_opportunity` before the v19.34.173 F-gate.
+> PRE=ce3624c5, POST=886bb287 (both verified on apply). Backup at
+> opportunity_evaluator.py.bak.20260616T133509. Backend restarted via
+> `./start_backend.sh --force`; 8/8 subsystems green. ENV
+> `V320_DAILY_BAR_GATE_POLICY=observe` in backend/.env. Today's 9:35-10:00 ET
+> window: zero gate fires (no eligible daily-bar setups emitted).
+> Tomorrow 09:30 ET: review log, decide observe→block.
+> **OCA-mislabel landscape clarified**: only 4 recoverable across history
+> (461/465 no_exec_match — ib_executions only started capturing in June).
+> Source-code fix in OCA-external close path is the real bug worth chasing.
+> Bonus: v325 reach-gate caught KRE/second_chance PT1@2.07x envelope —
+> empirical support for ROADMAP horizon-scaled bracket-geometry rework.
+> sanitize_v2 rerun: 102→112 clean core; June n=68 wr=44.1% avgR=-0.00
+> (trustworthy era). A-grade on sanitized: n=14 win=50% avgR=+0.16 (grade
+> calibration NOT inverted on clean data). Windows ops tool shipped:
+> `scripts/tail-v320-gate.ps1` (paste.rs/TrxPq, sha 985e9b11).**
+
 > **🔜 2026-06-16 — Issue 1 + Issue 2 from prior fork BOTH RESOLVED.
 > (1) v320f-fix1 cleanup applied to 386,919 mislabeled `ib_historical_data`
 > rows: 251,551 unique 1-min bars RESCUED (relabeled), 95,242 true duplicates

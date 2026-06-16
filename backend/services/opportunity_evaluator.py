@@ -156,6 +156,86 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+
+            # ── v19.34.320 — Daily-bar premarket gate ── BEGIN ────────
+            # Suppress daily-bar-consuming setups before the cutoff ET
+            # time. Today's daily bar isn't mature until the first 30
+            # min of RTH have passed (~10:00 ET). Setups whose
+            # trade_style in multi_day/swing/position/investment OR
+            # setup_type in daily-bar list read TODAY's daily OHLCV ->
+            # pre-cutoff fires consume incomplete/whippy data.
+            #
+            # Env: V320_DAILY_BAR_GATE_POLICY in {block,observe,off}
+            #      V320_DAILY_BAR_CUTOFF_ET (HH:MM America/New_York)
+            #      V320_DAILY_BAR_STYLES   (comma list)
+            #      V320_DAILY_BAR_SETUPS   (comma list)
+            try:
+                import os as _os_v320
+                _v320_policy = (_os_v320.environ.get(
+                    "V320_DAILY_BAR_GATE_POLICY", "block")
+                    or "block").lower().strip()
+                if _v320_policy not in ("block", "observe", "off"):
+                    _v320_policy = "block"
+                if _v320_policy != "off":
+                    from zoneinfo import ZoneInfo as _ZI_v320
+                    _v320_cutoff = (_os_v320.environ.get(
+                        "V320_DAILY_BAR_CUTOFF_ET", "10:00") or "10:00")
+                    _h, _m = _v320_cutoff.split(":")
+                    _cutoff_min = int(_h) * 60 + int(_m)
+                    _now_et = datetime.now(_ZI_v320("America/New_York"))
+                    _now_min = _now_et.hour * 60 + _now_et.minute
+                    if _now_min < _cutoff_min:
+                        _styles_env = _os_v320.environ.get(
+                            "V320_DAILY_BAR_STYLES",
+                            "multi_day,swing,position,investment")
+                        _setups_env = _os_v320.environ.get(
+                            "V320_DAILY_BAR_SETUPS",
+                            "daily_breakout,rs_leader_break,"
+                            "stage_2_breakout,power_trend_stack,"
+                            "pocket_pivot,three_week_tight,"
+                            "accumulation_entry,daily_squeeze")
+                        _v320_styles = {s.strip().lower() for s in _styles_env.split(",") if s.strip()}
+                        _v320_setups = {s.strip().lower() for s in _setups_env.split(",") if s.strip()}
+                        _alert_style = (alert.get("trade_style") or "").lower().strip()
+                        _alert_setup = (setup_type or "").lower().strip()
+                        _hit_style = _alert_style in _v320_styles
+                        _hit_setup = _alert_setup in _v320_setups
+                        if _hit_style or _hit_setup:
+                            if _v320_policy == "block":
+                                try:
+                                    bot.record_rejection(
+                                        symbol=symbol, setup_type=setup_type,
+                                        direction=direction_str,
+                                        reason_code="v320_daily_bar_premarket_gate",
+                                        context={
+                                            "policy": "v19.34.320_premarket_gate",
+                                            "cutoff_et": _v320_cutoff,
+                                            "now_et": _now_et.strftime("%H:%M"),
+                                            "matched_style": _alert_style if _hit_style else None,
+                                            "matched_setup": _alert_setup if _hit_setup else None,
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+                                logger.info(
+                                    "\U0001f6ab [v19.34.320] daily-bar gate BLOCK "
+                                    "%s/%s (style=%s, setup=%s, now=%s ET, cutoff=%s ET)",
+                                    symbol, setup_type, _alert_style or "-",
+                                    _alert_setup or "-",
+                                    _now_et.strftime("%H:%M"), _v320_cutoff,
+                                )
+                                return None
+                            elif _v320_policy == "observe":
+                                logger.info(
+                                    "\U0001f441\ufe0f [v19.34.320 OBSERVE] daily-bar gate would BLOCK "
+                                    "%s/%s (style=%s, setup=%s, now=%s ET)",
+                                    symbol, setup_type, _alert_style or "-",
+                                    _alert_setup or "-", _now_et.strftime("%H:%M"),
+                                )
+            except Exception as _v320_err:
+                logger.debug("v320 daily-bar gate threw (allowing through): %s", _v320_err)
+            # ── v19.34.320 — Daily-bar premarket gate ── END ──────────
+
             # ── v19.34.173 — Setup-grade F-gate ──────────────────────
             # Block alerts whose setup_type is graded F over the
             # rolling 30d window. The previous behaviour was
