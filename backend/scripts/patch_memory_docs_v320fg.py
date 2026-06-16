@@ -25,9 +25,9 @@ PRD_PATH = os.path.join(REPO_ROOT, "memory", "PRD.md")
 
 # Anchor must be unique to the existing top entry on the DGX so we KNOW
 # we're prepending in the right spot.
-CHANGELOG_ANCHOR = "## 2026-06-15 (evening) — P-WIRE Phase 2 investigation + Issue 2 backfill enqueued"
+CHANGELOG_ANCHOR = "## 2026-06-08 — v19.34.308–310:"
 
-PRD_ANCHOR = "> **🔜 2026-06-15 — P-WIRE Phase 2 INVESTIGATION COMPLETE."
+PRD_ANCHOR = "> **⚠️ AGENTS — READ THIS BLOCK BEFORE ANY CODE CHANGE.**"
 
 # ---------------------------------------------------------------------------
 # NEW CONTENT
