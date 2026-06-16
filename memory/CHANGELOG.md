@@ -1,3 +1,60 @@
+## 2026-06-16 (later) — v320h OCA close-path accounting finalize PATCHER DELIVERED
+
+### v19.34.320h — OCA externally-closed accounting finalize (paste.rs/n609C)
+
+**Status:** Patcher built + locally validated; DGX apply PENDING operator.
+
+**The bug (P0, recurring ~4 records/hr).** The v19.31 externally-closed
+phantom sweep in `position_manager.py` (the `oca_closed_externally_v19_31`
+path, ~L385) marks the trade CLOSED and claims `realized_pnl`, but never:
+- sets `exit_price`,
+- recomputes `net_pnl` (so it stays at the -$1.00 commission-min sentinel
+  written earlier by `_apply_commission`),
+- refreshes `pnl_pct`.
+
+Every IB-OCA-closed trade (stops / targets) therefore persists to `bot_trades`
+with corrupt performance metrics. `GET /api/trades/closed` computed the right
+PnL on the fly (from `realized_pnl`), masking the DB-level corruption.
+
+**The fix.** Inserts a finalize block immediately BEFORE the `_persist_trade`
+call in the sweep (anchored on the unique `_trade.remaining_shares = 0`
+chunk). It:
+1. classifies the close leg (long→SELL, short→BUY),
+2. probes `ib_executions` for the close-side fill within ±15m of `closed_at`
+   (best match by closest qty); falls back to last `current_price` mark,
+3. `net_pnl = round(realized_pnl − total_commissions, 2)`,
+4. `pnl_pct` off the entry basis (`fill_price || entry_price`); short-aware.
+
+**ENV gate `V320H_OCA_FIX_POLICY`:**
+- `observe` (DEFAULT) — logs `[v19.34.320h OBSERVE]` would-be values, writes nothing.
+- `fix` — writes `exit_price` / `net_pnl` / `pnl_pct` onto the trade before persist.
+- `off` — skips the block.
+
+**§2.2 compliance / safety.** PRE_SHA256 `ee4f3f2e…` guard, base64 (old,new)
+single-chunk replacement, POST_SHA256 `e5cec8f9…` guard (refuses to leave a
+file whose hash ≠ tested build), auto-backup, `--check/--apply/--rollback/--status`.
+Local CI override via `V320H_PM_TARGET` env. Round-trip cmp vs paste.rs/n609C
+IDENTICAL. Locally validated: check→apply (POST verified, compiles)→idempotent
+→rollback (restored exact PRE_SHA). 4 pytest green
+(`backend/tests/test_v320h_oca_close_finalize_patcher.py`).
+
+**DGX deploy (operator):**
+```bash
+curl -sS -o /tmp/patch_v320h.py https://paste.rs/n609C
+.venv/bin/python /tmp/patch_v320h.py --check
+.venv/bin/python /tmp/patch_v320h.py --apply
+git add backend/services/position_manager.py && git commit -m "v19.34.320h: OCA close finalize (observe)" && git push origin main
+./start_backend.sh --force
+# observe a few OCA closes in logs ([v19.34.320h OBSERVE]); then set
+#   V320H_OCA_FIX_POLICY=fix and restart to begin writing.
+```
+
+**Generator:** `backend/scripts/_build_v320h_patcher.py` (dev-only; emits the
+patcher with byte-exact base64 chunks + real POST_SHA).
+
+---
+
+
 ## 2026-06-16 — v320f mislabel cleanup APPLIED + v320g SPCX surgical repair APPLIED
 
 ### v19.34.320f-fix1 — Mislabeled-bar relabel/dedup/quarantine (paste.rs/uB64p, sha 7b4812b2)

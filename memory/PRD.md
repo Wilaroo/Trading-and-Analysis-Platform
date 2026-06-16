@@ -1,5 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-16 (later) — v320h OCA close-path accounting PATCHER DELIVERED
+> (DGX deploy pending operator). Fixes the recurring P0: the v19.31 external-
+> close sweep in `position_manager.py` (`oca_closed_externally_v19_31`) marks
+> the trade CLOSED + claims `realized_pnl` but never finalized `exit_price`,
+> never recomputed `net_pnl` (left at the -$1.00 commission-min sentinel), and
+> never refreshed `pnl_pct` — corrupting ~4 records/hr. The §2.2 patcher
+> inserts a finalize block before `_persist_trade`: classify leg (long→SELL /
+> short→BUY), source `exit_price` from matching `ib_executions` fill (±15m of
+> close, fallback last `current_price`), `net_pnl = realized_pnl −
+> total_commissions`, `pnl_pct` off entry basis. Gated by ENV
+> `V320H_OCA_FIX_POLICY` (observe|fix|off, DEFAULT observe). PRE_SHA
+> `ee4f3f2e…` / POST_SHA `e5cec8f9…`. paste.rs/n609C (round-trip cmp
+> IDENTICAL). Locally validated check→apply→rollback + 4 pytest green
+> (`tests/test_v320h_oca_close_finalize_patcher.py`). NOT yet applied on DGX.**
+
+
 > **🔜 2026-06-16 — Issue 1 + Issue 2 from prior fork BOTH RESOLVED.
 > (1) v320f-fix1 cleanup applied to 386,919 mislabeled `ib_historical_data`
 > rows: 251,551 unique 1-min bars RESCUED (relabeled), 95,242 true duplicates
