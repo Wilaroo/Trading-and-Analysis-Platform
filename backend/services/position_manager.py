@@ -923,6 +923,33 @@ class PositionManager:
                 if total_value > 0:
                     trade.pnl_pct = ((trade.unrealized_pnl + trade.realized_pnl) / (trade.original_shares * trade.fill_price)) * 100
 
+                # v19.34.320j — persist live unrealized_pnl/pnl_pct to Mongo so
+                # open-position P&L is observable at the DB level (was computed
+                # in-memory only -> DB showed $0 for all opens). Throttled per
+                # trade (~20s) to avoid a per-tick write storm.
+                try:
+                    import time as _t_320j
+                    from datetime import datetime as _dt_320j, timezone as _tz_320j
+                    _last_320j = getattr(trade, "_v320j_last_pnl_sync", 0) or 0
+                    if (_t_320j.time() - _last_320j) >= 20:
+                        _db_320j = (getattr(bot, "_db", None)
+                                    if getattr(bot, "_db", None) is not None
+                                    else getattr(bot, "db", None))
+                        if _db_320j is not None and getattr(trade, "id", None):
+                            await asyncio.to_thread(
+                                _db_320j.bot_trades.update_one,
+                                {"id": trade.id},
+                                {"$set": {
+                                    "unrealized_pnl": float(getattr(trade, "unrealized_pnl", 0) or 0),
+                                    "pnl_pct": float(getattr(trade, "pnl_pct", 0) or 0),
+                                    "current_price": float(getattr(trade, "current_price", 0) or 0),
+                                    "unrealized_pnl_synced_at": _dt_320j.now(_tz_320j.utc).isoformat(),
+                                }},
+                            )
+                            trade._v320j_last_pnl_sync = _t_320j.time()
+                except Exception as _e_320j:
+                    logger.debug("[v19.34.320j] unrealized_pnl persist threw: %s", _e_320j)
+
                 # Update trailing stop if enabled
                 if trade.trailing_stop_config.get('enabled', True):
                     await bot._update_trailing_stop(trade)
