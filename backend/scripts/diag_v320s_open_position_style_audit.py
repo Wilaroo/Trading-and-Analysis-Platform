@@ -27,8 +27,10 @@ from pymongo import MongoClient
 sys.path.insert(0, "backend")
 try:
     from services.setup_taxonomy import style_of, canonicalize
+    from services.trade_style_classifier import resolve_trade_style
 except Exception:  # pragma: no cover
     from backend.services.setup_taxonomy import style_of, canonicalize
+    from backend.services.trade_style_classifier import resolve_trade_style
 
 INTRADAY = {"scalp", "intraday"}
 CARRY = {"multi_day", "swing", "position", "investment"}
@@ -53,6 +55,24 @@ def _natural(setup_type):
         return "unknown"
 
 
+def _natural_ctx(t):
+    """Context-aware natural style: resolve from setup + timeframe (and tiers)
+    WITHOUT the stamped trade_style. For multi-timeframe setups this reflects
+    the firing horizon (e.g. trend_continuation + timeframe=intraday -> intraday)
+    so we don't false-positive timeframe-aware intraday stamps as mislabeled."""
+    try:
+        return resolve_trade_style({
+            "setup_type": t.get("setup_type"),
+            "setup_variant": t.get("setup_variant"),
+            "scan_tier": t.get("scan_tier"),
+            "tier": t.get("tier"),
+            "symbol_tier": t.get("symbol_tier"),
+            "timeframe": t.get("timeframe"),
+        }) or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def main():
     db = _load_db()
     opens = list(db.bot_trades.find({"status": "open"}, {"_id": 0}))
@@ -67,15 +87,21 @@ def main():
         eb = (t.get("entered_by") or "").lower()
         aplus = bool(t.get("smb_is_a_plus"))
         nat = _natural(setup)
+        nat_ctx = _natural_ctx(t)  # timeframe-aware
 
         if any(m in eb for m in ADOPTED_MARKERS) or any(m in setup for m in ADOPTED_MARKERS):
             verdict = "ADOPTED(skip)"
         elif nat == "unknown":
             verdict = "UNKNOWN"
         elif nat in INTRADAY and stamped in CARRY:
+            # genuine carry hijack of an intraday-natured setup
             verdict = "MISLABELED_CARRY→INTRADAY"
         elif nat in CARRY and stamped in INTRADAY:
-            verdict = "MISLABELED_INTRA→CARRY"
+            # only a real mislabel if the firing TIMEFRAME also says carry;
+            # otherwise the intraday stamp is correct timeframe-aware behaviour
+            # (e.g. trend_continuation fired on intraday bars) — not a bug.
+            verdict = ("MISLABELED_INTRA→CARRY" if nat_ctx in CARRY
+                       else f"OK~ (timeframe={t.get('timeframe') or '?'}→{nat_ctx})")
         elif nat == stamped:
             verdict = "OK"
         else:
