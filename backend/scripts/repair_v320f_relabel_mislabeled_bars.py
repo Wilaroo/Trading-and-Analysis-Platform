@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
 repair_v320f_relabel_mislabeled_bars.py  —  v19.34.320f cleanup  (2026-06-16)
+v320f-fix1 (2026-06-16): PARTIAL bucket → QUARANTINE (was: tag-only).
+  Sets bar_size='partial_review_v320f' so the row is excluded from
+  production 1-min/1-day reads and MIS_Q. Original bar_size preserved
+  in `bar_size_pre_v320f`. Full doc copied to review collection. Audit
+  row stores drift_keys (which OHLCV fields differed) for analysis.
+  Rationale: partial-drift diag showed ~9–11% of mislabeled rows are
+  higher-volume (likely consolidated-tape) bars vs single-exchange
+  1-min siblings — both are arguably valid data, so quarantine, never
+  delete.
 
 Cleans up the ~386,919 mislabeled rows in `ib_historical_data` where
 `bar_size="1 day"` but the `date` field is a full timestamp (len > 10),
@@ -278,18 +287,32 @@ def cmd_apply(resume=False):
                     audits.append({**base, "action": "delete_on_dupe_key",
                                    "note": "unique-idx collision; treated as dup"})
                     counts["exact_delete"] += 1
-            else:  # partial
-                reviews.append({**base, "ohlcv_mislabeled":
-                                {k: d.get(k) for k in OHLCV_KEYS},
-                                "ohlcv_1min_existing": sib,
-                                "needs_review": True})
-                # Tag (not delete) the row so we can find it again.
+            else:  # partial — QUARANTINE (v320f-fix1)
+                # Copy the FULL original doc into the review collection
+                # (preserve everything, including potentially-better volume
+                # data, so the operator can promote/demote later).
+                full_copy = dict(d)
+                full_copy["_orig_id"] = str(full_copy.pop("_id"))
+                full_copy["_v320f_id"] = base["_v320f_id"]
+                full_copy["v320f_quarantined_at"] = base["ts"]
+                full_copy["ohlcv_1min_existing"] = sib
+                full_copy["needs_review"] = True
+                reviews.append(full_copy)
+                # Flip bar_size so MIS_Q no longer matches AND the row is
+                # excluded from production 1-min and 1-day reads. Keep
+                # original bar_size in `bar_size_pre_v320f` for full revert.
                 col.update_one(
                     {"_id": d["_id"]},
-                    {"$set": {"v320f_partial_review_staged": _now_iso()}},
+                    {"$set": {"bar_size": "partial_review_v320f",
+                              "bar_size_pre_v320f": "1 day",
+                              "v320f_partial_review_staged": _now_iso()}},
                 )
                 audits.append({**base, "action": "stage_partial",
-                               "review_coll": REVIEW_COLL})
+                               "original_bar_size": "1 day",
+                               "new_bar_size": "partial_review_v320f",
+                               "review_coll": REVIEW_COLL,
+                               "drift_keys": [k for k in OHLCV_KEYS
+                                              if d.get(k) != sib.get(k)]})
                 counts["partial_stage"] += 1
 
             last_obj = d["_id"]
@@ -365,8 +388,13 @@ def cmd_rollback():
             if r.modified_count == 1:
                 reverted["update"] += 1
         elif action == "stage_partial":
-            col.update_one({"_id": orig_id},
-                           {"$unset": {"v320f_partial_review_staged": ""}})
+            # v320f-fix1: also revert bar_size back to '1 day'.
+            col.update_one(
+                {"_id": orig_id},
+                {"$set": {"bar_size": "1 day"},
+                 "$unset": {"v320f_partial_review_staged": "",
+                            "bar_size_pre_v320f": ""}},
+            )
             rev.delete_one({"_v320f_id": a["_v320f_id"]})
             reverted["stage_partial"] += 1
         elif action in ("delete", "delete_on_dupe_key"):
