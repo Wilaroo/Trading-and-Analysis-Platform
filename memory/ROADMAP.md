@@ -3,6 +3,22 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🟡 P1 ACTION ITEM (added 2026-06-16) — Intraday HIGH-priority gate audit (secondary lever)
+After v320p (A+ horizon-hijack fix, commit 7011ab04) is confirmed via RTH diag rerun,
+investigate the SECONDARY intraday-frequency lever: the HIGH-priority gate itself.
+v320o data: CARRY alerts reach HIGH priority 55% of the time vs INTRADAY only 20% —
+and HIGH priority is the auto-fire threshold (`_auto_execute_min_priority = HIGH`).
+So even with the A+ fix, intraday alerts under-reach the auto-fire bar.
+TASK: build a read-only diag (`diag_v320q_priority_attribution.py`) that, per
+trade_style, breaks down WHY intraday alerts under-reach HIGH priority — decompose
+the priority scorer inputs (catalyst weighting, SMB big-picture/regime skew, TQS,
+in-play score). Goal: find whether the priority formula structurally penalizes
+intraday context, then propose a calibration (NOT a sizing change). Gate this work
+on confirming v320p's rebalance first (don't stack two intraday changes blind).
+Verify lever: v320o GROUP ROLLUP INTRADAY HIGH% should rise toward CARRY%.
+
+
+
 ## Session Summary - 2026-06-12 (sanitization probes + v322x observability; calibration PARKED)
 
 ### v323b — RVOL ROOT CAUSE SOLVED (no-scalps incident)
