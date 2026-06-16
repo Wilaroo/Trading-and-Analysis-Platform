@@ -1,3 +1,24 @@
+## 2026-06-16 (later6) — v320 cleanup committed (b4ad8c87)
+
+- diag_v320s polished to CONTEXT-AWARE (resolve_trade_style with setup+timeframe, no
+  stamped trade_style) → INTRA→CARRY no longer false-positives on timeframe-aware
+  multi-timeframe setups (TSLA/META/NOK now show OK~ timeframe=intraday). Genuine carry
+  hijacks still flag.
+- tests/test_aplus_horizon_no_hijack.py — regression guard locking v320p+v320u (A+ never
+  hijacks intraday/scalp config setups to carry) + trend_continuation timeframe invariant.
+  6/6 pass on DGX.
+- Committed scripts: diag_v320s (ctx-aware), patch_v320t_restyle_open, diag_v320v,
+  test_aplus_horizon_no_hijack. Pushed b4ad8c87.
+- P2 trend_continuation → P3/RESOLVED (0/21 fall to static fallback; no behavioral fix).
+- GLD/MSTR multi_day→swing re-stamp: deliberately SKIPPED (live behavioral churn for a
+  cosmetic carry-vs-carry relabel).
+- NOTE: dev scaffolding (_build_v320m/p/u_patcher.py generators, test_v320m/p patcher
+  round-trip tests) remain sandbox-only, NOT committed to the DGX repo (available via
+  paste.rs on request).
+
+---
+
+
 ## 2026-06-16 (later5) — v320u: completes the A+ horizon-hijack fix (2nd path) — ✅ APPLIED (fb979de5)
 
 ### Discovery: v320p was silently NEUTRALIZED by a second A+ path
