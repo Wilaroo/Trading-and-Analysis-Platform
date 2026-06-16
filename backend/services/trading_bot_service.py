@@ -5955,7 +5955,10 @@ class TradingBotService:
         try:
             if (source_info or {}).get("tier") == "pusher_orders_snapshot":
                 from routers.ib import _pushed_ib_data
-                from datetime import datetime, timezone
+                # v19.34.320L — use module-global datetime/timezone (line 19).
+                # The prior local "from datetime import datetime, timezone" here
+                # bound them function-wide, causing UnboundLocalError at the
+                # naked-sweep telemetry write (~L6530) when this branch wasn't taken.
                 _lu = (_pushed_ib_data or {}).get("last_update")
                 if _lu:
                     _last_dt = datetime.fromisoformat(str(_lu).replace("Z", "+00:00"))
