@@ -221,3 +221,29 @@ DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v327_mode_unlo
 PENDING operator: run v327 → confirm desired anchor-aware MIXED behavior + risk appetite (thin/neg
 sanitized edge caveat) → then build the §2.2 mode_for_direction patcher (shadow not applicable; it's
 a mapping change — deploy + watch newly-admitted longs' sanitized avgR ≥0, else rollback).
+
+## ✅ v327 DGX RESULT (2026-06-17) — mode fix is THE lever; suppression is NOT the gate
+8h, 623 decisions, 100% cautious. SKIP=511 REDUCE=104 GO=8.
+regime_suppression: mode=active ALL 623; action NONE=565, REDUCE=58, **ACTIVE-SKIP=0**.
+UNLOCK SIM (if mode=NORMAL bar 38): currently NOT-GO=615 → **WOULD-GO=85** (all 85 now cautious),
+would-REDUCE=209, still-blocked-active-skip=**0**, score-too-low=321.
+CONCLUSION: v324's "83 regime_suppression" was a misread — suppression has ZERO active SKIPs
+(only REDUCEs 58). The cautious GO-bar(50) is the binding gate. The anchor-aware MIXED mode fix
+unlocks ~10x GO (8→~85) while active-REDUCE still trims negative-EV cells (safety net intact).
+
+## 🚀 PATCHER BUILT: patch_v328_anchor_aware_mixed_mode.py (v19.34.321) — PENDING operator --apply
+Target: backend/services/multi_tf_regime.py mode_for_direction MIXED/UNKNOWN branch.
+  SANDBOX PRE_SHA  = ae994e646b85e1eeac8a65a28994d5eec883dd8dc927c61b13753f030f67e1ea
+  POST_SHA         = 8954243629a4d4633a0c1a1dcbbcfc54addf8f784e5a73bce142bce79999ebc1
+NEW RULE: MIXED + anchor UP → long:normal, short:defensive; MIXED + anchor DOWN → long:defensive,
+  short:normal; anchor NEUTRAL/UNKNOWN → both cautious (unchanged). Counter-trend side becomes MORE
+  conservative (defensive=GO60) than old blanket cautious(50); with-trend unlocks (normal=GO38).
+§2.2 patcher self-tested on isolated copy: --check OK, --apply→POST_SHA exact + compiles,
+  --rollback→byte-identical to PRE. Logic unit-tested (10/10 cases incl. unchanged ALIGNED/PULLBACK).
+  paste.rs https://paste.rs/1RHPB ; patcher sha f7f3973510fdc6cd618e8b3cc7233ba6a52ffc2491ccf23c834a46ef8424094b.
+  Regression test: backend/tests/test_v328_anchor_aware_mixed.py (run post-apply on DGX).
+DRIFT NOTE: PRE_SHA is the SANDBOX sha; if DGX multi_tf_regime.py drifted, --check ABORTS →
+  operator uploads their copy → rebase. (--check is read-only/safe.)
+DEPLOY: --check → (operator go-ahead) → --apply → pytest test_v328 → COMMIT → ./start_backend.sh --force.
+POST-DEPLOY VERIFY (MIXED session): diag_v327 (GO should rise 8→~85, mode mix shows 'normal' longs),
+  diag_v326 (UP-anchor MIXED days now mode(long)=normal), diag_v321b (newly-admitted LONG avgR ≥0 else rollback).
