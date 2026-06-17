@@ -387,3 +387,13 @@ asyncio loop (py3.12). Corrected test paste https://paste.rs/tI6b2
   sha 9465d8861f9772e5fede10f243b932215555c06a0edfa3f65fae82247cd77b2b. Operator to pull + pytest (5) + re-commit.
 DETECTOR VALIDATION stands (exec-with-stubs earlier: long/short fire, RVOL gate, no-break, 2/day cap).
 NEW DGX whole-file baseline for enhanced_scanner.py = bc674f26… (use for any future patcher PRE_SHA).
+
+## ✅✅ patch_v330 COMPLETE & LIVE-VERIFIED (2026-06-17, commit 07e52bc7)
+test_v330 fixed (EnhancedBackgroundScanner) → pytest 5 passed → committed 07e52bc7 + push →
+./start_backend.sh --force "Application startup complete", health 0 red, ib_gateway connected.
+LIVE FIRE confirmed: live_alerts last 3h rubber_band_long=2 (short=0, market-dependent). New
+event-based SMB snapback detector is emitting. enhanced_scanner.py DGX baseline now bc674f26… (from
+v330) — note: commit 07e52bc7 only touched the test, so live enhanced_scanner.py == bc674f26 (v330 applied).
+ISSUE 2 (rubber_band) CLOSED. NEXT: generalize find→trade-replay→rewrite template to hitchhiker,
+second_chance, big_dog (P1). Also watch rubber_band fire→GO→trade flow + sanitized avgR vs replay
+(+0.27R long / +0.59R short) over next sessions.

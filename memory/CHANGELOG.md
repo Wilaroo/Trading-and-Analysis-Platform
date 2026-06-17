@@ -26203,3 +26203,25 @@ KEY INVESTIGATION RESULTS:
   edge. Auto-calibration kept OFF until a CLEAN corpus accrues; use EV>0 not win-rate.
 - Model-family audit (110 promoted models): 59 DEAD at inference, 46 class-collapsed.
   Full table → /app/memory/AUDIT_model_families_2026-06-10.md
+
+---
+## 2026-06-17 — Execution unblock + rubber_band detector rewrite (fork session)
+**v19.34.321 (v328) — anchor-aware MIXED trading-mode** [commit f7729179, LIVE]
+- Root cause of the execution starvation: SPY multi_tf context flipped to MIXED when the
+  daily anchor was strongly UP (91) but intraday went NEUTRAL → flattened BOTH directions to
+  cautious (GO bar 38→50). Classifier was NOT stuck (diag v326 day-by-day timeline).
+- Fix: mode_for_direction MIXED branch now anchor-aware — anchor UP→long:normal/short:defensive,
+  anchor DOWN→long:defensive/short:normal, neutral/unknown→both cautious. confidence_gate L2090.
+- Verified: diag v327 unlock-sim projected GO 8→~85; post-deploy mode mix flipped to normal=15/
+  defensive=8 (was 100% cautious); regime_suppression independent (0 active-skips). pytest 4 passed.
+
+**v19.34.322 (v330) — rubber_band SMB snapback rewrite (long+short)** [commit 07e52bc7, LIVE]
+- Replaced the %-from-EMA9 STATE check (which faked a "double bar break" it never enforced) with a
+  real event detector: ext≥1.25% from session open + 1-min double-bar-break within +1..+4 bars of
+  the extreme + accel(1.3x) + RVOL≥1.5 + 2/day cap per side. 1-min bars from ib_historical_data.
+- Validated on 14d native-1min trade replays: LONG +0.27R/76% (v329), SHORT +0.59R/74% (v330),
+  +EV across all extension buckets; edge concentrated in +1..+4 window. pytest 5 passed; live-fired.
+- New enhanced_scanner.py DGX baseline: bc674f26….
+
+Diagnostics shipped (read-only): v326 regime/mtf timeline, v327 mode-unlock sim, v329 long replay,
+v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker, second_chance, big_dog.
