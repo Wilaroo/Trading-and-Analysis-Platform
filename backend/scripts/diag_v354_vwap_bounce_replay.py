@@ -168,6 +168,7 @@ def main():
     pullwin = _arg("--pullwin", 5, int)      # pullback window (must touch & hold VWAP)
     vwaptol = _arg("--vwaptol", 0.15, float) # pullback low within vwaptol% of VWAP
     minleg = _arg("--minleg", 0.5, float)    # up-leg must be >= minleg% (a real drive)
+    legmult = _arg("--legmult", 1.0, float)  # target = entry + legmult*leg_height (1.0 = full measured move)
     stopbuf = _arg("--stopbuf", 0.10, float) # stop = VWAP * (1 - stopbuf%) (just below VWAP)
     minrr = _arg("--minrr", 1.0, float)
     maxrr = _arg("--maxrr", 0.0, float)      # 0 = off
@@ -184,8 +185,9 @@ def main():
 
     _maxrr_lbl = f"{maxrr:g}" if maxrr > 0 else "off"
     print(f"\n=== v354 VWAP BOUNCE replay — {days}d  leglook={leglook}  pullwin={pullwin}  "
-          f"vwaptol={vwaptol:g}%  minleg={minleg:g}%  stopbuf={stopbuf:g}%  minRR={minrr:g}  "
-          f"maxRR={_maxrr_lbl}  timewin={'09:35-09:45' if timewin else 'all-RTH'}  winsor=±{cap:g}R ===\n")
+          f"vwaptol={vwaptol:g}%  minleg={minleg:g}%  legmult={legmult:g}  stopbuf={stopbuf:g}%  "
+          f"minRR={minrr:g}  maxRR={_maxrr_lbl}  timewin={'09:35-09:45' if timewin else 'all-RTH'}  "
+          f"winsor=±{cap:g}R ===\n")
 
     universe = Counter()
     for a in db.live_alerts.find({}, {"_id": 0, "symbol": 1, "created_at": 1, "timestamp": 1, "ts": 1}):
@@ -250,7 +252,7 @@ def main():
                             n_doc_ev += 1
                             entry = c
                             stop = vw * (1 - stopbuf / 100.0)
-                            target = entry + leg_h            # measured move of the first leg
+                            target = entry + legmult * leg_h  # measured move (legmult of first leg)
                             risk = entry - stop
                             if risk > 0 and target > entry:
                                 rr = (target - entry) / risk
