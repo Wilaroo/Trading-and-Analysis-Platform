@@ -420,3 +420,23 @@ TIME-DECAY AUDIT FINDINGS (read-only grep, services/):
 RECOMMENDATION (pending operator appetite): add a per-tier TIME-STOP / max-hold review (e.g. swing: exit if
 not >=+1R by N trading days; position: periodic thesis review / hard max-hold). Build a read-only "stale
 higher-tier holds" diag first to size the problem, then propose env-flagged time-stops in order_policy_registry.
+
+## ✅ v331 DGX RESULT (2026-06-17) — taxonomy clean; sweep mapped; anomalies found
+STYLE MISMATCHES: NONE (registry default_style == SSOT style_of for every registered setup). Taxonomy consistent.
+REGISTRY GAPS (reg_style "—", not in SETUP_REGISTRY but resolve via SSOT fallback; real+traded ones):
+  accumulation_entry(swing,5011f/1327t), daily_breakout(multi_day,2320/309), daily_squeeze(multi_day,9418/276),
+  trend_continuation(multi_day,5297/28), bouncy_ball(intraday,598/15), vwap_continuation(intraday,171/42),
+  premarket_high_break, the_3_30_trade, gap_fill_open, day_2_continuation, base_breakout. (artifacts: reconciled_*,
+  approaching_*, carry_forward_watch = pseudo-setups, should be edge-excluded). → optional registry-completeness cleanup.
+SCALP SWEEP MAP (operator: generalize to all scalps):
+  FADE (snapback template v329/v330, 11 to do; rubber_band DONE): backside, bella_fade, fading_bounce,
+    first_move_down, first_move_up, gap_fade, mean_reversion, off_sides, time_of_day_fade, volume_capitulation, vwap_fade.
+  MOMENTUM (need NEW continuation replay template, 9): 9_ema_scalp, abc_scalp, fashionably_late, gap_give_go,
+    gap_pick_roll, hitchhiker, puppy_dog, second_chance, spencer_scalp.
+  Volume priority — fade: vwap_fade(4982/102), gap_fade(3624/165), off_sides(3830/9=correct short suppression),
+    mean_reversion(2680/88), backside(487/17). momentum: fashionably_late(1073/34), gap_give_go(818/29), second_chance(624/9).
+FIND-NO-TRADE anomalies (fires>=20, 0 trades): breakdown 2470/0 (BIGGEST — triage; intraday/swing/reversal short),
+  tidal_wave 335/0 (new m8 momentum detector never trades), fading_bounce 90/0 (short fade, likely suppressed),
+  + swing/position/investment breakouts (vcp_breakout 568, ascending/descending_triangle, base_breakout, weekly_breakout,
+  stage_1_to_2, fifty_two_week_high, two_hundred_day_*, death/golden_cross) all fire but 0 trades → likely higher tiers
+  not executed by the bot OR blocked; CONFIRM whether intentional (ties into time-decay/tier-execution question).
