@@ -247,3 +247,14 @@ DRIFT NOTE: PRE_SHA is the SANDBOX sha; if DGX multi_tf_regime.py drifted, --che
 DEPLOY: --check → (operator go-ahead) → --apply → pytest test_v328 → COMMIT → ./start_backend.sh --force.
 POST-DEPLOY VERIFY (MIXED session): diag_v327 (GO should rise 8→~85, mode mix shows 'normal' longs),
   diag_v326 (UP-anchor MIXED days now mode(long)=normal), diag_v321b (newly-admitted LONG avgR ≥0 else rollback).
+
+## ✅✅ v328 / v19.34.321 DEPLOYED & LIVE (2026-06-17 ~11:35 ET)
+Operator: --apply → POST_SHA 8954243… exact (backup multi_tf_regime.py.bak_v328) →
+pytest test_v328 4 passed → git commit f7729179 + push origin/main →
+./start_backend.sh --force → "Application startup complete" (23s), health: mongo green,
+ib_gateway green/connected, 0 red. Patch is LIVE. Anchor-aware MIXED mode is active.
+PENDING (wall-clock): after ~20-30 min of fresh decisions under the new code, re-run
+diag_v327 --hours 1 → expect trading_mode mix to show 'normal' for longs (not 100%
+cautious) and GO rising from ~8 toward ~85 on MIXED-context days. Watch newly-admitted
+LONG sanitized avgR (diag_v321b) ≥0 next session; if bleeding → --rollback or tighten
+regime-suppression EV table. DGX git HEAD now f7729179.
