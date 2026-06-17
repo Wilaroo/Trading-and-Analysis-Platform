@@ -476,3 +476,15 @@ backside 487/15, volume_capitulation 21/14, off_sides 3830/7(short-suppressed), 
 first_move_down 12/1, fading_bounce 90/0, first_move_up/time_of_day_fade 0/0.
 MOMENTUM: fashionably_late 1074/30, gap_give_go 818/29, second_chance 625/7, gap_pick_roll 87/3, hitchhiker 2/4,
 puppy_dog 26/1, 9_ema/abc/spencer 0g.
+
+## 📏 v332 — STALENESS / TIME-DECAY SIZING (shipped, operator: "measure staleness first")
+Open positions live in bot_trades status open/filled/pending; created_at=entry, closed_at=exit,
+risk_amount→R=realized_pnl/risk_amount. v332 (genuine bot-own via classify_close+is_adopted_entry):
+  PART A closed trades per TIER x HOLD-BUCKET(<1/1-2/3-5/6-10/>10d): n/win%/avgR/medR/totR → find the
+    hold-day boundary where win%/avgR craters = time-stop candidate per tier.
+  PART B currently OPEN holds per tier: count + age p50/max + count over heuristic STALE_DAYS
+    (intraday>1, multi_day>5, swing>15, position>40, investment>90) + top stale symbols → live dead-money size.
+  paste https://paste.rs/ (PASTE_URL above) sha (see cmd output).
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v332_staleness_sizing.py --days 120
+PENDING: operator runs v332 → read hold-time decay per tier + open stale holds → set per-tier time-stop
+thresholds → then env-flagged time-stop patch in order_policy_registry. (Window 120d for enough higher-tier closes.)
