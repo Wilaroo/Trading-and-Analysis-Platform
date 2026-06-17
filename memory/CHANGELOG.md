@@ -1,3 +1,52 @@
+## 2026-06-17 (later) — v320r intraday scalp priority-ceiling fix PATCHER READY (paste.rs/mTqD1)
+
+### Chain: v320q (attribution) → v320r-precheck (EV gate) → v320r (the fix)
+v320q ran on DGX (8627 alerts/5d, 15.9% post-v320p). VERIFIED in code (not just data):
+priority is set PER-DETECTOR, mostly `HIGH if tape.confirmation_for_<dir> else MEDIUM`,
+and several intraday scalps HARD-CODE `priority=AlertPriority.MEDIUM` (no HIGH branch).
+Attribution: 66.8% of intraday's non-HIGH population is this STRUCTURAL CEILING
+(vs 32.8% tape-miss). Intraday is NOT lower quality (TQS 54.4 vs carry 52.9; in-play
+7.8 vs 2.0; tape_score 3.5 vs 0.3; big-pic 8.0 vs 5.6) → the gap is structural, not edge.
+Daily setups (power_trend_stack/daily_squeeze/stage_2_breakout/…) emit HIGH UNCONDITIONALLY
+at 0% tape; intraday HIGH-capable setups are tape-gated → asymmetry favoring carry.
+
+### v320r-precheck (EV-gate calibration, paste.rs/gglWO, read-only) — DGX run
+Auto-fire requires HIGH **AND** tape_confirmation **AND** EV/win-rate gate (verified L1560).
+Gate source: Mongo `strategy_stats`; knobs `_auto_execute_min_ev_r=0.10`,
+`_win_rate_grace_min_trades=20`. DGX result: 44 setups, PASS=36 (ALL grace-only, proven-EV=0
+— thin clean-data regime), FAIL=8. PROOF gate is calibrated correctly: `rs_leader_break`
+(39 outcomes, -0.14R) is correctly EV-BLOCKED. All 5 Tier-1 PASS (on grace). Flag: `big_dog`
+-2.12R/20% over 5. KEY ASSUMPTION VERIFIED (L3985): `alert.tape_confirmation =
+tape.confirmation_for_<dir>` — the SAME signal the promotion gate keys on, so v320q tape
+rates ARE the promotion rates (~52-62%).
+
+### v320r — OPTION B (operator-approved): promote 3 scalps, exclude big_dog + gap_pick_roll
+`services/enhanced_scanner.py`. Gives `second_chance`, `backside`, `fashionably_late` the
+existing tape-gated HIGH branch (`HIGH if tape.confirmation_for_long else MEDIUM`), replacing
+hardcoded MEDIUM. Only tape-confirmed subset promotes; EV/win-rate gate still governs
+auto-fire (not a force-fire — removes an artificial ceiling). Alert-stamping ONLY — no
+close/bracket/kill-switch/sizing/_open_trades. big_dog EXCLUDED (neg EV); gap_pick_roll
+EXCLUDED (DGX form unconfirmed — grep -A25 cut off the priority line; sandbox shows it may
+ALREADY be HIGH-capable → separate follow-up).
+§2.2 patcher (generator scripts/_build_v320r_patcher.py): PRE_SHA256 HARD guard
+`89555e59…` (== DGX v320p baseline, confirmed via operator sha256sum), 3 base64 anchored
+chunks (each uniquely keyed by setup_type, count==1 asserted), drift-safe (aborts on anchor
+mismatch / PRE mismatch), auto-backup, --check/--apply/--rollback/--status, py_compile gate,
+marker-based idempotency. FULL round-trip patcher test PASSED locally (synthetic target:
+status/check/apply/idempotent-noop/rollback + PRE&POST compile). paste.rs/mTqD1 round-trip
+IDENTICAL. AWAITING operator --check → --apply → commit → restart. Post-deploy verify (next
+RTH): re-run diag_v320q --days 5 — INTRADAY HIGH% should rise toward CARRY%; diag_v320o
+override footprint stable.
+
+### FOLLOW-UPS
+- gap_pick_roll: confirm DGX priority line (`grep -n -A 35 'async def _check_gap_pick_roll'`);
+  if hardcoded MEDIUM, add to a v320r.1; if already HIGH-gated, no-op (close out).
+- off_sides_short: biggest medium-capped intraday bucket (637) but only 3.8% tape — investigate
+  why tape is so low (regime-gated RANGE_BOUND/FADE short) before any promotion.
+
+---
+
+
 ## 2026-06-17 — v320q priority-attribution diag DELIVERED (read-only) + PWIRE shadow re-enable guidance
 
 ### v320q — PRIORITY ATTRIBUTION BY STYLE (READ-ONLY, paste.rs/5WwmW)
