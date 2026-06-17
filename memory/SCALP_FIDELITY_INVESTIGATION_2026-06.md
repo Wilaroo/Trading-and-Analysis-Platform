@@ -588,3 +588,38 @@ accel1.3x, 2/day cap, by ext-bucket + snapback-speed. Compare to rubber_band v32
 DECISION GATE: lowest ext bucket with avgR comfortably >0 = FIRE floor for that side; if SHORT <=0 across
 buckets → confirms no-edge-shorting-strength → keep short suppressed. THEN build patch_v341 _check_vwap_fade
 rewrite (VWAP-anchored snapback) for the +EV side(s) only.
+
+## ✅✅ v340/v340b DGX RESULT (2026-06-18) — vwap_fade = REAL BOTH-SIDES edge in a BOUNDED 1-3% band
+v340 raw means were INFLATED by tiny-stop R-explosions (avgR +0.9..+2.3 but medR<=0). v340b
+risk-controlled (minrisk>=1% stop floor [matches v336] + winsor±3R) → winsorAvg & medR AGREE:
+  SHORT (tradeable=163, gated 1011/1181 sub-1%-risk): ALL win67% wAvg+0.165 med+0.246;
+    1-2% n88 win73% wAvg+0.213 med+0.276 ✅ | 2-3% n35 win74% wAvg+0.168 med+0.206 ✅ |
+    >=3% n40 win48% wAvg+0.057 med-0.124 ❌
+  LONG (tradeable=146, gated 1278/1432): ALL win65% wAvg+0.249 med+0.230;
+    1-2% n77 win73% wAvg+0.190 med+0.206 ✅ | 2-3% n26 win69% wAvg+0.270 med+0.625 ✅ |
+    >=3% n43 win49% wAvg+0.342 med-0.051 ❌ (artifact)
+  Fastest snapbacks +1..+2 carry most edge. WIN RATES 65-74% ~ rubber_band parity.
+KEY: the 1% stop floor is ESSENTIAL (gates ~86% tiny-stop noise). >=3% ext has NO robust edge
+(too extended = runaway, don't fade). SHORT works here (unlike off_sides/v336 blind-short) BECAUSE
+it requires a CONFIRMED reversal (red breaks 2-bar lows) after a BOUNDED 1-3% stretch + 1% stop +
+intraday exit (no overnight gap). Distinct from shorting-strength-and-holding.
+
+### CURRENT _check_vwap_fade (sandbox L4545-4617) = BROKEN STATE-detector (same disease as rubber_band)
+Fires on STATE dist_from_vwap<-2.5&rsi<35 (long) / >2.5&rsi>70 (short). 2.5% threshold sits in the
+dead-zone; NO double-bar-break trigger, NO 3% ceiling, NO accel, NO 2/day cap, NO 1% stop floor.
+
+### 🔒 LOCKED FIRE CONFIG for patch_v341 _check_vwap_fade rewrite (BOTH sides, v330 template)
+ext-from-VWAP in [1.0%, 3.0%) band (fire in-band, HARD-EXCLUDE >=3%); trigger = 1-min double-bar-break
+reversal within +1..+4 bars of the VWAP-extreme (exclude +0); accel extreme-bar range>=1.3x median;
+stop>=1.0% of entry (skip if tighter); RVOL>=1.5; 2/day cap per (symbol,side). entry=2-bar-break,
+stop=extreme±0.02, target=VWAP (1R floor), t2 further. bars via technical_service._get_intraday_bars_from_db
+(sym,"1 min",60). priority CRIT(tape&band-core)/HIGH/MED. LONG: green clears prior-2 highs fade up to VWAP.
+SHORT: red breaks prior-2 lows fade down to VWAP.
+Diags: v340 paste agW6R, v340b paste FLvOX (round-trip OK).
+
+### 🛠 GENERIC EXTRACTOR shipped (reusable across the sweep): backend/scripts/_extract_func.py
+paste https://paste.rs/2AsKx ; DGX: python3 /tmp/_extract_func.py _check_vwap_fade → returns live function
+SHA + whole-file SHA + paste URL → then build function-anchored patch_v341 (file 452KB drifted, anchor on
+operator bytes). Sandbox func span L4545-4617 sha b92ccff3… (DGX will differ — use theirs).
+PENDING operator: run extractor → paste back → I build patch_v341. THEN continue FADE sweep:
+gap_fade(3627/154) → mean_reversion(2680/73) → backside(487/15).
