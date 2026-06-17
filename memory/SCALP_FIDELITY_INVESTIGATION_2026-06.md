@@ -326,3 +326,12 @@ SHORT SIDE: NOT validated here (replay is long-only); off_sides_short proven no-
 NEXT: build patch_v330 _check_rubber_band LONG rewrite (1-min bar fetch via
   self.technical_service._get_intraday_bars_from_db(sym,"1 min",N); event-on-latest-bar; 2/day cap).
   Pending operator confirm: ext floor 1.5 vs 1.0, long-only scope.
+
+## ⏭ v330 — SHORT-SIDE REPLAY shipped (operator: ext floor=1.25 for LONG; short replay first, then decide both-vs-long-only)
+v330 mirrors v329 for shorts: extension ABOVE open + double-bar-break DOWN (RED bar breaks prior-2 lows);
+entry=break-down level, stop=HOD+0.02, target=9EMA(1m) 1R floor. Reports by ext bucket + snapback speed,
+compare to v329 long (+0.268R, 76%). paste https://paste.rs/hALOb
+  sha 6644c76ab0b213c8b70c499dd4c935e907d32f53251fab294abef879eae7c079 (round-trip OK).
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v330_rubber_band_short_replay.py --days 14 --universe 300
+DECISION: short +EV across buckets → build BOTH long(ext>=1.25%)+short into patch_v330; short <=0/weak →
+  LONG-ONLY (ext>=1.25%, window +1..+4, accel1.3x, RVOL>=1.5, 2/day cap). LONG floor LOCKED at 1.25% per operator.
