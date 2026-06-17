@@ -749,3 +749,16 @@ EMA20) + folds in the vwap_fade overlap split (UNIQUE ext-from-VWAP<1% vs OVERLA
   DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v345_mean_reversion_replay.py --days 14 --ext 3.0 --universe 300 --maxhold 30 --side both --minriskpct 1.0 --winsor 3.0 --vwapgate 1.0
 DECISION: ext buckets +EV → FIRE floor; UNIQUE sizeable&+EV → REWRITE (EMA20 anchor, patch_v346); UNIQUE
 small/neg & OVERLAP dominant → SUPPRESS mean_reversion (vwap_fade covers it). enhanced_scanner baseline 9520d851.
+
+## ✅ v345 RESULT — mean_reversion is ~97% a vwap_fade DUPLICATE → SUPPRESS (patch_v346)
+14d, 60 tradeable (87 gated <1% risk; low-frequency). SHORT n25 win48% wAvg+0.046 medR-0.063 (breakeven);
+LONG n35 win63% wAvg+0.477 medR+0.826 (+EV, strongest 2-4% ext). OVERLAP SPLIT: UNIQUE vs vwap_fade =
+1/25 short, 2/35 long → ~97% OVERLAP (already fire vwap_fade). The +EV LONG edge is ALREADY captured by the
+live vwap_fade; SHORT adds nothing. Rewriting would create correlated double-fires (2x sizing same signal)
+for zero incremental edge → SUPPRESS.
+patch_v346 / v19.34.327: removes "mean_reversion" from trading_bot_service._enabled_setups (L1206) → routes to
+setup_disabled gate (like breakdown). Line-anchored (unique) + py_compile + backup + reverse-rollback (no
+whole-file SHA — large drifting file, single unambiguous enum line). Self-tested isolated copy: check/apply/
+rollback byte-identical; mean_reversion confirmed removed from enabled block.
+  paste https://paste.rs/kpS7V
+DEPLOY: --check → --apply → commit → ./start_backend.sh --force. NEXT FADE: backside(487/15).
