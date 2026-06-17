@@ -1,5 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **✅ 2026-06-17 (latest) — v19.34.323 (patch_v336) SHORT-FADE GATE + R-WINSOR
+> DEPLOYED & COMMITTED (9ae11efc), LIVE. diag_v333/v334 forensics: trade_2_hold is
+> net +$56.9k (the "-878R" was a risk_amount artifact); the REAL P0 = $26.4k EXCESS
+> beyond the stop, 90% SHORTS / 88% vwap_fade_short — low-priced/illiquid strength-shorts
+> with sub-1% stops gapped through OVERNIGHT (WTI 2.84/2c→3.21; PRCT 26.67/4c→27.02).
+> DEEP ENGINE AUDIT (operator-requested): stop/target/IB-exec engines are SOUND — OCA
+> stops are GTC market StopOrders that fired correctly; loss is gap slippage on a no-edge
+> entry held overnight, NOT a placement bug. FIX (entry-side + analytics only, ZERO
+> safety-critical-path change): (1) opportunity_evaluator short-fade gate blocks SHORT
+> fade/reversion setups on price<$5 or stop%<1.0% (SHORT_FADE_GATE_POLICY=block|observe|off);
+> (2) winsorize realized-R to ±R_WINSOR_CLAMP(3.0) in learning_loop._bucket + ev_tracking
+> so -261R artifacts can't poison the meta-labeler. 9/9 pytest; backend health 6g/2y/0r.
+> NEXT (deferred Part A): EOD-flatten ENFORCEMENT for intraday short fades (so they never
+> ride overnight) tied to Issue-3 trade_2_hold classifier gap; then P0 breakdown 2470/0
+> anomaly. DGX §2.2 patcher workflow ONLY — no testing_agent. English.**
+
 > **✅ 2026-06-17 — v320r intraday scalp PRIORITY-CEILING FIX DEPLOYED & COMMITTED
 > (8a69292a). Chain: diag_v320q (priority attribution, paste.rs/5WwmW) proved 66.8%
 > of intraday's non-HIGH population is a STRUCTURAL ceiling — intraday scalps

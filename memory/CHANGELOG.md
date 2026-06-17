@@ -1,3 +1,55 @@
+## 2026-06-17 (later) — v19.34.323 (patch_v336) SHORT-FADE entry gate + R-winsorization — SHIPPED + COMMITTED (9ae11efc) + LIVE
+
+### Why (diag_v333 + diag_v334, READ-ONLY forensics on 120d genuine bot-own trades)
+- diag_v333 reframed `trade_2_hold`: net **+$56.9k**; the "-878R" was a `risk_amount`
+  artifact (planned risk → blown-stop & tiny-risk denominators explode R; winsor avgR
+  was only -0.27). NOT an edge bleed.
+- diag_v334 sized the REAL P0 tail: **$26,356 EXCESS lost BEYOND the stop**, **90% SHORTS**
+  (47 trades), **88% `vwap_fade_short`** ($23.3k). Worst-12 all low-priced/illiquid
+  strength-shorts with sub-1% stops: WTI $2.84/2c→exit 3.21 (-$6,426), USO 108.31 stop
+  →116.12 (0.03% stop), PRCT $26.67/4c→27.02 (×8 fragmented slices). Only 12% of losers
+  blown (<-1.35R); 73% scratch — so NOT a systemic stop failure.
+
+### Engine audit (operator-requested deep review of trade-mgmt / stop / target / IB exec)
+VERDICT: engines are STRUCTURALLY SOUND. Dual-stop = local soft-stop (bid/ask-aware,
+30s stale-quote guard, `position_manager.update_open_positions` L823-864) + IB server-side
+**GTC market `StopOrder`** OCA bracket (`ib_direct_service._place_bracket_two_step` →
+`place_oca_stop_target(time_in_force="GTC")` L1998). The GTC stop SURVIVES overnight and
+fired correctly — the overrun is **gap/squeeze slippage** on a no-edge entry held overnight
+(WTI/USO held ~20-24h per v333), NOT a stop-placement/enforcement bug. OCA-race close guard,
+close_trade/_custom split, v283 partial-fill R-preservation, M0 ladder mgmt, scale-out,
+naked/phantom/sign-mismatch sweeps, multi-layer EOD flatten — all present & sound.
+
+### What shipped (all fail-OPEN, env-reversible; ZERO changes to close_trade /
+### submit_with_bracket / EOD safety-critical paths)
+1. **opportunity_evaluator.py** — SHORT-FADE entry gate (mirrors v194 fail-open pattern):
+   blocks SHORT fade/reversion setups (keyword match on setup_type: fade/bounce/reversion/
+   rubber_band/off_sides/backside) when `price < MIN_SHORT_FADE_PRICE` ($5) → reason
+   `short_fade_low_price`, OR stop-distance% < `MIN_SHORT_FADE_STOP_PCT` (1.0%) → reason
+   `short_fade_stop_too_tight`. Policy `SHORT_FADE_GATE_POLICY={block,observe,off}` (default
+   block). Drops logged to `trade_drops`. Catches every v334 worst-12 row.
+2. **learning_loop_service.py** `_bucket` + **ev_tracking_service.py** EV calc — winsorize
+   each realized-R to ±`R_WINSOR_CLAMP` (3.0) so a single -261R artifact can't poison the
+   meta-labeler / EV gate. win_rate (sign-based) and raw `r_outcomes` unchanged.
+
+### Deploy / verification
+patch_v336 (paste.rs/Vgvj0, §2.2 PRE/POST SHA256 guards, --check, auto-backup, --rollback).
+PRE oe 886bb287 / ll b6805b41 / ev 72edc34c → POST oe 2625116e94 / ll c6e4344905 / ev 44a4f8426f.
+DGX --check clean → applied → 9/9 pytest (`tests/test_v336_short_fade_winsor.py`, paste.rs/ZPzWX)
+→ committed 9ae11efc → pushed → backend restarted clean (health 6 green/2 benign-yellow/0 red).
+Backups `*.bak.v336` on disk. NO testing_agent (DGX mandate). English.
+
+### Env knobs (backend/.env, all optional)
+SHORT_FADE_GATE_POLICY=block|observe|off · MIN_SHORT_FADE_PRICE=5.0 ·
+MIN_SHORT_FADE_STOP_PCT=0.010 · SHORT_FADE_SETUP_KEYWORDS=fade,bounce,reversion,rubber_band,off_sides,backside ·
+R_WINSOR_CLAMP=3.0
+
+### Deferred follow-up (NEXT)
+- **Part A**: EOD-flatten ENFORCEMENT for intraday short fades (so they never ride overnight
+  into a gap) — tied to Issue-3 `trade_2_hold` classifier gap (528/586 genuine fell to this
+  default bucket). Touches Journey-3 EOD path → handle with care.
+- P0 `breakdown` 2470-fires/0-trades anomaly. Then FADE/MOMENTUM scalp sweeps; P-WIRE Phase 2.
+
 ## 2026-06-17 (later) — v320r intraday scalp priority-ceiling fix PATCHER READY (paste.rs/mTqD1)
 
 ### Chain: v320q (attribution) → v320r-precheck (EV gate) → v320r (the fix)

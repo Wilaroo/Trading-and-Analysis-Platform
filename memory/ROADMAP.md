@@ -3,6 +3,26 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## 🔴 NEXT SESSION (added 2026-06-17, after v336 short-fade gate shipped)
+- **P0 — Part A: EOD-flatten ENFORCEMENT for intraday short fades.** v334 catastrophic
+  tail (WTI/USO) = intraday short fades that rode ~20-24h OVERNIGHT, then a gap blew the
+  GTC market-stop far past trigger. v336 prevents ENTRY of the danger profile; Part A must
+  ensure any intraday/short-fade that DOES open is reliably EOD-flattened so it never holds
+  overnight. ENTANGLED with Issue-3 (`trade_2_hold` classifier gap — diag_v333 showed 528/586
+  genuine trades fell to this default bucket → may resolve to a non-EOD policy). Build a
+  read-only diag first (which genuine intraday/fade closed trades had hold_seconds spanning a
+  session boundary + their resolved trade_style/close_at_eod policy), THEN patch. Touches
+  Journey-3 EOD path (safety-critical) — fork via siblings, validate at 15:55 ET.
+- **P0 — `breakdown` anomaly (2470 fires / 0 genuine trades):** diagnose whether it's a real
+  block bug or correct suppression. Read-only audit of the breakdown detector → execution path.
+- **P1 — verify v336 in the wild:** after next RTH, grep `🚫 [v19.34.323 short-fade]` and
+  confirm it catches vwap_fade_short on sub-$5 / tight-stop names (run with
+  SHORT_FADE_GATE_POLICY=observe first if you want to watch before blocking).
+- Then: FADE scalp sweep (gap_fade/vwap_fade/mean_reversion/backside), MOMENTUM scalp sweep,
+  P-WIRE Phase 2 (~200 resolved shadow decisions). 🔴 Rotate Atlas MongoDB password (still pending).
+
+
+
 ## ✅ RESOLVED (2026-06-16, diag_v320x) — "91% high_vol" debunked; regime classifier is ACCURATE; DO NOT recalibrate the 1.3 threshold
 diag_v320x_regime_validation.py (paste.rs/lWcsD) backtested the PRODUCTION classify_regime
 on 175 clean SPY daily bars (last ~180td). True distribution: range_bound 37%, bull_trend
