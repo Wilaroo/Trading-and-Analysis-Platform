@@ -1,0 +1,60 @@
+# Scalp Fidelity Investigation (SMB cheat-sheet vs code) — 2026-06 fork
+
+Operator goal: get the system to **find / fire / trade** the SMB scalps PROPERLY
+(starting with rubber_band), measured against the real cheat sheets. All work is
+READ-ONLY diags delivered via paste.rs (AGENTS.md §2.2). No detector patched yet.
+
+## Live DGX anchor
+- `backend/services/enhanced_scanner.py` SHA256 (2026-06-17):
+  `b631ebad524d6fc8151cd4d9f979b73c0b1997337557a680035d6a9742e1e3e3`
+- Sandbox file is line-shifted ~+42 lines vs DGX → patchers MUST anchor on exact
+  text + assert PRE_SHA, never line numbers.
+- 1-min bars CONFIRMED available: `ib_historical_data`, `bar_size:'1 min'`, 259M docs,
+  date = tz-aware ISO. → snapback double-bar-break trigger is buildable at native granularity.
+
+## Detector locations (DGX line nums)
+rubber_band 4402 · second_chance 4923 · backside 4961 · off_sides 5002 ·
+fashionably_late 5044 · hitchhiker 4747 · big_dog 5882 · gap_pick_roll 6316.
+Snapshot has `.open` and `.atr` (used by back_through_open etc.) → ATR-from-open computable.
+
+## Issues CLOSED by data
+- gap_pick_roll: already tape-gated HIGH (line 6343) → no-op.
+- off_sides_short: shorts into strength — 70% bullish tape, 4.3% confirm, no edge → correctly
+  suppressed; DO NOT promote.
+
+## Cheat-sheet vs code fidelity (audited 6 SMB setups)
+Systemic deviation: every detector fires on a STATE; every SMB scalp's edge is a
+TRIGGER (aggressive 1-min range/candle break). None implement the trigger; none enforce
+the daily attempt cap (2-strikes / one-and-done). Fidelity: fashionably_late 🟢 High;
+backside/hitchhiker 🟡 Med; rubber_band/second_chance/big_dog 🔴 Low (second_chance is
+basically a VWAP-proximity long, not a retest; big_dog has no wedge/vol-contraction/mid-day gate).
+
+## Sanitized edge (v321b, last 14d, canonical classify_close)
+- 1646 raw closed → only **66 sanitized** in 14d. Per-setup edge mostly UNMEASURABLE.
+- n≥5 only: daily_breakout -0.40R(n6), trend_continuation_short -0.16R(n19),
+  fashionably_late -0.09R(n7, ~breakeven).
+- ELEPHANT: system alerts in the thousands, almost nothing becomes a clean trade.
+
+## rubber_band FIND census (v321c, 14d, ext≥1%, 1-min bars)
+- 919 real snapback event-days (32% of scanned cells); we alerted 55 cells / 192 alerts.
+- **RECALL 3%** (we miss 97% of real snapbacks), **PRECISION 49%**, 14/55 cells over-fire (max 29/day).
+- Extension calibration: p50 day = 1.09% below open; ≥2.0% = 29% of cells, ≥3.0% = 18%.
+  → FIRE detector should use ext≥~2% (not 1%) + snapback trigger + RVOL + 2/day cap.
+
+## Diags shipped this session (paste.rs, round-trip verified)
+- diag_v320y_off_sides_tape.py        sha 92d3362e… (paste Dw58y)
+- diag_v320z_rubber_band_truth.py     sha bc1be652… (paste sckt5)
+- diag_v321a_setup_fidelity.py        sha c3c3f94d… (paste 4rLJb)  [edge col VOID — raw pnl]
+- diag_v321b_sanitized_edge.py        sha 3413ee27… (paste cGdbJ)  [canonical sanitized edge]
+- diag_v321c_rubber_band_replay.py    sha 71a5c7de… (paste hwSrg)  [1-min FIND census]
+- diag_v321d_trade_autopsy.py         sha 67dc7414… (paste AMub7)  [alert→trade→funnel autopsy]
+
+## Plan: find → fire → trade (rubber_band first, then apply template)
+1. FIND ✅ proven (v321c: 3% recall).
+2. TRADE 🔎 v321d running — find WHERE 192 alerts → 0 clean trades die (gate vs exit-mgmt vs shadow).
+3. FIRE ⏭ redesign `_check_rubber_band` patcher: ext-from-open≥~2% + 1-min double-bar-break
+   snapback within ~6 bars of LOD + RVOL quality + clean-trend avoid + 2/day cap.
+   OPEN IMPLEMENTATION Q: how does a detector access recent 1-min bars at runtime?
+   (scanner has _prime_wave_live_bars + ib_historical_data; may need snapback flag stamped
+   on the snapshot during build, OR a bar fetch inside the detector). Verify before patching.
+4. Generalize template to hitchhiker, second_chance, big_dog.
