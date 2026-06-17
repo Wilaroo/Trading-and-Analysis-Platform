@@ -335,3 +335,24 @@ compare to v329 long (+0.268R, 76%). paste https://paste.rs/hALOb
 DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v330_rubber_band_short_replay.py --days 14 --universe 300
 DECISION: short +EV across buckets → build BOTH long(ext>=1.25%)+short into patch_v330; short <=0/weak →
   LONG-ONLY (ext>=1.25%, window +1..+4, accel1.3x, RVOL>=1.5, 2/day cap). LONG floor LOCKED at 1.25% per operator.
+
+## ✅✅ v330 DGX RESULT (2026-06-17) — SHORT SIDE ALSO STRONGLY +EV → BUILD BOTH
+14d univ300: 1153 events/795 sym-days, 1146 tradeable. OVERALL win=74%, avgR=+0.587,
+totR=+672.4R (mean skewed by big winners; medR=+0.264 → solid +central tendency).
+BY EXT: 1-2% n559 +0.281R | 2-3% n256 +1.334R | >=3% n331 +0.526R (all +EV).
+BY SPEED: +0bar weak (+0.149), +1..+4 strong (+0.211/+0.329/+1.916/+0.651), +5/+6 +0.34/+0.20.
+DECISION: BUILD BOTH sides into the _check_rubber_band rewrite. Symmetric config:
+  LONG  ext>=1.25% (operator), SHORT ext>=1.25% (1-2% bucket +0.281R, fine); window +1..+4
+  (exclude +0), accel1.3x, RVOL>=1.5, 2/day cap PER SIDE per (symbol,day).
+  geometry LONG: entry=2-bar-break-up, stop=LOD-0.02, t1=9EMA, t2=VWAP.
+           SHORT: entry=2-bar-break-down, stop=HOD+0.02, t1=9EMA, t2=VWAP.
+
+## 🔧 DRIFT HANDLING for patch_v330 (enhanced_scanner.py)
+sandbox enhanced_scanner.py SHA bf5cf446… != recorded DGX b631ebad… → DRIFTED. File 452KB
+(> paste.rs ~384KB safe limit) → cannot whole-file round-trip. STRATEGY: anchor patcher on the
+operator's EXACT _check_rubber_band bytes via function-level PRE/POST SHA (not whole-file), +
+py_compile guard. Shipped _extract_rb_func.py (DGX-safe, no heredoc) to pull the live function:
+  paste https://paste.rs/8h1Hv. Operator runs it → returns function-SHA + paste URL of their bytes →
+  rebuild patch_v330 anchored on those exact bytes (function-granular PRE/POST sha + compile check +
+  --check/--apply/--rollback + backup). Sandbox function span 4360..4480 (121 lines), sandbox func
+  sha 1901bcfc… (DGX likely differs — use theirs).
