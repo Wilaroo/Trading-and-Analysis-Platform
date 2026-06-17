@@ -4400,124 +4400,166 @@ class EnhancedBackgroundScanner:
     # ==================== SETUP CHECKERS (with tape reading) ====================
     
     async def _check_rubber_band(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Rubber Band Scalp - Mean reversion from EMA9"""
-        # Long setup - extended below EMA9
-        if snapshot.dist_from_ema9 < -2.5 and snapshot.rsi_14 < 38 and snapshot.rvol >= 1.5:
-            extension = abs(snapshot.dist_from_ema9)
-            
-            # Higher priority with tape confirmation
-            if tape.confirmation_for_long and extension > 3.5:
-                priority = AlertPriority.CRITICAL
-            elif extension > 3.5:
-                priority = AlertPriority.HIGH
-            else:
-                priority = AlertPriority.MEDIUM
-            
-            # Calculate proper levels using S/R and ATR
-            stop_loss = round(min(snapshot.low_of_day - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
-            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
-            target_2 = round(snapshot.vwap, 2) if snapshot.vwap > snapshot.ema_9 else round(snapshot.ema_9 + snapshot.atr, 2)
-            
-            # Calculate R-multiple
-            risk = snapshot.current_price - stop_loss
-            reward = target_1 - snapshot.current_price
-            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
-            
-            # Get historical EV
-            ev_info = ""
-            if "rubber_band" in self._strategy_stats:
-                stats = self._strategy_stats["rubber_band"]
-                if stats.win_rate > 0:
-                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
-            
-            return LiveAlert(
-                id=f"rb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="rubber_band_long",
-                strategy_name="Rubber Band Long (INT-25)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.ema_9,
-                stop_loss=stop_loss,
-                target=target_1,
-                risk_reward=r_multiple,
-                trigger_probability=0.65,
-                win_probability=0.62,
-                minutes_to_trigger=10,
-                headline=f"🎯 {symbol} Rubber Band LONG - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Extended {extension:.1f}% below 9-EMA ${snapshot.ema_9:.2f}",
-                    f"RSI oversold at {snapshot.rsi_14:.0f}",
-                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} below support, Target: ${target_1:.2f})",
-                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else "Mean reversion to EMA9",
-                    "Entry: Double bar break above prior highs"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        
-        # Short setup - extended above EMA9
-        if snapshot.dist_from_ema9 > 3.0 and snapshot.rsi_14 > 65 and snapshot.rvol >= 1.5:
-            extension = snapshot.dist_from_ema9
-            
-            if tape.confirmation_for_short and extension > 4.0:
-                priority = AlertPriority.CRITICAL
-            elif extension > 4.0:
-                priority = AlertPriority.HIGH
-            else:
-                priority = AlertPriority.MEDIUM
-            
-            # Calculate proper levels using S/R and ATR
-            stop_loss = round(max(snapshot.high_of_day + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
-            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
-            target_2 = round(snapshot.vwap, 2) if snapshot.vwap < snapshot.ema_9 else round(snapshot.ema_9 - snapshot.atr, 2)  # noqa: F841
-            
-            # Calculate R-multiple
-            risk = stop_loss - snapshot.current_price
-            reward = snapshot.current_price - target_1
-            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
-            
-            # Get historical EV
-            ev_info = ""
-            if "rubber_band" in self._strategy_stats:
-                stats = self._strategy_stats["rubber_band"]
-                if stats.win_rate > 0:
-                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
-            
-            return LiveAlert(
-                id=f"rb_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="rubber_band_short",
-                strategy_name="Rubber Band Short (INT-25)",
-                direction="short",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.ema_9,
-                stop_loss=stop_loss,
-                target=target_1,
-                risk_reward=r_multiple,
-                trigger_probability=0.65,
-                win_probability=0.58,
-                minutes_to_trigger=10,
-                headline=f"🎯 {symbol} Rubber Band SHORT - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_short else ''}",
-                reasoning=[
-                    f"Extended {extension:.1f}% above 9-EMA ${snapshot.ema_9:.2f}",
-                    f"RSI overbought at {snapshot.rsi_14:.0f}",
-                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} above resistance, Target: ${target_1:.2f})",
-                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else "Mean reversion to EMA9",
-                    "Entry: Double bar break below prior lows"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        
+        """Rubber Band Scalp — SMB snapback (v19.34.322 redesign).
+
+        Fires on the TRIGGER, not a %-from-EMA9 STATE: price must extend
+        >= EXT_FLOOR% from the SESSION OPEN, then a 1-min double-bar-break
+        snapback prints within +1..+4 bars of the extreme. Validated +EV on a
+        14d native-1min replay (v329 long +0.27R/76%; v330 short +0.59R/74%);
+        the edge lives in the +1..+4 window so the same-bar (+0) reversal is
+        excluded. Caps 2 fires/day per (symbol, side) — cheat-sheet 2-strikes.
+        """
+        EXT_FLOOR = 1.25       # % extension from the session open
+        TRIGGER_WIN = 4        # snapback must print within +1..+4 bars of the extreme
+        ACCEL = 1.3            # extreme-bar range >= ACCEL x median range so far
+        MIN_RVOL = 1.5
+
+        ts = self.technical_service
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+
+        rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+        if rvol < MIN_RVOL:
+            return None
+        open_px = float(getattr(snapshot, "open", 0.0) or bars[0].get("open", 0.0) or 0.0)
+        if open_px <= 0:
+            return None
+
+        caps = getattr(self, "_rb_daily_caps", None)
+        if caps is None:
+            caps = self._rb_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        # ----- LONG snapback: extended BELOW open, green bar clears prior-2 highs -----
+        lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
+        if lows:
+            lod = min(v for _, v in lows)
+            lod_idx = max(j for j, v in lows if v == lod)
+            ext_long = (open_px - lod) / open_px * 100.0
+            accel_l = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
+            green = last["close"] > last["open"]
+            clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+            if (ext_long >= EXT_FLOOR and accel_l and green and clears_hi
+                    and 1 <= (i - lod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:long"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(min(lod - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
+                target_1 = round(snapshot.ema_9, 2)
+                risk = snapshot.current_price - stop_loss
+                reward = target_1 - snapshot.current_price
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_long and ext_long > 3.0)
+                            else AlertPriority.HIGH if ext_long > 2.0 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "rubber_band" in self._strategy_stats:
+                    st = self._strategy_stats["rubber_band"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+                return LiveAlert(
+                    id=f"rb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="rubber_band_long",
+                    strategy_name="Rubber Band Long (snapback)",
+                    direction="long",
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.76,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} Rubber Band LONG snapback — {ext_long:.1f}% below open {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_long:.1f}% below open ${open_px:.2f} → 1-min double-bar-break snapback",
+                        f"Snapback {i - lod_idx} bar(s) after LOD ${lod:.2f} (flush range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target 9-EMA ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to 9-EMA (v329 replay +0.27R, 76% win)",
+                        "Entry: green bar cleared prior-2 highs (2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+                )
+
+        # ----- SHORT snapback: extended ABOVE open, red bar breaks prior-2 lows -----
+        highs = [(j, b["high"]) for j, b in enumerate(bars) if b.get("high") is not None]
+        if highs:
+            hod = max(v for _, v in highs)
+            hod_idx = max(j for j, v in highs if v == hod)
+            ext_short = (hod - open_px) / open_px * 100.0
+            accel_s = (med_r <= 0) or ((bars[hod_idx]["high"] - bars[hod_idx]["low"]) >= ACCEL * med_r)
+            red = last["close"] < last["open"]
+            breaks_lo = i >= 2 and last["low"] < min(bars[i - 1]["low"], bars[i - 2]["low"])
+            if (ext_short >= EXT_FLOOR and accel_s and red and breaks_lo
+                    and 1 <= (i - hod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:short"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(max(hod + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
+                target_1 = round(snapshot.ema_9, 2)
+                risk = stop_loss - snapshot.current_price
+                reward = snapshot.current_price - target_1
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_short and ext_short > 3.0)
+                            else AlertPriority.HIGH if ext_short > 2.0 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "rubber_band" in self._strategy_stats:
+                    st = self._strategy_stats["rubber_band"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_short else ""
+                return LiveAlert(
+                    id=f"rb_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="rubber_band_short",
+                    strategy_name="Rubber Band Short (snapback)",
+                    direction="short",
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(min(bars[i - 1]["low"], bars[i - 2]["low"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.74,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} Rubber Band SHORT snapback — {ext_short:.1f}% above open {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_short:.1f}% above open ${open_px:.2f} → 1-min double-bar-break-down snapback",
+                        f"Snapback {i - hod_idx} bar(s) after HOD ${hod:.2f} (spike range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} above HOD, Target 9-EMA ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to 9-EMA (v330 replay +0.59R, 74% win)",
+                        "Entry: red bar broke prior-2 lows (2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+                )
+
         return None
     
     async def _check_vwap_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
