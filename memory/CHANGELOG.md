@@ -34,9 +34,11 @@ chunks (each uniquely keyed by setup_type, count==1 asserted), drift-safe (abort
 mismatch / PRE mismatch), auto-backup, --check/--apply/--rollback/--status, py_compile gate,
 marker-based idempotency. FULL round-trip patcher test PASSED locally (synthetic target:
 status/check/apply/idempotent-noop/rollback + PRE&POST compile). paste.rs/mTqD1 round-trip
-IDENTICAL. AWAITING operator --check → --apply → commit → restart. Post-deploy verify (next
-RTH): re-run diag_v320q --days 5 — INTRADAY HIGH% should rise toward CARRY%; diag_v320o
-override footprint stable.
+IDENTICAL. ✅ APPLIED + COMMITTED + PUSHED on DGX (commit 8a69292a; POST sha b631ebad…
+matched the --check prediction exactly; backend restarted clean, /api/system/health green
+8/8, IB connected, pusher fresh). Post-deploy verify (NEXT RTH, wall-clock gated): re-run
+diag_v320q --days 5 — INTRADAY HIGH% should rise toward CARRY% as these 3 promote on
+tape-confirmed alerts; diag_v320o override footprint stable.
 
 ### FOLLOW-UPS
 - gap_pick_roll: confirm DGX priority line (`grep -n -A 35 'async def _check_gap_pick_roll'`);

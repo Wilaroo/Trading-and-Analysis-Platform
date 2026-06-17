@@ -1,5 +1,23 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **✅ 2026-06-17 — v320r intraday scalp PRIORITY-CEILING FIX DEPLOYED & COMMITTED
+> (8a69292a). Chain: diag_v320q (priority attribution, paste.rs/5WwmW) proved 66.8%
+> of intraday's non-HIGH population is a STRUCTURAL ceiling — intraday scalps
+> (second_chance/backside/fashionably_late + more) hard-code priority=MEDIUM so they
+> can NEVER reach HIGH (the auto-fire bar), despite equal-or-better TQS/in-play/tape
+> vs carry. diag_v320r-precheck (EV-gate calibration, paste.rs/gglWO) confirmed the EV
+> gate lets them fire (cold-start grace) and correctly blocks proven losers
+> (rs_leader_break -0.14R/39 outcomes EV-BLOCKED) → gate is calibrated. v320r
+> (paste.rs/mTqD1, §2.2 patcher, PRE 89555e59→POST b631ebad) gave 3 scalps the existing
+> tape-gated HIGH branch (HIGH if tape.confirmation_for_long else MEDIUM); alert-stamping
+> only, EV gate still governs auto-fire. big_dog EXCLUDED (-2.12R/20%), gap_pick_roll
+> EXCLUDED (DGX form unconfirmed). Backend restarted clean (health green 8/8). VERIFY
+> NEXT RTH: re-run diag_v320q --days 5 → INTRADAY HIGH% should rise toward CARRY%.
+> FOLLOW-UPS: gap_pick_roll DGX-form check; off_sides_short low-tape (3.8%) investigation;
+> P-WIRE Phase 2 (~200 resolved shadow decisions); v321 EOD Flatten Modal. DGX patcher
+> workflow ONLY — no testing_agent. English.**
+
+
 > **✅ 2026-06-16 (later) — P0/P1 OCA + observability batch DEPLOYED & COMMITTED:
 > v320h (observe, e7b9c682) → v320h.1 implied-primary (b259038a) + historical
 > backfill (470 rows, net_pnl 29→−23,508 corrected) → v320i target_order_ids
