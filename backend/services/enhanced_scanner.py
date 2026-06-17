@@ -5006,7 +5006,7 @@ class EnhancedBackgroundScanner:
 
         def _etm(bar):
             try:
-                dt = datetime.fromisoformat(str(bar.get("date")).replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(str(bar.get("timestamp") or bar.get("date")).replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 dt = dt.astimezone(_ET)

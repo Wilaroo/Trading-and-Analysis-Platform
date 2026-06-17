@@ -2,7 +2,8 @@
 test_v355_orb.py — Opening Range Break cheat-sheet rewrite (v19.34.355).
 
 Drives EnhancedBackgroundScanner._check_orb with a fabricated `self`, synthetic 1-min bars
-(UTC; June -> 13:30 UTC = 09:30 ET), snapshot and tape. Verifies the SMB ORB doctrine:
+(UTC; June -> 13:30 UTC = 09:30 ET) keyed with 'timestamp' (the shape _get_intraday_bars_from_db
+returns after renaming 'date' -> 'timestamp'), snapshot and tape. Verifies the SMB ORB doctrine:
   • FIRES a LONG on the first break above the 15-min opening-range high WITH a volume
     expansion, STOP just below the breakout bar, TARGET = 2x the OR measured move, R:R
     gated [1.5, 2.5], during the morning window.
@@ -22,7 +23,7 @@ from services.enhanced_scanner import EnhancedBackgroundScanner, TimeWindow
 
 
 def _bar(hhmm, o, h, l, c, v):
-    return {"date": f"2026-06-16T{hhmm}:00+00:00", "open": o, "high": h, "low": l, "close": c, "volume": v}
+    return {"timestamp": f"2026-06-16T{hhmm}:00+00:00", "open": o, "high": h, "low": l, "close": c, "volume": v}
 
 
 # 15-min OR 98.00-100.00 (height 2.0), breakout bar at 09:45 ET closes 100.50 on 3x volume.
