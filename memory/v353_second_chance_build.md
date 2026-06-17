@@ -36,7 +36,9 @@ patch_v353_second_chance_doctrine.py → https://paste.rs/jDGfl  sha 547f642d9da
 test_v353_second_chance.py           → https://paste.rs/OpbLr  sha f4270eafc66350756525d617a970c5f7ff0427494f5bf30f320f2535a2c2f2f4
 All 6 test scenarios validated locally vs the NEW function (fire stop=99.98/target=100.60/RR=1.82; 5 no-fire guards).
 
-## Status: AWAITING operator --check / --apply / pytest / commit / restart.
+## Status: DEPLOYED ✅ (operator applied, 6/6 pytest, committed, backend GREEN 8/8).
+## NEW LIVE BASELINE whole-file SHA (enhanced_scanner.py) = 3611da4854a7fff120793d4c882de141c3e1a663cd08bd9ba8cc25928635d0af
+##   -> use this as DGX_WHOLE_PRE for the NEXT patcher (re-extract to confirm).
 
 ## NEXT MOMENTUM SETUPS (by frequency, same replay→validate→patch flow)
 vwap_bounce, orb, first_move_up, first_move_down, fashionably_late, daily_breakout,
