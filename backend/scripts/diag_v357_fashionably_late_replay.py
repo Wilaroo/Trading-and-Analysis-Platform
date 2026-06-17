@@ -169,6 +169,7 @@ def main():
     tz_assume = _argstr('--tz', 'auto')
     minmove = _arg('--minmove', 0.05, float)
     warmup = _arg('--warmup', 3, int)
+    maxturn = _arg('--maxturn', 9, int)  # cheat sheet: avoid >15min flat 9EMA after the turn (9 bars*5min=45min cap)
     cap = _arg('--winsor', 3.0, float)
 
     db = _load_db()
@@ -245,11 +246,13 @@ def main():
                 vwap.append(cum_pv / cum_v if cum_v > 0 else c[k])
 
             last_entry = -999
-            lod = l[0]
-            hod = h[0]
+            lod = l[0]; lod_idx = 0
+            hod = h[0]; hod_idx = 0
             for i in range(1, len(rb)):
-                lod = min(lod, l[i])
-                hod = max(hod, h[i])
+                if l[i] < lod:
+                    lod = l[i]; lod_idx = i
+                if h[i] > hod:
+                    hod = h[i]; hod_idx = i
                 if i < warmup or i - last_entry < cooldown:
                     continue
                 in_win = WIN_START <= ets[i].time() <= WIN_END
@@ -274,7 +277,12 @@ def main():
                         stop_l = vwap[i] - atr * 0.33
                         tgt_l = vwap[i] + move
                         r_liv, rr_liv = _sim_long(h, l, c, i, end, entry, stop_l, tgt_l)
+                        div = v[0:lod_idx + 1]; conv = v[lod_idx:i + 1]
+                        conv_gt = (mean(conv) if conv else 0) > (mean(div) if div else 0)
+                        turn_bars = i - lod_idx
                         events.append({'side': 'long', 'in_win': in_win, 'vwap_ok': vwap_ok,
+                                       'conv_gt': conv_gt, 'turn_bars': turn_bars,
+                                       'qual': conv_gt and 0 < turn_bars <= maxturn,
                                        'doc': r_doc, 'doc_rr': rr_doc,
                                        'live': r_liv, 'live_rr': rr_liv})
                         last_entry = i
@@ -294,7 +302,12 @@ def main():
                         stop_l = vwap[i] + atr * 0.33
                         tgt_l = vwap[i] - move
                         r_liv, rr_liv = _sim_short(h, l, c, i, end, entry, stop_l, tgt_l)
+                        div = v[0:hod_idx + 1]; conv = v[hod_idx:i + 1]
+                        conv_gt = (mean(conv) if conv else 0) > (mean(div) if div else 0)
+                        turn_bars = i - hod_idx
                         events.append({'side': 'short', 'in_win': in_win, 'vwap_ok': vwap_ok,
+                                       'conv_gt': conv_gt, 'turn_bars': turn_bars,
+                                       'qual': conv_gt and 0 < turn_bars <= maxturn,
                                        'doc': r_doc, 'doc_rr': rr_doc,
                                        'live': r_liv, 'live_rr': rr_liv})
                         last_entry = i
@@ -325,6 +338,13 @@ def main():
     _report('ALL', events, 'live', cap)
     _report('LONG', [e for e in events if e['side'] == 'long'], 'live', cap)
     _report('SHORT', [e for e in events if e['side'] == 'short'], 'live', cap)
+    print('=' * 92)
+    print('DOCTRINE exits — QUALITY cuts (cheat-sheet probability boosters):')
+    _report('conv_vol>div_vol', [e for e in events if e['conv_gt']], 'doc', cap)
+    _report(f'fast turn (<={maxturn} bars)', [e for e in events if 0 < e['turn_bars'] <= maxturn], 'doc', cap)
+    _report('QUALITY (both, LONG)', [e for e in events if e['qual'] and e['side'] == 'long'], 'doc', cap)
+    _report('QUALITY (both, SHORT)', [e for e in events if e['qual'] and e['side'] == 'short'], 'doc', cap)
+    _report('QUALITY (both, ALL)', [e for e in events if e['qual']], 'doc', cap)
     print('=' * 92)
     print('\n=== READING ===')
     print('• Cheat sheet claims 60% win @ 3:1 RR. Compare DOCTRINE win% / winsorAvg vs LIVE-style.')
