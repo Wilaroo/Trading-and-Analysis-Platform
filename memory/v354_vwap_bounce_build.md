@@ -31,7 +31,9 @@ test_v354_vwap_bounce.py           -> https://paste.rs/GWV7u  sha 610fa5589798eb
 ## Fixed extractor -> https://paste.rs/MMZzt  sha 7cf7f39edab1e8b70b6eba71343ec677e6ab7d58c11e93b048ebbc5852309b6c
 ## NOTE: v353 second_chance was UNAFFECTED (next sibling was async def _check_backside).
 
-## Status: AWAITING operator --check/--apply/pytest/commit/restart.
+## Status: DEPLOYED ✅ (operator applied, 1/1 pytest, committed, backend GREEN 8/8).
+## NEW LIVE BASELINE whole-file SHA = 8a02c5232659732e0191e4ffcee086aed6b53e11cf11689d52cabe3069620864
+##   -> use as DGX_WHOLE_PRE for the NEXT patcher (re-extract to confirm).
 
 ## Next
 1. Operator runs extract_func.py _check_vwap_bounce on DGX -> paste whole-file SHA(=expect 3611da48...)+PRE+OLD_B64.
