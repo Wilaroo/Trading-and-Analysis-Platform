@@ -4563,42 +4563,21 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_vwap_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """VWAP Bounce - Pullback to VWAP in uptrend"""
-        if (-0.8 < snapshot.dist_from_vwap < 0.3 and 
-            snapshot.trend == "uptrend" and 
-            snapshot.above_ema9 and
-            snapshot.rvol >= 1.5):
-            
-            dist = abs(snapshot.dist_from_vwap)
-            priority = AlertPriority.HIGH if dist < 0.3 and tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"vwap_bounce_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="vwap_bounce",
-                strategy_name="VWAP Bounce (INT-06)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(snapshot.vwap - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.vwap + (snapshot.atr * 1.5), 2),
-                risk_reward=3.0,
-                trigger_probability=0.60,
-                win_probability=0.60,
-                minutes_to_trigger=10,
-                headline=f"📍 {symbol} VWAP Bounce - ${snapshot.vwap:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Price {snapshot.dist_from_vwap:+.1f}% from VWAP",
-                    "Uptrend intact - above 9-EMA and 20-EMA",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}",
-                    "Entry: Rejection wick + bullish candle at VWAP"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+        """VWAP Bounce \u2014 DISABLED (v19.34.354, audit suppression).
+
+        Audit finding: the shipped near-VWAP-STATE rule (dist_from_vwap in (-0.8%, +0.3%),
+        trend==uptrend, above 9-EMA, rvol>=1.5; stop=VWAP-0.5*ATR, target=VWAP+1.5*ATR,
+        R:R hard-coded 3.0) is NEGATIVE-EV. 14d native-1min replay (diag_v354_vwap_bounce):
+        winsorAvg -0.101R over 2,387 fires (-242R total) \u2014 59%% win but BROKEN geometry
+        (realized avg R:R 0.85). A doctrine rewrite (SMB "First VWAP Pullback": opening-drive
+        up-leg -> pullback that HOLDS above rising VWAP -> confirmation bounce; stop just below
+        VWAP, target = measured move of the first leg) was tested across legmult 0.5/0.75/1.0,
+        minleg 0.5/0.75/1.0, single-attempt and RR caps 2.0-2.5: EVERY R:R band stayed negative
+        (doctrine entry only 30-43%% win; best band -0.049R). No validated +EV configuration
+        exists in the IB data, so this high-fire setup is SUPPRESSED to stop the bleed on the
+        unmanaged paper account. Re-enable only after a replay surfaces a band with
+        winsorAvg > 0. --rollback restores the prior near-VWAP rule.
+        """
         return None
     
     # v19.34.47 — ATR-floored stop helper.
