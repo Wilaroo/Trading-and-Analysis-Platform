@@ -26344,3 +26344,25 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   suppress), backside(v348), off_sides(v350) ALL DONE. ***
   NEXT PHASE (B): MOMENTUM/continuation setups — build a new continuation-replay
   template (breakout follow-through, opposite of snapback mechanics).
+
+- 2026-06-17 v352 (CHEAT-SHEET RE-ALIGN — backside): User supplied ~19 SMB
+  cheat sheets; cross-check revealed v348 backside DEVIATED from the official
+  Back$ide sheet on STOP/R:R (v348 used deep flush-LOD stop -> R:R<1). diag_v352
+  _backside_higherlow_replay (paste.rs/JsWBw) validated the doctrine version:
+  TIGHT stop = .02 below the most-recent HIGHER LOW, HH+HL rising structure,
+  above 9-EMA + below VWAP, recovered >halfway LOD->VWAP, target=VWAP, RR>=1,
+  one-and-done, 10:00-13:30 ET. Result: 63% win, winsorAvg +0.70R, medR +1.11R,
+  avg R:R 4.8 (vs v348 +0.28R). patch_v352_backside_cheatsheet.py (paste.rs/
+  uNxFY) anchored to live v348 backside (func PRE 2f6f4f61), func POST e7d32308.
+  DGX_WHOLE_PRE e772deda -> APPLIED new whole-file SHA
+  907581dcf313c5d1ba4e275d2de548dbf8f5119ecd479129c8dad63d77f0a50e.
+  Committed 1d0b86cf; backend GREEN (7 green / 1 yellow). test_v352_backside.py
+  (paste.rs/kC98F) 6 pass.
+  *** NEW DIRECTIVE: cheat sheets are GROUND TRUTH. Review queue by fire count,
+  cheat-sheet-backed first. backside DONE. NEXT: second_chance (16,659). ***
+  Cheat sheets on hand (~19): back$ide(done), second_chance, First VWAP Pullback,
+  ORB, First Move Up/Down, fashionably_late, Range Break, Big Dog, Puppy Dog,
+  Gap Give&Go, Spencer Scalp, rubberband, hitchhiker, 9 EMA(ride-9ema scalp),
+  Breaking News(intraday catalyst), Bella Trade(distinct long/short), Back-Through
+  Open(investigate). No sheets for squeeze(29k)/relative_strength(17k+11k)/
+  daily_squeeze(10k) -> research params online.
