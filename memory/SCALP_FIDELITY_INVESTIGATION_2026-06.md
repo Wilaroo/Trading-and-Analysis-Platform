@@ -377,3 +377,13 @@ DEPLOY: --check (expect whole-file OK) → --apply → curl test → pytest test
   on real flushes; track their fire→GO→trade (now mode-unblocked post-v328) + sanitized avgR vs replay
   (+0.27R long / +0.59R short). NEXT: generalize this find→trade-replay→rewrite template to hitchhiker,
   second_chance, big_dog.
+
+## ✅ patch_v330 APPLIED & LIVE (2026-06-17, commit 19dde7f5) — detector rewrite deployed
+--check whole-file OK (b631ebad) → --apply → POST whole-file SHA bc674f2688e9983edc3e7cad385a3463fe04d75ebc8dd927975154018b4b37cf
+(backup .bak_v330). Committed 19dde7f5 + pushed. Live detector compiles & is the new SMB snapback.
+TEST BUG (test-only, NOT runtime): test_v330 imported wrong class name `EnhancedScanner`; real class is
+`EnhancedBackgroundScanner` (enhanced_scanner.py L817). Fixed import + hardened _run to use a fresh
+asyncio loop (py3.12). Corrected test paste https://paste.rs/tI6b2
+  sha 9465d8861f9772e5fede10f243b932215555c06a0edfa3f65fae82247cd77b2b. Operator to pull + pytest (5) + re-commit.
+DETECTOR VALIDATION stands (exec-with-stubs earlier: long/short fire, RVOL gate, no-break, 2/day cap).
+NEW DGX whole-file baseline for enhanced_scanner.py = bc674f26… (use for any future patcher PRE_SHA).
