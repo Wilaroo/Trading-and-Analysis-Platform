@@ -730,3 +730,9 @@ VALIDATED: patcher self-test isolated copy (check/apply/rollback byte-identical)
 unknown→intraday); test_v344 5/5. Sandbox patched.
 ARTIFACTS: patcher paste https://paste.rs/UmR36 ; test paste https://paste.rs/2JRo2
 DEPLOY: --check (expect ce3624c5 OK; if DRIFT send live SHA) → --apply → pytest (5) → COMMIT → start_backend --force.
+
+## 🔧 patch_v344 REBUILT for DGX drift (2026-06-18)
+First v344 ABORTED safely on --check: DGX opportunity_evaluator.py whole-file SHA = 2625116e94117f280b64f33c0e456231951207c8a3e0cbac22a2f0b1ca083b49 (drifted vs sandbox ce3624c5; anchor line present & unique). Rebuilt anchored on the DGX live SHA, dropped whole-file POST assertion (can't precompute without DGX bytes) — guards = whole-file PRE + unique anchor + py_compile + reverse-anchor rollback (same pattern as enhanced_scanner patchers). Self-test isolated copy: check/apply/rollback byte-identical. test_v344 already on DGX (committed 0474982c).
+  rebuilt patcher paste https://paste.rs/hcw1h
+NOTE: commit 0474982c added only test_v344 (the patch itself aborted, not applied). DGX HEAD = 0474982c.
+DGX file baselines: enhanced_scanner.py = 9520d851… (post v341+v343); opportunity_evaluator.py = 2625116e… (pre v344).

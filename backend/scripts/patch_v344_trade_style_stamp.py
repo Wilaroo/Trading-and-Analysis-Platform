@@ -24,8 +24,7 @@ Then: commit ; ./start_backend.sh --force
 import base64, hashlib, sys, shutil, os, py_compile, tempfile
 
 FILE = "backend/services/opportunity_evaluator.py"
-PRE_SHA  = "ce3624c52cb6c03fd7475a11478b33c6478963fa08c9bc46dd215afcf1e8d120"
-POST_SHA = "b34dc9177ee029ead90d54a85a26b534e3634c57e2e0b2a7fb247afd5c4586a9"
+PRE_SHA  = "2625116e94117f280b64f33c0e456231951207c8a3e0cbac22a2f0b1ca083b49"
 OLD_B64 = "ICAgICAgICAgICAgICAgIHRyYWRlX3N0eWxlPWFsZXJ0LmdldCgidHJhZGVfc3R5bGUiLCAidHJhZGVfMl9ob2xkIiks"
 NEW_B64 = "ICAgICAgICAgICAgICAgIHRyYWRlX3N0eWxlPXNlbGYuX3Jlc29sdmVfZ2VvbWV0cnlfc3R5bGUoYWxlcnQsIHNldHVwX3R5cGUpLA=="
 BACKUP = FILE + ".bak_v344"
@@ -73,8 +72,8 @@ def apply():
     if src.count(old) != 1:
         print(f"ABORT: anchor count={src.count(old)} (need 1)."); sys.exit(3)
     patched = src.replace(old, new, 1)
-    if _sha(patched) != POST_SHA:
-        print("ABORT: POST sha mismatch (corrupt patcher)."); sys.exit(3)
+    if new not in patched:
+        print("ABORT: replacement produced no change (corrupt patcher)."); sys.exit(3)
     if not _compiles(patched):
         print("ABORT: patched file does not compile. No write."); sys.exit(3)
     shutil.copy2(FILE, BACKUP)
