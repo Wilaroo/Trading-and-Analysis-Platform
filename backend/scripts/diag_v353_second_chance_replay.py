@@ -180,6 +180,7 @@ def main():
     volmult = _arg("--volmult", 1.3, float)     # break-vol vs consolidation median-vol
     maxbreakmult = _arg("--maxbreakmult", 1.0, float)  # rush height <= mult * prior range height (0=off)
     minrr = _arg("--minrr", 1.5, float)
+    maxrr = _arg("--maxrr", 0.0, float)        # 0 = off; else skip trades with rr > maxrr
     maxhold = _arg("--maxhold", 30, int)
     maxattempts = _arg("--maxattempts", 2, int)  # cheat-sheet "2 strikes and we're out"
     uni_cap = _arg("--universe", 300, int)
@@ -191,9 +192,10 @@ def main():
     start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
     start_utc = start.astimezone(timezone.utc)
 
+    _maxrr_lbl = f"{maxrr:g}" if maxrr > 0 else "off"
     print(f"\n=== v353 SECOND CHANCE replay — {days}d  reslook={reslook}  rush={rushwin}  "
           f"retest={rettest}  rettol={rettol:g}%  minbreak={minbreak:g}%  volmult={volmult:g}  "
-          f"maxbreakmult={maxbreakmult:g}  minRR={minrr:g}  "
+          f"maxbreakmult={maxbreakmult:g}  minRR={minrr:g}  maxRR={_maxrr_lbl}  "
           f"timewin={'09:59-16:00' if timewin else 'off'}  winsor=±{cap:g}R ===\n")
 
     universe = Counter()
@@ -278,7 +280,7 @@ def main():
                             risk = entry - stop
                             if risk > 0 and target > entry:
                                 rr = (target - entry) / risk
-                                if rr >= minrr:
+                                if rr >= minrr and (maxrr <= 0 or rr <= maxrr):
                                     r = _sim_exit(bars, i, entry, stop, target, rr, maxhold)
                                     if r is not None:
                                         n_doc_tr += 1; doc_fired += 1
