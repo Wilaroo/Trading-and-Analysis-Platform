@@ -4956,79 +4956,130 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_orb(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Opening Range Breakout"""
+        """Opening Range Break — cheat-sheet-faithful TRUE 15-min OR (v19.34.355).
+
+        The shipped detector used the running HIGH/LOW OF DAY as the "opening range" (they
+        drift all morning) with stop=LOD-0.02 and target=price+2*(HOD-LOD). A 14d & 21d
+        native-1min replay (diag_v355) showed that rule is ~breakeven-to-negative (-91R/14d).
+        SMB Opening Range Break doctrine: define the OR = high/low of the FIRST 15 min from
+        09:30; ENTER on the first break ABOVE OR-high with a VOLUME expansion; STOP just below
+        the BREAKOUT BAR; TARGET = 2x measured move of the OR; hard time-exit ~11:30 ET. Gated
+        to R:R 1.5-2.5 (the only +EV slice) the doctrine validated: 14d n=59 49% win +0.321R;
+        21d n=95 42% win +0.183R, avg R:R 1.96 — +EV and beats the live rule. LONG only, one
+        breakout/day/symbol. 1-min bars from ib_historical_data (IB-only) via technical_service.
+        (The non-actionable "approaching_orb" heads-up branch is removed as unvalidated noise.)
+        """
+        OR_MIN = 15
+        VOLMULT = 1.5
+        STOPBUF = 0.05            # % below the breakout-bar low (stop just below breakout bar)
+        TMULT = 2.0              # target = OR_high + TMULT*OR_height (2x measured move)
+        OR_END = 570 + OR_MIN    # 09:45 ET (minutes from midnight)
+        TIME_EXIT = 690          # 11:30 ET — no new ORB entries after this
+        MIN_RR = 1.5
+        MAX_RR = 2.5
+
         current_window = self._get_current_time_window()
-        
-        if current_window not in [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION]:
+        if current_window not in (TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM,
+                                  TimeWindow.MORNING_SESSION):
             return None
-        
-        if snapshot.rvol >= 2.0:
-            dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-            
-            # CONFIRMED ORB: Price broke above opening range high
-            if dist_from_hod < -0.1 and dist_from_hod > -1.5 and snapshot.above_vwap:
-                priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-                breakout_pct = abs(dist_from_hod)
-                
-                return LiveAlert(
-                    id=f"orb_long_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="orb_long_confirmed",
-                    strategy_name="ORB CONFIRMED (INT-03)",
-                    direction="long",
-                    priority=priority,
-                    current_price=snapshot.current_price,
-                    trigger_price=snapshot.high_of_day,
-                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
-                    target=round(snapshot.current_price + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
-                    risk_reward=2.0,
-                    trigger_probability=0.65,
-                    win_probability=0.58,
-                    minutes_to_trigger=0,
-                    headline=f"🚀 {symbol} ORB BREAKOUT CONFIRMED - Broke ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                    reasoning=[
-                        f"Price ABOVE opening range high by {breakout_pct:.2f}%",
-                        f"ORH was ${snapshot.high_of_day:.2f}, now ${snapshot.current_price:.2f}",
-                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"RVOL: {snapshot.rvol:.1f}x",
-                        f"Tape: {tape.overall_signal.value}"
-                    ],
-                    time_window=current_window.value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
-            
-            # APPROACHING ORB: Price near opening range high
-            if 0 < dist_from_hod < 0.5 and snapshot.above_vwap:
-                priority = AlertPriority.MEDIUM
-                
-                return LiveAlert(
-                    id=f"orb_long_approaching_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="approaching_orb",
-                    strategy_name="Approaching ORB (INT-03)",
-                    direction="long",
-                    priority=priority,
-                    current_price=snapshot.current_price,
-                    trigger_price=snapshot.high_of_day,
-                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
-                    target=round(snapshot.high_of_day + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
-                    risk_reward=2.0,
-                    trigger_probability=0.50,
-                    win_probability=0.52,
-                    minutes_to_trigger=10,
-                    headline=f"👀 {symbol} Approaching ORB - {dist_from_hod:.2f}% to ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                    reasoning=[
-                        f"Price {dist_from_hod:.2f}% below ORH ${snapshot.high_of_day:.2f}",
-                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"RVOL: {snapshot.rvol:.1f}x",
-                        f"⚠️ Wait for confirmed break above ${snapshot.high_of_day:.2f}"
-                    ],
-                    time_window=current_window.value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
-        return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 120)
+        if not bars or len(bars) < OR_MIN + 1:
+            return None
+
+        caps = getattr(self, "_orb_daily_caps", None)
+        if caps is None:
+            caps = self._orb_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 1:
+            return None
+
+        try:
+            from zoneinfo import ZoneInfo
+            _ET = ZoneInfo("America/New_York")
+        except Exception:
+            return None
+
+        def _etm(bar):
+            try:
+                dt = datetime.fromisoformat(str(bar.get("date")).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.astimezone(_ET)
+                return dt.hour * 60 + dt.minute
+            except Exception:
+                return None
+
+        or_bars = [b for b in bars if (_etm(b) is not None and 570 <= _etm(b) < OR_END)]
+        if not or_bars:
+            return None
+        or_high = max(b["high"] for b in or_bars)
+        or_low = min(b["low"] for b in or_bars)
+        or_h = or_high - or_low
+        if or_h <= 0:
+            return None
+        or_vol = sum((b.get("volume") or 0) for b in or_bars) / len(or_bars)
+
+        last = bars[-1]
+        last_etm = _etm(last)
+        if last_etm is None or last_etm < OR_END or last_etm > TIME_EXIT:
+            return None
+        if last.get("high") is None or last.get("low") is None or last.get("close") is None:
+            return None
+        # first breakout only: no earlier post-OR bar may have closed above OR-high.
+        for b in bars:
+            em = _etm(b)
+            if em is not None and OR_END <= em < last_etm and (b.get("close") or 0) > or_high:
+                return None
+        if not (last["close"] > or_high and last["high"] > or_high):
+            return None
+        if or_vol > 0 and (last.get("volume") or 0) < VOLMULT * or_vol:
+            return None
+
+        entry = round(last["close"], 2)
+        stop_loss = round(last["low"] * (1 - STOPBUF / 100.0), 2)
+        target = round(or_high + TMULT * or_h, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0 or target <= entry:
+            return None
+        rr = (target - entry) / risk
+        if rr < MIN_RR or rr > MAX_RR:
+            return None
+        r_multiple = round(rr, 2)
+
+        caps[key] = caps.get(key, 0) + 1
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        tape_tag = "✓ TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"orb_long_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="orb_long_confirmed",
+            strategy_name="ORB CONFIRMED (INT-03)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target,
+            risk_reward=r_multiple,
+            trigger_probability=0.49,
+            win_probability=0.49,
+            minutes_to_trigger=0,
+            headline=f"🚀 {symbol} ORB BREAKOUT — broke 15-min OR high ${or_high:.2f} (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"15-min opening range ${or_low:.2f}-${or_high:.2f} (height ${or_h:.2f}); first break above on volume",
+                f"Breakout-bar vol {(last.get('volume') or 0):.0f} >= {VOLMULT:g}x OR avg {or_vol:.0f}",
+                f"STOP ${stop_loss:.2f} (just below breakout bar) · TARGET 2x OR ${target:.2f} · time-exit 11:30 ET",
+                f"R:R {r_multiple:.1f}:1 (v355 replay 42-49% win, +0.18..0.32R, RR-gated 1.5-2.5) · Tape: {tape.overall_signal.value}",
+            ],
+            time_window=current_window.value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
     
     async def _check_gap_give_go(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Gap Give and Go - Gap up, pullback, continuation"""
