@@ -258,3 +258,16 @@ diag_v327 --hours 1 → expect trading_mode mix to show 'normal' for longs (not 
 cautious) and GO rising from ~8 toward ~85 on MIXED-context days. Watch newly-admitted
 LONG sanitized avgR (diag_v321b) ≥0 next session; if bleeding → --rollback or tighten
 regime-suppression EV table. DGX git HEAD now f7729179.
+
+## ✅ v328 LIVE-VERIFIED (2026-06-17, post .bat restart, git pull f7729179)
+diag_v327 --hours 1 (179 dec): trading_mode mix now cautious=156, **normal=15, defensive=8**
+(was 100% cautious pre-patch) → anchor-aware MIXED mode CONFIRMED WORKING. Counter-trend shorts
+correctly benched (defensive). regime_suppression still 0 ACTIVE-SKIP (19 REDUCE) — safety net intact.
+BINDING CONSTRAINT SHIFTED: mode no longer the blocker. This 1h: WOULD-GO=8 (vs 85 in prior 8h),
+score<25=106, would-REDUCE=64, GO=1. Scores pile below GO line (v323 "scoring starved" resurfacing).
+CAVEATS: (1) 1h window too small/low-score to judge true GO unlock — re-measure over --hours 4-6 in a
+MIXED-context session. (2) Next lever is SCORE QUALITY (better detectors), NOT lowering the GO threshold
+(thin/neg edge → would admit marginal trades).
+NEXT FORK: (A) re-measure v327 --hours 4-6 for real GO rate; (B) rubber_band detector redesign (now
+unblocked) to lift signal quality; (C) score-composition recal (sector -324 drag, quality_inplay
+non-discriminating per v323). Recommend B (detector quality) as the durable lever; defer threshold changes.
