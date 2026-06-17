@@ -271,3 +271,36 @@ MIXED-context session. (2) Next lever is SCORE QUALITY (better detectors), NOT l
 NEXT FORK: (A) re-measure v327 --hours 4-6 for real GO rate; (B) rubber_band detector redesign (now
 unblocked) to lift signal quality; (C) score-composition recal (sector -324 drag, quality_inplay
 non-discriminating per v323). Recommend B (detector quality) as the durable lever; defer threshold changes.
+
+## 🎯 ISSUE 2 STARTED (rubber_band redesign, now UNBLOCKED post-v328)
+RUNTIME BAR-ACCESS RESOLVED: detectors reach 1-min bars via
+  self.technical_service._get_intraday_bars_from_db(sym, "1 min", N)  [SYNC, reads
+  ib_historical_data — same IB-only source as training; precedent at enhanced_scanner L4028]
+  plus async _get_live_intraday_bars(sym,"1 min") for the freshest forming bar.
+CURRENT _check_rubber_band (enhanced_scanner L4360) confirmed broken: fires on a STATE
+  (dist_from_ema9<-2.5 + rsi<38 + rvol>=1.5), wrong metric (%-from-EMA9 not from-open),
+  NO double-bar-break trigger (the reasoning literally claims one that the code never checks),
+  no 2/day cap.
+PRE-PATCH VALIDATION (verify-before-claim, respects thin-edge caveat): shipped v329 TRADE-
+  outcome replay. Reuses v321c's proven snapback detector (ext-from-open + double-bar-break +
+  accel + 2/day cap) and SIMULATES each event: entry=double-bar-break level, stop=LOD-0.02,
+  target=9EMA(1m) w/1R floor, walk fwd maxhold bars → realized R by EXTENSION BUCKET (1-2/2-3/
+  >=3%) and snapback speed. Picks the ext floor that earns edge BEFORE rewiring FIRE.
+  paste https://paste.rs/4TVLB  sha 89b0d51b0b54eb28cd243ff087f1a8b01209167fa9d7674e9b5188dab8127025 (round-trip OK).
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v329_rubber_band_trade_replay.py --days 14 --universe 300
+DECISION GATE: if a low ext bucket (e.g. 2-3%) shows avgR comfortably >0 → that's the FIRE floor;
+  build the _check_rubber_band rewrite patcher (1-min double-bar-break + ext floor + RVOL + 2/day cap).
+  If even >=3% is <=0 → snapback-long has no edge this regime → do NOT rewire; revisit geometry/regime first.
+
+## 📚 TQS vs GO/REDUCE/SKIP (answered for operator, 2026-06-17)
+They are TWO SEQUENTIAL LAYERS, not one weighted score (AGENTS.md Journey-1 steps 5 then 6):
+  - TQS (quality_score 0-100, A+/A/B/C) computed UPSTREAM (scoring_engine/smart_filter/enhanced_scanner);
+    gates in smart_filter, then passed as an INPUT to confidence_gate.evaluate(quality_score=...).
+  - confidence_gate builds its OWN additive confidence_score (start 0, +layers: meta_labeler ~+11,
+    sector ±6, regime, cross_model +5, rs, vae +5, quality_inplay +5, base "other"). TQS contributes
+    only a SMALL bounded nudge: +10 (TQS>=80) / +5 (>=60) / 0 (>=40) / -5 (<40)  [confidence_gate L699-710].
+  - GO/REDUCE/SKIP = final confidence_score vs MODE threshold (NORMAL go38/red25, CAUTIOUS go50/red35,
+    AGGRESSIVE go28, DEFENSIVE go60) PLUS hard vetoes (meta force_skip, active regime-suppression SKIP).
+  So GO/REDUCE/SKIP is the OUTPUT of the gate (downstream of TQS); TQS does NOT have the decision weighted
+  into it. TQS's influence inside the gate is minor (max +10/-5) — dominant drivers are the model layers,
+  the mode threshold, and the hard vetoes.
