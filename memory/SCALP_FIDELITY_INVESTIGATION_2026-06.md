@@ -456,3 +456,23 @@ DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v331b_setup_au
 PENDING: operator runs v331b → re-assess FIND-NO-TRADE (esp breakdown 2470/0, higher-tier breakouts) and
 real per-setup trade yields on clean data, THEN decide sweep order + time-stop appetite. Time-decay code
 findings (no max-hold/time-stop on multi_day/swing/position/investment) stand regardless.
+
+## ✅ v331b SANITIZED RESULT (2026-06-17) — clean per-setup truth
+4030 bot_trades/30d: 89% GENUINE bot-own, 4% artifact, 5% adopted (May phantom crisis is OUTSIDE 30d
+window → less polluted than feared, but per-setup now trustworthy). Field coverage ok (exit_price 15% →
+external-bracket reclass mostly inactive = conservative).
+TIERS DO TRADE (genuine_own): swing pocket_pivot 168, three_week_tight 57; position stage_2_breakout 92;
+investment rs_leader_break 399, power_trend_stack 89; multi_day daily_breakout 298, daily_squeeze 262,
+accumulation_entry 1261, trend_continuation 20; intraday squeeze 275, orb 76, opening_drive 70, breakout 34.
+=> TIME-DECAY GAP IS A REAL LIVE RISK (these active swing/position/investment trades have NO max-hold/time-stop).
+CONFIRMED FIND-NO-TRADE (clean, 0 genuine): breakdown 2470/0 (BIGGEST anomaly), tidal_wave 334/0,
+fading_bounce 90/0, vcp_breakout 568/0, descending_triangle 225/0, ascending_triangle 120/0,
+weekly_breakout 213/0, base_breakout 63/0, day_2_continuation 102/0, death_cross_filtered 178/0,
+golden_cross_filtered 126/0, two_hundred_day_loss 99/0, two_hundred_day_reclaim 23/0, stage_1_to_2 57/0,
+fifty_two_week_high 38/0. NOTE: some peers in same tiers DO trade (pocket_pivot/stage_2/rs_leader) → it's
+SPECIFIC broken/blocked detectors, NOT a blanket tier-execution gap.
+SCALP SWEEP genuine conversion — FADE: gap_fade 3627f/154g, vwap_fade 4982/73, mean_reversion 2680/73,
+backside 487/15, volume_capitulation 21/14, off_sides 3830/7(short-suppressed), bella_fade 8/0(ALL-CONTAMINATED),
+first_move_down 12/1, fading_bounce 90/0, first_move_up/time_of_day_fade 0/0.
+MOMENTUM: fashionably_late 1074/30, gap_give_go 818/29, second_chance 625/7, gap_pick_roll 87/3, hitchhiker 2/4,
+puppy_dog 26/1, 9_ema/abc/spencer 0g.
