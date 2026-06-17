@@ -79,3 +79,21 @@ basically a VWAP-proximity long, not a retest; big_dog has no wedge/vol-contract
 - REVISED SEQUENCING: (1) diagnose+fix FIRE gate → (2) redesign rubber_band detector
   (snapshot pre-gate + 1-min snapback via _get_intraday_bars_from_db(sym,"1 min",N) + 2/day cap)
   → (3) generalize. Do NOT patch any detector until the gate lets alerts execute.
+
+## 🔧 CORRECTION (diag_live_gate_decisions output, 2026-06)
+My "nothing executes / FIRE gate blocks everything" headline was OVERSTATED — corrected:
+- confidence_gate_log: 89,508 decisions → GO=23,530 (26%), REDUCE=17,461, SKIP=48,517.
+- bot_trades PLACED: total 15,167; 30d=4,035; 7d=334. The system IS trading (~334/wk).
+- Dominant SKIP = meta-labeler force-skip p_win<0.50 (11,395) ≫ low-confidence (1,910).
+  Mode mostly 'normal' (GO=38), regime_score median 62 → mode is NOT the blocker; the
+  0.50 EV cut is. confidence_score piles at 30-39 (just under GO line).
+- TWO distinct problems (not one):
+  (A) FIRE SELECTION: meta-labeler 0.50 force-skip starves rubber_band/big_dog/daily_squeeze
+      etc. (the GATE-no-exec setups) — an EV-calibration lever.
+  (B) TRADE QUALITY: of ~710 placed in 14d, only 66 survive sanitization (~9%); rest are
+      shadow/learning_only/hygiene. Downstream quality problem.
+- v321e "exec 2%" was alerts÷trades across MISMATCHED funnels (live_alerts ≠ gate decisions
+  ≠ trades). Real recent trade rate ≈334/7d; volume dropped ~4x vs 2-4 weeks ago.
+- Reconciliation diag: diag_v321f_reconcile.py paste AcmiO
+  sha 98c32ccbd936fe7c36131380397a16e15ca4bdf8b04f758487d9597da50aa80d
+  (verifies status dist 15,167 vs closed 1,646 vs in-window 710 vs sanitized 66; live/shadow split).
