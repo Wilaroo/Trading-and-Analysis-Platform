@@ -504,3 +504,19 @@ DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v333_trade2hol
 PENDING: operator runs v333 → if worst trades show exit far beyond stop w/ big $ → stops not honored (P0 fix);
 if tiny-risk rows inflate R → R-artifact (fix risk_amount/exclude from edge stats). Either way revisit the
 trade_style classifier default. breakdown 2470/0 triage + FADE-scalp sweep still queued.
+
+## ✅ v333 RESULT (2026-06-17) — "-878R" is a METRIC ARTIFACT; real risk = blown stops on shorts
+trade_2_hold DOLLAR P&L = NET +$56,940 (mean +$108, median -$6.3, win 34%, best +$49,590, worst -$6,426).
+winsor avgR -0.27 (raw -1.66) → -878R is risk_amount artifact. 8 tiny-risk(<$5) rows = -447R alone.
+risk_amount = PLANNED risk → when a stop is BLOWN, realized loss >> planned → R explodes.
+REAL FAILURES (worst-12): WTI short stop2.86→exit3.21 -$6426; USO short 108.31→116.12 -$3614 (held 1434m!).
+Others R≈-1.0 honored fine. SHORT-FADE bleed: vwap_fade_short -$25.4k(52t), off_sides_short -$10.6k(13t),
+rubber_band_short -$1.4k. close_reason stop_loss=-$63.8k(108t) but offset by +$49.6k winner → net +.
+CONCLUSIONS: (1) NOT a -878R edge bleed — good. (2) P0 RISK: stops not honored on some shorts (exit far
+beyond stop); single -$6.4k tail. (3) Concentrated bleed = SHORT fades (shorting strength). (4) METRIC: R uses
+planned risk → winsorize/realized-risk in edge/EV so meta-labeler isn't poisoned by -261R outliers.
+SHIPPED v334 stop-overrun forensic: direction-aware overrun (exit beyond stop), honored vs BLOWN R-profile,
+EXCESS-$ beyond stop by dir/setup, worst-12 overshoots. paste https://paste.rs/ (see PASTE_URL)
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v334_stop_overrun_forensic.py --days 120
+PENDING: operator runs v334 → sizes systemic stop-blowing. If blown% high/concentrated in shorts → P0 fix
+(hard stop orders + short eligibility min price/liquidity). breakdown 2470/0 + FADE sweep still queued.
