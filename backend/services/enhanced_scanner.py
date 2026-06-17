@@ -5143,43 +5143,47 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_backside(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Back$ide \u2014 shallow VWAP-recovery snapback (v19.34.348 redesign, LONG-only).
+        """Back$ide \u2014 cheat-sheet-faithful VWAP-recovery scalp (v19.34.352).
 
-        Fires on the TRIGGER, not a dist_from_vwap STATE: after a SHALLOW dip BELOW session
-        VWAP (the [0.3%, 1.0%) band that vwap_fade \u2014 which floors at 1.0% \u2014 structurally
-        cannot serve), price must reclaim the 9-EMA and a 1-min double-bar-HIGH-break snapback
-        prints within +1..+4 bars of the dip-low, snapping back UP to VWAP. Validated +EV on a
-        14d risk-controlled native-1min replay (v347: 0-0.5% band win93%/+0.11R, 0.5-1% band
-        win88%/+0.41R; n=32/33 UNIQUE vs vwap_fade \u2014 a distinct shallow-dip recovery edge,
-        NOT a duplicate). Requires stop >= 1.0% of entry (the min-risk floor that gated ~96% of
-        the loose state fires) + RVOL >= 1.2 + price above the 9-EMA + 2 fires/day per symbol.
+        Re-aligned to the OFFICIAL SMB Back$ide cheat sheet (v348 used a DEEP flush-low stop
+        which crushed R:R; doctrine uses a TIGHT stop .02 below the MOST RECENT HIGHER LOW).
+        LONG only. Rising phase after a distinct low: a HIGHER LOW (recent pullback low > the
+        session LOD) plus a HIGHER HIGH (green 1-min double-bar-high break = "break of a 1-min
+        bar from consolidation, pay the offer on the break"), price holding ABOVE the 9-EMA but
+        still BELOW VWAP, recovered MORE than halfway between LOD and VWAP. STOP = recent higher
+        low - 0.02 (tight). TARGET = VWAP (exit all). One-and-done (1/day/symbol). Ideal periods
+        10:00-13:30 ET. Only takes R:R >= 1.0. Validated on a 14d native-1min replay (v352:
+        63% win, winsorAvg +0.70R, medR +1.11R, avg R:R 4.8 to VWAP) \u2014 doctrine-faithful AND
+        far better than v348 (+0.28R). Cheat-sheet stats: 50-60% win, ~1.4:1 R:R.
         """
-        DIP_FLOOR = 0.3
-        DIP_CEIL = 1.0          # >= 1.0% is vwap_fade's band \u2014 keep backside complementary (zero overlap)
-        TRIGGER_WIN = 4
+        RECENT_K = 5
         ACCEL = 1.3
-        MIN_RVOL = 1.2
-        MIN_RISK_PCT = 1.0
+        HALFWAY = 0.5
+        MIN_RR = 1.0
 
+        if self._get_current_time_window() not in (
+                TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY):
+            return None
         if not getattr(snapshot, "above_ema9", False):
             return None
         ts = getattr(self, "technical_service", None)
         if ts is None:
             return None
         bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
-        if not bars or len(bars) < 5:
-            return None
-        rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
-        if rvol < MIN_RVOL:
+        if not bars or len(bars) < RECENT_K + 3:
             return None
         vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
-        if vwap <= 0:
+        ema9 = float(getattr(snapshot, "ema_9", 0.0) or 0.0)
+        if vwap <= 0 or ema9 <= 0:
             return None
 
         caps = getattr(self, "_backside_daily_caps", None)
         if caps is None:
             caps = self._backside_daily_caps = {}
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 1:
+            return None
 
         def _median(xs):
             s = sorted(xs)
@@ -5189,70 +5193,74 @@ class EnhancedBackgroundScanner:
             return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
 
         i = len(bars) - 1
+        if i < RECENT_K + 1:
+            return None
         last = bars[i]
+        lows = [b["low"] for b in bars if b.get("low") is not None]
+        if not lows:
+            return None
+        lod = min(lows)
         ranges = [(b["high"] - b["low"]) for b in bars[:i]
                   if b.get("high") is not None and b.get("low") is not None]
         med_r = _median(ranges)
 
-        lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
-        if lows:
-            lod = min(v for _, v in lows)
-            lod_idx = max(j for j, v in lows if v == lod)
-            dip = (vwap - lod) / vwap * 100.0
-            accel_ok = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
-            green = last["close"] > last["open"]
-            clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
-            if (DIP_FLOOR <= dip < DIP_CEIL and accel_ok and green and clears_hi
-                    and 1 <= (i - lod_idx) <= TRIGGER_WIN):
-                key = f"{symbol}:{today}:long"
-                if caps.get(key, 0) >= 2:
-                    return None
-                entry = round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2)
-                if entry >= vwap:
-                    return None
-                stop_loss = round(min(lod - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
-                risk = entry - stop_loss
-                if risk <= 0 or entry <= 0 or (risk / entry * 100.0) < MIN_RISK_PCT:
-                    return None
-                target_1 = round(vwap, 2)
-                reward = target_1 - entry
-                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
-                priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-                ev_info = ""
-                if "backside" in self._strategy_stats:
-                    st = self._strategy_stats["backside"]
-                    if st.win_rate > 0:
-                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
-                caps[key] = caps.get(key, 0) + 1
-                tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
-                return LiveAlert(
-                    id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="backside",
-                    strategy_name="Back$ide Scalp (INT-32)",
-                    direction="long",
-                    priority=priority,
-                    current_price=snapshot.current_price,
-                    trigger_price=entry,
-                    stop_loss=stop_loss,
-                    target=target_1,
-                    risk_reward=r_multiple,
-                    trigger_probability=0.65,
-                    win_probability=0.73,
-                    minutes_to_trigger=0,
-                    headline=f"\U0001f3af {symbol} Back$ide snapback \u2014 {dip:.1f}% dip reclaim to VWAP {tape_tag}",
-                    reasoning=[
-                        f"Shallow {dip:.1f}% dip below VWAP ${vwap:.2f} \u2192 1-min double-bar-break reclaim",
-                        f"Snapback {i - lod_idx} bar(s) after LOD ${lod:.2f} (flush range >= {ACCEL:g}x median), above 9-EMA",
-                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target VWAP ${target_1:.2f})",
-                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                        ev_info if ev_info else "Shallow VWAP-recovery (v347 replay +0.28R, 91% win, 0.3-1% band)",
-                        "Entry: green bar reclaimed prior-2 highs (0.3-1% band, complementary to vwap_fade, 2/day cap)",
-                    ],
-                    time_window=self._get_current_time_window().value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
+        green = last["close"] > last["open"]
+        clears_hi = last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+        entry = round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2)
+        recent_low = min(bars[j]["low"] for j in range(i - RECENT_K, i))
+        accel_ok = (med_r <= 0) or ((last["high"] - last["low"]) >= ACCEL * med_r)
+        if not (green and clears_hi and entry < vwap and last["close"] > ema9
+                and recent_low > lod
+                and entry > lod + HALFWAY * (vwap - lod)
+                and accel_ok):
+            return None
+
+        stop_loss = round(recent_low - 0.02, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0:
+            return None
+        target_1 = round(vwap, 2)
+        rr = (target_1 - entry) / risk
+        if rr < MIN_RR:
+            return None
+        r_multiple = round(rr, 2)
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        ev_info = ""
+        if "backside" in self._strategy_stats:
+            st = self._strategy_stats["backside"]
+            if st.win_rate > 0:
+                ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+        caps[key] = caps.get(key, 0) + 1
+        hl_dist = (vwap - entry) / vwap * 100.0
+        tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="backside",
+            strategy_name="Back$ide Scalp (INT-32)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target_1,
+            risk_reward=r_multiple,
+            trigger_probability=0.63,
+            win_probability=0.63,
+            minutes_to_trigger=0,
+            headline=f"\U0001f3af {symbol} Back$ide \u2014 higher-low reclaim to VWAP (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"Rising back$ide: higher-low ${recent_low:.2f} > LOD ${lod:.2f}, green bar broke prior-2 highs",
+                f"Recovered {hl_dist:.1f}% below VWAP ${vwap:.2f} (>halfway from LOD), holding above 9-EMA",
+                f"R:R = {r_multiple:.1f}:1 (TIGHT stop ${stop_loss:.2f} = .02 below higher low, Target VWAP ${target_1:.2f})",
+                f"Tape: {tape.overall_signal.value}",
+                ev_info if ev_info else "Cheat-sheet back$ide (v352 replay 63% win, +0.70R, avg R:R 4.8 to VWAP)",
+                "One-and-done scalp, 10:00-13:30 ET window (SMB Back$ide doctrine)",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
         return None
     
     async def _check_off_sides(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
