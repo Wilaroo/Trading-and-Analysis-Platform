@@ -4011,3 +4011,14 @@ Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 
 - TP/SL track remaining (later): optional structure-snapping into evaluator entry
   path (S/R + hunt zones at trade creation); trailing-mode unification with
   StopManager (smart_stop trailing modes still independent of stop_manager.py).
+
+## 2026-06-17 — NEW BACKLOG (operator-approved this session)
+- [P1] DETECTOR EDGE SCORECARD (saved idea): nightly read-only diag that replays each LIVE
+  detector's last-N-day realized R (entry/stop/target sim like v329/v330) → at-a-glance ranking of
+  which setups actually earn vs which to fix next. Build after the scalp generalization sweep.
+- [P1] SCALP GENERALIZATION SWEEP: apply find→trade-replay→rewrite to ALL scalps (not just
+  hitchhiker/second_chance/big_dog). PRE-STEP: setup-category audit — verify each "scalp" is tagged
+  correctly vs "intraday"/swing/etc.; recategorize mis-tagged setups.
+- [P1] TIME-DECAY AUDIT (NEW): investigate whether Multi-day / Swing / Position / Investment tier
+  trades have any time-decay / max-hold / time-stop exit triggers; decide if we should add time-based
+  exit limits per tier. Read-only audit first, then propose.

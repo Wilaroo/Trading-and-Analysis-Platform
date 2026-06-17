@@ -397,3 +397,26 @@ v330) — note: commit 07e52bc7 only touched the test, so live enhanced_scanner.
 ISSUE 2 (rubber_band) CLOSED. NEXT: generalize find→trade-replay→rewrite template to hitchhiker,
 second_chance, big_dog (P1). Also watch rubber_band fire→GO→trade flow + sanitized avgR vs replay
 (+0.27R long / +0.59R short) over next sessions.
+
+## 🗂 v331 — SETUP CATEGORY/STYLE/TEMPLATE AUDIT (shipped) + TIME-DECAY AUDIT (2026-06-17)
+SSOT confirmed: smb_integration.SETUP_REGISTRY holds horizon default_style (scalp/intraday/multi_day/
+swing/investment/position); setup_taxonomy.style_of/setup_class/strategy_family resolve behavior.
+KEY (sandbox smoke): rubber_band=scalp/fade/reversion (DONE); bella_fade,off_sides=scalp/fade;
+big_dog=INTRADAY/momentum/breakout; hitchhiker,second_chance=scalp/MOMENTUM/continuation.
+=> REWRITE SWEEP NEEDS 2 TEMPLATES: FADE scalps reuse v329/v330 snapback; MOMENTUM scalps
+(hitchhiker/second_chance/spencer/9_ema/abc/fashionably_late/gap_give_go) need a CONTINUATION replay
+(entry on consolidation-break, stop below pullback low, target=measured-move/trail). big_dog is intraday.
+v331 diag dumps reg_style vs ssot_style vs class/family + fires/trades + flags STYLE mismatches +
+FIND-NO-TRADE + the scalp fade/momentum split. paste https://paste.rs/ (see PASTE_URL above).
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v331_setup_category_audit.py --days 30
+
+TIME-DECAY AUDIT FINDINGS (read-only grep, services/):
+- SCALP: SCALP_DECAY_MINUTES (default 60) staleness decay in opportunity_evaluator (v19.34.171 sweep). ✓
+- INTRADAY: time-to-close decay (opportunity_evaluator ~L3056). ✓
+- order_policy_registry per-style: scalp/intraday close_at_eod=True (DAY TIF); swing/position/investment
+  GTC, close_at_eod=False, trail-on-20EMA, EOD-sweep-exempt.
+- MULTI_DAY / SWING / INVESTMENT / POSITION: NO max_hold / max_days / time_stop / time_decay field anywhere.
+  They exit ONLY on trail/target/stop → a dead-money higher-tier trade can be held indefinitely. GAP CONFIRMED.
+RECOMMENDATION (pending operator appetite): add a per-tier TIME-STOP / max-hold review (e.g. swing: exit if
+not >=+1R by N trading days; position: periodic thesis review / hard max-hold). Build a read-only "stale
+higher-tier holds" diag first to size the problem, then propose env-flagged time-stops in order_policy_registry.
