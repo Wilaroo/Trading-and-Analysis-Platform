@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""
+patch_v355_orb_doctrine.py  (AGENTS.md 2.2 -- function-anchored patcher)
+
+WHAT: rewrites enhanced_scanner._check_orb from the running-HOD/LOD "opening range" rule to
+      the SMB Opening Range Break doctrine: TRUE 15-min OR (first 15 min from 09:30); enter on
+      the first break above OR-high WITH a volume expansion; STOP just below the breakout bar;
+      TARGET = 2x measured move of the OR; morning window, hard time-exit 11:30 ET; one
+      breakout/day/symbol; R:R gated [1.5, 2.5]. Removes the unvalidated "approaching_orb" branch.
+WHY : v355 native-1min replay (diag_v355_orb): the live HOD/LOD rule is ~breakeven-to-negative
+      (-91R/14d). The true-OR doctrine RR-gated 1.5-2.5 is +EV: 14d n=59 49% win +0.321R;
+      21d n=95 42% win +0.183R, avg R:R 1.96 -- and beats the live rule. 1-min bars from
+      ib_historical_data (IB-only) via self.technical_service._get_intraday_bars_from_db.
+DRIFT NOTE: FUNCTION-ANCHORED. Asserts live whole-file SHA == DGX baseline AND the exact live
+      _check_orb bytes present (count==1), replaces, asserts embedded NEW func SHA, py_compiles
+      the whole file before writing.
+
+Usage (repo root, DGX):
+  .venv/bin/python backend/scripts/patch_v355_orb_doctrine.py --check
+  .venv/bin/python backend/scripts/patch_v355_orb_doctrine.py --apply
+  .venv/bin/python backend/scripts/patch_v355_orb_doctrine.py --rollback
+Then: pytest backend/tests/test_v355_orb.py -q ; commit ; ./start_backend.sh --force
+"""
+import base64, hashlib, sys, shutil, os, py_compile, tempfile
+
+FILE = "backend/services/enhanced_scanner.py"
+DGX_WHOLE_PRE = "8a02c5232659732e0191e4ffcee086aed6b53e11cf11689d52cabe3069620864"
+PRE_FUNC_SHA  = "3507ca0a42c60ea28a8db043040dbf4fd2874a7b20c4e4d774c839738248b5dd"
+POST_FUNC_SHA = "c4876ae8c64ffe8c790741272b4c5510440c98847ffe2e365ac6507d32936e50"
+OLD_B64 = "ICAgIGFzeW5jIGRlZiBfY2hlY2tfb3JiKHNlbGYsIHN5bWJvbDogc3RyLCBzbmFwc2hvdCwgdGFwZTogVGFwZVJlYWRpbmcpIC0+IE9wdGlvbmFsW0xpdmVBbGVydF06CiAgICAgICAgIiIiT3BlbmluZyBSYW5nZSBCcmVha291dCIiIgogICAgICAgIGN1cnJlbnRfd2luZG93ID0gc2VsZi5fZ2V0X2N1cnJlbnRfdGltZV93aW5kb3coKQogICAgICAgIAogICAgICAgIGlmIGN1cnJlbnRfd2luZG93IG5vdCBpbiBbVGltZVdpbmRvdy5PUEVOSU5HX0RSSVZFLCBUaW1lV2luZG93Lk1PUk5JTkdfTU9NRU5UVU0sIFRpbWVXaW5kb3cuTU9STklOR19TRVNTSU9OXToKICAgICAgICAgICAgcmV0dXJuIE5vbmUKICAgICAgICAKICAgICAgICBpZiBzbmFwc2hvdC5ydm9sID49IDIuMDoKICAgICAgICAgICAgZGlzdF9mcm9tX2hvZCA9ICgoc25hcHNob3QuaGlnaF9vZl9kYXkgLSBzbmFwc2hvdC5jdXJyZW50X3ByaWNlKSAvIHNuYXBzaG90LmN1cnJlbnRfcHJpY2UpICogMTAwCiAgICAgICAgICAgIAogICAgICAgICAgICAjIENPTkZJUk1FRCBPUkI6IFByaWNlIGJyb2tlIGFib3ZlIG9wZW5pbmcgcmFuZ2UgaGlnaAogICAgICAgICAgICBpZiBkaXN0X2Zyb21faG9kIDwgLTAuMSBhbmQgZGlzdF9mcm9tX2hvZCA+IC0xLjUgYW5kIHNuYXBzaG90LmFib3ZlX3Z3YXA6CiAgICAgICAgICAgICAgICBwcmlvcml0eSA9IEFsZXJ0UHJpb3JpdHkuSElHSCBpZiB0YXBlLmNvbmZpcm1hdGlvbl9mb3JfbG9uZyBlbHNlIEFsZXJ0UHJpb3JpdHkuTUVESVVNCiAgICAgICAgICAgICAgICBicmVha291dF9wY3QgPSBhYnMoZGlzdF9mcm9tX2hvZCkKICAgICAgICAgICAgICAgIAogICAgICAgICAgICAgICAgcmV0dXJuIExpdmVBbGVydCgKICAgICAgICAgICAgICAgICAgICBpZD1mIm9yYl9sb25nX2NvbmZpcm1lZF97c3ltYm9sfV97ZGF0ZXRpbWUubm93KCkuc3RyZnRpbWUoJyVIJU0lUycpfSIsCiAgICAgICAgICAgICAgICAgICAgc3ltYm9sPXN5bWJvbCwKICAgICAgICAgICAgICAgICAgICBzZXR1cF90eXBlPSJvcmJfbG9uZ19jb25maXJtZWQiLAogICAgICAgICAgICAgICAgICAgIHN0cmF0ZWd5X25hbWU9Ik9SQiBDT05GSVJNRUQgKElOVC0wMykiLAogICAgICAgICAgICAgICAgICAgIGRpcmVjdGlvbj0ibG9uZyIsCiAgICAgICAgICAgICAgICAgICAgcHJpb3JpdHk9cHJpb3JpdHksCiAgICAgICAgICAgICAgICAgICAgY3VycmVudF9wcmljZT1zbmFwc2hvdC5jdXJyZW50X3ByaWNlLAogICAgICAgICAgICAgICAgICAgIHRyaWdnZXJfcHJpY2U9c25hcHNob3QuaGlnaF9vZl9kYXksCiAgICAgICAgICAgICAgICAgICAgc3RvcF9sb3NzPXJvdW5kKHNuYXBzaG90Lmxvd19vZl9kYXkgLSAwLjAyLCAyKSwKICAgICAgICAgICAgICAgICAgICB0YXJnZXQ9cm91bmQoc25hcHNob3QuY3VycmVudF9wcmljZSArIChzbmFwc2hvdC5oaWdoX29mX2RheSAtIHNuYXBzaG90Lmxvd19vZl9kYXkpICogMiwgMiksCiAgICAgICAgICAgICAgICAgICAgcmlza19yZXdhcmQ9Mi4wLAogICAgICAgICAgICAgICAgICAgIHRyaWdnZXJfcHJvYmFiaWxpdHk9MC42NSwKICAgICAgICAgICAgICAgICAgICB3aW5fcHJvYmFiaWxpdHk9MC41OCwKICAgICAgICAgICAgICAgICAgICBtaW51dGVzX3RvX3RyaWdnZXI9MCwKICAgICAgICAgICAgICAgICAgICBoZWFkbGluZT1mIvCfmoAge3N5bWJvbH0gT1JCIEJSRUFLT1VUIENPTkZJUk1FRCAtIEJyb2tlICR7c25hcHNob3QuaGlnaF9vZl9kYXk6LjJmfSB7J+KckyBUQVBFJyBpZiB0YXBlLmNvbmZpcm1hdGlvbl9mb3JfbG9uZyBlbHNlICcnfSIsCiAgICAgICAgICAgICAgICAgICAgcmVhc29uaW5nPVsKICAgICAgICAgICAgICAgICAgICAgICAgZiJQcmljZSBBQk9WRSBvcGVuaW5nIHJhbmdlIGhpZ2ggYnkge2JyZWFrb3V0X3BjdDouMmZ9JSIsCiAgICAgICAgICAgICAgICAgICAgICAgIGYiT1JIIHdhcyAke3NuYXBzaG90LmhpZ2hfb2ZfZGF5Oi4yZn0sIG5vdyAke3NuYXBzaG90LmN1cnJlbnRfcHJpY2U6LjJmfSIsCiAgICAgICAgICAgICAgICAgICAgICAgIGYiUmFuZ2U6ICR7c25hcHNob3QubG93X29mX2RheTouMmZ9IC0gJHtzbmFwc2hvdC5oaWdoX29mX2RheTouMmZ9IiwKICAgICAgICAgICAgICAgICAgICAgICAgZiJSVk9MOiB7c25hcHNob3QucnZvbDouMWZ9eCIsCiAgICAgICAgICAgICAgICAgICAgICAgIGYiVGFwZToge3RhcGUub3ZlcmFsbF9zaWduYWwudmFsdWV9IgogICAgICAgICAgICAgICAgICAgIF0sCiAgICAgICAgICAgICAgICAgICAgdGltZV93aW5kb3c9Y3VycmVudF93aW5kb3cudmFsdWUsCiAgICAgICAgICAgICAgICAgICAgbWFya2V0X3JlZ2ltZT1zZWxmLl9tYXJrZXRfcmVnaW1lLnZhbHVlLAogICAgICAgICAgICAgICAgICAgIGV4cGlyZXNfYXQ9KGRhdGV0aW1lLm5vdyh0aW1lem9uZS51dGMpICsgdGltZWRlbHRhKGhvdXJzPTEpKS5pc29mb3JtYXQoKQogICAgICAgICAgICAgICAgKQogICAgICAgICAgICAKICAgICAgICAgICAgIyBBUFBST0FDSElORyBPUkI6IFByaWNlIG5lYXIgb3BlbmluZyByYW5nZSBoaWdoCiAgICAgICAgICAgIGlmIDAgPCBkaXN0X2Zyb21faG9kIDwgMC41IGFuZCBzbmFwc2hvdC5hYm92ZV92d2FwOgogICAgICAgICAgICAgICAgcHJpb3JpdHkgPSBBbGVydFByaW9yaXR5Lk1FRElVTQogICAgICAgICAgICAgICAgCiAgICAgICAgICAgICAgICByZXR1cm4gTGl2ZUFsZXJ0KAogICAgICAgICAgICAgICAgICAgIGlkPWYib3JiX2xvbmdfYXBwcm9hY2hpbmdfe3N5bWJvbH1fe2RhdGV0aW1lLm5vdygpLnN0cmZ0aW1lKCclSCVNJVMnKX0iLAogICAgICAgICAgICAgICAgICAgIHN5bWJvbD1zeW1ib2wsCiAgICAgICAgICAgICAgICAgICAgc2V0dXBfdHlwZT0iYXBwcm9hY2hpbmdfb3JiIiwKICAgICAgICAgICAgICAgICAgICBzdHJhdGVneV9uYW1lPSJBcHByb2FjaGluZyBPUkIgKElOVC0wMykiLAogICAgICAgICAgICAgICAgICAgIGRpcmVjdGlvbj0ibG9uZyIsCiAgICAgICAgICAgICAgICAgICAgcHJpb3JpdHk9cHJpb3JpdHksCiAgICAgICAgICAgICAgICAgICAgY3VycmVudF9wcmljZT1zbmFwc2hvdC5jdXJyZW50X3ByaWNlLAogICAgICAgICAgICAgICAgICAgIHRyaWdnZXJfcHJpY2U9c25hcHNob3QuaGlnaF9vZl9kYXksCiAgICAgICAgICAgICAgICAgICAgc3RvcF9sb3NzPXJvdW5kKHNuYXBzaG90Lmxvd19vZl9kYXkgLSAwLjAyLCAyKSwKICAgICAgICAgICAgICAgICAgICB0YXJnZXQ9cm91bmQoc25hcHNob3QuaGlnaF9vZl9kYXkgKyAoc25hcHNob3QuaGlnaF9vZl9kYXkgLSBzbmFwc2hvdC5sb3dfb2ZfZGF5KSAqIDIsIDIpLAogICAgICAgICAgICAgICAgICAgIHJpc2tfcmV3YXJkPTIuMCwKICAgICAgICAgICAgICAgICAgICB0cmlnZ2VyX3Byb2JhYmlsaXR5PTAuNTAsCiAgICAgICAgICAgICAgICAgICAgd2luX3Byb2JhYmlsaXR5PTAuNTIsCiAgICAgICAgICAgICAgICAgICAgbWludXRlc190b190cmlnZ2VyPTEwLAogICAgICAgICAgICAgICAgICAgIGhlYWRsaW5lPWYi8J+RgCB7c3ltYm9sfSBBcHByb2FjaGluZyBPUkIgLSB7ZGlzdF9mcm9tX2hvZDouMmZ9JSB0byAke3NuYXBzaG90LmhpZ2hfb2ZfZGF5Oi4yZn0geyfinJMgVEFQRScgaWYgdGFwZS5jb25maXJtYXRpb25fZm9yX2xvbmcgZWxzZSAnJ30iLAogICAgICAgICAgICAgICAgICAgIHJlYXNvbmluZz1bCiAgICAgICAgICAgICAgICAgICAgICAgIGYiUHJpY2Uge2Rpc3RfZnJvbV9ob2Q6LjJmfSUgYmVsb3cgT1JIICR7c25hcHNob3QuaGlnaF9vZl9kYXk6LjJmfSIsCiAgICAgICAgICAgICAgICAgICAgICAgIGYiUmFuZ2U6ICR7c25hcHNob3QubG93X29mX2RheTouMmZ9IC0gJHtzbmFwc2hvdC5oaWdoX29mX2RheTouMmZ9IiwKICAgICAgICAgICAgICAgICAgICAgICAgZiJSVk9MOiB7c25hcHNob3QucnZvbDouMWZ9eCIsCiAgICAgICAgICAgICAgICAgICAgICAgIGYi4pqg77iPIFdhaXQgZm9yIGNvbmZpcm1lZCBicmVhayBhYm92ZSAke3NuYXBzaG90LmhpZ2hfb2ZfZGF5Oi4yZn0iCiAgICAgICAgICAgICAgICAgICAgXSwKICAgICAgICAgICAgICAgICAgICB0aW1lX3dpbmRvdz1jdXJyZW50X3dpbmRvdy52YWx1ZSwKICAgICAgICAgICAgICAgICAgICBtYXJrZXRfcmVnaW1lPXNlbGYuX21hcmtldF9yZWdpbWUudmFsdWUsCiAgICAgICAgICAgICAgICAgICAgZXhwaXJlc19hdD0oZGF0ZXRpbWUubm93KHRpbWV6b25lLnV0YykgKyB0aW1lZGVsdGEoaG91cnM9MSkpLmlzb2Zvcm1hdCgpCiAgICAgICAgICAgICAgICApCiAgICAgICAgcmV0dXJuIE5vbmUKICAgIAo="
+NEW_B64 = "ICAgIGFzeW5jIGRlZiBfY2hlY2tfb3JiKHNlbGYsIHN5bWJvbDogc3RyLCBzbmFwc2hvdCwgdGFwZTogVGFwZVJlYWRpbmcpIC0+IE9wdGlvbmFsW0xpdmVBbGVydF06CiAgICAgICAgIiIiT3BlbmluZyBSYW5nZSBCcmVhayDigJQgY2hlYXQtc2hlZXQtZmFpdGhmdWwgVFJVRSAxNS1taW4gT1IgKHYxOS4zNC4zNTUpLgoKICAgICAgICBUaGUgc2hpcHBlZCBkZXRlY3RvciB1c2VkIHRoZSBydW5uaW5nIEhJR0gvTE9XIE9GIERBWSBhcyB0aGUgIm9wZW5pbmcgcmFuZ2UiICh0aGV5CiAgICAgICAgZHJpZnQgYWxsIG1vcm5pbmcpIHdpdGggc3RvcD1MT0QtMC4wMiBhbmQgdGFyZ2V0PXByaWNlKzIqKEhPRC1MT0QpLiBBIDE0ZCAmIDIxZAogICAgICAgIG5hdGl2ZS0xbWluIHJlcGxheSAoZGlhZ192MzU1KSBzaG93ZWQgdGhhdCBydWxlIGlzIH5icmVha2V2ZW4tdG8tbmVnYXRpdmUgKC05MVIvMTRkKS4KICAgICAgICBTTUIgT3BlbmluZyBSYW5nZSBCcmVhayBkb2N0cmluZTogZGVmaW5lIHRoZSBPUiA9IGhpZ2gvbG93IG9mIHRoZSBGSVJTVCAxNSBtaW4gZnJvbQogICAgICAgIDA5OjMwOyBFTlRFUiBvbiB0aGUgZmlyc3QgYnJlYWsgQUJPVkUgT1ItaGlnaCB3aXRoIGEgVk9MVU1FIGV4cGFuc2lvbjsgU1RPUCBqdXN0IGJlbG93CiAgICAgICAgdGhlIEJSRUFLT1VUIEJBUjsgVEFSR0VUID0gMnggbWVhc3VyZWQgbW92ZSBvZiB0aGUgT1I7IGhhcmQgdGltZS1leGl0IH4xMTozMCBFVC4gR2F0ZWQKICAgICAgICB0byBSOlIgMS41LTIuNSAodGhlIG9ubHkgK0VWIHNsaWNlKSB0aGUgZG9jdHJpbmUgdmFsaWRhdGVkOiAxNGQgbj01OSA0OSUgd2luICswLjMyMVI7CiAgICAgICAgMjFkIG49OTUgNDIlIHdpbiArMC4xODNSLCBhdmcgUjpSIDEuOTYg4oCUICtFViBhbmQgYmVhdHMgdGhlIGxpdmUgcnVsZS4gTE9ORyBvbmx5LCBvbmUKICAgICAgICBicmVha291dC9kYXkvc3ltYm9sLiAxLW1pbiBiYXJzIGZyb20gaWJfaGlzdG9yaWNhbF9kYXRhIChJQi1vbmx5KSB2aWEgdGVjaG5pY2FsX3NlcnZpY2UuCiAgICAgICAgKFRoZSBub24tYWN0aW9uYWJsZSAiYXBwcm9hY2hpbmdfb3JiIiBoZWFkcy11cCBicmFuY2ggaXMgcmVtb3ZlZCBhcyB1bnZhbGlkYXRlZCBub2lzZS4pCiAgICAgICAgIiIiCiAgICAgICAgT1JfTUlOID0gMTUKICAgICAgICBWT0xNVUxUID0gMS41CiAgICAgICAgU1RPUEJVRiA9IDAuMDUgICAgICAgICAgICAjICUgYmVsb3cgdGhlIGJyZWFrb3V0LWJhciBsb3cgKHN0b3AganVzdCBiZWxvdyBicmVha291dCBiYXIpCiAgICAgICAgVE1VTFQgPSAyLjAgICAgICAgICAgICAgICMgdGFyZ2V0ID0gT1JfaGlnaCArIFRNVUxUKk9SX2hlaWdodCAoMnggbWVhc3VyZWQgbW92ZSkKICAgICAgICBPUl9FTkQgPSA1NzAgKyBPUl9NSU4gICAgIyAwOTo0NSBFVCAobWludXRlcyBmcm9tIG1pZG5pZ2h0KQogICAgICAgIFRJTUVfRVhJVCA9IDY5MCAgICAgICAgICAjIDExOjMwIEVUIOKAlCBubyBuZXcgT1JCIGVudHJpZXMgYWZ0ZXIgdGhpcwogICAgICAgIE1JTl9SUiA9IDEuNQogICAgICAgIE1BWF9SUiA9IDIuNQoKICAgICAgICBjdXJyZW50X3dpbmRvdyA9IHNlbGYuX2dldF9jdXJyZW50X3RpbWVfd2luZG93KCkKICAgICAgICBpZiBjdXJyZW50X3dpbmRvdyBub3QgaW4gKFRpbWVXaW5kb3cuT1BFTklOR19EUklWRSwgVGltZVdpbmRvdy5NT1JOSU5HX01PTUVOVFVNLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgVGltZVdpbmRvdy5NT1JOSU5HX1NFU1NJT04pOgogICAgICAgICAgICByZXR1cm4gTm9uZQoKICAgICAgICB0cyA9IGdldGF0dHIoc2VsZiwgInRlY2huaWNhbF9zZXJ2aWNlIiwgTm9uZSkKICAgICAgICBpZiB0cyBpcyBOb25lOgogICAgICAgICAgICByZXR1cm4gTm9uZQogICAgICAgIGJhcnMgPSB0cy5fZ2V0X2ludHJhZGF5X2JhcnNfZnJvbV9kYihzeW1ib2wsICIxIG1pbiIsIDEyMCkKICAgICAgICBpZiBub3QgYmFycyBvciBsZW4oYmFycykgPCBPUl9NSU4gKyAxOgogICAgICAgICAgICByZXR1cm4gTm9uZQoKICAgICAgICBjYXBzID0gZ2V0YXR0cihzZWxmLCAiX29yYl9kYWlseV9jYXBzIiwgTm9uZSkKICAgICAgICBpZiBjYXBzIGlzIE5vbmU6CiAgICAgICAgICAgIGNhcHMgPSBzZWxmLl9vcmJfZGFpbHlfY2FwcyA9IHt9CiAgICAgICAgdG9kYXkgPSBkYXRldGltZS5ub3codGltZXpvbmUudXRjKS5zdHJmdGltZSgiJVktJW0tJWQiKQogICAgICAgIGtleSA9IGYie3N5bWJvbH06e3RvZGF5fTpsb25nIgogICAgICAgIGlmIGNhcHMuZ2V0KGtleSwgMCkgPj0gMToKICAgICAgICAgICAgcmV0dXJuIE5vbmUKCiAgICAgICAgdHJ5OgogICAgICAgICAgICBmcm9tIHpvbmVpbmZvIGltcG9ydCBab25lSW5mbwogICAgICAgICAgICBfRVQgPSBab25lSW5mbygiQW1lcmljYS9OZXdfWW9yayIpCiAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgcmV0dXJuIE5vbmUKCiAgICAgICAgZGVmIF9ldG0oYmFyKToKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgZHQgPSBkYXRldGltZS5mcm9taXNvZm9ybWF0KHN0cihiYXIuZ2V0KCJkYXRlIikpLnJlcGxhY2UoIloiLCAiKzAwOjAwIikpCiAgICAgICAgICAgICAgICBpZiBkdC50emluZm8gaXMgTm9uZToKICAgICAgICAgICAgICAgICAgICBkdCA9IGR0LnJlcGxhY2UodHppbmZvPXRpbWV6b25lLnV0YykKICAgICAgICAgICAgICAgIGR0ID0gZHQuYXN0aW1lem9uZShfRVQpCiAgICAgICAgICAgICAgICByZXR1cm4gZHQuaG91ciAqIDYwICsgZHQubWludXRlCiAgICAgICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgICAgICByZXR1cm4gTm9uZQoKICAgICAgICBvcl9iYXJzID0gW2IgZm9yIGIgaW4gYmFycyBpZiAoX2V0bShiKSBpcyBub3QgTm9uZSBhbmQgNTcwIDw9IF9ldG0oYikgPCBPUl9FTkQpXQogICAgICAgIGlmIG5vdCBvcl9iYXJzOgogICAgICAgICAgICByZXR1cm4gTm9uZQogICAgICAgIG9yX2hpZ2ggPSBtYXgoYlsiaGlnaCJdIGZvciBiIGluIG9yX2JhcnMpCiAgICAgICAgb3JfbG93ID0gbWluKGJbImxvdyJdIGZvciBiIGluIG9yX2JhcnMpCiAgICAgICAgb3JfaCA9IG9yX2hpZ2ggLSBvcl9sb3cKICAgICAgICBpZiBvcl9oIDw9IDA6CiAgICAgICAgICAgIHJldHVybiBOb25lCiAgICAgICAgb3Jfdm9sID0gc3VtKChiLmdldCgidm9sdW1lIikgb3IgMCkgZm9yIGIgaW4gb3JfYmFycykgLyBsZW4ob3JfYmFycykKCiAgICAgICAgbGFzdCA9IGJhcnNbLTFdCiAgICAgICAgbGFzdF9ldG0gPSBfZXRtKGxhc3QpCiAgICAgICAgaWYgbGFzdF9ldG0gaXMgTm9uZSBvciBsYXN0X2V0bSA8IE9SX0VORCBvciBsYXN0X2V0bSA+IFRJTUVfRVhJVDoKICAgICAgICAgICAgcmV0dXJuIE5vbmUKICAgICAgICBpZiBsYXN0LmdldCgiaGlnaCIpIGlzIE5vbmUgb3IgbGFzdC5nZXQoImxvdyIpIGlzIE5vbmUgb3IgbGFzdC5nZXQoImNsb3NlIikgaXMgTm9uZToKICAgICAgICAgICAgcmV0dXJuIE5vbmUKICAgICAgICAjIGZpcnN0IGJyZWFrb3V0IG9ubHk6IG5vIGVhcmxpZXIgcG9zdC1PUiBiYXIgbWF5IGhhdmUgY2xvc2VkIGFib3ZlIE9SLWhpZ2guCiAgICAgICAgZm9yIGIgaW4gYmFyczoKICAgICAgICAgICAgZW0gPSBfZXRtKGIpCiAgICAgICAgICAgIGlmIGVtIGlzIG5vdCBOb25lIGFuZCBPUl9FTkQgPD0gZW0gPCBsYXN0X2V0bSBhbmQgKGIuZ2V0KCJjbG9zZSIpIG9yIDApID4gb3JfaGlnaDoKICAgICAgICAgICAgICAgIHJldHVybiBOb25lCiAgICAgICAgaWYgbm90IChsYXN0WyJjbG9zZSJdID4gb3JfaGlnaCBhbmQgbGFzdFsiaGlnaCJdID4gb3JfaGlnaCk6CiAgICAgICAgICAgIHJldHVybiBOb25lCiAgICAgICAgaWYgb3Jfdm9sID4gMCBhbmQgKGxhc3QuZ2V0KCJ2b2x1bWUiKSBvciAwKSA8IFZPTE1VTFQgKiBvcl92b2w6CiAgICAgICAgICAgIHJldHVybiBOb25lCgogICAgICAgIGVudHJ5ID0gcm91bmQobGFzdFsiY2xvc2UiXSwgMikKICAgICAgICBzdG9wX2xvc3MgPSByb3VuZChsYXN0WyJsb3ciXSAqICgxIC0gU1RPUEJVRiAvIDEwMC4wKSwgMikKICAgICAgICB0YXJnZXQgPSByb3VuZChvcl9oaWdoICsgVE1VTFQgKiBvcl9oLCAyKQogICAgICAgIHJpc2sgPSBlbnRyeSAtIHN0b3BfbG9zcwogICAgICAgIGlmIHJpc2sgPD0gMCBvciBlbnRyeSA8PSAwIG9yIHRhcmdldCA8PSBlbnRyeToKICAgICAgICAgICAgcmV0dXJuIE5vbmUKICAgICAgICByciA9ICh0YXJnZXQgLSBlbnRyeSkgLyByaXNrCiAgICAgICAgaWYgcnIgPCBNSU5fUlIgb3IgcnIgPiBNQVhfUlI6CiAgICAgICAgICAgIHJldHVybiBOb25lCiAgICAgICAgcl9tdWx0aXBsZSA9IHJvdW5kKHJyLCAyKQoKICAgICAgICBjYXBzW2tleV0gPSBjYXBzLmdldChrZXksIDApICsgMQogICAgICAgIHByaW9yaXR5ID0gQWxlcnRQcmlvcml0eS5ISUdIIGlmIHRhcGUuY29uZmlybWF0aW9uX2Zvcl9sb25nIGVsc2UgQWxlcnRQcmlvcml0eS5NRURJVU0KICAgICAgICB0YXBlX3RhZyA9ICLinJMgVEFQRSIgaWYgdGFwZS5jb25maXJtYXRpb25fZm9yX2xvbmcgZWxzZSAiIgogICAgICAgIHJldHVybiBMaXZlQWxlcnQoCiAgICAgICAgICAgIGlkPWYib3JiX2xvbmdfY29uZmlybWVkX3tzeW1ib2x9X3tkYXRldGltZS5ub3coKS5zdHJmdGltZSgnJUglTSVTJyl9IiwKICAgICAgICAgICAgc3ltYm9sPXN5bWJvbCwKICAgICAgICAgICAgc2V0dXBfdHlwZT0ib3JiX2xvbmdfY29uZmlybWVkIiwKICAgICAgICAgICAgc3RyYXRlZ3lfbmFtZT0iT1JCIENPTkZJUk1FRCAoSU5ULTAzKSIsCiAgICAgICAgICAgIGRpcmVjdGlvbj0ibG9uZyIsCiAgICAgICAgICAgIHByaW9yaXR5PXByaW9yaXR5LAogICAgICAgICAgICBjdXJyZW50X3ByaWNlPXNuYXBzaG90LmN1cnJlbnRfcHJpY2UsCiAgICAgICAgICAgIHRyaWdnZXJfcHJpY2U9ZW50cnksCiAgICAgICAgICAgIHN0b3BfbG9zcz1zdG9wX2xvc3MsCiAgICAgICAgICAgIHRhcmdldD10YXJnZXQsCiAgICAgICAgICAgIHJpc2tfcmV3YXJkPXJfbXVsdGlwbGUsCiAgICAgICAgICAgIHRyaWdnZXJfcHJvYmFiaWxpdHk9MC40OSwKICAgICAgICAgICAgd2luX3Byb2JhYmlsaXR5PTAuNDksCiAgICAgICAgICAgIG1pbnV0ZXNfdG9fdHJpZ2dlcj0wLAogICAgICAgICAgICBoZWFkbGluZT1mIvCfmoAge3N5bWJvbH0gT1JCIEJSRUFLT1VUIOKAlCBicm9rZSAxNS1taW4gT1IgaGlnaCAke29yX2hpZ2g6LjJmfSAoUjpSIHtyX211bHRpcGxlOi4xZn0pIHt0YXBlX3RhZ30iLAogICAgICAgICAgICByZWFzb25pbmc9WwogICAgICAgICAgICAgICAgZiIxNS1taW4gb3BlbmluZyByYW5nZSAke29yX2xvdzouMmZ9LSR7b3JfaGlnaDouMmZ9IChoZWlnaHQgJHtvcl9oOi4yZn0pOyBmaXJzdCBicmVhayBhYm92ZSBvbiB2b2x1bWUiLAogICAgICAgICAgICAgICAgZiJCcmVha291dC1iYXIgdm9sIHsobGFzdC5nZXQoJ3ZvbHVtZScpIG9yIDApOi4wZn0gPj0ge1ZPTE1VTFQ6Z314IE9SIGF2ZyB7b3Jfdm9sOi4wZn0iLAogICAgICAgICAgICAgICAgZiJTVE9QICR7c3RvcF9sb3NzOi4yZn0gKGp1c3QgYmVsb3cgYnJlYWtvdXQgYmFyKSDCtyBUQVJHRVQgMnggT1IgJHt0YXJnZXQ6LjJmfSDCtyB0aW1lLWV4aXQgMTE6MzAgRVQiLAogICAgICAgICAgICAgICAgZiJSOlIge3JfbXVsdGlwbGU6LjFmfToxICh2MzU1IHJlcGxheSA0Mi00OSUgd2luLCArMC4xOC4uMC4zMlIsIFJSLWdhdGVkIDEuNS0yLjUpIMK3IFRhcGU6IHt0YXBlLm92ZXJhbGxfc2lnbmFsLnZhbHVlfSIsCiAgICAgICAgICAgIF0sCiAgICAgICAgICAgIHRpbWVfd2luZG93PWN1cnJlbnRfd2luZG93LnZhbHVlLAogICAgICAgICAgICBtYXJrZXRfcmVnaW1lPXNlbGYuX21hcmtldF9yZWdpbWUudmFsdWUsCiAgICAgICAgICAgIGV4cGlyZXNfYXQ9KGRhdGV0aW1lLm5vdyh0aW1lem9uZS51dGMpICsgdGltZWRlbHRhKGhvdXJzPTEpKS5pc29mb3JtYXQoKQogICAgICAgICkKICAgIAo="
+BACKUP = FILE + ".bak_v355"
+
+
+def _sha(s): return hashlib.sha256(s.encode("utf-8")).hexdigest()
+def _read():
+    if not os.path.exists(FILE):
+        print(f"ERROR: {FILE} not found (run from repo root)"); sys.exit(2)
+    return open(FILE, encoding="utf-8").read()
+def _old(): return base64.b64decode(OLD_B64).decode("utf-8")
+def _new(): return base64.b64decode(NEW_B64).decode("utf-8")
+def _compiles(text):
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as tf:
+        tf.write(text); tmp = tf.name
+    try:
+        py_compile.compile(tmp, doraise=True); return True
+    except py_compile.PyCompileError as e:
+        print("POST-PATCH COMPILE FAILED:\n", e); return False
+    finally:
+        os.unlink(tmp)
+
+
+def check():
+    src = _read(); cur = _sha(src); old = _old()
+    print(f"file            : {FILE}")
+    print(f"whole-file SHA  : {cur}")
+    print(f"expected (DGX)  : {DGX_WHOLE_PRE}  {'OK' if cur == DGX_WHOLE_PRE else 'DRIFT!'}")
+    print(f"func anchor     : present={old in src} count={src.count(old)}")
+    print(f"func PRE sha    : {_sha(old)}  {'OK' if _sha(old) == PRE_FUNC_SHA else 'MISMATCH'}")
+    print(f"func POST sha   : {_sha(_new())}  {'OK' if _sha(_new()) == POST_FUNC_SHA else 'MISMATCH'}")
+    if _new() in src: print("state           : ALREADY PATCHED")
+    if cur != DGX_WHOLE_PRE:
+        print("\nDRIFT: live file != DGX baseline (benign if already applied; else re-extract)."); return False
+    if src.count(old) != 1:
+        print("\nAnchor missing/ambiguous -- abort."); return False
+    print("\nREADY: --apply installs the true 15-min OR doctrine (RR-gated 1.5-2.5).")
+    return True
+
+
+def apply():
+    src = _read(); old, new = _old(), _new()
+    if new in src: print("Already patched. No-op."); return
+    if _sha(src) != DGX_WHOLE_PRE:
+        print(f"ABORT: whole-file SHA {_sha(src)} != DGX baseline. See --check."); sys.exit(3)
+    if src.count(old) != 1:
+        print(f"ABORT: anchor count={src.count(old)} (need 1)."); sys.exit(3)
+    if _sha(old) != PRE_FUNC_SHA:
+        print("ABORT: function PRE sha mismatch."); sys.exit(3)
+    if _sha(new) != POST_FUNC_SHA:
+        print("ABORT: embedded NEW function sha mismatch (corrupt patcher)."); sys.exit(3)
+    patched = src.replace(old, new, 1)
+    if not _compiles(patched):
+        print("ABORT: patched file does not compile. No write."); sys.exit(3)
+    shutil.copy2(FILE, BACKUP)
+    with open(FILE, "w", encoding="utf-8") as f: f.write(patched)
+    print(f"APPLIED. backup -> {BACKUP}")
+    print(f"new whole-file SHA : {_sha(patched)}  (record this)")
+    print("Verify: pytest backend/tests/test_v355_orb.py -q ; commit BEFORE restart ; ./start_backend.sh --force")
+
+
+def rollback():
+    src = _read(); old, new = _old(), _new()
+    if old in src and _sha(src) == DGX_WHOLE_PRE:
+        print("Already at baseline. No-op."); return
+    if new in src and src.count(new) == 1:
+        restored = src.replace(new, old, 1)
+        shutil.copy2(FILE, FILE + ".bak_pre_rollback")
+        with open(FILE, "w", encoding="utf-8") as f: f.write(restored)
+        print(f"ROLLED BACK via reverse-anchor. whole-file SHA == DGX baseline: {_sha(restored) == DGX_WHOLE_PRE}")
+        return
+    if os.path.exists(BACKUP):
+        bsrc = open(BACKUP, encoding="utf-8").read()
+        if _sha(bsrc) == DGX_WHOLE_PRE:
+            shutil.copy2(BACKUP, FILE); print(f"ROLLED BACK from {BACKUP} (== DGX baseline)."); return
+    print("ABORT: could not safely roll back."); sys.exit(4)
+
+
+if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else "--check"
+    {"--check": check, "--apply": apply, "--rollback": rollback}.get(arg, lambda: print("usage: --check | --apply | --rollback"))()

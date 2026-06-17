@@ -12,7 +12,13 @@ NEW source: /tmp/new_orb.txt (sandbox)
 test_v355_orb.py created (6 scenarios, validated locally vs NEW func).
 6 local scenarios PASS: fire(stop98.95/target104.0/rr2.26), no-vol, wrong-window, rr>2.5, not-first, cap.
 
-## Status: AWAITING operator `extract_func.py _check_orb` on DGX (expect whole-file 8a02c523...).
-## Then build patch_v355_orb_doctrine.py pinned to DGX PRE + POST c4876ae8.
+## Patcher BUILT & SIMULATED (anchor matches DGX; preserves _atr_floored_stop & _check_gap_give_go; compiles)
+DGX_WHOLE_PRE = 8a02c5232659732e0191e4ffcee086aed6b53e11cf11689d52cabe3069620864
+PRE_FUNC_SHA  = 3507ca0a42c60ea28a8db043040dbf4fd2874a7b20c4e4d774c839738248b5dd
+POST_FUNC_SHA = c4876ae8c64ffe8c790741272b4c5510440c98847ffe2e365ac6507d32936e50
+patch_v355_orb_doctrine.py -> https://paste.rs/9Jw3f  sha 136fe5caf317ba68fda2798504d6e549d2f33bafc61e350e3e017e74cf01c362
+test_v355_orb.py           -> https://paste.rs/Ovd5j  sha c463e19be8c0c435f104a4e64aa8f1a94422b487ffd69c9470dbb07d5f409589
+
+## Status: AWAITING operator --check/--apply/pytest/commit/restart.
 
 ## Live baseline whole-file SHA = 8a02c5232659732e0191e4ffcee086aed6b53e11cf11689d52cabe3069620864
