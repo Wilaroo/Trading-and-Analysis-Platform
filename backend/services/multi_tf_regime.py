@@ -197,7 +197,18 @@ def mode_for_direction(context: str, direction: str, long_score: Optional[float]
         if d == "short":
             return "aggressive" if ls <= 30 else "normal"
         return "defensive"  # longs against a confirmed down anchor
-    # MIXED / UNKNOWN
+    # MIXED / UNKNOWN — anchor-aware (v19.34.321). A decisive daily anchor
+    # with a merely-NEUTRAL (non-opposing) intraday is a trend consolidating,
+    # NOT a no-read. v326/v327 (2026-06): SPY (UP-anchor, NEUTRAL-intraday) fell
+    # here and flattened BOTH directions to 'cautious', raising the GO bar 38->50
+    # and starving GO (~10x fewer GOs). Keep the WITH-trend side tradeable
+    # (normal) and the COUNTER-trend side defensive; only a truly neutral/unknown
+    # anchor caps both. Symmetric for a decisive-DOWN anchor.
+    lb = lane_bias(long_score)
+    if lb == "UP":
+        return "normal" if d == "long" else "defensive"
+    if lb == "DOWN":
+        return "defensive" if d == "long" else "normal"
     return "cautious"
 
 
