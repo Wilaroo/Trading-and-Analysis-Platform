@@ -667,3 +667,17 @@ DECISION GATE: (dir,gap) cells where winsorAvg & medR both >0 = keep/tune that F
 if raw VWAP-cross is weak, add a v341-style snapback trigger. THEN build patch_v343 if a rewrite is warranted.
 SWEEP QUEUE after gap_fade: mean_reversion(2680/73) → backside(487/15) → [MOMENTUM template] hitchhiker/
 second_chance/fashionably_late/gap_give_go/spencer/9_ema/abc/gap_pick_roll/puppy_dog.
+
+## ⚠️ v342 DGX RESULT (2026-06-18) — gap_fade (current logic) is NEGATIVE-EV → rework or suppress
+21d, 1224 gap-days, 1080 triggered. ALL 6 (dir,gap) cells NEGATIVE on winsorAvg AND medR:
+  SHORT (gap-up failing): ALL n574 win43% wAvg-0.108 med-0.078 (2-3 -0.131 | 3-5 -0.121 | >=5 -0.065)
+  LONG  (gap-down recovering): ALL n506 win42% wAvg-0.068 med-0.106 (2-3 -0.113 | 3-5 -0.023 | >=5 -0.078)
+The live thesis (fade VWAP-cross to FULL prior-close fill) fights gap momentum + distant target rarely
+fills (40-46% win). gap_fade is bleeding as-is. SHIPPED v342b A/B (trigger {vwapcross|snapback} x target
+{prevclose|vwap}) to test if v341 mechanics (double-bar-break snapback + closer VWAP target, gap-gated)
+rescue it. paste https://paste.rs/QreOm (round-trip OK).
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v342b_gap_fade_ab.py --days 21 --gapmin 2.0 --universe 300 --maxhold 60 --minriskpct 0.5 --winsor 3.0 --warmup 3 --trigger snapback --target vwap
+DECISION: snapback+vwap clearly +EV → patch_v343 rewrite (gap-gated v341 mechanics); +EV but ~=vwap_fade →
+gap_fade REDUNDANT → suppress (remove from _enabled_setups), vwap_fade covers it; still <=0 → SUPPRESS gap_fade.
+DGX HEAD now 0e9d32be (v341 committed+pushed). NOTE: that commit accidentally swept 5 stray shell-token files
+(done/echo/grep/sha256sum/}) into the repo — operator to `git rm` them.
