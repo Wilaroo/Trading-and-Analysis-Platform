@@ -5143,48 +5143,116 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_backside(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Back$ide - Recovery from LOD"""
-        if (snapshot.trend == "uptrend" and
-            snapshot.above_ema9 and
-            not snapshot.above_vwap and
-            snapshot.dist_from_vwap > -2.0 and
-            snapshot.rvol >= 1.2):
-            
-            return LiveAlert(
-                id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="backside",
-                strategy_name="Back$ide Scalp (INT-32)",
-                direction="long",
-                # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which capped
-                # this intraday scalp below the auto-fire bar regardless of signal
-                # quality; see v320q + v320r-precheck). Only the tape-confirmed
-                # subset promotes; EV/win-rate gate still governs auto-fire.
-                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.ema_9 - 0.02,
-                    atr=getattr(snapshot, "atr", None),
+        """Back$ide \u2014 shallow VWAP-recovery snapback (v19.34.348 redesign, LONG-only).
+
+        Fires on the TRIGGER, not a dist_from_vwap STATE: after a SHALLOW dip BELOW session
+        VWAP (the [0.3%, 1.0%) band that vwap_fade \u2014 which floors at 1.0% \u2014 structurally
+        cannot serve), price must reclaim the 9-EMA and a 1-min double-bar-HIGH-break snapback
+        prints within +1..+4 bars of the dip-low, snapping back UP to VWAP. Validated +EV on a
+        14d risk-controlled native-1min replay (v347: 0-0.5% band win93%/+0.11R, 0.5-1% band
+        win88%/+0.41R; n=32/33 UNIQUE vs vwap_fade \u2014 a distinct shallow-dip recovery edge,
+        NOT a duplicate). Requires stop >= 1.0% of entry (the min-risk floor that gated ~96% of
+        the loose state fires) + RVOL >= 1.2 + price above the 9-EMA + 2 fires/day per symbol.
+        """
+        DIP_FLOOR = 0.3
+        DIP_CEIL = 1.0          # >= 1.0% is vwap_fade's band \u2014 keep backside complementary (zero overlap)
+        TRIGGER_WIN = 4
+        ACCEL = 1.3
+        MIN_RVOL = 1.2
+        MIN_RISK_PCT = 1.0
+
+        if not getattr(snapshot, "above_ema9", False):
+            return None
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+        rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+        if rvol < MIN_RVOL:
+            return None
+        vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
+        if vwap <= 0:
+            return None
+
+        caps = getattr(self, "_backside_daily_caps", None)
+        if caps is None:
+            caps = self._backside_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
+        if lows:
+            lod = min(v for _, v in lows)
+            lod_idx = max(j for j, v in lows if v == lod)
+            dip = (vwap - lod) / vwap * 100.0
+            accel_ok = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
+            green = last["close"] > last["open"]
+            clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+            if (DIP_FLOOR <= dip < DIP_CEIL and accel_ok and green and clears_hi
+                    and 1 <= (i - lod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:long"
+                if caps.get(key, 0) >= 2:
+                    return None
+                entry = round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2)
+                if entry >= vwap:
+                    return None
+                stop_loss = round(min(lod - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
+                risk = entry - stop_loss
+                if risk <= 0 or entry <= 0 or (risk / entry * 100.0) < MIN_RISK_PCT:
+                    return None
+                target_1 = round(vwap, 2)
+                reward = target_1 - entry
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+                ev_info = ""
+                if "backside" in self._strategy_stats:
+                    st = self._strategy_stats["backside"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+                return LiveAlert(
+                    id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="backside",
+                    strategy_name="Back$ide Scalp (INT-32)",
                     direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"↗️ {symbol} Back$ide - Recovering to VWAP",
-                reasoning=[
-                    "Higher highs/lows above 9-EMA",
-                    f"Tape: {tape.overall_signal.value}",
-                    f"Target: VWAP ${snapshot.vwap:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=entry,
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.73,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} Back$ide snapback \u2014 {dip:.1f}% dip reclaim to VWAP {tape_tag}",
+                    reasoning=[
+                        f"Shallow {dip:.1f}% dip below VWAP ${vwap:.2f} \u2192 1-min double-bar-break reclaim",
+                        f"Snapback {i - lod_idx} bar(s) after LOD ${lod:.2f} (flush range >= {ACCEL:g}x median), above 9-EMA",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target VWAP ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Shallow VWAP-recovery (v347 replay +0.28R, 91% win, 0.3-1% band)",
+                        "Entry: green bar reclaimed prior-2 highs (0.3-1% band, complementary to vwap_fade, 2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                )
         return None
     
     async def _check_off_sides(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
