@@ -26277,3 +26277,19 @@ KEY INVESTIGATION RESULTS:
 
 Diagnostics shipped (read-only): v326 regime/mtf timeline, v327 mode-unlock sim, v329 long replay,
 v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker, second_chance, big_dog.
+
+## 2026-06-18 — P0 closures + FADE sweep started (v19.34.324 / patch_v341)
+- ✅ P0 breakdown 2470/0 = CORRECT SUPPRESSION (not in _enabled_setups → setup_disabled gate;
+  0 reach confidence gate). No execution bug. Enabling = edge-validation decision, not a fix. (v337)
+- ✅ P0 Part A EOD-flatten = HISTORICAL residue, live path HEALTHY → STAND DOWN (no Journey-3 patch).
+  v338/v339: all 14 dangerous stop_loss overnight-rides entered Mar/Apr — BEFORE the EOD stack
+  (v245→v322s, Jun 2-12). Post-stack overnight leaks are only safety-net catches (zombie_cleanup,
+  missed_eod_boot_flatten). Zero silent gap-stop rides after Jun 2. v245/v261/v301/v322s already seal it.
+- ✅ SHIPPED & LIVE patch_v341 / v19.34.324: _check_vwap_fade rewritten to VWAP-anchored SMB snapback
+  (both sides, [1.0%,3.0%) ext band, 1-min double-bar-break +1..+4, 1% stop floor, RVOL>=1.5, 2/day cap).
+  Validated by v340b risk-controlled replay (LONG/SHORT 1-2% band win73% ~+0.20R; >=3% no edge excluded;
+  1% stop floor gated ~86% tiny-stop R-explosions). pytest 6/6. DGX --check clean (bc674f26) → apply →
+  new baseline 45db2e66 → restart clean (0 red). NEW enhanced_scanner baseline = 45db2e66….
+- 🧭 FADE sweep queue: vwap_fade ✅ | gap_fade replay v342 shipped (pending run) | mean_reversion,
+  backside next | then MOMENTUM continuation-template group.
+- Tooling: generic _extract_func.py (live function extractor, reusable across the sweep).

@@ -3,6 +3,11 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## ✅ RESOLVED 2026-06-18 (was NEXT SESSION P0s)
+- ✅ P0 Part A EOD-flatten: HISTORICAL residue; live stack (v245/v261/v301/v322s) already seals it. No patch. (v338/v339)
+- ✅ P0 breakdown 2470/0: correct suppression (disabled setup), not a bug. (v337)
+- ✅ vwap_fade rewrite LIVE (patch_v341/v19.34.324); replay-validated both sides.
+
 ## 🔴 NEXT SESSION (added 2026-06-17, after v336 short-fade gate shipped)
 - **P0 — Part A: EOD-flatten ENFORCEMENT for intraday short fades.** v334 catastrophic
   tail (WTI/USO) = intraday short fades that rode ~20-24h OVERNIGHT, then a gap blew the

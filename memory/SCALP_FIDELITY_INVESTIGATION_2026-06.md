@@ -643,3 +643,27 @@ ARTIFACTS: patcher paste https://paste.rs/tOKtG sha 6e677a33cdcacc3574a2eaae6b44
 DEPLOY: --check (expect whole-file OK on bc674f26) → --apply → pytest test_v341 (6) → COMMIT → ./start_backend.sh --force.
 POST-DEPLOY: watch live_alerts for vwap_fade_long/short firing on real flushes; track fire→GO→trade +
 sanitized avgR vs replay (+0.19R long / +0.21R short, 1-2% band). NEXT FADE: gap_fade(3627/154) replay.
+
+## ✅✅ patch_v341 / v19.34.324 DEPLOYED & LIVE (2026-06-18) — vwap_fade snapback active
+Operator: --check whole-file OK (bc674f26) → --apply → new whole-file SHA 45db2e66d028625d96ec6a97ea78afcca032e4f8beda557b8de58303e988b296
+(backup .bak_v341) → pytest test_v341 6/6 → ./start_backend.sh --force "Application startup complete" (23s),
+health 6 green / 2 benign-yellow (pusher no-push-yet recent boot; historical_queue 0 pending/27 failed) / 0 red,
+ib_gateway green/connected. vwap_fade VWAP-anchored SMB snapback is LIVE.
+NEW DGX whole-file baseline for enhanced_scanner.py = 45db2e66… (use for any future patcher PRE_SHA).
+⚠ COMMIT REMINDER: operator restarted via start_backend BEFORE an explicit git commit was observed — code
+is live but persist to origin/main with: git commit -m "v19.34.324 vwap_fade snapback (patch_v341)".
+POST-DEPLOY watch: live_alerts vwap_fade_long/short on real flushes; fire→GO→trade + sanitized avgR vs
+replay (+0.19R long / +0.21R short, 1-2% band).
+
+## 🧭 FADE SWEEP #2 — gap_fade replay (v342) SHIPPED, PENDING operator run
+Current _check_gap_fade (L5751) is a proper gap-fill trade (NOT broken-state): |gap|>=2% + rvol>=1.3;
+gap-UP failing (below VWAP)->SHORT to prev_close; gap-DOWN recovering (above VWAP)->LONG to prev_close;
+stop=HOD/LOD±0.3ATR. v342 validates this thesis from native 1-min bars (prior_close + ATR derived from
+1-min day OHLC; one trade/symbol-day at first failing/recovering VWAP cross after warmup), reporting
+rawAvg/winsorAvg/medR/win% by (direction, gap-bucket 2-3/3-5/>=5%) with min-risk gate + winsor.
+  paste https://paste.rs/uT6yc  (round-trip OK)
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v342_gap_fade_replay.py --days 21 --gapmin 2.0 --universe 300 --maxhold 60 --minriskpct 0.5 --winsor 3.0 --warmup 3
+DECISION GATE: (dir,gap) cells where winsorAvg & medR both >0 = keep/tune that FIRE config; prune the rest;
+if raw VWAP-cross is weak, add a v341-style snapback trigger. THEN build patch_v343 if a rewrite is warranted.
+SWEEP QUEUE after gap_fade: mean_reversion(2680/73) → backside(487/15) → [MOMENTUM template] hitchhiker/
+second_chance/fashionably_late/gap_give_go/spencer/9_ema/abc/gap_pick_roll/puppy_dog.
