@@ -26322,3 +26322,25 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   FADE sweep status: vwap_fade(v341 rewrite), gap_fade(v343 rewrite),
   mean_reversion(v346 suppress), backside(v348 rewrite) ALL DONE.
   NEXT FADE: off_sides (range-break short, loose state-detector) — pending.
+
+- 2026-06-17 v349/v350 (FADE SWEEP #5 — off_sides, FINAL FADE): diag_v349_
+  off_sides_replay (paste.rs/3oDNM) ran 14d risk-controlled native-1min replay
+  with THREE targets to separate "setup +EV?" from "live target too far?". In
+  off_sides' actual UNIQUE near-VWAP zone (|dist_vwap|<1%, complementary to
+  vwap_fade-short): LIVE target LOD-(HOD-LOD) +0.099R (weakest), LOD target
+  +0.129R/58%w, VWAP target +0.140R/78%w. Loose state-detector fired ~94%
+  sub-edge (9659/10296 gated by 1.0% min-risk). VERDICT: REWRITE w/ closer
+  target. patch_v350_off_sides_snapback.py (paste.rs/237Ww) replaced
+  _check_off_sides with a range-top fade SHORT snapback: same gates (regime
+  range/fade, |dist_vwap|<1%, range>1.5%, <=1% from HOD) + RED 1-min double-bar
+  -low-break + 1.3x accel + 1.0% min-risk (stop=HOD+buf) + 2/day; target =
+  nearer-of(VWAP,LOD) below entry. Function-anchored: PRE whole-file 932d320f..,
+  func PRE b7b484db.., func POST ad34fe11.. all OK; APPLIED -> new whole-file SHA
+  e772deda3d2dcb84affe1edcf8257999b3129c6ce178c34041c94b0846b3cc92.
+  Committed 511897f8; backend restarted GREEN (6 green / 2 benign yellow).
+  test_v350_off_sides.py (paste.rs/3yP54) 7 pass (LOD-target fire, VWAP-target
+  fire, wrong-regime/far-HOD/not-near-vwap/min-risk gates, 2/day cap).
+  *** FADE SWEEP COMPLETE: vwap_fade(v341), gap_fade(v343), mean_reversion(v346
+  suppress), backside(v348), off_sides(v350) ALL DONE. ***
+  NEXT PHASE (B): MOMENTUM/continuation setups — build a new continuation-replay
+  template (breakout follow-through, opposite of snapback mechanics).
