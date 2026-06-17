@@ -97,3 +97,21 @@ My "nothing executes / FIRE gate blocks everything" headline was OVERSTATED — 
 - Reconciliation diag: diag_v321f_reconcile.py paste AcmiO
   sha 98c32ccbd936fe7c36131380397a16e15ca4bdf8b04f758487d9597da50aa80d
   (verifies status dist 15,167 vs closed 1,646 vs in-window 710 vs sanitized 66; live/shadow split).
+
+## ✅ ROOT CAUSE CONFIRMED (v321f + v321g, 2026-06)
+v321f: 15,167 bot_trades = simulated 6,632 + rejected 6,325 + closed 1,646 + vetoed 548 + open 9.
+  14d=854 placed, trade_type=paper 100%, learning_only 44%. 854→204 closed→73 sanitized.
+  GO→order conversion 46-70%. live_alerts 179,082 (≠ gate decisions). System is PAPER-only.
+v321g cross-tab (30d, 24,544 scored decisions): GO-rate rises 0→0→1→13→73→96% with score →
+  **scoring is CORRECT, not inverted.**
+  - SKIP attribution: **meta_pwin<0.5 = 11,413 (86%)**, low_score 1,912 (14%), regime_supp 4 (0%).
+  - GO-eligible (score≥38)=7,595; **1,793 (24%) force-SKIPPED by the meta-labeler wall.**
+ROOT CAUSE = confidence_gate.py L924-929: flat `p_win < 0.50 → force_skip`. EV-blind: a 2:1
+  setup is breakeven at p_win=0.33, so the 0.50 wall kills positive-EV setups. This is THE lever.
+  evaluate() has entry_price+stop_price (risk) but NOT target → RR must come from per-setup
+  expectancy (regime_expectancy cells / strategy_stats) or an assumed RR.
+CAVEAT: sanitized edge (66 trades) is negative/thin → loosening could add negative-EV trades.
+  → MUST roll out SHADOW-FIRST (log what EV-aware cut would admit; measure paper EV; then flip).
+Diags: v321f paste AcmiO sha 98c32ccb…; v321g paste wfd5S sha 2302faff….
+NEXT: need DGX live SHA + grep of confidence_gate.py L889-940 before building the
+  EV-aware meta-labeler patcher (shadow mode first). This is the FIRST patcher of the investigation.
