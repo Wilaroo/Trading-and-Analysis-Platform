@@ -4971,7 +4971,11 @@ class EnhancedBackgroundScanner:
             snapshot.trend == "uptrend" and
             snapshot.rvol >= 1.2):
             
-            priority = AlertPriority.MEDIUM
+            # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which
+            # capped this intraday scalp below the auto-fire bar regardless of
+            # signal quality; see v320q + v320r-precheck). Only the tape-confirmed
+            # subset promotes; EV/win-rate gate still governs auto-fire.
+            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
             
             return LiveAlert(
                 id=f"second_chance_{symbol}_{datetime.now().strftime('%H%M%S')}",
@@ -5014,7 +5018,11 @@ class EnhancedBackgroundScanner:
                 setup_type="backside",
                 strategy_name="Back$ide Scalp (INT-32)",
                 direction="long",
-                priority=AlertPriority.MEDIUM,
+                # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which capped
+                # this intraday scalp below the auto-fire bar regardless of signal
+                # quality; see v320q + v320r-precheck). Only the tape-confirmed
+                # subset promotes; EV/win-rate gate still governs auto-fire.
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.current_price,
                 stop_loss=self._atr_floored_stop(
@@ -5097,7 +5105,11 @@ class EnhancedBackgroundScanner:
                 setup_type="fashionably_late",
                 strategy_name="Fashionably Late (INT-26)",
                 direction="long",
-                priority=AlertPriority.MEDIUM,
+                # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which capped
+                # this intraday scalp below the auto-fire bar regardless of signal
+                # quality; see v320q + v320r-precheck). Only the tape-confirmed
+                # subset promotes; EV/win-rate gate still governs auto-fire.
+                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
                 current_price=snapshot.current_price,
                 trigger_price=snapshot.current_price,
                 stop_loss=self._atr_floored_stop(  # v19.34.50
