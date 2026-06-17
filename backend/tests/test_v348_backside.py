@@ -1,7 +1,7 @@
 """
 test_v348_backside.py — Back$ide VWAP-recovery snapback (v19.34.348).
 
-Drives EnhancedScanner._check_backside directly with a fabricated `self`, 1-min bars,
+Drives EnhancedBackgroundScanner._check_backside directly with a fabricated `self`, 1-min bars,
 snapshot and tape. Verifies:
   • FIRES a +EV snapback in the shallow [0.3%, 1.0%) dip band (target == VWAP, long).
   • DOES NOT fire at >= 1.0% dip (that is vwap_fade's band — zero overlap by construction).
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 # backend/ on sys.path so `services.*` resolves regardless of pytest rootdir / PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.enhanced_scanner import EnhancedScanner
+from services.enhanced_scanner import EnhancedBackgroundScanner
 
 
 def _bar(o, h, l, c, v=10000):
@@ -45,8 +45,8 @@ def _tape(conf_long=True):
 
 
 def _run(slf, snap, tape):
-    return asyncio.get_event_loop().run_until_complete(
-        EnhancedScanner._check_backside(slf, "TEST", snap, tape))
+    return asyncio.new_event_loop().run_until_complete(
+        EnhancedBackgroundScanner._check_backside(slf, "TEST", snap, tape))
 
 
 # Low-priced symbol so the 0.02 stop buffer + ~0.9% dip clears the 1.0% min-risk floor.
