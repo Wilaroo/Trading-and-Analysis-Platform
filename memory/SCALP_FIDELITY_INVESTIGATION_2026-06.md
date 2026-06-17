@@ -681,3 +681,16 @@ DECISION: snapback+vwap clearly +EV → patch_v343 rewrite (gap-gated v341 mecha
 gap_fade REDUNDANT → suppress (remove from _enabled_setups), vwap_fade covers it; still <=0 → SUPPRESS gap_fade.
 DGX HEAD now 0e9d32be (v341 committed+pushed). NOTE: that commit accidentally swept 5 stray shell-token files
 (done/echo/grep/sha256sum/}) into the repo — operator to `git rm` them.
+
+## ✅ v342b DGX RESULT — gap_fade RESCUED by v341 mechanics (snapback+VWAP target)
+21d, 1224 gap-days, 177 triggered (335 gated <0.5% risk). BOTH sides +EV, winsorAvg & medR >0 all cells:
+  SHORT (gap-up) ALL n83 win55% wAvg+0.174 med+0.061 (2-3 +0.117/+0.051, 3-5 +0.253/+0.558, >=5 +0.151/+0.061)
+  LONG  (gap-down) ALL n94 win59% wAvg+0.177 med+0.176 (2-3 +0.345/+0.244, 3-5 +0.302/+0.194, >=5 +0.017/+0.105)
+=> the FULL-prior-close-fill target was the bleed; snapback + closer VWAP target fixes it.
+REDUNDANCY CHECK: vwap_fade (live) fires the same snapback-to-VWAP on >=1% ext-from-VWAP flushes. On gap-up-
+failing days the HOD is usually well above VWAP → likely large overlap. SHIPPED v342c overlap probe to split
+gap_fade triggers into UNIQUE(ext<1%, vwap_fade misses) vs OVERLAP(>=1%, dup) with per-bucket R.
+  paste https://paste.rs/vzSem (round-trip OK)
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v342c_overlap.py --days 21 --gapmin 2.0 --universe 300 --maxhold 60 --minriskpct 0.5 --winsor 3.0 --warmup 3 --vwapgate 1.0
+DECISION: UNIQUE large & +EV → patch_v343 gap-gated snapback rewrite; UNIQUE small/neg → SUPPRESS gap_fade
+(remove from _enabled_setups), vwap_fade covers it (avoids correlated double-fires for unmanaged paper trading).
