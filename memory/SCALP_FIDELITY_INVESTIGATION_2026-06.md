@@ -488,3 +488,19 @@ risk_amount→R=realized_pnl/risk_amount. v332 (genuine bot-own via classify_clo
 DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v332_staleness_sizing.py --days 120
 PENDING: operator runs v332 → read hold-time decay per tier + open stale holds → set per-tier time-stop
 thresholds → then env-flagged time-stop patch in order_policy_registry. (Window 120d for enough higher-tier closes.)
+
+## 🚨 v332 RESULT (2026-06-17) — TIME-DECAY NOT THE ISSUE; trade_2_hold -878R bleed found
+TIME-DECAY: NOT warranted. All tiers resolve fast (hold p50 ≤0.2d); Part B 0 stale open holds (max age 2.1d).
+Do NOT build time-stops — data refutes the dead-money hypothesis. (Measuring first paid off.)
+DOMINANT FINDING: trade_style 'trade_2_hold' = 528/586 genuine bot-own closes, win 34%, avgR -1.66,
+totR -878.8R, BUT medR only -0.05 → fat LEFT TAIL. trade_2_hold = LEGACY DEFAULT/fallback style (set when
+classifier assigns none: enhanced_scanner L8928, opportunity_evaluator L1737; maps to INTRADAY/DAY-TIF).
+=> TWO issues: (1) trade_style classifier mostly NOT assigning real styles → everything defaults to trade_2_hold;
+(2) that bucket has a catastrophic R tail. Other tiers tiny n (~breakeven). scalp 5/+0.09 fine.
+SHIPPED v333 forensic to decide REAL blown-stops (P0 risk bug) vs CORRUPT risk_amount (R artifact):
+dissects $ pnl, risk_amount health, winsorized vs raw R, loss-by-close_reason, setup mix, worst-12 verbatim.
+  paste https://paste.rs/qJKkg sha 572615653ca87df5b5c38a37bd60158a19e24d95c1eb554ec809e787f9f63af5
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v333_trade2hold_forensic.py --days 120
+PENDING: operator runs v333 → if worst trades show exit far beyond stop w/ big $ → stops not honored (P0 fix);
+if tiny-risk rows inflate R → R-artifact (fix risk_amount/exclude from edge stats). Either way revisit the
+trade_style classifier default. breakdown 2470/0 triage + FADE-scalp sweep still queued.
