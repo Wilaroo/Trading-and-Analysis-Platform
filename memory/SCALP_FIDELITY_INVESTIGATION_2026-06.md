@@ -115,3 +115,19 @@ CAVEAT: sanitized edge (66 trades) is negative/thin → loosening could add nega
 Diags: v321f paste AcmiO sha 98c32ccb…; v321g paste wfd5S sha 2302faff….
 NEXT: need DGX live SHA + grep of confidence_gate.py L889-940 before building the
   EV-aware meta-labeler patcher (shadow mode first). This is the FIRST patcher of the investigation.
+
+## 🚀 PATCHER SHIPPED: patch_v322_ev_aware_meta.py (2026-06)
+- Target: confidence_gate.py L919-929 (the meta veto). DGX live SHA == sandbox (NO DRIFT):
+  PRE_SHA  = 454318302b85bfd17f6e2b789221c074bfa08b30d30c4b8f28828ed9cb35193a
+  POST_SHA = de14fd64b4887c15494726f0bc60a250e75a1fe01c8fb05c1ea3c7f379835709
+- Rule (per operator: ACTIVE, per-setup expectancy, margin 0.05):
+  floor = 1/(1+2.0)+0.05 = 0.383 (was flat 0.50). Override via setup_regime_expectancy
+  weighted_mean_r: >0 → floor=min(floor,0.30); <=hard_r → floor=0.50. force_skip = p_win<floor.
+- §2.2 patcher: PRE/POST SHA guards, base64 anchored chunk, --check/--apply/--rollback, backup.
+  TESTED on isolated copy: check OK, apply→POST_SHA+compiles, rollback→byte-identical to PRE.
+  paste.rs vVBhG, patcher sha ad120515322f45e741db213f731f8a9204eb859d557f3b4857aaee75a247cce3.
+  Repo copy: backend/scripts/patch_v322_ev_aware_meta.py.
+- DEPLOY: curl patcher → --check → --apply → ./start_backend.sh --force.
+- POST-DEPLOY VERIFY: re-run diag_v321g (meta_pwin<0.5 SKIP share should drop, GO-eligible-vetoed
+  drop, more GO/trades) + watch diag_v321b sanitized avgR of newly-admitted setups stays ≥0.
+  If newly-admitted trades bleed → --rollback or raise RR_assumed/floor.
