@@ -163,3 +163,27 @@ ROOT (top of funnel) = a persistent DEFENSIVE REGIME posture: HOLD→cautious ra
 Diags staged: v322b (pC7MQ), v323 (daDEY), v324 (Xot41), v325 (qnvs4).
 DECISION PENDING on v325: if stuck → fix regime→mode trigger (biggest GO unlock); if legit → accept
   selectivity. Sector penalty (-6) is a secondary recalibration candidate either way.
+
+## 🔍 v326 — REGIME/MULTI-TF CONTEXT TIMELINE (fork resume, 2026-06)
+ROOT-CAUSE CODE TRACE (HIGH confidence, read-only): the 100%-CAUTIOUS posture
+(v324: regime_state=HOLD, composite pinned 68) is NOT decided by composite_score.
+`confidence_gate._update_trading_mode` (L2090-2104) PREFERS SPY `multi_tf.context`
+over the legacy 68→NORMAL map. `mode_for_direction` (multi_tf_regime.py L185-201):
+  - UNKNOWN context → excluded by L2092 guard → falls to legacy → 68 → NORMAL.
+  - MIXED context  → returns 'cautious' for BOTH long & short (L200-201).
+So 100% cautious ⟹ SPY context is **MIXED** (not UNKNOWN). MIXED arises when the
+long-anchor lane (20/50/200 SMA + structure, L109-122) lands NEUTRAL (41-59) OR the
+intraday lane is missing (classify_context anchor-only fallback, L168-172). The
+composite=68 (bullish) vs anchor-lane=NEUTRAL mismatch is the suspected lever.
+WHY v325 was insufficient: confidence_gate_log lacks multi_tf.context + lane scores.
+v326 reads `market_regime_state` (1 upserted doc/day, persists full multi_tf) → shows
+per-day composite/state/context/lane scores+bias/modes + WHY-MIXED attribution.
+SHIPPED: diag_v326_regime_mtf_timeline.py — paste https://paste.rs/QklXu
+  sha256 1716f8c10a450a3366e28077c9fbadc149b19359a482ee4eadaa9aa74ccf28df (round-trip OK).
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v326_regime_mtf_timeline.py --days 21
+DECISION PENDING on v326 output:
+  - long-anchor NEUTRAL every day (composite says bullish) → recalibrate anchor lane
+    OR remap MIXED→ (long:normal) when long-anchor bias≥NEUTRAL & composite≥55. Biggest GO unlock.
+  - intraday lane UNKNOWN → SPY 1h/5m/1m intraday bars not backfilled → backfill fix.
+  - context/scores vary day-to-day → caution legit → accept selectivity, pivot to sector(-6) recal.
+DGX git HEAD at resume: 8a69292a (v19.34.320r). NO patcher yet — read-only diag only.
