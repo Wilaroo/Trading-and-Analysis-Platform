@@ -356,3 +356,24 @@ py_compile guard. Shipped _extract_rb_func.py (DGX-safe, no heredoc) to pull the
   rebuild patch_v330 anchored on those exact bytes (function-granular PRE/POST sha + compile check +
   --check/--apply/--rollback + backup). Sandbox function span 4360..4480 (121 lines), sandbox func
   sha 1901bcfc… (DGX likely differs — use theirs).
+
+## 🚀 patch_v330 BUILT — rubber_band SMB snapback rewrite (LONG+SHORT), PENDING operator --apply
+DGX function == sandbox function (sha 1901bcfc… identical; only file line-positions drift).
+Target: enhanced_scanner._check_rubber_band. DGX whole-file PRE = b631ebad524d… (operator-confirmed
+via extractor). FUNCTION-anchored patcher (whole-file POST not precomputable for 452KB file): asserts
+whole-file==b631ebad + func anchor count==1 + func PRE sha 1901bcfc… + embedded NEW sha 6721b9f8… +
+py_compile guard + backup .bak_v330 + --check/--apply/--rollback.
+NEW detector: ext>=1.25% from SESSION OPEN + 1-min double-bar-break within +1..+4 bars of extreme +
+accel(extreme-bar range>=1.3x median) + RVOL>=1.5 + 2/day cap per (symbol,side). LONG: green clears
+prior-2 highs, stop=min(LOD-0.02, support-0.25ATR), t1=9EMA. SHORT: red breaks prior-2 lows, stop=
+max(HOD+0.02, resistance+0.25ATR), t1=9EMA. Bars via self.technical_service._get_intraday_bars_from_db
+(sym,"1 min",60) [IB-only]. priority CRIT(tape&ext>3)/HIGH(ext>2)/MED.
+VALIDATED (sandbox, exec-with-stubs): long fires(HIGH), short fires, RVOL gate blocks, no-double-break
+blocks, 2/day cap works. OLD->NEW replace compiles on the real file.
+ARTIFACTS: patcher paste https://paste.rs/ydNsP sha 65083ffab9b2e0623f354f097490140a07ce130562d7e348b54d6a0ff95e38b1
+  test    paste https://paste.rs/S5i1t sha 2ececc53477f530fbea08dc10ffed96bebdc4aeadeca94b7998bdfe0353bf789
+DEPLOY: --check (expect whole-file OK) → --apply → curl test → pytest test_v330 (5 tests) → COMMIT →
+  ./start_backend.sh --force. POST-DEPLOY: watch live_alerts for setup_type rubber_band_long/short firing
+  on real flushes; track their fire→GO→trade (now mode-unblocked post-v328) + sanitized avgR vs replay
+  (+0.27R long / +0.59R short). NEXT: generalize this find→trade-replay→rewrite template to hitchhiker,
+  second_chance, big_dog.
