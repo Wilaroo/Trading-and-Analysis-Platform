@@ -5101,46 +5101,138 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_second_chance(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Second Chance - Retest of broken level"""
-        dist_from_vwap = abs(snapshot.dist_from_vwap)
-        
-        if (dist_from_vwap < 0.5 and 
-            snapshot.above_vwap and 
-            snapshot.trend == "uptrend" and
-            snapshot.rvol >= 1.2):
-            
-            # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which
-            # capped this intraday scalp below the auto-fire bar regardless of
-            # signal quality; see v320q + v320r-precheck). Only the tape-confirmed
-            # subset promotes; EV/win-rate gate still governs auto-fire.
-            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"second_chance_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="second_chance",
-                strategy_name="Second Chance Scalp (INT-24)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(snapshot.vwap - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.high_of_day, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"🔄 {symbol} Second Chance - Retesting VWAP",
-                reasoning=[
-                    f"Retesting VWAP ${snapshot.vwap:.2f}",
-                    "Uptrend intact",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
-        return None
+        """Second Chance Scalp \u2014 cheat-sheet-faithful resistance break \u2192 low-vol retest (v19.34.353).
+
+        The shipped detector was a generic "near-VWAP momentum" filter (within 0.5% above VWAP,
+        uptrend, rvol>=1.2; stop=VWAP-0.5*ATR, target=HIGH_OF_DAY, R:R hard-coded 2.0). A 14d &
+        21d native-1min replay showed that rule is NEGATIVE-EV (winsorAvg -0.06R over 3,761 fires,
+        -233R total). The SMB "2nd Chance Scalp" is a RESISTANCE-RETEST scalp, NOT a VWAP play:
+          1) a resistance level breaks on a strong, HIGH-VOLUME rush out of range,
+          2) price PULLS BACK and RETESTS the broken level on LOW volume \u2014 old resistance must
+             HOLD as new support (do NOT fall back into the range),
+          3) ENTER on a confirmation candle that closes ABOVE the prior candle (buyers returned),
+          4) STOP = .02 below the LOW OF THE TURN CANDLE (new support),
+          5) TARGET = the HIGH OF THE INITIAL PULLBACK (the rush high that set up the scalp).
+        Validated (v353 replay, RR-gated 1.5-2.5 = the only +EV slice; the >=2.5 band was dead):
+          14d vol-filtered: n=211, 39% win, winsorAvg +0.092R, avg R:R 1.92;
+          21d: n=381, 38% win, winsorAvg +0.048R, avg R:R 1.89 \u2014 +EV and beats the live rule.
+        LONG only. 1-min bars from ib_historical_data (IB-only) via technical_service. Max 2
+        attempts/day/symbol (cheat-sheet "2 strikes and we're out").
+        """
+        RESLOOK = 15          # consolidation lookback = the resistance window before the rush
+        RUSHWIN = 6           # bars over which the breakout rush high is measured
+        RETTEST = 4           # bars over which the retest / turn-candle low is measured
+        RETTOL = 0.20         # retest low must come within RETTOL% above the broken level
+        SUPPORTTOL = 0.15     # turn low may dip at most SUPPORTTOL% below the level (support held)
+        MINBREAK = 0.10       # rush must clear resistance by >= MINBREAK%
+        VOLMULT = 1.3         # break volume must be >= VOLMULT * consolidation median volume
+        MAXBREAKMULT = 1.0    # rush height must be <= MAXBREAKMULT * prior range height
+        MIN_RR = 1.5          # RR gate (validated +EV slice is 1.5-2.5; doctrine ~1.9:1)
+        MAX_RR = 2.5
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        need = RESLOOK + RUSHWIN + RETTEST + 3
+        if not bars or len(bars) < need:
+            return None
+
+        caps = getattr(self, "_second_chance_daily_caps", None)
+        if caps is None:
+            caps = self._second_chance_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 2:
+            return None
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        for b in (bars[i], bars[i - 1]):
+            if (b.get("high") is None or b.get("low") is None
+                    or b.get("close") is None or b.get("open") is None):
+                return None
+
+        cons = bars[i - RESLOOK - RUSHWIN:i - RUSHWIN]   # consolidation before the rush
+        rush = bars[i - RUSHWIN:i]                        # rush + pullback (excl. entry bar)
+        ret = bars[i - RETTEST:i]                         # retest / turn region (excl. entry bar)
+        if not cons or not rush or not ret:
+            return None
+
+        resistance = max(b["high"] for b in cons)
+        cons_lo = min(b["low"] for b in cons)
+        prior_range = resistance - cons_lo
+        rush_high = max(b["high"] for b in rush)
+        turn_bar = min(ret, key=lambda b: b["low"])
+        turn_low = turn_bar["low"]
+        med_vol = _median([b.get("volume") or 0 for b in cons])
+        break_vol = max(b.get("volume") or 0 for b in rush)
+        retest_vol = min(b.get("volume") or 0 for b in ret)
+
+        broke = rush_high >= resistance * (1 + MINBREAK / 100.0)
+        near = turn_low <= resistance * (1 + RETTOL / 100.0)
+        held = turn_low >= resistance * (1 - SUPPORTTOL / 100.0)
+        vol_ok = (med_vol <= 0) or (break_vol >= VOLMULT * med_vol and retest_vol < break_vol)
+        confirm = (last["close"] > last["open"]) and (last["close"] > bars[i - 1]["high"])
+        not_too_tall = (MAXBREAKMULT <= 0) or (prior_range <= 0) or \
+            ((rush_high - resistance) <= MAXBREAKMULT * prior_range)
+
+        if not (broke and near and held and vol_ok and confirm and not_too_tall):
+            return None
+
+        entry = round(last["close"], 2)
+        stop_loss = round(turn_low - 0.02, 2)
+        target_1 = round(rush_high, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0 or target_1 <= entry:
+            return None
+        rr = (target_1 - entry) / risk
+        if rr < MIN_RR or rr > MAX_RR:
+            return None
+        r_multiple = round(rr, 2)
+
+        caps[key] = caps.get(key, 0) + 1
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        ev_info = ""
+        if "second_chance" in self._strategy_stats:
+            st = self._strategy_stats["second_chance"]
+            if st.win_rate > 0:
+                ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+        tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"second_chance_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="second_chance",
+            strategy_name="Second Chance Scalp (INT-24)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target_1,
+            risk_reward=r_multiple,
+            trigger_probability=0.40,
+            win_probability=0.40,
+            minutes_to_trigger=0,
+            headline=f"\U0001f504 {symbol} Second Chance \u2014 broken ${resistance:.2f} retested & held (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"Resistance ${resistance:.2f} broke on rush to ${rush_high:.2f}; low-vol retest held as support",
+                f"Turn-candle low ${turn_low:.2f}; confirm bar closed above prior high \u2014 buyers returned",
+                f"R:R = {r_multiple:.1f}:1 (STOP ${stop_loss:.2f} = .02 below turn low, TARGET rush high ${target_1:.2f})",
+                f"Tape: {tape.overall_signal.value}",
+                ev_info if ev_info else "Cheat-sheet 2nd Chance (v353 replay 38-39% win, +0.05..0.09R, avg R:R 1.9, RR-gated 1.5-2.5)",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
     
     async def _check_backside(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Back$ide \u2014 cheat-sheet-faithful VWAP-recovery scalp (v19.34.352).
