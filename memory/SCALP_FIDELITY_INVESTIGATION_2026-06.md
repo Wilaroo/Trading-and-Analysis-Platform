@@ -304,3 +304,25 @@ They are TWO SEQUENTIAL LAYERS, not one weighted score (AGENTS.md Journey-1 step
   So GO/REDUCE/SKIP is the OUTPUT of the gate (downstream of TQS); TQS does NOT have the decision weighted
   into it. TQS's influence inside the gate is minor (max +10/-5) — dominant drivers are the model layers,
   the mode threshold, and the hard vetoes.
+
+## ✅✅ v329 DGX RESULT (2026-06-17) — RUBBER_BAND SNAPBACK-LONG IS STRONGLY +EV
+14d, univ 300: 1394 events / 898 symbol-days, 1390 tradeable.
+OVERALL: win=76%, avgR=+0.268, totR=+371.9R, EV/trade +0.268R. Edge is REAL and large.
+BY EXT BUCKET (all positive, flat → edge not ext-sensitive):
+  1-2% n=682 win78% +0.286R | 2-3% n=284 win80% +0.239R | >=3% n=424 win72% +0.257R.
+BY SNAPBACK SPEED (bars from LOD→trigger): +0bar WEAK (+0.098, 66%); +1..+4 STRONG
+  (+0.279/+0.183/+0.602/+0.257); +5 weak (+0.042); +6 +0.596 (n=36 small).
+  → exclude +0 (same-bar reversal) and >+4; window +1..+4 weighted avgR ≈ +0.303R (n~1081).
+ext dist p25=1.4 p50=2.0 p75=3.5.
+DATA-VALIDATED FIRE CONFIG for _check_rubber_band rewrite (LONG):
+  ext-from-open >= 1.5% (p25=1.4; keeps high-edge upper-1-2% + all 2-3/>=3; edge +EV even at 1%)
+  trigger = first GREEN 1-min bar clearing prior-2 highs, +1..+4 bars AFTER the LOD bar (TRIGGER_WINDOW=4, exclude +0)
+  accel: LOD-bar range >= 1.3x median range so far
+  RVOL >= 1.5 (keep existing quality gate; not in replay since RVOL not on bar doc)
+  2/day cap per (symbol, day)
+  entry=double-bar-break level; stop=LOD-0.02; target_1=9EMA(1m); target_2=VWAP.
+SHORT SIDE: NOT validated here (replay is long-only); off_sides_short proven no-edge (shorts into
+  strength). Do NOT rewire the short side blind — give it its own v329-style replay first.
+NEXT: build patch_v330 _check_rubber_band LONG rewrite (1-min bar fetch via
+  self.technical_service._get_intraday_bars_from_db(sym,"1 min",N); event-on-latest-bar; 2/day cap).
+  Pending operator confirm: ext floor 1.5 vs 1.0, long-only scope.
