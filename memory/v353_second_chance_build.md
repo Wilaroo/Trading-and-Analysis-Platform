@@ -26,8 +26,19 @@ DGX whole-file SHA + PRE_FUNC_SHA + OLD_B64 = PENDING operator extractor run (pa
 diag_v353_second_chance_replay.py → https://paste.rs/zbraX (sha 0453cdede28f...)
 extract_v353_second_chance.py     → https://paste.rs/9dRHd (sha b3aeeeea0962...)
 
-## Next
-1. Operator runs extractor on DGX → paste output.
-2. Assemble patch_v353_second_chance_doctrine.py (--check/--apply/--rollback) pinned to DGX values.
-3. test_v353_second_chance.py unit test (synthetic bars → fires w/ correct stop/target; non-pattern → no fire).
-4. Apply, pytest, commit BEFORE restart, ./start_backend.sh --force.
+## DGX pinned values (from extractor on DGX)
+DGX_WHOLE_PRE = 907581dcf313c5d1ba4e275d2de548dbf8f5119ecd479129c8dad63d77f0a50e
+PRE_FUNC_SHA  = 3b3d1209aa10f8032323154952387de633c0a0931ff1e2bfc20b19bbb7862cb1
+POST_FUNC_SHA = 7830560a5aca78cc42f2c553e3883c37b486e8b3d9f081d2692ca2efd562d892
+
+## SHIPPED (paste.rs) — round-trip verified
+patch_v353_second_chance_doctrine.py → https://paste.rs/jDGfl  sha 547f642d9da7fb01108661bd93293e10de734948f51d0ecd334c8e75d3ab43ed
+test_v353_second_chance.py           → https://paste.rs/OpbLr  sha f4270eafc66350756525d617a970c5f7ff0427494f5bf30f320f2535a2c2f2f4
+All 6 test scenarios validated locally vs the NEW function (fire stop=99.98/target=100.60/RR=1.82; 5 no-fire guards).
+
+## Status: AWAITING operator --check / --apply / pytest / commit / restart.
+
+## NEXT MOMENTUM SETUPS (by frequency, same replay→validate→patch flow)
+vwap_bounce, orb, first_move_up, first_move_down, fashionably_late, daily_breakout,
+big_dog, gap_give_go, spencer_scalp. Then +EV research for squeeze, relative_strength_long,
+daily_squeeze (no cheat sheet). Cheat sheets available as artifacts (get_assets_tool).
