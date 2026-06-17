@@ -711,3 +711,22 @@ DEPLOY: --check (expect 45db2e66 OK) → --apply → pytest test_v343 (7) → CO
 POST: watch live_alerts gap_fade short/long firing only in the <1%-VWAP gap-reversal zone; track sanitized avgR
 vs replay (+0.11R short / +0.13R long). After deploy, DGX baseline changes — record new whole-file SHA for next patcher.
 NEXT FADE: mean_reversion(2680/73) replay → backside(487/15) → MOMENTUM continuation template.
+
+## ✅✅ patch_v343 / v19.34.325 DEPLOYED & LIVE (2026-06-18, commit 2d738164) — gap_fade snapback active
+--check 45db2e66 OK → --apply → new whole-file SHA 9520d851d28a55ba6f64a20831680e33d5612558d27e9f9b2fa524ebb91ba5b1
+(backup .bak_v343) → pytest 7/7 → commit 2d738164 + push → ./start_backend.sh --force clean (6 green/2
+benign-yellow/0 red, ib_gateway connected). NEW enhanced_scanner baseline = 9520d851… (use for next patcher).
+
+## 🚀 patch_v344 / v19.34.326 BUILT — trade_2_hold entry-stamp fix (operator: "make the entry path fix")
+Target opportunity_evaluator.py L1737 (BotTrade creation). Replaces trade_style=alert.get("trade_style",
+"trade_2_hold") with trade_style=self._resolve_geometry_style(alert, setup_type) — the existing canonical
+resolver (trade_2_hold→setup-derived horizon; unknown→intraday; reused from the policy/geometry layer).
+Fixes v332/v333/v338 finding: 528/586 genuine closes stamped with meaningless trade_2_hold default,
+polluting per-setup EV/meta-labeler. ANALYTICS-ONLY (no close/bracket/EOD change); unknown still →intraday
+(no regression); real styles pass through. Line-anchored + whole-file PRE/POST SHA + compile guard.
+PRE ce3624c5… (v336 opp_eval, unchanged by v341/v343) POST b34dc917….
+VALIDATED: patcher self-test isolated copy (check/apply/rollback byte-identical); resolver probe correct
+(rubber_band/vwap_fade→scalp, squeeze/orb→intraday, daily_breakout→multi_day, accumulation_entry→swing,
+unknown→intraday); test_v344 5/5. Sandbox patched.
+ARTIFACTS: patcher paste https://paste.rs/UmR36 ; test paste https://paste.rs/2JRo2
+DEPLOY: --check (expect ce3624c5 OK; if DRIFT send live SHA) → --apply → pytest (5) → COMMIT → start_backend --force.

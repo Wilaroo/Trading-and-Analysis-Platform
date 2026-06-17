@@ -1734,7 +1734,7 @@ class OpportunityEvaluator:
                 timeframe=timeframe_str,
                 quality_score=quality_score,
                 quality_grade=quality_grade,
-                trade_style=alert.get("trade_style", "trade_2_hold"),
+                trade_style=self._resolve_geometry_style(alert, setup_type),
                 smb_grade=alert.get("smb_grade", quality_grade),
                 tqs_score=float(tqs_score_final or 0),
                 tqs_grade=tqs_grade_final,
