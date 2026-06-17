@@ -26300,3 +26300,25 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
 - v342c: 54% of triggers are UNIQUE low-VWAP-ext gap reversals vwap_fade MISSES, +EV (69-71% win); OVERLAP
   bucket medR -1.0 (vwap_fade's job). → REWRITE with complementarity gate (entry within 1% of VWAP).
 - patch_v343 built+validated (self-test byte-identical; test_v343 7/7). PENDING operator --apply on baseline 45db2e66.
+
+- 2026-06-17 v347/v348 (FADE SWEEP #4 — backside): diag_v347_backside_replay
+  (paste.rs/mLLnE) ran 14d risk-controlled native-1min replay: backside is
+  +EV and ~97% UNIQUE vs the live vwap_fade (n=32/33 UNIQUE; ALL win91%/
+  +0.284R; 0-0.5% band +0.11R/93%w, 0.5-1% band +0.41R/88%w). The loose live
+  state-detector (uptrend+above_ema9+below_vwap+dist>-2%+rvol>=1.2, no
+  trigger/min-risk) fired ~454 sub-edge alerts (2468/2580 events gated by the
+  1.0% min-risk floor in replay). VERDICT: REWRITE (not suppress).
+  patch_v348_backside_snapback.py (paste.rs/AANL2) replaced _check_backside
+  with a VWAP-recovery SNAPBACK confined to the shallow [0.3%,1.0%) dip band
+  (9-EMA reclaim + 1-min double-bar-HIGH-break within +1..+4 bars of dip-low +
+  1.3x accel + RVOL>=1.2 + stop>=1.0% + 2/day; target=VWAP, LONG-only). The
+  band is COMPLEMENTARY to vwap_fade's [1.0%,3.0%) -> zero double-fire by
+  construction. Function-anchored patcher: PRE whole-file 9520d851.., func PRE
+  c89eef20.., func POST 2f6f4f61.. all OK; APPLIED -> new whole-file SHA
+  932d320f107222b4d5380dea0ffd43a4bc12a54908c0297c3ce78c605bdafef1.
+  Committed f5f3dea2; backend restarted GREEN (6 green / 2 benign yellow).
+  test_v348_backside.py (paste.rs/I3Bts) 6 pass (fires shallow band, skips
+  vwap_fade band/min-risk/rvol/ema9 gates, 2/day cap); committed 2bcb405e.
+  FADE sweep status: vwap_fade(v341 rewrite), gap_fade(v343 rewrite),
+  mean_reversion(v346 suppress), backside(v348 rewrite) ALL DONE.
+  NEXT FADE: off_sides (range-break short, loose state-detector) — pending.
