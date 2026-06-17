@@ -440,3 +440,19 @@ FIND-NO-TRADE anomalies (fires>=20, 0 trades): breakdown 2470/0 (BIGGEST — tri
   + swing/position/investment breakouts (vcp_breakout 568, ascending/descending_triangle, base_breakout, weekly_breakout,
   stage_1_to_2, fifty_two_week_high, two_hundred_day_*, death/golden_cross) all fire but 0 trades → likely higher tiers
   not executed by the bot OR blocked; CONFIRM whether intentional (ties into time-decay/tier-execution question).
+
+## ⚠️ v331 DATA CAVEAT (operator flagged 2026-06-17) — re-run on SANITIZED data
+v331 counted RAW bot_trades → contaminated by (a) hygiene ARTIFACTS (phantom/sweep/reconcile/
+instant-unwind<120s/corrupt-PnL) and (b) ADOPTED/external positions (reconciled/IB-imported/orphan;
+30d audit: 46% of closes adopted, +$181k, while bot's own edge ~breakeven). SSOT =
+services/trade_outcome_hygiene.classify_close()+is_adopted_entry(). e.g. accumulation_entry "1327 trades"
+was ~94% artifacts per hygiene docstring; reconciled_orphan(89)/reconciled_excess_slice(29) are pure artifacts.
+=> v331's trade/FIND-NO-TRADE numbers are NOT trustworthy. STYLE-mismatch (none) + scalp FADE/MOMENTUM
+split ARE trustworthy (taxonomy-only, data-independent).
+SHIPPED v331b: applies classify_close + is_adopted_entry, counts GENUINE_OWN only, reports artifact/adopted
+contamination + corrected FIND-NO-TRADE + field-coverage sanity + edge-excluded filtering.
+  paste https://paste.rs/2pZ3Q sha 61be186a5f0df658252e42306f6f5bedbdb063cae8510e2a3e5b1fa6f9f42a28
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v331b_setup_audit_sanitized.py --days 30
+PENDING: operator runs v331b → re-assess FIND-NO-TRADE (esp breakdown 2470/0, higher-tier breakouts) and
+real per-setup trade yields on clean data, THEN decide sweep order + time-stop appetite. Time-decay code
+findings (no max-hold/time-stop on multi_day/swing/position/investment) stand regardless.
