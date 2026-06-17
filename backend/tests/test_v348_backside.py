@@ -11,9 +11,13 @@ snapshot and tape. Verifies:
 Run on DGX:  pytest backend/tests/test_v348_backside.py -q
 """
 import asyncio
+import os
+import sys
 from types import SimpleNamespace
 
-from backend.services.enhanced_scanner import EnhancedScanner
+# backend/ on sys.path so `services.*` resolves regardless of pytest rootdir / PYTHONPATH
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from services.enhanced_scanner import EnhancedScanner
 
 
 def _bar(o, h, l, c, v=10000):
