@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.enhanced_scanner import EnhancedScanner, AlertPriority  # noqa: F401
+from services.enhanced_scanner import EnhancedBackgroundScanner, AlertPriority  # noqa: F401
 
 
 def _bar(o, h, l, c):
@@ -71,8 +71,12 @@ def _tape():
 
 
 def _run(fself, snap):
-    return asyncio.get_event_loop().run_until_complete(
-        EnhancedScanner._check_rubber_band(fself, "TEST", snap, _tape()))
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(
+            EnhancedBackgroundScanner._check_rubber_band(fself, "TEST", snap, _tape()))
+    finally:
+        loop.close()
 
 
 def test_long_snapback_fires():
