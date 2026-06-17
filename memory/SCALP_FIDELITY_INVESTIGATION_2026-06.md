@@ -550,3 +550,41 @@ the safety-critical EOD path.
   leak canonical-resolve = multi_day/swing → NOT leaks (stored style stale, correctly held).
 PENDING: operator runs BOTH → paste output → decide breakdown real-bug-vs-suppression + size the
 EOD leak before patching Journey-3. FADE+MOMENTUM scalp sweep queued after.
+
+## ✅✅ v337/v338/v339 DGX RESULTS (2026-06-18) — BOTH P0s RESOLVED (no patch warranted)
+DGX HEAD at run: 9ae11efc (v19.34.323).
+
+### P0-1 breakdown 2470/0 = CORRECT SUPPRESSION (not a bug) — CLOSED
+v337: live_alerts 2470 breakdown; confidence_gate_log 0; trade_drops 8322 (setup_disabled 7803 +
+universal_liquidity_gate 519); bot_trades 0. `breakdown` is NOT in trading_bot_service._enabled_setups
+→ every alert dies at the setup_disabled gate BEFORE the confidence gate. No execution bug. ENABLING it
+is an EDGE-VALIDATION decision (replay-first, per off_sides_short/v336 short-caution), NOT a fix.
+Only residual cost = wasted alert-gen overhead (P3: stop the disabled detector emitting).
+
+### P0-2 Part A EOD-flatten = HISTORICAL residue, live path HEALTHY — STAND DOWN (no EOD patch)
+v338: 590 genuine closed/120d, 41 overnight; LEAK surface (should_close_at_eod=True yet held overnight)=32,
+31/32 trade_2_hold, ALL re-resolve canonical→intraday(21)/scalp(11). v339 TIMELINE settled live-vs-historical:
+  entry months: Mar 23, Apr 6, May 2, Jun 1. ALL 14 dangerous stop_loss overnight-rides (WTI/USO/KRG/BP)
+  entered Mar 11 or Apr 30 — BEFORE the EOD-policy stack (v245 ~6/2, v261 ~6/3, v301 ~6/8, v322s ~6/12).
+  Post-stack overnight leaks = ONLY safety-net catches: May 5 zombie_cleanup, Jun 12 DKNG missed_eod_boot_flatten
+  (v322s firing as designed). ZERO silent gap-stop rides after 6/2.
+CONCLUSION (HIGH conf): v245/v261/v301/v322s already seal the live EOD gap; v336 blocks the dangerous
+short-fade re-entry profile. Patching safety-critical Journey-3 = net-negative risk → DO NOT PATCH.
+Residual P1 (analytics, not safety): trade_2_hold legacy DEFAULT style still stamped at entry — EOD now
+resolves it correctly via canonical classifier, but the stored style pollutes EV/meta-labeler. Optional
+entry-path fix to stamp a real resolved style (defer; ask operator).
+Diags: v337 paste 2kUMh, v338 paste yqjwG, v339 paste dnzt7 (all round-trip OK).
+
+## 🧭 FADE SWEEP STARTED — vwap_fade replay (v340), template = v329/v330 generalized to VWAP anchor
+Operator ask: "evaluate every remaining scalp/intraday trade — find/calc/trade properly vs cheat sheets."
+Sweep order (v331 map, by volume): FADE: vwap_fade(4982f/73g) → gap_fade(3627/154) → mean_reversion(2680/73)
+→ backside(487/15). MOMENTUM (needs new continuation template): fashionably_late, gap_give_go, second_chance...
+v340 = vwap_fade TRADE-OUTCOME REPLAY (READ-ONLY), generalizes v329 snapback from ext-from-OPEN to
+ext-from-VWAP (the real vwap_fade thesis). BOTH sides (short=fade strength above VWAP = v336 danger profile,
+measured honestly; long=fade weakness below VWAP). entry=2-bar-break, stop=extreme±0.02, target=VWAP(1R floor),
+accel1.3x, 2/day cap, by ext-bucket + snapback-speed. Compare to rubber_band v329 +0.27R/v330 +0.59R.
+  paste https://paste.rs/agW6R  sha 0183d003c9f1b53620d5dc88db0c50c3423c31b4dc0dfb5020f920a29c0a684e
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v340_vwap_fade_replay.py --days 14 --ext 1.0 --universe 300 --side both
+DECISION GATE: lowest ext bucket with avgR comfortably >0 = FIRE floor for that side; if SHORT <=0 across
+buckets → confirms no-edge-shorting-strength → keep short suppressed. THEN build patch_v341 _check_vwap_fade
+rewrite (VWAP-anchored snapback) for the +EV side(s) only.
