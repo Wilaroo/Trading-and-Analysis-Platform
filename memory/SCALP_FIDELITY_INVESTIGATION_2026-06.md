@@ -131,3 +131,17 @@ NEXT: need DGX live SHA + grep of confidence_gate.py L889-940 before building th
 - POST-DEPLOY VERIFY: re-run diag_v321g (meta_pwin<0.5 SKIP share should drop, GO-eligible-vetoed
   drop, more GO/trades) + watch diag_v321b sanitized avgR of newly-admitted setups stays ≥0.
   If newly-admitted trades bleed → --rollback or raise RR_assumed/floor.
+
+## ✅ DEPLOYED & LIVE (2026-06-17 ~10:40 ET)
+- Operator ran --check (PRE_SHA OK) → --apply (hit POST_SHA de14fd64… exactly, backup
+  confidence_gate.py.bak_v322) → ./start_backend.sh --force. Backend: "Application startup
+  complete", mongo green, ib_gateway green/connected. No import errors. Patch is LIVE.
+- Post-deploy verifier: diag_v322_verify.py paste k4cfX
+  sha 76796f26716599fc28280744643dd6210a3b0c7d6c67f6c75739233a39fba4f2
+  (counts new 'EV-aware ALLOW' / '< EV-floor' reasoning vs old '< 50% NO EDGE').
+- PENDING (wall-clock): run diag_v322_verify (today's session) → then diag_v321g (meta_pwin
+  SKIP share should drop from 86%, GO-eligible-vetoed from 24%) → then diag_v321b (newly-admitted
+  setups' sanitized avgR must stay ≥0; if bleeding, --rollback).
+- NEXT after gate verified: redesign _check_rubber_band detector (snapshot pre-gate +
+  1-min double-bar-break snapback via _get_intraday_bars_from_db(sym,"1 min",N) + ext≥2% +
+  2/day cap) so it FIRES and now EXECUTES. Then generalize to hitchhiker/second_chance/big_dog.
