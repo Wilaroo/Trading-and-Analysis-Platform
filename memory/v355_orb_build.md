@@ -19,6 +19,9 @@ POST_FUNC_SHA = c4876ae8c64ffe8c790741272b4c5510440c98847ffe2e365ac6507d32936e50
 patch_v355_orb_doctrine.py -> https://paste.rs/9Jw3f  sha 136fe5caf317ba68fda2798504d6e549d2f33bafc61e350e3e017e74cf01c362
 test_v355_orb.py           -> https://paste.rs/Ovd5j  sha c463e19be8c0c435f104a4e64aa8f1a94422b487ffd69c9470dbb07d5f409589
 
-## Status: AWAITING operator --check/--apply/pytest/commit/restart.
+## Status: DEPLOYED ✅ (operator applied, 6/6 pytest, committed 8c930d57, backend GREEN 8/8).
+## NEW LIVE BASELINE whole-file SHA = bacf7753595c6b2479db0a5cecc8dccf4193fc34b6bebfbb014fe994ae3ebcb7
+##   -> use as DGX_WHOLE_PRE for the NEXT patcher (re-extract to confirm).
+## Next setup: first_move_up / first_move_down.
 
 ## Live baseline whole-file SHA = 8a02c5232659732e0191e4ffcee086aed6b53e11cf11689d52cabe3069620864
