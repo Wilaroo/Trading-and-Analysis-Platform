@@ -389,6 +389,96 @@ class OpportunityEvaluator:
                     "[v19.34.194 vol-floor] gate crashed (fail-open): %s", _q9_err,
                 )
 
+            # ── v19.34.323 — SHORT-FADE eligibility gate (v334 stop-overrun) ──
+            # diag_v334 proved the catastrophic stop-overrun tail (~$23k of
+            # $26k excess loss) is ~90% SHORTS and ~88% vwap_fade_short:
+            # shorting STRENGTH on low-priced / illiquid names with absurdly
+            # tight stops (WTI $2.84/2c stop->exit 3.21; PRCT $26.67/4c->27.02;
+            # USO 0.03% stop). The stop engine fired correctly — the loss is
+            # gap/squeeze slippage on a no-edge entry held overnight. Cheapest
+            # bulletproof fix: never enter the danger profile. Two fail-OPEN
+            # levers on SHORT fade/reversion setups only:
+            #   1. MIN_SHORT_FADE_PRICE  (default $5)  — kills sub-$5 squeezers.
+            #   2. MIN_SHORT_FADE_STOP_PCT (default 1.0%) — kills noise-stop
+            #      fades (stop distance < pct of price) that any squeeze blows
+            #      straight through.
+            # Env: SHORT_FADE_GATE_POLICY in {block,observe,off} (default block);
+            #      SHORT_FADE_SETUP_KEYWORDS (csv substring match on setup_type).
+            # Drops land in `trade_drops` via record_rejection.
+            try:
+                import os as _os_sf
+                _sf_policy = (_os_sf.environ.get(
+                    "SHORT_FADE_GATE_POLICY", "block") or "block").lower()
+                if _sf_policy != "off" and str(direction_str).lower().startswith("s"):
+                    _sym_sf = (symbol or "").upper()
+                    _su_l = str(setup_type or "").lower()
+                    _kw_raw = _os_sf.environ.get(
+                        "SHORT_FADE_SETUP_KEYWORDS",
+                        "fade,bounce,reversion,rubber_band,off_sides,backside",
+                    )
+                    _kws = [k.strip() for k in _kw_raw.split(",") if k.strip()]
+                    if any(k in _su_l for k in _kws):
+                        _px_sf = (alert.get("price") or alert.get("current_price")
+                                  or alert.get("entry_price")
+                                  or alert.get("trigger_price"))
+                        _stop_sf = (alert.get("stop_loss")
+                                    or alert.get("stop_price"))
+                        try:
+                            _px_sf = float(_px_sf) if _px_sf else None
+                        except (TypeError, ValueError):
+                            _px_sf = None
+                        try:
+                            _stop_sf = float(_stop_sf) if _stop_sf else None
+                        except (TypeError, ValueError):
+                            _stop_sf = None
+                        try:
+                            _min_price = float(_os_sf.environ.get(
+                                "MIN_SHORT_FADE_PRICE", "5.0"))
+                        except (TypeError, ValueError):
+                            _min_price = 5.0
+                        try:
+                            _min_stop_pct = float(_os_sf.environ.get(
+                                "MIN_SHORT_FADE_STOP_PCT", "0.010"))
+                        except (TypeError, ValueError):
+                            _min_stop_pct = 0.010
+                        _block_reason = None
+                        _sf_ctx = {}
+                        if (_px_sf is not None and _min_price > 0
+                                and _px_sf < _min_price):
+                            _block_reason = "short_fade_low_price"
+                            _sf_ctx = {"price": round(_px_sf, 4),
+                                       "min_price": _min_price}
+                        elif (_px_sf and _stop_sf and _min_stop_pct > 0):
+                            _sd_pct = abs(_stop_sf - _px_sf) / _px_sf
+                            if _sd_pct < _min_stop_pct:
+                                _block_reason = "short_fade_stop_too_tight"
+                                _sf_ctx = {"stop_pct": round(_sd_pct, 5),
+                                           "min_stop_pct": _min_stop_pct,
+                                           "price": round(_px_sf, 4),
+                                           "stop": round(_stop_sf, 4)}
+                        if _block_reason:
+                            logger.info(
+                                "\U0001f6ab [v19.34.323 short-fade] %s %s %s — %s %s",
+                                ("OBSERVE" if _sf_policy == "observe" else "BLOCK"),
+                                _sym_sf, setup_type, _block_reason, _sf_ctx,
+                            )
+                            if _sf_policy != "observe":
+                                try:
+                                    bot.record_rejection(
+                                        symbol=symbol, setup_type=setup_type,
+                                        direction=direction_str,
+                                        reason_code=_block_reason,
+                                        context=_sf_ctx,
+                                    )
+                                except Exception:
+                                    pass
+                                return None
+            except Exception as _sf_err:
+                logger.debug(
+                    "[v19.34.323 short-fade] gate crashed (fail-open): %s",
+                    _sf_err,
+                )
+
             # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
             # Alerts that sit in the pipeline too long are no longer trading
             # the setup they detected. Kill them at the gate to save the IB

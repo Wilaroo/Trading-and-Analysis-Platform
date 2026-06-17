@@ -522,8 +522,18 @@ class EVTrackingService:
             return 0.0
         
         # Calculate from R-outcomes
-        wins_r = [r for r in record.r_outcomes if r > 0]
-        losses_r = [r for r in record.r_outcomes if r <= 0]
+        # v19.34.323 — winsorize each R to ±R_WINSOR_CLAMP so a single
+        # blown-stop / tiny-risk artifact (e.g. -261R or +261R) can't poison
+        # the EV gate. Raw record.r_outcomes is preserved (not mutated).
+        import os as _os_w
+        try:
+            _cl = float(_os_w.environ.get("R_WINSOR_CLAMP", "3.0"))
+        except (TypeError, ValueError):
+            _cl = 3.0
+        _ro = ([max(-_cl, min(_cl, r)) for r in record.r_outcomes]
+               if _cl > 0 else record.r_outcomes)
+        wins_r = [r for r in _ro if r > 0]
+        losses_r = [r for r in _ro if r <= 0]
         
         if wins_r:
             record.avg_win_r = sum(wins_r) / len(wins_r)
