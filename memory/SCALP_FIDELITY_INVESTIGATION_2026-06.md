@@ -520,3 +520,33 @@ EXCESS-$ beyond stop by dir/setup, worst-12 overshoots. paste https://paste.rs/ 
 DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v334_stop_overrun_forensic.py --days 120
 PENDING: operator runs v334 → sizes systemic stop-blowing. If blown% high/concentrated in shorts → P0 fix
 (hard stop orders + short eligibility min price/liquidity). breakdown 2470/0 + FADE sweep still queued.
+
+## 🚀 v337 + v338 — TWO P0 READ-ONLY DIAGS SHIPPED (2026-06-18, post-v336)
+Both round-trip verified (cmp == local). No drift risk (NEW files, read-only; not patchers).
+
+### v337 — breakdown FIND-NO-TRADE triage (2470 fires / 0 genuine trades)
+Buckets setup_type LIKE 'breakdown%' across the WHOLE pipeline: alerts (live_alerts/alerts/
+live_scanner_alerts/predictive_alerts) → confidence_gate_log (GO/REDUCE/SKIP + top SKIP reasons)
+→ trade_drops (which gate killed it) → rejection_events → bot_trades (status/entered_by/genuine).
+Tells real BLOCK-BUG from correct suppression.
+  paste https://paste.rs/2kUMh  sha 55ac6724e48ab84ab61e37ed84d9e8c8cb15cc21a6bb0ecdf091c57db1f4dc28
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v337_breakdown_triage.py --days 30
+  READING: alerts-high+SKIP-dominant→gate kills it; GO-but-trade_drops→post-gate BLOCK BUG;
+  no-gate-rows+no-drops→never reaches gate (experimental/learning-only/dispatch-filtered).
+
+### v338 — Part A EOD-flatten ENFORCEMENT audit (overnight-leak surface)
+On GENUINE bot-own closed trades (classify_close + is_adopted_entry), flags OVERNIGHT holds
+(entry ET-date != exit ET-date) and cross-references the AUTHORITATIVE policy
+order_policy_registry.should_close_at_eod(trade) (v19.34.245 path; resolves trade_2_hold via the
+canonical classifier). THE LEAK SURFACE = should_close_at_eod==True BUT held overnight → slipped
+past Journey-3 EOD. Buckets leak by setup_type/trade_style/direction/close_reason + canonical
+resolve_trade_style of leak rows (Issue-3 entanglement check: does v245 already cover trade_2_hold
+or do they re-resolve to a HOLD style?). Pinpoints exactly which trades evade EOD BEFORE we touch
+the safety-critical EOD path.
+  paste https://paste.rs/yqjwG  sha a9636fbfccb69e8a1a92d5894b69034fbb3995d6f027a9eec6e97d435dd8183a
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v338_eod_flatten_audit.py --days 120
+  READING: leak>0 + dominated by trade_2_hold + canonical-resolve still intraday/scalp → Issue-3
+  default IS the cause AND v245 should have flattened → trace WHY check_eod_close skipped them.
+  leak canonical-resolve = multi_day/swing → NOT leaks (stored style stale, correctly held).
+PENDING: operator runs BOTH → paste output → decide breakdown real-bug-vs-suppression + size the
+EOD leak before patching Journey-3. FADE+MOMENTUM scalp sweep queued after.
