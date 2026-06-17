@@ -187,3 +187,37 @@ DECISION PENDING on v326 output:
   - intraday lane UNKNOWN → SPY 1h/5m/1m intraday bars not backfilled → backfill fix.
   - context/scores vary day-to-day → caution legit → accept selectivity, pivot to sector(-6) recal.
 DGX git HEAD at resume: 8a69292a (v19.34.320r). NO patcher yet — read-only diag only.
+
+## ✅ v326 DGX RESULT (2026-06-17) — CLASSIFIER IS NOT STUCK; MIXED-when-anchor-UP is the lever
+Per-day (DGX, last 10d): comp 48→54(ALIGNED_UP)→65(ALIGNED_UP, mode aggressive/defensive)
+→ 06-15 comp68 ALIGNED_UP long91/UP intra66/UP aggressive/defensive
+→ 06-16 comp68 **MIXED** long91/UP intra **43/NEUTRAL** cautious/cautious
+→ 06-17 comp68 **MIXED** long91/UP intra **46/NEUTRAL** cautious/cautious.
+Distinct comp scores=4, distinct long-lane=3, contexts vary (ALIGNED_UP=6, MIXED=2, PULLBACK=1).
+WHY-MIXED attribution: 2/2 MIXED days = intraday lane NEUTRAL (long anchor strongly UP=91).
+DIAGNOSIS (HIGH): NOT stuck. The cautious posture is ONLY the last 2 days, triggered because
+classify_context (multi_tf_regime L173-181) only recognizes (UP,UP)=ALIGNED_UP and (UP,DOWN)=
+PULLBACK; (UP,**NEUTRAL**) falls through to MIXED → mode_for_direction MIXED branch (L200-201)
+flattens BOTH long & short to 'cautious'. This is miscalibrated: a strong daily uptrend (anchor 91)
+with a merely-NEUTRAL (not opposing) intraday should keep LONGS at NORMAL (buyable consolidation)
+and SHORTS defensive — not cap both to cautious. The cautious mode raises GO bar 38→50
+(confidence_gate L1026-1031), starving GO.
+PROPOSED LEVER (surgical, mode_for_direction MIXED branch, anchor-aware):
+  MIXED + long_anchor bias UP  → long:normal,   short:cautious
+  MIXED + long_anchor bias DOWN→ long:cautious,  short:normal
+  MIXED + anchor NEUTRAL/UNK   → both cautious (unchanged)
+Leaves classify_context, ALIGNED/PULLBACK/BOUNCE, and the UNKNOWN→legacy guard untouched.
+
+## 🔬 v327 — MODE-FIX UNLOCK SIM + suppression-mode probe (READ-ONLY, staged)
+regime_suppression is INDEPENDENT of trading_mode (per setup×dir×regime-band EV table,
+confidence_gate L1041-1080; runs shadow|active). v324 attributed 83 not-GO to regime_suppression
+reasoning, but those may be SHADOW notes, not ACTIVE skips. v327 reads the STRUCTURED
+regime_suppression dict (.mode/.action) + simulates: of currently-NOT-GO, how many would GO at
+NORMAL bar (score>=38) if not hard-blocked by an ACTIVE-SKIP. Settles whether the mode fix alone
+unlocks GO (suppression shadow) or suppression is the real gate (active).
+SHIPPED: diag_v327_mode_unlock_sim.py — paste https://paste.rs/xk3Iw
+  sha256 16d4b476e6281ba9c02689e8c54b9fdaad97fc6e65b1733a7f366beaf9a70a96 (round-trip OK).
+DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v327_mode_unlock_sim.py --hours 8
+PENDING operator: run v327 → confirm desired anchor-aware MIXED behavior + risk appetite (thin/neg
+sanitized edge caveat) → then build the §2.2 mode_for_direction patcher (shadow not applicable; it's
+a mapping change — deploy + watch newly-admitted longs' sanitized avgR ≥0, else rollback).
