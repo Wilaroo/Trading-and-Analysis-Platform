@@ -736,3 +736,16 @@ First v344 ABORTED safely on --check: DGX opportunity_evaluator.py whole-file SH
   rebuilt patcher paste https://paste.rs/hcw1h
 NOTE: commit 0474982c added only test_v344 (the patch itself aborted, not applied). DGX HEAD = 0474982c.
 DGX file baselines: enhanced_scanner.py = 9520d851… (post v341+v343); opportunity_evaluator.py = 2625116e… (pre v344).
+
+## ✅✅ patch_v344 / v19.34.326 DEPLOYED & LIVE (2026-06-18, commit c0d88f8f) — trade_style stamp fixed
+--check 2625116e OK → --apply → new opportunity_evaluator baseline = eecb760f6ef2aafc6c2690a225d0ff2d522163d3f086eecfc70a7ad6378700ce → pytest 5/5 → commit c0d88f8f + push → restart clean (6 green/2 benign-yellow/0 red). Persisted BotTrade.trade_style now canonical (no more trade_2_hold default pollution).
+DGX baselines now: enhanced_scanner.py = 9520d851… ; opportunity_evaluator.py = eecb760f… ; HEAD = c0d88f8f.
+
+## 🧭 FADE SWEEP #3 — mean_reversion replay (v345) SHIPPED, PENDING operator run
+Live _check_mean_reversion (L5584) = STATE detector: RSI extreme + dist_from_ema20>3% + near S/R,
+target=20-EMA, no snapback/cap. v345 applies v341 mechanics anchored to a 1-min EMA20 mean (snapback to
+EMA20) + folds in the vwap_fade overlap split (UNIQUE ext-from-VWAP<1% vs OVERLAP>=1%) IN ONE RUN.
+  paste https://paste.rs/FiUpv (round-trip OK)
+  DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v345_mean_reversion_replay.py --days 14 --ext 3.0 --universe 300 --maxhold 30 --side both --minriskpct 1.0 --winsor 3.0 --vwapgate 1.0
+DECISION: ext buckets +EV → FIRE floor; UNIQUE sizeable&+EV → REWRITE (EMA20 anchor, patch_v346); UNIQUE
+small/neg & OVERLAP dominant → SUPPRESS mean_reversion (vwap_fade covers it). enhanced_scanner baseline 9520d851.
