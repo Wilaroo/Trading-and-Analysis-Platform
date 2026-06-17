@@ -20,6 +20,10 @@ test_v355_orb.py (now uses 'timestamp' key) -> https://paste.rs/bbHOp  sha 1437b
   reads _strategy_stats[base].expected_value_r/win_rate from graded r_outcomes; 20-trade cold-start grace; must be +EV to auto-trade.
 - vwap_bounce suppressed (returns None) -> no alerts, no harm, gate naturally skips.
 
-## Status: AWAITING operator --check/--apply/pytest/commit/restart for v355.1.
-## TODO suggested: read-only diag_live_setup_fires.py (per-setup alert counts last N sessions) for ongoing confidence.
-## Next setup after hotfix: first_move_up / first_move_down.
+## Status: DEPLOYED ✅ (operator applied, 6/6 pytest, committed 7da3810c, GREEN 8/8). ORB now fires live.
+## NEW LIVE BASELINE whole-file SHA = 30eba7d1faf17f1c4fa0794c564e5790b73e4baf0b35f04095a1cbc16d03b1ac
+##   -> use as DGX_WHOLE_PRE for the NEXT patcher (re-extract to confirm).
+## Monitor: diag_live_setup_fires.py -> https://paste.rs/deESS sha 32944812bee03e12d00fbee86e444c16edb4442612ddd719f3eb17e0e55bba81
+##   (per-setup alert counts last N sessions; watchlist for audit changes).
+## GitHub: pushed through 7da3810c (Wilaroo/Trading-and-Analysis-Platform).
+## Next setup: first_move_up / first_move_down.
