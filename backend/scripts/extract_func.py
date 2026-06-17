@@ -11,7 +11,7 @@ Usage (repo root, DGX):
   .venv/bin/python backend/scripts/extract_func.py _check_vwap_bounce
 Paste the WHOLE output back so the patcher can be hash-pinned.
 """
-import base64, hashlib, sys
+import base64, hashlib, sys, re
 
 FILE = "backend/services/enhanced_scanner.py"
 
@@ -27,7 +27,12 @@ def main():
     if marker not in src:
         print(f"ERROR: {name} not found"); return
     start = src.index(marker)
-    nxt = src.index("\n    async def ", start + len(marker))
+    # End at the FIRST next sibling at 4-space indent (def / async def / comment /
+    # decorator), i.e. the first '\n    <non-space>' after the def line. This keeps
+    # trailing blank line(s) (anchor tail '...\n    \n') and does NOT swallow a
+    # following sync helper like _atr_floored_stop.
+    m = re.search(r"\n    \S", src[start + len(marker):])
+    nxt = (start + len(marker)) + m.start()
     anchor = src[start:nxt + 1]
     print(f"method         : {name}")
     print(f"anchor count   : {src.count(anchor)}  (MUST be 1)")
