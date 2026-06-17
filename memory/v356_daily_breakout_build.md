@@ -9,8 +9,17 @@
 DAILY-bar replay, exact live logic, multi-day exit (--maxhold), RR buckets. Params:
 --days 180 --barsize "1 day" --lookback 20 --minbreak/--maxbreak --maxhold --minrr/--maxrr --cooldown --universe.
 
-## Status: AWAITING operator replay output. First confirm daily bar_size label (distinct bar_size).
-## Decision: +EV overall -> keep; band-only +EV -> gate; negative -> tighten/suppress.
+## RESULT: VALIDATED +EV — KEEP AS-IS (no patcher). ✅
+Replay (180d, 400 syms, IB daily bars):
+- 20d lookback/10d hold: n=24086, 41% win, winsorAvg +0.060R, +1455R total, avgRR 2.0
+- 50d lookback/10d hold: n=13140, 41% win, +0.041R, +537R
+- 20d/5d hold/cooldown5: n=22142, 44% win, +0.051R, +1123R
+All +EV across 24k events & variants. Most-auto-executed setup (~15x/day) is profitable & robust.
+No rewrite/suppression. All trades in 1.5-2.5 RR band (avgRR 2.0) so a gate would change nothing.
+bar_size labels present: '1 day','1 hour','1 min','1 week','15 mins','30 mins','5 mins'.
+
+## Status: AUDITED — KEEP. No deploy needed.
+## Next pick offered: (a) fashionably_late [cheat sheet, 10 auto-exec] (b) squeeze/daily_squeeze [no sheet, highest alerts].
 
 ## Live baseline whole-file SHA = 30eba7d1faf17f1c4fa0794c564e5790b73e4baf0b35f04095a1cbc16d03b1ac
 
