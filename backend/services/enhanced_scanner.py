@@ -4627,76 +4627,172 @@ class EnhancedBackgroundScanner:
             return round(max(float(raw_stop), float(entry_price) + floor_distance), 2)
 
     async def _check_vwap_fade(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """VWAP Reversion - Fade extended moves back to VWAP"""
-        # Long fade - extended below VWAP
-        if snapshot.dist_from_vwap < -2.5 and snapshot.rsi_14 < 35:
-            return LiveAlert(
-                id=f"vwap_fade_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="vwap_fade_long",
-                strategy_name="VWAP Reversion Long (INT-07)",
-                direction="long",
-                priority=AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.low_of_day - 0.02,
-                    atr=getattr(snapshot, "atr", None),
+        """VWAP Fade — SMB mean-reversion snapback (v19.34.324 redesign).
+
+        Fires on the TRIGGER, not a dist_from_vwap STATE: price must extend into the
+        [1.0%, 3.0%) band from session VWAP, then a 1-min double-bar-break snapback
+        prints within +1..+4 bars of the extreme. Validated +EV BOTH sides on a 14d
+        risk-controlled native-1min replay (v340b: LONG win73%/+0.19R, SHORT win73%/
+        +0.21R in the 1-2% bucket; >=3% has NO edge so it's hard-excluded). Requires
+        stop >= 1.0% of entry (the v340b min-risk floor that gated ~86% tiny-stop
+        R-explosions) + RVOL >= 1.5 + 2 fires/day per (symbol, side).
+        """
+        EXT_FLOOR = 1.0
+        EXT_CEIL = 3.0          # >=3% extension has NO robust edge — do not fade a runaway
+        TRIGGER_WIN = 4         # snapback must print within +1..+4 bars of the extreme
+        ACCEL = 1.3
+        MIN_RVOL = 1.5
+        MIN_RISK_PCT = 1.0      # stop must be >= 1.0% of entry (v340b / v336 floor)
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+        rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+        if rvol < MIN_RVOL:
+            return None
+        vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
+        if vwap <= 0:
+            return None
+
+        caps = getattr(self, "_vwap_fade_daily_caps", None)
+        if caps is None:
+            caps = self._vwap_fade_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        # ----- LONG snapback: extended BELOW VWAP, green bar clears prior-2 highs -----
+        lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
+        if lows:
+            lod = min(v for _, v in lows)
+            lod_idx = max(j for j, v in lows if v == lod)
+            ext_long = (vwap - lod) / vwap * 100.0
+            accel_l = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
+            green = last["close"] > last["open"]
+            clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+            if (EXT_FLOOR <= ext_long < EXT_CEIL and accel_l and green and clears_hi
+                    and 1 <= (i - lod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:long"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(min(lod - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
+                risk = snapshot.current_price - stop_loss
+                if risk <= 0 or snapshot.current_price <= 0 or (risk / snapshot.current_price * 100.0) < MIN_RISK_PCT:
+                    return None
+                target_1 = round(vwap, 2)
+                reward = target_1 - snapshot.current_price
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_long and ext_long > 2.0)
+                            else AlertPriority.HIGH if ext_long > 1.5 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "vwap_fade" in self._strategy_stats:
+                    st = self._strategy_stats["vwap_fade"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+                return LiveAlert(
+                    id=f"vwap_fade_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="vwap_fade_long",
+                    strategy_name="VWAP Fade Long (snapback)",
                     direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"↩️ {symbol} VWAP Fade LONG - {abs(snapshot.dist_from_vwap):.1f}% below",
-                reasoning=[
-                    f"Extended {abs(snapshot.dist_from_vwap):.1f}% below VWAP",
-                    f"RSI oversold at {snapshot.rsi_14:.0f}",
-                    f"Tape: {tape.overall_signal.value}",
-                    f"Target: Mean reversion to VWAP ${snapshot.vwap:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
-        
-        # Short fade - extended above VWAP
-        if snapshot.dist_from_vwap > 2.5 and snapshot.rsi_14 > 70:
-            return LiveAlert(
-                id=f"vwap_fade_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="vwap_fade_short",
-                strategy_name="VWAP Reversion Short (INT-07)",
-                direction="short",
-                priority=AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.high_of_day + 0.02,
-                    atr=getattr(snapshot, "atr", None),
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.73,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} VWAP Fade LONG snapback \u2014 {ext_long:.1f}% below VWAP {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_long:.1f}% below VWAP ${vwap:.2f} \u2192 1-min double-bar-break snapback",
+                        f"Snapback {i - lod_idx} bar(s) after LOD ${lod:.2f} (flush range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target VWAP ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to VWAP (v340b replay +0.19R, 73% win, 1-2% band)",
+                        "Entry: green bar cleared prior-2 highs (1-3% band, 2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                )
+
+        # ----- SHORT snapback: extended ABOVE VWAP, red bar breaks prior-2 lows -----
+        highs = [(j, b["high"]) for j, b in enumerate(bars) if b.get("high") is not None]
+        if highs:
+            hod = max(v for _, v in highs)
+            hod_idx = max(j for j, v in highs if v == hod)
+            ext_short = (hod - vwap) / vwap * 100.0
+            accel_s = (med_r <= 0) or ((bars[hod_idx]["high"] - bars[hod_idx]["low"]) >= ACCEL * med_r)
+            red = last["close"] < last["open"]
+            breaks_lo = i >= 2 and last["low"] < min(bars[i - 1]["low"], bars[i - 2]["low"])
+            if (EXT_FLOOR <= ext_short < EXT_CEIL and accel_s and red and breaks_lo
+                    and 1 <= (i - hod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:short"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(max(hod + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
+                risk = stop_loss - snapshot.current_price
+                if risk <= 0 or snapshot.current_price <= 0 or (risk / snapshot.current_price * 100.0) < MIN_RISK_PCT:
+                    return None
+                target_1 = round(vwap, 2)
+                reward = snapshot.current_price - target_1
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_short and ext_short > 2.0)
+                            else AlertPriority.HIGH if ext_short > 1.5 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "vwap_fade" in self._strategy_stats:
+                    st = self._strategy_stats["vwap_fade"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_short else ""
+                return LiveAlert(
+                    id=f"vwap_fade_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="vwap_fade_short",
+                    strategy_name="VWAP Fade Short (snapback)",
                     direction="short",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"↩️ {symbol} VWAP Fade SHORT - {snapshot.dist_from_vwap:.1f}% above",
-                reasoning=[
-                    f"Extended {snapshot.dist_from_vwap:.1f}% above VWAP",
-                    f"RSI overbought at {snapshot.rsi_14:.0f}",
-                    f"Tape: {tape.overall_signal.value}",
-                    f"Target: Mean reversion to VWAP ${snapshot.vwap:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(min(bars[i - 1]["low"], bars[i - 2]["low"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.73,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} VWAP Fade SHORT snapback \u2014 {ext_short:.1f}% above VWAP {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_short:.1f}% above VWAP ${vwap:.2f} \u2192 1-min double-bar-break-down snapback",
+                        f"Snapback {i - hod_idx} bar(s) after HOD ${hod:.2f} (spike range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} above HOD, Target VWAP ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to VWAP (v340b replay +0.21R, 73% win, 1-2% band)",
+                        "Entry: red bar broke prior-2 lows (1-3% band, 2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                )
+
         return None
     
     async def _check_breakout(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
