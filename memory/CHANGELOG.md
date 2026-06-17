@@ -26293,3 +26293,10 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
 - 🧭 FADE sweep queue: vwap_fade ✅ | gap_fade replay v342 shipped (pending run) | mean_reversion,
   backside next | then MOMENTUM continuation-template group.
 - Tooling: generic _extract_func.py (live function extractor, reusable across the sweep).
+
+## 2026-06-18b — gap_fade rewrite (v19.34.325 / patch_v343)
+- v342: current gap_fade (fade VWAP-cross to full prior-close fill) = NEGATIVE-EV (n=1080, all cells red).
+- v342b: v341 snapback + VWAP target flips it +EV (SHORT +0.17R, LONG +0.18R).
+- v342c: 54% of triggers are UNIQUE low-VWAP-ext gap reversals vwap_fade MISSES, +EV (69-71% win); OVERLAP
+  bucket medR -1.0 (vwap_fade's job). → REWRITE with complementarity gate (entry within 1% of VWAP).
+- patch_v343 built+validated (self-test byte-identical; test_v343 7/7). PENDING operator --apply on baseline 45db2e66.

@@ -694,3 +694,20 @@ gap_fade triggers into UNIQUE(ext<1%, vwap_fade misses) vs OVERLAP(>=1%, dup) wi
   DGX cmd: PYTHONPATH=backend .venv/bin/python backend/scripts/diag_v342c_overlap.py --days 21 --gapmin 2.0 --universe 300 --maxhold 60 --minriskpct 0.5 --winsor 3.0 --warmup 3 --vwapgate 1.0
 DECISION: UNIQUE large & +EV → patch_v343 gap-gated snapback rewrite; UNIQUE small/neg → SUPPRESS gap_fade
 (remove from _enabled_setups), vwap_fade covers it (avoids correlated double-fires for unmanaged paper trading).
+
+## ✅ v342c RESULT + 🚀 patch_v343 BUILT — gap_fade REWRITE (gap-gated complementary snapback)
+v342c: ext-from-VWAP at entry p50=0.91%; UNIQUE(<1%, vwap_fade misses)=95/177=54%, +EV both sides
+(SHORT n39 win69% +0.11R med+0.113 | LONG n56 win71% +0.13R med+0.214). OVERLAP(>=1%) medR -1.0 (vwap_fade's
+job). => REWRITE gap_fade with v341 snapback + VWAP target + COMPLEMENTARITY gate (fire only when entry
+within 1% of VWAP) so gap_fade & vwap_fade never double-fire.
+patch_v343 / v19.34.325: target _check_gap_fade. Anchored on post-v341 whole-file 45db2e66… ; func PRE
+96150b2b… POST 699a0d0e…. NEW: |gap|>=2% + rvol>=1.3 + 1-min double-bar-break after post-gap HOD/LOD +
+accel1.3x + stop HOD/LOD±0.02 + target=VWAP(1R floor) + entry-within-1%-of-VWAP complementarity + MIN_RISK 0.5%
++ 2/day cap. gap-up→SHORT, gap-down→LONG.
+VALIDATED: patcher self-test isolated copy (check/apply/rollback byte-identical); test_v343 7/7 (gap-up short,
+gap-down long, small-gap block, rvol block, complementarity block, no-trigger block, 2/day cap). Sandbox patched.
+ARTIFACTS: patcher paste https://paste.rs/IX871 ; test paste https://paste.rs/T9KPZ ; overlap diag paste https://paste.rs/vzSem
+DEPLOY: --check (expect 45db2e66 OK) → --apply → pytest test_v343 (7) → COMMIT → ./start_backend.sh --force.
+POST: watch live_alerts gap_fade short/long firing only in the <1%-VWAP gap-reversal zone; track sanitized avgR
+vs replay (+0.11R short / +0.13R long). After deploy, DGX baseline changes — record new whole-file SHA for next patcher.
+NEXT FADE: mean_reversion(2680/73) replay → backside(487/15) → MOMENTUM continuation template.

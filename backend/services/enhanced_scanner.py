@@ -5749,90 +5749,163 @@ class EnhancedBackgroundScanner:
         )
     
     async def _check_gap_fade(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Gap Fade: gap that's failing — trade the fill back to previous close"""
+        """Gap Fade — SMB gap-reversal snapback (v19.34.325 redesign).
+
+        The legacy fade-to-full-prior-close on a raw VWAP-cross was NEGATIVE-EV
+        (v342: -0.11R short / -0.07R long, n=1080). Replaced with the v341 mechanics
+        gated to gap days: a 1-min double-bar-break snapback after the post-gap HOD/LOD
+        extreme, stop = HOD/LOD +/- 0.02, target = session VWAP (1R floor). Stays
+        COMPLEMENTARY to the live vwap_fade (which owns >=1% ext-from-VWAP flushes):
+        gap_fade only fires when entry is WITHIN 1% of VWAP — the low-extension gap
+        reversals vwap_fade MISSES (v342c: UNIQUE 54% of triggers, SHORT win69%/+0.11R,
+        LONG win71%/+0.13R; both medR>0). Keeps the live |gap|>=2% + RVOL>=1.3 context +
+        2 fires/day per (symbol, side).
+        """
         if abs(snapshot.gap_pct) < 2.0 or snapshot.rvol < 1.3:
             return None
-        
-        # Gap up but failing (below VWAP, not holding gap)
-        if snapshot.gap_pct > 0 and not snapshot.holding_gap and not snapshot.above_vwap:
-            direction = "short"
-            stop = snapshot.high_of_day + (snapshot.atr * 0.3)
-            target = snapshot.prev_close
-            priority = AlertPriority.HIGH if snapshot.gap_pct >= 4.0 else AlertPriority.MEDIUM
-            if tape.confirmation_for_short:
-                priority = AlertPriority.CRITICAL if priority == AlertPriority.HIGH else AlertPriority.HIGH
-            
-            risk = abs(snapshot.current_price - stop)
-            rr = abs(target - snapshot.current_price) / risk if risk > 0 else 1
-            
-            return LiveAlert(
-                id=f"gap_fade_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="gap_fade",
-                strategy_name="Gap Fade Short",
-                direction="short",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(stop, 2),
-                target=round(target, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.60,
-                win_probability=0.57,
-                minutes_to_trigger=15,
-                headline=f"GAP FADE {symbol} SHORT - +{snapshot.gap_pct:.1f}% gap FAILING, target fill ${snapshot.prev_close:.2f}",
-                reasoning=[
-                    f"Gapped up {snapshot.gap_pct:.1f}% but FAILING to hold",
-                    f"Below VWAP ${snapshot.vwap:.2f} — sellers taking control",
-                    f"Target: Gap fill to prev close ${snapshot.prev_close:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    f"Stop above HOD ${snapshot.high_of_day:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
-        
-        # Gap down but recovering (above VWAP, holding)
-        if snapshot.gap_pct < 0 and snapshot.holding_gap and snapshot.above_vwap:
-            direction = "long"  # noqa: F841
-            stop = snapshot.low_of_day - (snapshot.atr * 0.3)
-            target = snapshot.prev_close
-            priority = AlertPriority.HIGH if abs(snapshot.gap_pct) >= 4.0 else AlertPriority.MEDIUM
-            if tape.confirmation_for_long:
-                priority = AlertPriority.CRITICAL if priority == AlertPriority.HIGH else AlertPriority.HIGH
-            
-            risk = abs(snapshot.current_price - stop)
-            rr = abs(target - snapshot.current_price) / risk if risk > 0 else 1
-            
-            return LiveAlert(
-                id=f"gap_fade_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="gap_fade",
-                strategy_name="Gap Recovery Long",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(stop, 2),
-                target=round(target, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.60,
-                win_probability=0.57,
-                minutes_to_trigger=15,
-                headline=f"GAP RECOVERY {symbol} LONG - {snapshot.gap_pct:.1f}% gap RECOVERING, target fill ${snapshot.prev_close:.2f}",
-                reasoning=[
-                    f"Gapped down {abs(snapshot.gap_pct):.1f}% but RECOVERING",
-                    f"Above VWAP ${snapshot.vwap:.2f} — buyers stepping in",
-                    f"Target: Gap fill to prev close ${snapshot.prev_close:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    f"Stop below LOD ${snapshot.low_of_day:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
-        
+        VWAP_COMPLEMENT = 1.0   # only the <1% ext-from-VWAP zone that vwap_fade misses
+        TRIGGER_WIN = 4
+        ACCEL = 1.3
+        MIN_RISK_PCT = 0.5
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+        vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
+        if vwap <= 0:
+            return None
+
+        caps = getattr(self, "_gap_fade_daily_caps", None)
+        if caps is None:
+            caps = self._gap_fade_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        # gap-UP failing -> SHORT snapback to VWAP (red breaks prior-2 lows after HOD)
+        if snapshot.gap_pct > 0:
+            highs = [(j, b["high"]) for j, b in enumerate(bars) if b.get("high") is not None]
+            if highs:
+                hod = max(v for _, v in highs)
+                hod_idx = max(j for j, v in highs if v == hod)
+                accel_s = (med_r <= 0) or ((bars[hod_idx]["high"] - bars[hod_idx]["low"]) >= ACCEL * med_r)
+                red = last["close"] < last["open"]
+                breaks_lo = i >= 2 and last["low"] < min(bars[i - 1]["low"], bars[i - 2]["low"])
+                if red and breaks_lo and accel_s and 1 <= (i - hod_idx) <= TRIGGER_WIN:
+                    entry = round(min(bars[i - 1]["low"], bars[i - 2]["low"]), 2)
+                    if entry <= vwap or abs(entry - vwap) / vwap * 100.0 >= VWAP_COMPLEMENT:
+                        return None
+                    key = f"{symbol}:{today}:short"
+                    if caps.get(key, 0) >= 2:
+                        return None
+                    stop_loss = round(hod + 0.02, 2)
+                    risk = stop_loss - snapshot.current_price
+                    if risk <= 0 or snapshot.current_price <= 0 or (risk / snapshot.current_price * 100.0) < MIN_RISK_PCT:
+                        return None
+                    target_1 = round(vwap, 2)
+                    rr = round((snapshot.current_price - target_1) / risk, 2) if risk > 0 else 1.0
+                    priority = AlertPriority.HIGH if snapshot.gap_pct >= 4.0 else AlertPriority.MEDIUM
+                    if tape.confirmation_for_short:
+                        priority = AlertPriority.CRITICAL if priority == AlertPriority.HIGH else AlertPriority.HIGH
+                    caps[key] = caps.get(key, 0) + 1
+                    return LiveAlert(
+                        id=f"gap_fade_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                        symbol=symbol,
+                        setup_type="gap_fade",
+                        strategy_name="Gap Fade Short (snapback)",
+                        direction="short",
+                        priority=priority,
+                        current_price=snapshot.current_price,
+                        trigger_price=entry,
+                        stop_loss=stop_loss,
+                        target=target_1,
+                        risk_reward=rr,
+                        trigger_probability=0.62,
+                        win_probability=0.69,
+                        minutes_to_trigger=0,
+                        headline=f"GAP FADE {symbol} SHORT snapback \u2014 +{snapshot.gap_pct:.1f}% gap, fade to VWAP ${vwap:.2f}",
+                        reasoning=[
+                            f"Gapped up {snapshot.gap_pct:.1f}% then 1-min double-bar-break-down snapback {i - hod_idx} bar(s) after HOD ${hod:.2f}",
+                            f"Entry within {abs(entry - vwap) / vwap * 100.0:.1f}% of VWAP (low-ext gap reversal vwap_fade misses)",
+                            f"R:R = {rr:.1f}:1 (Stop ${stop_loss:.2f} above HOD, Target VWAP ${target_1:.2f})",
+                            f"RVOL {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                            "Mean reversion to VWAP (v342c replay +0.11R, 69% win, gap-unique zone)",
+                            "Entry: red bar broke prior-2 lows (2/day cap)",
+                        ],
+                        time_window=self._get_current_time_window().value,
+                        market_regime=self._market_regime.value,
+                        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                    )
+
+        # gap-DOWN recovering -> LONG snapback to VWAP (green clears prior-2 highs after LOD)
+        if snapshot.gap_pct < 0:
+            lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
+            if lows:
+                lod = min(v for _, v in lows)
+                lod_idx = max(j for j, v in lows if v == lod)
+                accel_l = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
+                green = last["close"] > last["open"]
+                clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+                if green and clears_hi and accel_l and 1 <= (i - lod_idx) <= TRIGGER_WIN:
+                    entry = round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2)
+                    if entry >= vwap or abs(entry - vwap) / vwap * 100.0 >= VWAP_COMPLEMENT:
+                        return None
+                    key = f"{symbol}:{today}:long"
+                    if caps.get(key, 0) >= 2:
+                        return None
+                    stop_loss = round(lod - 0.02, 2)
+                    risk = snapshot.current_price - stop_loss
+                    if risk <= 0 or snapshot.current_price <= 0 or (risk / snapshot.current_price * 100.0) < MIN_RISK_PCT:
+                        return None
+                    target_1 = round(vwap, 2)
+                    rr = round((target_1 - snapshot.current_price) / risk, 2) if risk > 0 else 1.0
+                    priority = AlertPriority.HIGH if abs(snapshot.gap_pct) >= 4.0 else AlertPriority.MEDIUM
+                    if tape.confirmation_for_long:
+                        priority = AlertPriority.CRITICAL if priority == AlertPriority.HIGH else AlertPriority.HIGH
+                    caps[key] = caps.get(key, 0) + 1
+                    return LiveAlert(
+                        id=f"gap_fade_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                        symbol=symbol,
+                        setup_type="gap_fade",
+                        strategy_name="Gap Recovery Long (snapback)",
+                        direction="long",
+                        priority=priority,
+                        current_price=snapshot.current_price,
+                        trigger_price=entry,
+                        stop_loss=stop_loss,
+                        target=target_1,
+                        risk_reward=rr,
+                        trigger_probability=0.62,
+                        win_probability=0.71,
+                        minutes_to_trigger=0,
+                        headline=f"GAP RECOVERY {symbol} LONG snapback \u2014 {snapshot.gap_pct:.1f}% gap, recover to VWAP ${vwap:.2f}",
+                        reasoning=[
+                            f"Gapped down {abs(snapshot.gap_pct):.1f}% then 1-min double-bar-break-up snapback {i - lod_idx} bar(s) after LOD ${lod:.2f}",
+                            f"Entry within {abs(entry - vwap) / vwap * 100.0:.1f}% of VWAP (low-ext gap reversal vwap_fade misses)",
+                            f"R:R = {rr:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target VWAP ${target_1:.2f})",
+                            f"RVOL {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                            "Mean reversion to VWAP (v342c replay +0.13R, 71% win, gap-unique zone)",
+                            "Entry: green bar cleared prior-2 highs (2/day cap)",
+                        ],
+                        time_window=self._get_current_time_window().value,
+                        market_regime=self._market_regime.value,
+                        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                    )
+
         return None
     
     async def _check_chart_pattern(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
