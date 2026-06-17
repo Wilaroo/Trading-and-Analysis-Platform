@@ -145,3 +145,21 @@ NEXT: need DGX live SHA + grep of confidence_gate.py L889-940 before building th
 - NEXT after gate verified: redesign _check_rubber_band detector (snapshot pre-gate +
   1-min double-bar-break snapback via _get_intraday_bars_from_db(sym,"1 min",N) + ext≥2% +
   2/day cap) so it FIRES and now EXECUTES. Then generalize to hitchhiker/second_chance/big_dog.
+
+## 🔬 FIRE FUNNEL traced to the TOP (v322b → v323 → v324, 2026-06-17)
+Post-v322 the meta-veto is no longer the binding gate. The funnel:
+- v322b: EV-aware ALLOWs (16) → 0 GO; admits were low-score (squeeze 16, fashionably_late 3).
+- v323 (8h, 542 dec): GO median 56 (min 50), REDUCE 35-48, SKIP median 22. Clean gap at 48→50
+  ⇒ effective GO bar ≈ 50. meta_labeler now only ADDS (+10.9, 0 neg) ✓. SECTOR is a net DRAG
+  (-324, -6 per "short against strong sector", fires 496×). quality_inplay doesn't discriminate.
+- v324 (8h, 558 dec): 100% CAUTIOUS (GO=50), regime_state=HOLD, regime_score CONSTANT 68.
+  91 score≥38 GO-eligible, 83 NOT GO — ALL carry regime_suppression. Lowering threshold ⇒ ~0× GO.
+ROOT (top of funnel) = a persistent DEFENSIVE REGIME posture: HOLD→cautious raises GO to 50 AND
+  activates regime_suppression. This sits ABOVE meta-veto/score/detector. NOT obviously a bug —
+  it's the risk layer. RED FLAG: regime_score pinned at exactly 68 (no intraday variance) ⇒ maybe
+  STUCK classifier.
+- v325 regime/mode timeline (paste qnvs4 sha 3ee6eeeb…) staged to test stuck-vs-legitimate over 21d:
+  few distinct regime_score values + cautious every day ⇒ stuck (upstream lever); varies ⇒ legit caution.
+Diags staged: v322b (pC7MQ), v323 (daDEY), v324 (Xot41), v325 (qnvs4).
+DECISION PENDING on v325: if stuck → fix regime→mode trigger (biggest GO unlock); if legit → accept
+  selectivity. Sector penalty (-6) is a secondary recalibration candidate either way.
