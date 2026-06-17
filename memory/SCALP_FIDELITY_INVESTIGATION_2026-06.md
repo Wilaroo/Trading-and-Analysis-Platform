@@ -623,3 +623,23 @@ SHA + whole-file SHA + paste URL → then build function-anchored patch_v341 (fi
 operator bytes). Sandbox func span L4545-4617 sha b92ccff3… (DGX will differ — use theirs).
 PENDING operator: run extractor → paste back → I build patch_v341. THEN continue FADE sweep:
 gap_fade(3627/154) → mean_reversion(2680/73) → backside(487/15).
+
+## 🚀 patch_v341 BUILT — vwap_fade VWAP-anchored SMB snapback (v19.34.324), PENDING operator --apply
+DGX live func == sandbox func (sha b92ccff3 confirmed via _extract_func). Target:
+enhanced_scanner._check_vwap_fade. FUNCTION-anchored (file 452KB drifted; whole-file POST not
+precomputable): asserts whole-file PRE = bc674f2688e9983edc3e7cad385a3463fe04d75ebc8dd927975154018b4b37cf
++ func anchor count==1 + func PRE sha b92ccff3… + embedded NEW func sha 8650f2b7… + py_compile guard +
+backup .bak_v341 + --check/--apply/--rollback.
+NEW detector (BOTH sides, v330 template anchored to session VWAP): ext into [1.0%,3.0%) band from
+snapshot.vwap + 1-min double-bar-break snapback within +1..+4 bars of HOD/LOD extreme + accel(extreme-bar
+range>=1.3x median) + RVOL>=1.5 + stop>=1.0% of entry (skip if tighter) + 2/day cap per (symbol,side).
+LONG: green clears prior-2 highs, target=VWAP. SHORT: red breaks prior-2 lows, target=VWAP. priority
+CRIT(tape&ext>2)/HIGH(ext>1.5)/MED. Bars via technical_service._get_intraday_bars_from_db(sym,"1 min",60).
+VALIDATED: patcher self-tested on isolated copy (check OK, apply→new present/old gone/compiles, rollback
+byte-identical). test_v341_vwap_fade.py 6/6 pass (long fires, short fires, RVOL gate, >=3% ceiling block,
+no-double-break block, 2/day cap). Sandbox enhanced_scanner.py replaced with NEW func (sandbox leads DGX).
+ARTIFACTS: patcher paste https://paste.rs/tOKtG sha 6e677a33cdcacc3574a2eaae6b4439bd749a6130e455c3d4795725b770f94da1
+  test paste https://paste.rs/txJdX sha 7156eb0a4b60c94dbae7c268f87fbd73277ed09aeeb641e0b745ab8d57144f55
+DEPLOY: --check (expect whole-file OK on bc674f26) → --apply → pytest test_v341 (6) → COMMIT → ./start_backend.sh --force.
+POST-DEPLOY: watch live_alerts for vwap_fade_long/short firing on real flushes; track fire→GO→trade +
+sanitized avgR vs replay (+0.19R long / +0.21R short, 1-2% band). NEXT FADE: gap_fade(3627/154) replay.
