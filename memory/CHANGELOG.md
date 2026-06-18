@@ -1,3 +1,32 @@
+## 2026-06-18 — v363 (patch_v363) REWRITE `spencer_scalp` to SMB DOCTRINE (LONG-only) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (consulted Spencer+Scalp cheat sheet)
+Doctrine: ≥20-min tight consolidation (<15% of day range) in the UPPER 1/3, low-vol pause → volume
+surge break of the range high, stop .02 below range, measured-move scale (1R/2R/3R). Prior code was a
+loose near-HOD proxy (dist_from_hod<1 + daily_range<3 + rvol≥1.5, ATR stop, fixed HOD+1.5ATR target),
+LONG-only, and NEVER filled live (ground truth 0 closed / 9 simulated).
+
+### Evidence (diag_v363_spencer_scalp_doctrine.py, 180d/300-sym, 1-min)
+- doctrine LONG band<0.15 + vol-surge 1.3 (scaled exit): n=17729 win 52% winsorAvg +0.063R.
+- fixed 2.0R LONG (detector-only, SHIPPED): ~+0.043R. SHORT ~0 (dropped). Morning-only −EV (kept all-day).
+- Thin edge (~+0.04-0.06R) but real & doctrine-faithful; makes the setup actually tradeable.
+
+### Action
+- New `_check_spencer_scalp` (detector-only, LONG-only): fetches 1-min bars; 20-bar consolidation,
+  band<0.15·dayRange, upper-1/3 (range_low≥lod+0.667·dayRange), break-bar vol≥1.3×cons avg;
+  entry=range_high+.01 (on break print), stop=range_low−.02, target=entry+2.0·risk. Behaviorally
+  validated locally (valid fire + 4 invalidations).
+- Patcher `backend/scripts/patch_v363_spencer_scalp_doctrine.py` (whole-file PRE-SHA `e7700628…` guard,
+  `_check_spencer_scalp` PRE_FUNC_SHA `e11acffc…`, OLD count==1, py_compile, --check, auto-backup).
+- Regression test `backend/tests/test_v363_spencer_scalp_doctrine.py` (5 cases). Build doc
+  `memory/v363_spencer_scalp_build.md`.
+- paste.rs: patcher `https://paste.rs/NauvZ`, test `https://paste.rs/1lRtq` (both round-trip cmp-verified).
+
+### Milestone
+The scalp/intraday cheat-sheet adjudication queue (v353→v363) is COMPLETE. Remaining: scaled-exit
+position-mgmt enhancements + big_dog/puppy_dog doctrine rewrite.
+
+
 ## 2026-06-18 — v362 (patch_v362) REWRITE `gap_give_go` to SMB DOCTRINE — BUILT + PASTED (awaiting DGX apply)
 
 ### Why (operator flagged the Gap_Give_and_Go cheat sheet)
