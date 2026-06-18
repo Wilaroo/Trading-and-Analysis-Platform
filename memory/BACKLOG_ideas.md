@@ -27,4 +27,4 @@ NONE — scalp/intraday cheat-sheet adjudication queue COMPLETE.
 
 ### Future enhancements
 - Scaled measured-move exits (spencer 1R/2R/3R; gap_give_go Move2Move double-bar-break trail) — position-mgmt layer.
-- big_dog/puppy_dog doctrine rewrite (mid-day window + above-PDH + consolidation-base stop + trail).
+- v364 big_dog/puppy_dog doctrine rewrite — EVALUATED, NOT SHIPPED (doctrine +0.02-0.04R < shipped v361 +0.097R; kept v361). See memory/v364_big_puppy_dog_eval.md.
