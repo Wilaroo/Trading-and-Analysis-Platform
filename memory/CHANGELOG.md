@@ -1,3 +1,28 @@
+## 2026-06-18 — v381 DEDUP mark_fired POST-TRADE (Issue 4 / "dedup_cooldown blocks continuation re-entries") — patcher ready (paste.rs/9Tw70), NOT yet applied
+Built patch_v381_dedup_mark_fired_post_trade.py. PRE-SHA 7344020b… POST a141edb6… (container-validated:
+anchors 1/1, py_compile OK, mark_fired relocated to line ~4725, rollback byte-exact). NOT yet applied on DGX.
+
+### Root cause (proven by diag_v380, read-only, paste.rs/KXwCR — 7d live data)
+`_dedup.mark_fired(symbol,setup,direction)` ran in the bot loop BEFORE evaluation (trading_bot_service.py
+~4696), so every alert that passed the dedup/position checks started the 300s (symbol,setup,dir) cooldown
+EVEN WHEN it was rejected downstream and never opened a trade. diag_v380 classified 20,567 dedup_cooldown
+drops: **92.9% BLOCKED_NO_TRADE_DAY** (key never traded that day; HON 96.4%), 3.1% blocked-while-open
+(legit), 1.9% lost-continuation, 2.1% delayed. → the cooldown was silently suppressing re-evaluation of
+trending names (HON, MS, C, PFE, INTC, MU…) for 5 min at a time.
+
+### Fix (1 file, reversible)
+- D1: REMOVE the pre-eval mark_fired (→ explanatory comment).
+- D2: ADD mark_fired inside the `if trade:` block → cooldown starts ONLY when a real trade is created.
+  Marking before `_execute_trade` still blocks a duplicate same-key alert in the same batch; the existing
+  open-position + pending checks still prevent stacking on a live position (preserves PRCT anti-stacking).
+- NET: rejected alerts no longer burn the cooldown; trending setups get re-evaluated each cycle. Expected
+  side effect: more re-evals + more reject records (intended — each is a fresh chance to fire).
+
+### Verify after apply
+Restart → after RTH, re-run diag_v380 --days 1: BLOCKED_NO_TRADE_DAY should collapse toward ~0; remaining
+blocks should be BLOCKED_WHILE_OPEN (legit). Watch for any unintended stacking (should be none).
+
+
 ## 2026-06-18 — v379 SMART_FILTER GRADE-GATE (Issue 3 / "borderline setups hard-blocked") — APPLIED on DGX, VERIFICATION PENDING (restart + RTH)
 APPLIED via patch_v379_smartfilter_grade_gate.py (paste.rs/ow794). PRE-SHA matched BOTH files
 (opportunity_evaluator eecb760f…, smart_filter 86fd6ac4…); POST smart_filter 42fd651e… (== --check
