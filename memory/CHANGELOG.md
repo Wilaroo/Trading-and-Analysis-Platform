@@ -1,6 +1,7 @@
-## 2026-06-18 — v381 DEDUP mark_fired POST-TRADE (Issue 4 / "dedup_cooldown blocks continuation re-entries") — patcher ready (paste.rs/9Tw70), NOT yet applied
-Built patch_v381_dedup_mark_fired_post_trade.py. PRE-SHA 7344020b… POST a141edb6… (container-validated:
-anchors 1/1, py_compile OK, mark_fired relocated to line ~4725, rollback byte-exact). NOT yet applied on DGX.
+## 2026-06-18 — v381 DEDUP mark_fired POST-TRADE (Issue 4 / "dedup_cooldown blocks continuation re-entries") — APPLIED on DGX (paste.rs/9Tw70), live-verify pending
+Built+APPLIED patch_v381_dedup_mark_fired_post_trade.py. PRE-SHA 7344020b… → POST a141edb6… (anchors 1/1,
+py_compile OK, mark_fired relocated to line ~4725, rollback byte-exact). Applied + backend restarted
+(startup complete, health green). Live-verify pending: diag_v380 after a clean post-restart RTH window.
 
 ### Root cause (proven by diag_v380, read-only, paste.rs/KXwCR — 7d live data)
 `_dedup.mark_fired(symbol,setup,direction)` ran in the bot loop BEFORE evaluation (trading_bot_service.py
