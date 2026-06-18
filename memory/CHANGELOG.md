@@ -1,3 +1,432 @@
+## 2026-06-18 — v379 SMART_FILTER GRADE-GATE (Issue 3 / "borderline setups hard-blocked") — APPLIED on DGX, VERIFICATION PENDING (restart + RTH)
+APPLIED via patch_v379_smartfilter_grade_gate.py (paste.rs/ow794). PRE-SHA matched BOTH files
+(opportunity_evaluator eecb760f…, smart_filter 86fd6ac4…); POST smart_filter 42fd651e… (== --check
+prediction), opportunity_evaluator 0dc997f3…; py_compile OK both; .bak.v379 backups written. Restart
++ live diag_v379 verification still pending.
+
+### Root cause (CORRECTED via diag_v379 — overturned the original "TQS 75 unreachable" diagnosis)
+The original read (diag_v378c) assumed smart_filter compares the TQS (max ~68) to high_tqs_requirement=75.
+diag_v379 (read-only, paste.rs/gS9i6) PROVED on live data (49/49 joinable smart_filter_skip drops,
+SNDK 32/32) that the MAIN bot loop feeds smart_filter `quality_score = alert['score'] =
+trigger_probability×100` (trading_bot_service.py builds that dict), NOT the TQS. 19 compared values
+were >68 — mathematically impossible for the TQS (a 5-pillar AVERAGE crushed to ~48-68 per
+grade_calibration.py) — so they could only be trigger_probability. The reject string hard-coded the
+word "TQS" → the 60 the operator saw was trigger_prob 0.60 mislabeled. These setups
+(stage_2_breakout / rs_leader_break / pocket_pivot / power_trend_stack) carry a base trigger_prob
+≈0.60 → 60 < 75 → EVERY borderline-win-rate setup permanently hard-blocked. The auto-execute path
+(scanner_integration.py) DOES pass the real TQS, so the input was also inconsistent across entry paths.
+
+### Fix (2 files, fully reversible, no safety-critical path)
+- **O1 opportunity_evaluator.py** — feed the REAL TQS: `quality_score = int(alert.get('tqs_score')
+  or alert.get('score') or 70)` (mirrors the confidence-gate GAP-1 fix; both entry paths now consistent).
+- **S1 smart_filter.py** — add `import os`, `_GRADE_RANK` ladder, env-tunable
+  `borderline_min_grade` (SMART_FILTER_BORDERLINE_MIN_GRADE, default "B") in DEFAULT_CONFIG.
+- **S2 smart_filter.py** — borderline band PROCEEDs when `calibrate_grade(quality_score) ≥ B`
+  (calibrated grade, consistent with the grade system), not the unreachable absolute 75.
+  `high_tqs_requirement` kept ONLY as a crash/no-reference fallback. Self-adapts if Path B later
+  de-compresses the scale. Container-validated: A/B→PROCEED, C+/C/F→SKIP, default=B, fallback→75.
+
+### Also checked (benign — no action)
+- ACTION_THRESHOLDS (STRONG_BUY≥80/BUY≥65) + tqs_action: never used as an execution gate (metadata/
+  display only). The unreachable cutoffs only affect a cosmetic label.
+
+### Follow-ups
+- **VERIFY v379 live:** restart (./start_backend.sh --force) → after RTH, diag_v379 should show
+  borderline skips reasoning on real grade; B-grade borderlines (SNDK TQS 57-58) should fire.
+- **Path B (P1, after Issue 4):** de-compress the TQS scale itself — turn off TQS_SETUP_DECOMPRESS
+  once v310 C-1 feeds real SMB, re-baseline absent-fundamental→50 so the raw composite uses 0-100.
+- **Issue 4 (P1):** dedup_cooldown blocking continuation re-entries (HON).
+
+
+## 2026-06-18 — v369 MISSED-MOVERS FIX — DEPLOYED, COMMITTED (21d3f479), VERIFIED LIVE
+APPLIED on DGX (PRE-SHA matched both files; POST-SHA matched --check prediction exactly:
+enhanced_scanner 4aa42be2…, ib_historical_collector e44ee544…), committed 21d3f479, pushed,
+backend restarted clean (health 7g/1y/0r; yellow = pusher_rpc fresh-boot no-data, benign).
+VERIFIED via diag_v369_verify.py (paste.rs/9GbUz, read-only): all 6 source markers present;
+**scalp_rvol fail_closed=True drops AFTER deploy (16:41Z) = 0** (5,018 pre-deploy fail-closes in
+the 7d TTL window, latest 13:27Z — none new); SPCX now clears the gate. trade_drops 2d snapshot:
+universal_liquidity_gate 14,866 (scalp_rvol 5,883 / dollar_adv 5,758 / scalp_share_adv 2,300 /
+scalp_adrp 925). Watch-symbol NEXT-LAYER blockers revealed (post-v369): SNDK→smart_filter_skip
+(Issue 3), HON→dedup_cooldown (Issue 4), MRVL→measured rvol 0.91x<1x floor (Issue 1a or SCALP_MIN_RVOL
+calibration), TSLA→auto_exec_ineligible priority=medium<high (v320r class). v369 working as designed.
+
+## 2026-06-18 — v369 MISSED-MOVERS FIX (RVOL defer + ATR ceiling waive) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diags v376/v377 — SNDK/MRVL/SPCX/TSLA missed)
+Two structural bugs were filtering out the market's best intraday movers:
+- **1b (RVOL fail-close):** `_passes_universal_liquidity_gate` rejected scalp/intraday alerts
+  whenever `rvol <= 0`. But `rvol == 0.0` means UNMEASURED (no live-volume push for names outside
+  the top-400 L1 set), NOT zero volume — ~97% of scalp/intraday drops were this fail-close.
+- **2 (ATR chaos ceiling):** `get_symbol_tier` marked any `atr_pct > 10%` as `tier=skip`, excluding
+  explosive, deeply-liquid names (MRVL/SPCX/SMCI) from the universe entirely.
+
+### What v369 does (both env-reversible, no safety-critical path touched)
+- **enhanced_scanner._passes_universal_liquidity_gate** (whole-fn replace, PRE_FUNC_SHA
+  `8494288681…`): when `rvol <= 0` (unmeasured), DEFER to the share-ADV + ADRP proofs below instead
+  of fail-closing. adv_dollar already proven to reach this branch, so a name passing share-ADV + ADRP
+  with unmeasured RVOL now PASSES. A MEASURED rvol genuinely below floor still blocks
+  (`elif rvol > 0 and rvol < min`). Reversible: `SCALP_RVOL_FAIL_CLOSED=true` restores old behavior.
+- **ib_historical_collector.get_symbol_tier** (ATR-gate sub-block, ASCII anchor): waive the UPPER
+  ceiling (`atr_pct > ATR_PCT_THRESHOLDS["max"]`) for highly-liquid names
+  (`avg_dollar_volume >= DOLLAR_VOL_THRESHOLDS["intraday"]`). MIN floor + thin-name ceiling preserved.
+  Reversible: `ATR_CEILING_WAIVE_LIQUID=false`.
+
+### §2.2 compliance / validation
+Patcher `patch_v369.py` (paste.rs/3Q8L5, round-trip cmp IDENTICAL, 37KB): whole-file PRE-SHA256 drift
+guard per file (enhanced_scanner `6cd66335…`, ib_historical_collector `a3cc6467…`), base64 (old,new)
+anchored chunks (each count==1 asserted), auto-backup `.bak.v369`, py_compile gate, prints POST-SHA,
+`--check/--apply/--rollback`, idempotent NOOP when already patched. Built programmatically from the
+operator's exact extracts (no manual base64). Full local round-trip test passed
+(`/tmp/v369/test_patch_v369.py`): check(no-write)→apply(both edits structurally verified)→idempotent
+NOOP→rollback(exact PRE-SHA)→drift-guard abort. Generator: `/tmp/v369/build_patch_v369.py`.
+
+### DGX deploy (operator)
+```
+curl -sS -o /tmp/patch_v369.py https://paste.rs/3Q8L5
+.venv/bin/python /tmp/patch_v369.py --check     # dry run + py_compile
+.venv/bin/python /tmp/patch_v369.py --apply
+git add backend/services/enhanced_scanner.py backend/services/ib_historical_collector.py \
+  && git commit -m "v369: RVOL-unmeasured defer + ATR ceiling waive for liquid movers" && git push origin main
+./start_backend.sh --force
+```
+Verify next RTH: SNDK/MRVL/SPCX-class names should pass the gate (re-run diag_v376/v377) and
+no longer show `tier=skip`. After verified, NEXT: Issue 3 (recompute strategy_stats on sanitized
+recent data), Issue 4 (dedup_cooldown continuation re-entries).
+
+
+## 2026-06-18 — v368 known-liquid bypass CLOSED + scalp/intraday ADRP floor — DEPLOYED, COMMITTED (0bb8ba83), VERIFIED LIVE
+Root cause chain (operator-driven, diags v370/v372/v374): user flagged scalps on HON/EWT/IWF/FXI.
+- v370: all 4 are liquid ($488M–$722M $-vol, ≫ $50M floor). NOT a liquidity failure. second_chance/backside ARE scalp-doctrine.
+- v371: 61% alert→trade trade_style divergence (collapse to trade_2_hold) — but v373 proved this is STALE history;
+  DGX line 1907 `_resolve_geometry_style` already persists canonical style (0% generic in last 3d). trade_style patch DROPPED.
+- v372: HON probe — gate WOULD block (2.2M sh < 3M) but HON sits in `_known_liquid_symbols` (228 hardcoded) which
+  `return True`d the WHOLE gate, skipping the v322m scalp share-ADV floor. Root cause = the static bypass.
+- v374: universe/tradeability audit — 92/228 hardcoded names < 3M sh (silently bypassed). EWT/IWF/FXI issue is
+  LOW ADRP (movement) not liquidity: ADRP 1.18–2.28% vs real movers 7–17%. Index ETFs/sleepy megacaps cluster low.
+Fix (patch_v368_scalp_adrp_gate.py, paste.rs r3w8c; PRE-SHA 0d9b24b1 → applied; all in enhanced_scanner.py):
+- E1: known-liquid no longer FULLY bypasses; only WAIVES dollar floor on genuine cache MISS. Scalp proof ALWAYS runs.
+- E2: dollar-floor check waived only when `_known_liquid and adv_dollar<=0`.
+- E3: NEW scalp/intraday ADRP floor check (after share-ADV check).
+- E4: `SCALP_MIN_ADRP` env knob (default 2.0, 0 disables) + `_adrp_cache`.
+- E5: `_get_adrp_for_gate` (reads symbol_adv_cache.adrp_20d → ib_historical_data 20-bar fallback, memoized per UTC-day)
+  + `_compute_adrp_from_bars`.
+Thresholds LOCKED by operator: ADRP≥2.0, KEEP share≥3M + dollar≥$50M (all three for scalp/intraday).
+VERIFIED (diag_v375, 6h post-deploy): scalp_adrp=58 drops (IEF/GDX/SLV/FXI/NFLX/WFC…), scalp_share_adv=61 (ACN×26/CMI/RTX…),
+existing scalp_rvol(2559)/dollar_adv(1824) intact. Watch-list verdicts exact: HON→BLOCKED(share), IWF/FXI/SPY/QQQ→BLOCKED(adrp),
+EWT→eligible (2.28>2.0), AAPL→eligible. Known-liquid set literal left intact (bypass removal neutralizes stale entries).
+DEFERRED: (1) collector adrp_20d warm-fill (fast-path; fallback already correct). (2) optional bump SCALP_MIN_ADRP=2.5 to catch EWT.
+New read-only diags: diag_v370/v371/v372/v373/v374/v375; helper extract_region_generic.py.
+
+
+## 2026-06-18 — AGENTS.md known-issue watchlist TRIAGED (all 3 closed; no code fixes needed)
+Verified all three §6/§16 watchlist items against live code/data — 2 were stale notes, 1 disproven+moot.
+- **Stale-quote watchdog** → ✅ ALREADY FIXED (v19.34.82 `quote_resub_watchdog.py`, live 60s task,
+  env QUOTE_RESUB_WATCHDOG_ENABLED). AGENTS.md §6 note was stale; cleared.
+- **squeeze "scalp-only" narrator** → ✅ ALREADY FIXED (squeeze=intraday across trade_style_classifier,
+  _SCALP_SETUPS absent, sentcom SCALP_SETUPS absent, gameplan narrative accurate). Cleared.
+- **Scalp SMB grade not timeframe-aware** → ✅ CLOSED. diag_v368 (`JsUOT`) + diag_v369 (`iSpQN`):
+  §16 premise DISPROVEN (scalp avg smb 29.6 + profitable in-sample; intraday is the over-graded/worst
+  cell: smb 37.8 but 24% win / −0.26R, n=59). And MOOT for execution — `smb_grade` is AUDIT-ONLY since
+  v19.34.175 (canonical = `unified_grade`=`tqs_grade`; SMB=15% of one TQS pillar). Data caveat:
+  bot_trades doesn't persist smb_score_total (all "?") and 93% of closed trades carry lifecycle styles
+  (trade_2_hold/reconciled) — so grade→R validity isn't measurable from bot_trades; validate TQS if ever needed.
+- ⚠️ INCIDENTAL OBSERVATION (not the watchlist, worth noting): closed bot_trades skew net-negative —
+  intraday 24% win/−0.26R (n=59), multi_day 21%/−0.16R (n=19), overall 1420 trades 21% win/−0.04R.
+  Scalp positive but tiny n=7. This is a strategy-edge signal for the EV/replay track, not a grade bug.
+- New read-only diags: diag_v368_smb_grade_by_style.py, diag_v369_smb_grade_validity.py. AGENTS.md §6/§16 updated.
+
+
+## 2026-06-18 — v367 P1-MULTI-TF multi-bar-size shadow logging — DEPLOYED & COMMITTED (e325857c), LIVE
+
+### What shipped
+`ConfidenceGate._get_live_prediction` (confidence_gate.py) now computes the P-WIRE regime-shadow
+across **1min / 5min / 15min** (additive `result["regime_shadows"]` list) instead of only 5min.
+The PRIMARY live prediction path is BYTE-FOR-BYTE UNCHANGED (drives confidence/execution); the single
+`result["regime_shadow"]` (5min/daily) is preserved for backward-compat readers. Read-only shadow —
+never affects execution. Env-reversible via `PWIRE_MULTI_TF_SHADOW=0`. `pwire_shadow_eval.py` updated
+to consume `regime_shadows[]` (falls back to the single record) + a bar_size distribution line.
+- Patcher `patch_v367_multi_tf_shadow.py` (whole-file PRE `454318302b85…`→POST `f8e4a542…`,
+  `_get_live_prediction` PRE_FUNC_SHA `ef039ab3…`, anchor==1, py_compile, --check, auto-backup).
+  paste.rs: patcher `Gh8Jj`, eval `CZtfV`, test `QlXg7`. 2/2 pytest green (test_v367_multi_tf_shadow.py).
+- Verified bars exist for all TFs (diag_v367_barsize_inventory.py `MxOfg`): 1min 73M docs/3417 syms,
+  15min 32M/4105.
+- ✅ VERIFIED LIVE (diag_v367_verify.py `fAtwP`, 17min into RTH): post-v367 docs carry
+  `live_prediction.regime_shadows[]` length 3 spanning 5min/1min/15min. BONUS: at 1min & 15min the
+  high_vol variant is regime_model_available=True & directions_agree=True — i.e. multi-TF immediately
+  yields COMPARABLE regime records, unlike the quarantined 5min_high_vol variant (available=False).
+  NOTE: diag_v366 readiness reads the single `regime_shadow` (always 5min) so it can't show multi-TF —
+  use diag_v367_verify.py / pwire_shadow_eval.py (now reads the list) to inspect multi-TF accrual.
+
+### Why (P-WIRE Phase-2 unblock)
+Phase-2 regime-vs-generic edge eval is data-gated (RESOLVED 92→needs ~200) and 100% of shadow records
+were 5min. Multi-TF 2-3×'s the corpus per gate decision across all (bar_size,regime) cells. Phase-2
+itself remains time/data-gated (re-run pwire_shadow_eval once RESOLVED≥200; note dominant 5min_high_vol
+variant is QUARANTINED PBO=1.00 so 77% of records have no comparison model).
+
+## 2026-06-18 — v366 P-WIRE readiness + regime diagnosis — NO CODE CHANGE (misdiagnosis re-confirmed)
+diag_v366_pwire_readiness.py (`OBDuI`) + diag_v366b_regime_live_trace.py (`wjwyB`) independently
+RE-CONFIRMED the 2026-06-16 diag_v320x finding: the "~91% high_vol" is a per-decision SAMPLING ARTIFACT,
+NOT a threshold bug. Live trace: SPY daily atr_5/atr_20 = **1.358 → high_vol is CORRECT today** (clean,
+recent, deduped bars); SPY-daily `>1.3` only fires 15.9% of *days* (≈ the true 14% high_vol). **classify_regime
+threshold LEFT UNCHANGED** — recalibrating 1.3→1.5 would blind the classifier to real volatility (the
+PRD's proposed P0-CLASSIFIER fix is a misfix). Doc: memory/v366_pwire_regime_diagnosis.md.
+
+## 2026-06-18 — v365 scaled / measured-move EXIT eval — VERDICT: KEEP flat-2R (no build)
+diag_v365_scaled_exit_eval.py (`Mv5Va`) ran 5 exit policies head-to-head on the EXACT shipped
+spencer_scalp(v363)+gap_give_go(v362) entries (180d/300-sym). On mean EV flat_2R ≈ scaled_123 (tie,
+Δ −0.002..−0.008R), ROBUST across winsor ±3R/±2R (flat_2R is NOT a fat-tail artifact; the trail/m2m
+policies ARE tail-dependent and decay). Pure double-bar-break trail clearly LOSES. Operator chose to keep
+flat-2R (no EV gain to justify touching the safety-adjacent scale-out engine). Doc: memory/v365_scaled_exit_eval.md.
+
+## 2026-06-18 — P0 "suppressed setups firing live" — FALSE ALARM / CLOSED
+diag_v365_leak_recency.py (`6nTwV`) proved every squeeze/vwap_bounce/fashionably_late fire predates its
+suppression COMMIT (latest fire 15:56 ET Jun 17 < v354@17:27 / v357@20:50 / v359@21:42 ET) — stale
+pre-deploy residue from Jun 17 RTH (which ran on old code; suppressions committed/restarted that evening),
+NOT a live leak. The prior agent's "market_simulator/predictive_scanner secondary emitter" hypothesis was
+wrong (neither writes live_alerts/executes). Added generic extractor extract_func_generic.py (`jERWM`).
+
+
+## 2026-06-18 — v363 (patch_v363) REWRITE `spencer_scalp` to SMB DOCTRINE (LONG-only) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (consulted Spencer+Scalp cheat sheet)
+Doctrine: ≥20-min tight consolidation (<15% of day range) in the UPPER 1/3, low-vol pause → volume
+surge break of the range high, stop .02 below range, measured-move scale (1R/2R/3R). Prior code was a
+loose near-HOD proxy (dist_from_hod<1 + daily_range<3 + rvol≥1.5, ATR stop, fixed HOD+1.5ATR target),
+LONG-only, and NEVER filled live (ground truth 0 closed / 9 simulated).
+
+### Evidence (diag_v363_spencer_scalp_doctrine.py, 180d/300-sym, 1-min)
+- doctrine LONG band<0.15 + vol-surge 1.3 (scaled exit): n=17729 win 52% winsorAvg +0.063R.
+- fixed 2.0R LONG (detector-only, SHIPPED): ~+0.043R. SHORT ~0 (dropped). Morning-only −EV (kept all-day).
+- Thin edge (~+0.04-0.06R) but real & doctrine-faithful; makes the setup actually tradeable.
+
+### Action
+- New `_check_spencer_scalp` (detector-only, LONG-only): fetches 1-min bars; 20-bar consolidation,
+  band<0.15·dayRange, upper-1/3 (range_low≥lod+0.667·dayRange), break-bar vol≥1.3×cons avg;
+  entry=range_high+.01 (on break print), stop=range_low−.02, target=entry+2.0·risk. Behaviorally
+  validated locally (valid fire + 4 invalidations).
+- Patcher `backend/scripts/patch_v363_spencer_scalp_doctrine.py` (whole-file PRE-SHA `e7700628…` guard,
+  `_check_spencer_scalp` PRE_FUNC_SHA `e11acffc…`, OLD count==1, py_compile, --check, auto-backup).
+- Regression test `backend/tests/test_v363_spencer_scalp_doctrine.py` (5 cases). Build doc
+  `memory/v363_spencer_scalp_build.md`.
+- paste.rs: patcher `https://paste.rs/NauvZ`, test `https://paste.rs/1lRtq` (both round-trip cmp-verified).
+
+### Milestone
+The scalp/intraday cheat-sheet adjudication queue (v353→v363) is COMPLETE. Remaining: scaled-exit
+position-mgmt enhancements + big_dog/puppy_dog doctrine rewrite.
+
+
+## 2026-06-18 — v362 (patch_v362) REWRITE `gap_give_go` to SMB DOCTRINE — BUILT + PASTED (awaiting DGX apply)
+
+### Why (operator flagged the Gap_Give_and_Go cheat sheet)
+The live `_check_gap_give_go` was a loose VWAP-pullback proxy (gap>3% + above_vwap + 0<distVWAP<1.5 +
+rvol≥2, VWAP stop, fixed HOD target) — it modeled NONE of the doctrine. Cheat-sheet doctrine is a
+1-min setup: gap-up → "give" (pullback holding above prior close, ≤50% gap fill) → 3-7 bar
+consolidation on declining volume → ENTER on consolidation-range break, STOP .02 below cons low,
+Move2Move exit.
+
+### Evidence (diag_v362b_gap_give_go_doctrine.py, 180d/300-sym, 1-min — history present ~390 bars/session)
+- code-mirror (5-min): winsorAvg +0.069 (breakeven; +0.018 after slippage levers).
+- DOCTRINE 2.0R fixed target, gap≥1% band≤0.6%: **n=492 win 47% winsorAvg +0.233R** (SHIPPED).
+- DOCTRINE double-bar-break exit: +0.125R; 2.0R/2.5R/3.0R all +EV (chose 2.0R for robustness + detector-only).
+- Ground truth (8 real fills) −1.32R but tiny + artifact closes.
+
+### Action
+- New `_check_gap_give_go` (detector-only): opening-drive only; fetches 1-min bars via
+  `ts._get_intraday_bars_from_db(symbol,"1 min",60)`; detects give→3-7bar consolidation (band≤0.6%,
+  declining vol, holds>prev_close, give≤50% gap fill); entry=cons_high+.01 (on range-break print),
+  stop=cons_low−.02, target=entry+2.0·risk. Behaviorally validated locally (valid fire + 5 invalidations).
+- Patcher `backend/scripts/patch_v362_gap_give_go_doctrine.py` (whole-file PRE-SHA `8df7dd8c…` guard,
+  `_check_gap_give_go` PRE_FUNC_SHA `c93d0b9e…`, OLD count==1, **py_compile of patched file**, --check,
+  auto-backup). Built via programmatic decode→rewrite→encode off the operator extract.
+- Regression test `backend/tests/test_v362_gap_give_go_doctrine.py` (6 cases). Build doc
+  `memory/v362_gap_give_go_build.md`. Re-audit doc `memory/v361b_big_dog_puppy_doctrine_reaudit.md`.
+- paste.rs: patcher `https://paste.rs/YkXil`, test `https://paste.rs/nzFZy` (both round-trip cmp-verified).
+
+### Also this session
+- **Re-audit big_dog & puppy_dog vs cheat sheets** (v361b doc): both are loose proxies missing the
+  mid-day window (big_dog: 11:00-13:30), above-PDH gate, consolidation-base stop, and double-bar-break
+  trail. v361 stays live (empirically +EV); logged a P1 big_dog/puppy_dog doctrine rewrite.
+
+
+## 2026-06-18 — v361 (patch_v361) TIGHTEN `big_dog` (min-price $10 + min-stop 1.0%) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diag_v361_big_dog_replay.py 180d/300-sym 5-min + diag_setup_ground_truth.py)
+big_dog (INT-44 tight-coil HOD breakout, LONG) is NOT a suppress — it's a tighten:
+- LIVE trigger@HOD baseline: n=38166, win 46%, winsorAvg **−0.009R** (breakeven, realized RR ~1.05).
+- + min-stop≥1% + price≥$10: n=268, win 53%, winsorAvg **+0.097R**, medR +0.132 → +EV, healthy n.
+- Tighter coil ALONE (range<1.5%, distHOD<0.5%) did nothing (−0.013) → the lever is the stop/price floor.
+- Ground truth (5 real fills): avgR **−2.0**, every loss a sub-1% stop on a <$30 name gapping through
+  the stop (KRG $25.86 stop 25.74 → 25.53). Exactly the population the gates exclude.
+- MKT@signal cut −0.025R (worse) → HOD buy-stop is the right execution; only slippage gates needed.
+
+### Action
+- Patcher `backend/scripts/patch_v361_big_dog_gates.py` (anchored-chunk, whole-file PRE-SHA
+  `0569a724…` guard, `_check_big_dog` PRE_FUNC_SHA `5df2f583…`, `--check`, auto-backup). Adds to
+  `_check_big_dog`: (1) `current_price >= 10.0` entry gate; (2) precompute ATR-floored `stop` and
+  `return None` if `(cp-stop)/cp < 1.0%`. Geometry/coil/target unchanged. Built via programmatic
+  decode→transform→encode off the operator extract (no manual base64). Behaviorally validated +
+  test-logic validated locally against the patched fn (4/4).
+- Regression test `backend/tests/test_v361_big_dog_gates.py` (4 cases).
+- Build doc `memory/v361_big_dog_build.md`. Diag `diag_v361_big_dog_replay.py`.
+- paste.rs: patcher `https://paste.rs/k8eLK`, test `https://paste.rs/LF4j6` (both round-trip cmp-verified).
+
+
+## 2026-06-18 — v360 (patch_v360) SUPPRESS `first_move_up` + `first_move_down` — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diag_v360_first_move_replay.py, 180d / 300-sym, 5-min intraday)
+Both morning fades are structurally negative-EV counter-trend trades:
+- `first_move_up` (SHORT fade of fresh-HOD push): n=2392, win 27%, winsorAvg **−0.106 R/trade**, medR −1.0 (>50% hit full stop).
+- `first_move_down` (LONG fade of fresh-LOD flush): n=2274, win 24%, winsorAvg **−0.176 R/trade**, medR −1.0.
+Tightening push/RSI/rvol gates did not flip either to +EV. Ground truth too thin (up n=0, down n=2).
+Consistent with prior fade suppressions (vwap_bounce v354, fashionably_late v357, squeeze v359).
+
+### Action
+- Dual anchored-chunk patcher `backend/scripts/patch_v360_first_move_suppress.py` (whole-file
+  PRE-SHA `8ff8213235dd…` guard + BOTH OLD anchors matched once each + post-write verify; `--check`
+  dry-run; auto-backup). Swaps each body for `return None` + audit-citing docstring.
+- **Fixed blocker:** the OLD anchor base64 had 3 Cyrillic-homoglyph corruptions (`А`/`Б`/`Р` →
+  ASCII `A`/`B`/`R`) that broke decoding (cause of prior local test failures). Both anchors now
+  decode to exact live source; patcher compiles.
+- Regression test `backend/tests/test_v360_first_move_suppress.py` (both → None on would-fire snaps).
+- Build doc `memory/v360_first_move_build.md`.
+- paste.rs: patcher `https://paste.rs/qNcSK`, test `https://paste.rs/XNJKR` (both round-trip cmp-verified).
+
+
+## 2026-06-17 (later) — v19.34.323 (patch_v336) SHORT-FADE entry gate + R-winsorization — SHIPPED + COMMITTED (9ae11efc) + LIVE
+
+### Why (diag_v333 + diag_v334, READ-ONLY forensics on 120d genuine bot-own trades)
+- diag_v333 reframed `trade_2_hold`: net **+$56.9k**; the "-878R" was a `risk_amount`
+  artifact (planned risk → blown-stop & tiny-risk denominators explode R; winsor avgR
+  was only -0.27). NOT an edge bleed.
+- diag_v334 sized the REAL P0 tail: **$26,356 EXCESS lost BEYOND the stop**, **90% SHORTS**
+  (47 trades), **88% `vwap_fade_short`** ($23.3k). Worst-12 all low-priced/illiquid
+  strength-shorts with sub-1% stops: WTI $2.84/2c→exit 3.21 (-$6,426), USO 108.31 stop
+  →116.12 (0.03% stop), PRCT $26.67/4c→27.02 (×8 fragmented slices). Only 12% of losers
+  blown (<-1.35R); 73% scratch — so NOT a systemic stop failure.
+
+### Engine audit (operator-requested deep review of trade-mgmt / stop / target / IB exec)
+VERDICT: engines are STRUCTURALLY SOUND. Dual-stop = local soft-stop (bid/ask-aware,
+30s stale-quote guard, `position_manager.update_open_positions` L823-864) + IB server-side
+**GTC market `StopOrder`** OCA bracket (`ib_direct_service._place_bracket_two_step` →
+`place_oca_stop_target(time_in_force="GTC")` L1998). The GTC stop SURVIVES overnight and
+fired correctly — the overrun is **gap/squeeze slippage** on a no-edge entry held overnight
+(WTI/USO held ~20-24h per v333), NOT a stop-placement/enforcement bug. OCA-race close guard,
+close_trade/_custom split, v283 partial-fill R-preservation, M0 ladder mgmt, scale-out,
+naked/phantom/sign-mismatch sweeps, multi-layer EOD flatten — all present & sound.
+
+### What shipped (all fail-OPEN, env-reversible; ZERO changes to close_trade /
+### submit_with_bracket / EOD safety-critical paths)
+1. **opportunity_evaluator.py** — SHORT-FADE entry gate (mirrors v194 fail-open pattern):
+   blocks SHORT fade/reversion setups (keyword match on setup_type: fade/bounce/reversion/
+   rubber_band/off_sides/backside) when `price < MIN_SHORT_FADE_PRICE` ($5) → reason
+   `short_fade_low_price`, OR stop-distance% < `MIN_SHORT_FADE_STOP_PCT` (1.0%) → reason
+   `short_fade_stop_too_tight`. Policy `SHORT_FADE_GATE_POLICY={block,observe,off}` (default
+   block). Drops logged to `trade_drops`. Catches every v334 worst-12 row.
+2. **learning_loop_service.py** `_bucket` + **ev_tracking_service.py** EV calc — winsorize
+   each realized-R to ±`R_WINSOR_CLAMP` (3.0) so a single -261R artifact can't poison the
+   meta-labeler / EV gate. win_rate (sign-based) and raw `r_outcomes` unchanged.
+
+### Deploy / verification
+patch_v336 (paste.rs/Vgvj0, §2.2 PRE/POST SHA256 guards, --check, auto-backup, --rollback).
+PRE oe 886bb287 / ll b6805b41 / ev 72edc34c → POST oe 2625116e94 / ll c6e4344905 / ev 44a4f8426f.
+DGX --check clean → applied → 9/9 pytest (`tests/test_v336_short_fade_winsor.py`, paste.rs/ZPzWX)
+→ committed 9ae11efc → pushed → backend restarted clean (health 6 green/2 benign-yellow/0 red).
+Backups `*.bak.v336` on disk. NO testing_agent (DGX mandate). English.
+
+### Env knobs (backend/.env, all optional)
+SHORT_FADE_GATE_POLICY=block|observe|off · MIN_SHORT_FADE_PRICE=5.0 ·
+MIN_SHORT_FADE_STOP_PCT=0.010 · SHORT_FADE_SETUP_KEYWORDS=fade,bounce,reversion,rubber_band,off_sides,backside ·
+R_WINSOR_CLAMP=3.0
+
+### Deferred follow-up (NEXT)
+- **Part A**: EOD-flatten ENFORCEMENT for intraday short fades (so they never ride overnight
+  into a gap) — tied to Issue-3 `trade_2_hold` classifier gap (528/586 genuine fell to this
+  default bucket). Touches Journey-3 EOD path → handle with care.
+- P0 `breakdown` 2470-fires/0-trades anomaly. Then FADE/MOMENTUM scalp sweeps; P-WIRE Phase 2.
+
+## 2026-06-17 (later) — v320r intraday scalp priority-ceiling fix PATCHER READY (paste.rs/mTqD1)
+
+### Chain: v320q (attribution) → v320r-precheck (EV gate) → v320r (the fix)
+v320q ran on DGX (8627 alerts/5d, 15.9% post-v320p). VERIFIED in code (not just data):
+priority is set PER-DETECTOR, mostly `HIGH if tape.confirmation_for_<dir> else MEDIUM`,
+and several intraday scalps HARD-CODE `priority=AlertPriority.MEDIUM` (no HIGH branch).
+Attribution: 66.8% of intraday's non-HIGH population is this STRUCTURAL CEILING
+(vs 32.8% tape-miss). Intraday is NOT lower quality (TQS 54.4 vs carry 52.9; in-play
+7.8 vs 2.0; tape_score 3.5 vs 0.3; big-pic 8.0 vs 5.6) → the gap is structural, not edge.
+Daily setups (power_trend_stack/daily_squeeze/stage_2_breakout/…) emit HIGH UNCONDITIONALLY
+at 0% tape; intraday HIGH-capable setups are tape-gated → asymmetry favoring carry.
+
+### v320r-precheck (EV-gate calibration, paste.rs/gglWO, read-only) — DGX run
+Auto-fire requires HIGH **AND** tape_confirmation **AND** EV/win-rate gate (verified L1560).
+Gate source: Mongo `strategy_stats`; knobs `_auto_execute_min_ev_r=0.10`,
+`_win_rate_grace_min_trades=20`. DGX result: 44 setups, PASS=36 (ALL grace-only, proven-EV=0
+— thin clean-data regime), FAIL=8. PROOF gate is calibrated correctly: `rs_leader_break`
+(39 outcomes, -0.14R) is correctly EV-BLOCKED. All 5 Tier-1 PASS (on grace). Flag: `big_dog`
+-2.12R/20% over 5. KEY ASSUMPTION VERIFIED (L3985): `alert.tape_confirmation =
+tape.confirmation_for_<dir>` — the SAME signal the promotion gate keys on, so v320q tape
+rates ARE the promotion rates (~52-62%).
+
+### v320r — OPTION B (operator-approved): promote 3 scalps, exclude big_dog + gap_pick_roll
+`services/enhanced_scanner.py`. Gives `second_chance`, `backside`, `fashionably_late` the
+existing tape-gated HIGH branch (`HIGH if tape.confirmation_for_long else MEDIUM`), replacing
+hardcoded MEDIUM. Only tape-confirmed subset promotes; EV/win-rate gate still governs
+auto-fire (not a force-fire — removes an artificial ceiling). Alert-stamping ONLY — no
+close/bracket/kill-switch/sizing/_open_trades. big_dog EXCLUDED (neg EV); gap_pick_roll
+EXCLUDED (DGX form unconfirmed — grep -A25 cut off the priority line; sandbox shows it may
+ALREADY be HIGH-capable → separate follow-up).
+§2.2 patcher (generator scripts/_build_v320r_patcher.py): PRE_SHA256 HARD guard
+`89555e59…` (== DGX v320p baseline, confirmed via operator sha256sum), 3 base64 anchored
+chunks (each uniquely keyed by setup_type, count==1 asserted), drift-safe (aborts on anchor
+mismatch / PRE mismatch), auto-backup, --check/--apply/--rollback/--status, py_compile gate,
+marker-based idempotency. FULL round-trip patcher test PASSED locally (synthetic target:
+status/check/apply/idempotent-noop/rollback + PRE&POST compile). paste.rs/mTqD1 round-trip
+IDENTICAL. ✅ APPLIED + COMMITTED + PUSHED on DGX (commit 8a69292a; POST sha b631ebad…
+matched the --check prediction exactly; backend restarted clean, /api/system/health green
+8/8, IB connected, pusher fresh). Post-deploy verify (NEXT RTH, wall-clock gated): re-run
+diag_v320q --days 5 — INTRADAY HIGH% should rise toward CARRY% as these 3 promote on
+tape-confirmed alerts; diag_v320o override footprint stable.
+
+### FOLLOW-UPS
+- gap_pick_roll: confirm DGX priority line (`grep -n -A 35 'async def _check_gap_pick_roll'`);
+  if hardcoded MEDIUM, add to a v320r.1; if already HIGH-gated, no-op (close out).
+- off_sides_short: biggest medium-capped intraday bucket (637) but only 3.8% tape — investigate
+  why tape is so low (regime-gated RANGE_BOUND/FADE short) before any promotion.
+
+---
+
+
+## 2026-06-17 — v320q priority-attribution diag DELIVERED (read-only) + PWIRE shadow re-enable guidance
+
+### v320q — PRIORITY ATTRIBUTION BY STYLE (READ-ONLY, paste.rs/5WwmW)
+`scripts/diag_v320q_priority_attribution.py`. Task 1 (P1) secondary intraday-frequency
+lever after the v320p/v320u A+ horizon-hijack fix. Decomposes WHY intraday alerts
+under-reach the HIGH auto-fire gate (~20% vs CARRY ~55%, per v320o). Key arch fact
+(verified in enhanced_scanner detector branches): priority is NOT one formula — each
+detector hard-codes its ceiling, overwhelmingly `HIGH if tape.confirmation else MEDIUM`,
+and several setups are HARD-CAPPED at MEDIUM (no HIGH branch). So the diag splits the
+non-HIGH population into 3 separable causes per INTRADAY/CARRY group:
+  • ceiling_medium — setup's detector never emits HIGH/CRIT anywhere in window (STRUCTURAL)
+  • tape_gate_miss — HIGH-capable setup failed tape_confirmation (tape lever)
+  • residual       — HIGH-capable + tape-confirmed but still < HIGH (other in-branch gate)
+Empirical per-setup ceiling derived FROM the data (max priority observed), so it tracks
+live wiring without a hard-coded map. Reports per-style funnel + scorer-input means
+(tape_score/in_play_score/tqs_score/smb_big_picture/smb_is_a_plus) to reveal whether the
+gate keys on quality or on tape/ceiling. `--days N` (default 5 RTH); per-day breakdown
+flags post-v320p (★) days so calibration is gated on a post-fix sample. NOTHING WRITTEN;
+all reads project {"_id":0}. py_compile OK, paste.rs round-trip IDENTICAL, local smoke
+test passed (synthetic intraday vwap_fade ceiling-capped + tape-gated opening_drive vs
+carry squeeze → attribution correctly 71% ceiling / 29% tapeMiss for intraday). AWAITING
+operator DGX run to choose the lever (add HIGH branch to medium-capped intraday detectors
+vs recalibrate the tape gate — NOT a sizing change).
+
+### P-WIRE Phase 2 — shadow logging re-enable (no code change)
+Re-affirmed (diag_v320x): regime classifier is ACCURATE; 1.3 vol threshold correct;
+"91% high_vol" was a sampling artifact worsened by `PWIRE_SHADOW_ENABLED=false`. To unblock
+Phase 2, operator flips the flag true in backend/.env + restart, so ~200 resolved shadow
+decisions accrue across normal/trend/vol days for a representative pwire_shadow_eval.
+
+---
+
 ## 2026-06-16 (PM) — v19.34.320 daily-bar premarket gate APPLIED (observe mode) + OCA mislabel investigation
 
 ### v19.34.320 — Daily-bar premarket gate, observe-mode rollout (paste.rs/h5qCR, patcher sha 0d37639c)

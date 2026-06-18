@@ -3,6 +3,360 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## ✅ RESOLVED 2026-06-18 (this session — v365/v366/v367)
+- ✅ **P0 "suppressed setups firing live"** = FALSE ALARM. diag_v365_leak_recency proved stale
+  pre-deploy residue (every fire predates its suppression commit). No leak, no patch.
+- ✅ **P1 scaled measured-move exits** = EVALUATED → KEEP flat-2R. diag_v365_scaled_exit_eval:
+  flat_2R ties scaled_123 on mean EV (robust across winsor); trail/m2m lose. No EV gain to justify
+  the position-mgmt build. (Re-open only if a kill-switch losing-streak problem appears live —
+  deferred option B: drawdown/streak sim.)
+- ✅ **P1 multi-bar-size shadow logging (P1-MULTI-TF)** = SHIPPED (v367, committed e325857c). Shadow
+  now logs 1/5/15min. Env-reversible PWIRE_MULTI_TF_SHADOW=0.
+- ✅ **Regime "91% high_vol" / threshold recalibration** = RE-CONFIRMED misdiagnosis (matches
+  2026-06-16 diag_v320x). classify_regime threshold LEFT UNCHANGED. Do NOT recalibrate 1.3.
+
+## 🔴 NEXT SESSION (after 2026-06-18)
+- **P1 — VERIFY v379 (smart_filter grade-gate) live:** APPLIED on DGX (paste.rs/ow794), restart +
+  RTH pending. After restart, `diag_v379_smartfilter_input_probe.py --days 1` → borderline skips
+  should reason on the calibrated GRADE (not the mislabeled "TQS (60)"); B-grade borderlines should
+  fire. Tune live with SMART_FILTER_BORDERLINE_MIN_GRADE=C|B|A (no redeploy). Rollback: patcher --rollback.
+- **P1 — Issue 4: dedup_cooldown blocking continuation re-entries** (HON all-day trend). Investigate
+  why dedup blocks valid re-entries on trending names. (Was queued after Issue 3 = now v379.)
+- **P1 — Path B: de-compress the TQS scale itself** (the deeper root cause behind v379). Turn off
+  TQS_SETUP_DECOMPRESS once v310 C-1 confirmably feeds real SMB; re-baseline absent-fundamental→50 so
+  the raw composite spans 0-100. Re-rates the whole book → own validation pass (grade dist pre/post).
+- **P1 — VERIFY v367 in the wild:** after RTH, `diag_v366_pwire_readiness.py --days 1` → bar_size
+  distribution should show 1min/15min (not 100% 5min). Confirms multi-TF accrual.
+- **P1 — P-WIRE Phase 2 edge eval:** still data-gated (RESOLVED 92/200). Run `pwire_shadow_eval.py`
+  once RESOLVED≥200. NOTE: dominant 5min_high_vol variant is QUARANTINED (PBO=1.00) → 77% of records
+  have no comparison model; multi-TF widens the trainable cells. Re-run readiness in ~2 weeks.
+- 🔴 **Rotate Atlas MongoDB password** (old creds in git history) — still pending operator action.
+- **P2 backlog:** `GET /api/scanner/setup-ev-audit` + V5 tile; OCA-finalize-health endpoint + tile;
+  horizon-scaled bracket geometry; break up `server.py` monolith.
+
+
+## ✅ RESOLVED 2026-06-18 (was NEXT SESSION P0s)
+- ✅ P0 Part A EOD-flatten: HISTORICAL residue; live stack (v245/v261/v301/v322s) already seals it. No patch. (v338/v339)
+- ✅ P0 breakdown 2470/0: correct suppression (disabled setup), not a bug. (v337)
+- ✅ vwap_fade rewrite LIVE (patch_v341/v19.34.324); replay-validated both sides.
+
+## 🔴 NEXT SESSION (added 2026-06-17, after v336 short-fade gate shipped)
+- **P0 — Part A: EOD-flatten ENFORCEMENT for intraday short fades.** v334 catastrophic
+  tail (WTI/USO) = intraday short fades that rode ~20-24h OVERNIGHT, then a gap blew the
+  GTC market-stop far past trigger. v336 prevents ENTRY of the danger profile; Part A must
+  ensure any intraday/short-fade that DOES open is reliably EOD-flattened so it never holds
+  overnight. ENTANGLED with Issue-3 (`trade_2_hold` classifier gap — diag_v333 showed 528/586
+  genuine trades fell to this default bucket → may resolve to a non-EOD policy). Build a
+  read-only diag first (which genuine intraday/fade closed trades had hold_seconds spanning a
+  session boundary + their resolved trade_style/close_at_eod policy), THEN patch. Touches
+  Journey-3 EOD path (safety-critical) — fork via siblings, validate at 15:55 ET.
+- **P0 — `breakdown` anomaly (2470 fires / 0 genuine trades):** diagnose whether it's a real
+  block bug or correct suppression. Read-only audit of the breakdown detector → execution path.
+- **P1 — verify v336 in the wild:** after next RTH, grep `🚫 [v19.34.323 short-fade]` and
+  confirm it catches vwap_fade_short on sub-$5 / tight-stop names (run with
+  SHORT_FADE_GATE_POLICY=observe first if you want to watch before blocking).
+- Then: FADE scalp sweep (gap_fade/vwap_fade/mean_reversion/backside), MOMENTUM scalp sweep,
+  P-WIRE Phase 2 (~200 resolved shadow decisions). 🔴 Rotate Atlas MongoDB password (still pending).
+
+
+
+## ✅ RESOLVED (2026-06-16, diag_v320x) — "91% high_vol" debunked; regime classifier is ACCURATE; DO NOT recalibrate the 1.3 threshold
+diag_v320x_regime_validation.py (paste.rs/lWcsD) backtested the PRODUCTION classify_regime
+on 175 clean SPY daily bars (last ~180td). True distribution: range_bound 37%, bull_trend
+37%, high_vol 14%, bear_trend 13% — NOT 91% high_vol. The 91% in the P-WIRE shadow log is a
+SAMPLING ARTIFACT: shadow records are per-decision (~900/day), logging ran over a short,
+genuinely-volatile window, and each high_vol day was amplified ~900×. The classifier is fed
+correct SPY daily bars at every live site (confidence_gate._get_ai_regime,
+timeseries.classify_current_regime — 5-min cached). The 1.3 vol_expansion (atr5/atr20)
+threshold is well-calibrated: high_vol=14% of days and those days are PREDICTIVE (largest
+forward |moves|, +1.17% fwd5; bear→negative; range→quiet). Threshold sensitivity 1.3→14%,
+1.5→3%. ⇒ The 1.3→1.5 recalibration is RETRACTED PERMANENTLY (not a miscalibration).
+MTF directional panel (TrendSignalBlock._score_index): correct directional TILT (SPY BULL
+61% positive vs BEAR 45%) but weak magnitude predictiveness + bouncy BEAR bucket over a
+180d uptrend — sound as a cautious context FILTER (its actual use), not a return predictor.
+PHASE 2 implication: the "GENERIC HOLDS / keep regime dead" verdict rests on only n≈9
+resolved regime records from the skewed high_vol window — NOT trustworthy. A real Phase-2
+test needs a REPRESENTATIVE shadow sample across all 4 regimes → re-enable
+PWIRE_SHADOW_ENABLED and accumulate across normal/trend/vol days, THEN re-run
+pwire_shadow_eval. Until then Phase 2 stays parked (not on bad evidence, just on no evidence).
+
+
+## 🟢 P3 (added 2026-06-16, DATA-RESOLVED — no behavioral fix) — Timeframe-aware style resolution
+RESOLVED by diag_v320v (paste.rs/K7urU) on live data: of 21 trend_continuation trades
+(open + 7d), RISK METRIC = 0/21 (0%) — NONE rely on the static `multi_day` fallback;
+every row carries a style-resolvable `timeframe` (intraday ×19, swing ×2). 0 fragile.
+So the latent "missing-context → unsafe multi_day carry" risk is NOT materializing; the
+entry path reliably stamps a real style-timeframe (not raw bar sizes). Options (a)/(b)/(c)
+are therefore UNNECESSARY as a behavioral change. The GLD/MSTR/TSLA/META/NOK "split" is
+correct timeframe-aware stamping; the v320s INTRA→CARRY flag is a pure style_of-static
+artifact.
+REMAINING (low-value, optional):
+  • Defensive: a startup assert / unit test that trend_continuation alerts always carry a
+    style-resolvable timeframe (so the 0% never regresses).
+  • Cosmetic: GLD/MSTR are stamped multi_day while timeframe=swing (carry-vs-carry; both
+    hold overnight, different trail/target policy) — could normalize to swing.
+  • Diag polish: feed timeframe/trade_style into style_of inside diag_v320s so its
+    INTRA→CARRY flag stops false-positiving on multi-timeframe setups.
+Re-run diag_v320v with a 2nd arg (e.g. `daily_breakout`) to spot-check other no-config
+setups if ever concerned.
+
+
+## 🟡 P1 ACTION ITEM (added 2026-06-16; diag DELIVERED 2026-06-17) — Intraday HIGH-priority gate audit
+✅ DIAG DELIVERED: `diag_v320q_priority_attribution.py` (paste.rs/5WwmW, read-only,
+smoke-tested). AWAITING operator DGX run (`--days 5`, post-v320p sample). The diag
+decomposes the non-HIGH intraday population into ceiling_medium (structural — detector
+has no HIGH branch) vs tape_gate_miss (failed tape_confirmation) vs residual, per
+INTRADAY/CARRY group, with scorer-input means. NEXT after run: choose the lever —
+add a tape/in-play/RR-gated HIGH branch to medium-capped intraday detectors, OR
+recalibrate the tape gate. NOT a sizing change. Verify lever: v320o INTRADAY HIGH%
+should rise toward CARRY%.
+
+--- original note (context) ---
+After v320p (A+ horizon-hijack fix, commit 7011ab04) is confirmed via RTH diag rerun,
+investigate the SECONDARY intraday-frequency lever: the HIGH-priority gate itself.
+v320o data: CARRY alerts reach HIGH priority 55% of the time vs INTRADAY only 20% —
+and HIGH priority is the auto-fire threshold (`_auto_execute_min_priority = HIGH`).
+So even with the A+ fix, intraday alerts under-reach the auto-fire bar.
+TASK: build a read-only diag (`diag_v320q_priority_attribution.py`) that, per
+trade_style, breaks down WHY intraday alerts under-reach HIGH priority — decompose
+the priority scorer inputs (catalyst weighting, SMB big-picture/regime skew, TQS,
+in-play score). Goal: find whether the priority formula structurally penalizes
+intraday context, then propose a calibration (NOT a sizing change). Gate this work
+on confirming v320p's rebalance first (don't stack two intraday changes blind).
+Verify lever: v320o GROUP ROLLUP INTRADAY HIGH% should rise toward CARRY%.
+
+
+
+## Session Summary - 2026-06-12 (sanitization probes + v322x observability; calibration PARKED)
+
+### v323b — RVOL ROOT CAUSE SOLVED (no-scalps incident)
+Probe r2 convicted: morning catch-up IB collection (DGX boots after missed nightly run)
+persisted TODAY'S IN-PROGRESS daily bar as complete — OXY 06-11 vol=589,273 collected
+9:50 ET (full day ~6-8M). Scanner F7 guard treats prior-day bar as complete (tf=1.0) →
+RVOL = 0.09x → ALL setups blocked all session; scalps die first (stricter floor).
+SPY 06-09 row (collected 12:24 ET) same poison; nightly daily collection also erratic
+(SPY 3 days stale). FIX (patcher nfOTu): `_is_inprogress_daily_bar()` guard on ALL 3
+bar-write sites (daily bar dated today only persisted >= 16:15 ET) + repair scan that
+DELETES existing partial rows (collected same-ET-day before 16:15). Morning catch-ups
+now safe. Follow-up idea (backlog): live today-RVOL from pusher quote day_volume.
+Charts: intraday 1m/5m collection proven healthy (900 bars/day, 6m max gaps) — ADBE
+chart issue is in the chart data path/rendering, NOT collection; EEM entered universe
+mid-day. Chart investigation still open.
+
+### v323c — thought retention tiering (operator-approved)
+sentcom_thoughts: noise kinds (scan/skip/filter/info ≈ bulk of 371K rows/week) now get
+per-doc expires_at +7d (TTL(0) index `expires_at_ttl`); signal kinds (thought/alert/
+evaluation/fill/rejection/system/brain) live full 190d via created_at TTL backstop.
+Patcher fCGQH migrates existing noise rows. bot_trades/bracket_lifecycle_events
+untouched (permanent).
+
+### v323a r2 — long-memory chat recall (APPLIED on DGX, commit 3d524dfa)
+TTL 7d→190d collMod'd live (371,019 rows ≈ 7d volume). Deep per-symbol thought recall
+beyond 24h + "Symbol Trade Memory" from bot_trades — r2 SANITIZED inline (mirrors
+sanitize_v2 funnel: artifact close-reasons/setups, learning_only, [SIMULATED], shadow,
+no-exit-price all excluded; artifact count disclosed in-context so the LLM can't
+hallucinate a fake track record). Operator hallucination concern addressed pre-deploy.
+
+| Version | Topic | Status |
+|---|---|---|
+| v323a r2 | long-memory sanitized chat recall | APPLIED + COMMITTED (3d524dfa) |
+| v323b | daily-bar integrity / RVOL fix + repair | APPLIED + COMMITTED (bebd9f35) — 3,590 partial rows deleted of 13.75M scanned |
+| v323c | thought retention tiering | APPLIED + COMMITTED (6baec970) — only 2,504 noise rows stamped of 376K (kind-mix check pending) |
+
+### PT-REACHABILITY PROBE RESULTS (DGX run 14:26Z) — exits are NOT the only problem
+On the 102 clean trades: trade_2_hold median stop = 1.75 "ATR" / 3.46% of entry;
+median PT1 = 2.54R = ~4.85 ATR units; top offenders PT1 = 15-42 ATR (entry_context.atr
+units are heterogeneous — some rows clearly store intraday ATR — treat ATR columns as
+directional, R columns as exact). MFE: median 0.00R, only 6% ever reached +0.5R;
+PT1 touched by 0/101 trades. Clock closes (73): only 21% were ever ≥+0.25R; avg R left
+on table just +0.17R. COUNTERFACTUAL SWEEP: no PT placement (0.5-2.0R) flips avgR
+positive (baseline -0.066). CONCLUSION: brackets are so wide that ALL price action is
+noise within them — the R-DENOMINATOR is mis-scaled (stop from DAILY ATR ~1.3-2.5x on
+intraday holds → shares collapse → P&L ±$20). v322p decay-deferral alone won't fix this;
+the evidence-backed fix is HORIZON-SCALED BRACKET GEOMETRY (intraday stop ≈ fraction of
+daily ATR / k× intraday ATR, PT within expected hold-window range) → queued as the next
+major trading patch after v322z.
+
+### v322z — chat data-trust fixes (audit of SNDK conversation)
+Full chat_server.py audit: 16 context sections inventoried. GAPS FOUND+FIXED (patcher
+Hk2wg, 11 anchored chunks, test_v322z_chat_context.py 7 tests):
+1. Cold-symbol hydration: 2s timeout + SILENT skip → "I don't have a quote on SNDK".
+   Fixed: 6s budget for user-mentioned tickers (snapshot+technicals) + explicit
+   "LIVE QUOTE FETCH FAILED for: X" context line.
+2. Stale hardcoded "Risk Parameters: $2,500/1.5:1/10 positions" (line 687) → now LIVE
+   from /api/trading-bot/status risk_params; prompt risk-cap rule defers to live figure.
+3. NO decision-trail recall ("why did you pass on ADBE?" unanswerable) → new section
+   10.7 injects sentcom_thoughts: 1h global (12) + 24h per-mentioned-symbol (8).
+4. Lowercase mentions ("thoughts on sndk?") missed by uppercase-only regex → lowercase
+   rescue pass, gated on no-uppercase-found + stopword list + known-symbol cache
+   (ib_historical_data.distinct, 1h TTL).
+Minor: closed-trades context sorts by closed_at; bot-trade lines carry TQS grade+style.
+NOTE: chat server is a SEPARATE process (port 8002) — needs its own restart after apply.
+
+| Version | Topic | Status |
+|---|---|---|
+| sanitize_v1 probe | `diag_sanitized_closed_trades.py` (paste.rs F88ca) — 9-stage exclusion funnel | RUN on DGX 13:55Z |
+| sanitize_v2 probe | same script upgraded: + `classify_close()` hygiene layer, legacy_orphan, emergency_flatten | RUN on DGX 14:09Z |
+| v322x | TQS enrichment observability thought (🧮 pre→post TQS shift in stream) | APPLIED + COMMITTED (12d4dffb), 5/5 tests pass |
+
+### sanitize_v2 RESULTS (DGX run 2026-06-12 14:09Z) — TRUE clean core = 102 trades (6.4% of raw)
+hygiene_artifact cut 241 more than v1: 118 phantom-reason, 65 external_flatten,
+52 artifact setup_types (reconciled_orphan/excess_slice/imported_from_ib), 4 corrupt-R.
+legacy_orphan 70. Scored core = 94.
+- TQS rescale: A n=12, B n=14 — INSUFFICIENT (unchanged verdict).
+- Meta-labeling: `squeeze` collapsed 82 → **14** (!) — most squeeze closes were
+  phantom/flatten artifacts. NOTHING is near the 100 threshold. accumulation_entry=6.
+- Clean accrual rate: June n=58 in 12 days ≈ 4.8/day (win 48.3%, avgR -0.02,
+  trending up from May 35.3%/-0.04). A/B≥30 unblock est. mid-July+; squeeze≥100
+  unblock is MONTHS out at current mix.
+- ⚠ FINDING — exit mix of the 102 genuine trades: eod_auto_close 40, scalp_time_decay 17,
+  manual_eod 15, operator panel 15, stop_loss 13, **target_hit = 0**. ZERO target closes
+  among genuine trades; bot edge ≈ breakeven (avgR ≈ 0). Suggests PTs are placed too far /
+  time-based exits truncate winners → makes v322p decay-timer rework (defer decay when
+  green + right side of VWAP) directly evidence-backed.
+- ⚠ HOUSEKEEPING: commit 12d4dffb accidentally pushed patcher backup dirs
+  (v322t/u/v/w_backup_*/, ~13 files). Suggest `git rm -r --cached` + .gitignore `v*_backup_*/`.
+| MICRO_SETUPS | orphan applier `apply_v19_34_266.py` deleted (sandbox-only; never on DGX) | DONE — drift closed |
+
+### sanitize_v1 RESULTS (DGX run 2026-06-12 13:55Z) — raw counts were GARBAGE-INFLATED
+Raw 1594 closed → **257 survivors (16.1%)**. Exclusions: 645 no_exit_price (legacy
+"validator fail-open era" cleanups), 206 simulated, 199 provenance, 107 admin_close,
+91 learning_only, 55 sub-10s holds, 23 |R|>10.
+- **TQS rescale verdict: NO-GO ❌** — sanitized A n=13, B n=15 (needed ≥30 each).
+  The v322w probe's "A/B >30" was phantom-era debris.
+- **Meta-labeling verdict: NO-GO ❌** — `accumulation_entry` collapsed 102 → **9**
+  (May 19–26 phantom/drift crisis artifacts, exactly as `trade_outcome_hygiene.py`
+  documents). `squeeze` 490 → 82 (borderline).
+- v1 was still too lenient: 70 `orphaned_position_cleanup` (legacy reason, no current
+  code produces it), 47 `wrong_direction_phantom_swept`, 10 phantom_recovery rows
+  survived → sanitize_v2 layers canonical `classify_close()`; true core est. ~130-145.
+- Era trend healthy: May n=110 win36.4%/avgR+0.10 → June n=62 win46.8%/avgR-0.01.
+- `/tmp/sanitized_trade_ids.json` written on DGX — future calibration reuses this filter.
+
+### TQS card-vs-eval audit (SOLVED — by design, surfacing fixed by v322x)
+"🤔 Evaluating XOM (TQS 54 C)" vs card "TQS 60 B" = PRE-gate TQS (scanner, used as
+confidence-gate quality input, `opportunity_evaluator.py:705`) vs POST-gate AI-enriched
+recalc (GAP 3, line ~798) which is what gets STAMPED on the trade (line ~1453). Both
+preserved in `entry_context.tqs` with delta. v322x emits a 🧮 thought on material shift
+(≥1.0 pt or grade flip) so the trail reads "54 C → 60 B (model agrees, NN% conf)".
+
+### 🔵 PARKED (user-approved 2026-06-12) — data-sufficiency gated
+- **Tier 2a per-model probability calibration + TQS outcome-based recalibration/rescale**
+  — wait until SANITIZED A≥30 and B≥30 (est. ~6-8 weeks at current clean-data accrual).
+  Re-run `diag_sanitized_closed_trades.py` to check. Design notes: isotonic fit of
+  expected R / win-prob on tqs_score, rescale to outcome percentile (cosmetic 0-100
+  spread alone would NOT fix discrimination).
+- **v322y meta-labeling (take/skip layer)** — re-check when sanitized `squeeze` ≥100
+  (~82 at sanitize_v1; v2 will lower it). `accumulation_entry` OUT (n=9 clean).
+
+### Still pending (carried)
+- M0 ladder live validation — first SCALP fill (06-12 fills were opening_drive
+  INTRADAY/M-DAY only, ladder not exercised yet).
+- 🔴 SECURITY (user action): rotate Atlas MongoDB password.
+- IGV "Range Break" false trigger (INT-21 guard), ELF→XLE `_industry_to_etf` audit,
+  v322p decay-timer rework, chart-slow diagnosis, quarantine "MISSING"→"QUARANTINED"
+  label, EOD flatten modal / regime strip (v322q), Tier 3a drift-monitor UI tile.
+
+## Session Summary - 2026-06-11 (v322f/g/e shipped + RETRAIN DONE + Tier 3b ENFORCED)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.322f | Tier 3 (Investment) afternoon scan 3:45 → 3:30 PM ET | shipped + committed (7352bf4d) |
+| v19.34.322g | EOD auto-chain: 16:35 daily-bar top-up (`bar_size_filter`), 17:10 ADV rebuild, fix 2:15 AM resume ImportError | shipped (7352bf4d); first run queued 3,240 daily bars 06-10 16:35 ET |
+| v19.34.322e | Paced full-chain deep sector backfill (IB reqContractDetails, rated-first) + endpoints | shipped (e9c810f9), LIVE-VERIFIED: rated 774→1,463 |
+| v19.34.322h | Tier 3b: PBO calibration audit script + `TB_PBO_GATE=enforce` flipped | DONE (82065684; enforce live in backend/.env) |
+| v19.34.322i | PBO quarantine sweep: flag-based, ALL load paths, auto-lift on healthy promotion | DONE + VERIFIED (922a8ced + r2 d6687642); 12 toxic models quarantined |
+| v19.34.322j | T6 verification + flip tooling + quarantine-aware boot diagnostic + gate-summary runtime probe | DONE (27a01d7e + r2); T6 CONFIRMED ACTIVE |
+
+### v322j — T6 status (2026-06-11)
+**T6 was ALREADY active** (flipped in an earlier session; roadmap entry was stale).
+Runtime-verified via new probe: `GET /api/ai-training/confidence-gate/summary` →
+`regime_suppression: {mode: active, table_loaded: true, cell_count: 111}`.
+Table: 16 actionable cells → 0 SKIP, 7 REDUCE (all counter-trend-in-BULL:
+vwap_fade, vwap_bounce, squeeze|short etc.). Shadow replay empty (no decision has
+landed in a suppressible cell since logging began) — expected, recent regime NEUT/PULLBACK.
+`scripts/t6_flip.py` = standing audit tool (--flip/--shadow --apply to toggle).
+KNOWN QUIRK (benign): early-startup INFO logs from gate loaders (calibrated thresholds,
+regime expectancy) are swallowed by logging-config timing — use the summary endpoint, not greps.
+
+### v322i — Quarantine sweep (2026-06-11)
+12 negative-edge gate failers flagged via `scripts/quarantine_pbo_sweep.py --apply`:
+exit_timing {breakout,momentum,reversal,trend}, dp_5min_{high_vol,bear_trend},
+{range,mean_reversion,reversal,trend_continuation}_5min_predictor, dp_1min_bear_trend,
+scalp_1min_predictor. Flag honored at: GBM `_load_model` (exact + fallbacks),
+timeseries_service reloaders ×2, LEGACY `setup_type_models` loader (r2 — gap found
+post-apply: legacy collection copies bypassed the flag), ensemble meta-labeler,
+confidence-gate scoring query. predict() degrades to neutral flat/0-confidence.
+Promotion `$unset`s the flag (auto-rehab). Reverse: `--undo --apply`. Spared (positive
+edge, fail PBO only): short_scalp_1min, dp_1min_range_bound/high_vol, gap_fill_1min —
+use `--strict` to flag those too.
+VERIFIED on DGX: consistency diagnostic shows 29/34 reachable, MISSING = exactly the
+5 quarantined setup-family models; none of the 12 loaded at startup.
+COSMETIC (backlog): consistency diagnostic lists quarantined models as "MISSING" —
+could label them "QUARANTINED (intentional)" instead.
+
+### FULL RETRAIN COMPLETE (2026-06-10 20:08 → 06-11 ~05:45 UTC, 997m, GPU)
+162 models, 0 failures. **P7 Regime-Conditional 28/28 @ 56.7% — sample-count fix verified.**
+P3 Vol 76.7%, P9 CNN 74.1%, P8 Ensemble 65.0%, P1 Generic 52.7%.
+CPCV corpus: 79 models, median PBO 0.00, median edge +0.043. Gate calibration: defaults
+(0.20/0.0) block 16/79 (20%) — exactly the overfit tail (exit_timing breakout/momentum/
+reversal/trend @ PBO 0.93-1.00 negative edge, 5min setup quartet @ 0.64, marginal regime
+variants). 15 shadow_blocks logged during the run. ENFORCE NOW LIVE for future promotions.
+⚠ Known: several PBO-1.00 models (exit_timing family) were promoted in shadow mode and
+remain ACTIVE — optional "quarantine sweep" (demote active gate-failers) on the backlog.
+
+GPU note: XGBoost CUDA IS working on the GB10 (subprocess preflight confirmed
+"AVAILABLE and WORKING"; per-model `trained on device=cuda`). The P2 "GPU-torch swap"
+backlog item applies to TORCH only (torch is +cpu build) — XGBoost wheel has CUDA built in.
+
+### Next session priorities (in order)
+- 🟡 **P1**: M0 laddered server-side scale-out (multi-leg OCA) — biggest live-P&L lever.
+- 🟡 **P1**: Tier 3a drift-monitor UI tile; Tier 2a per-model probability calibration.
+- 🟢 **P2**: `_industry_to_etf` oddball audit (ELF mis-tagged XLE); sector-coverage UI chip.
+- 🔴 SECURITY (user action): rotate Atlas MongoDB password (still pending).
+
+## Session Summary - 2026-06-04 (chart depth + bad-tick guard shipped)
+
+| Version | Topic | Status |
+|---|---|---|
+| v19.34.265 | Chart depth bump (1m=7d/5m=14d/15m=30d/1h=60d) + transient bad-tick sanitization (`_sanitize_intraday_bars` + VP lo/hi clip) | shipped + operator-verified |
+
+Measure-first probe (`diag_chart_perf_depth.py`) proved storage (86-107d 1min,
+600d+ coarser) + backend cold-load (130-521ms) already supported deep charts —
+fix was purely the frontend's hardcoded shallow lookbacks. Backend optimization
++ backfill from the original plan DROPPED as unnecessary. Operator confirmed
+charts "much better and faster".
+
+### Backlog reconciliation — 2026-06-05 (verified against code, not docs)
+
+**✅ Shipped since these were written (removed from open backlog):**
+- EV Leaderboard on Mission Control — `EVLeaderboard.jsx` rendered at `MissionControlPage.jsx:231`.
+- Adopted-position unrealized P&L split (backend) — `routers/sentcom.py:817` `adopted_pnl_today`.
+- `hold_seconds` stamped on `bot_trades` at close — `trading_bot_service.py:1015`.
+- EOD close honors trade-style — `opportunity_evaluator.py` v245 derives `close_at_eod` from style policy.
+
+**🟡 P1 — genuinely open (verified):**
+- Bot-Vitals header on Mission Control (live strip off `/api/scanner/in-play-health`) — backend exists, **no frontend consumer**.
+- Mission Control sticky per-symbol search/filter across all 5 lanes — only *severity* filters exist today.
+- Squeeze intraday-vs-swing `trade_style` split (handoff Issue 2) — verify-then-fix.
+- ML: freshness retrain of family primaries (models ~39d stale, probe=GO); extend `retrain_readiness.py` with realized-outcome trainability budget.
+
+**🟢 P2 — open:**
+- L2 depth probe (`probe_l2_depth.py`) — script does NOT exist yet (DGX-run).
+- "Why this didn't auto-trade" EV chip on MC cards (reads v294 `ev_below`/`strategy_outcomes`).
+- Adopted-position P&L split **frontend chip** (backend already returns it); Gameplan prioritization-boost surfacing.
+- EOD close popup modal; scanner feed group/display; regime-classifier tolerance patch; EOD operator-override toggle.
+- GPU-torch swap (CUDA torch+torchvision for Spark GB10) — isolated task w/ CPU-build backup.
+- Trade Journey Sparkline + Scale-Out Grade modal (~6–9h, spec below); Adoption Review UI; PnL data-drift telemetry (60s).
+
+**🟢 P3 — open:**
+- Break up `server.py` monolith; refresh AGENTS.md for SSOT architecture.
+- Minors: pusher `reqAccountUpdates` 10s timeout log cleanup; APScheduler nightly auto-smart_backfill; `--reload` in start script; one-shot `ib_historical_data {bar_size:null}` junk-row delete.
+
+**🔵 Gated (not actionable yet):**
+- Realized-outcome meta-labeling layer — sample-gated (tidal_wave=0, fading_bounce=2); park until ~50–100 closed trades/canonical setup.
+
+
 ## Session Summary - 2026-05-22 (3 behavioral patches shipped — last $$ risks closed)
 
 | Version | Topic | Status |
@@ -3657,3 +4011,71 @@ All P1 hardening shipped (v88, v89, v90, v91, v92, v93, v94). Pipeline is self-h
 - 🟢 (P3) Chart bubble click → fire focus symbol.
 - 🟢 (P3) SEC EDGAR 8-K integration.
 - 🟢 (P3) Break up `server.py` and `trading_bot.py` monoliths.
+
+## 2026-06-10 — Model-family fix roadmap (post-audit; prioritized)
+Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 collapsed)
+- 🟡 P-LIVE-1 (ensemble): VERIFY FIRST — argmax-recall "collapse" is likely the wrong
+  lens for the gate's graded p_win meta-labeler (gate force-skips p_win<0.5 yet
+  take-rate is 33% → p_win spans 0.5). Run scripts/diag_ensemble_pwin_live.py.
+  If p_win discriminates → false alarm (do NOT class-weight, breaks 0.5/0.75 thresholds).
+  If squashed → rebuild meta-label target + recalibrate thresholds.
+- 🔴 P-LIVE-2: 2/7 base direction_predictor collapsed → P0 gate auto-rejects on next
+  retrain; optional one-time quarantine of currently-promoted collapsed ones.
+- 🟢 P-WIRE: regime-conditional model SELECTION. ~18 healthy two-sided regime models
+  (acc 0.56–0.78) are DEAD — live layer loads only base direction_predictor_{tf}
+  (+ regime FEATURES + heuristic adjust). MUST be earned by an apples-to-apples
+  OFFLINE backtest (generic vs regime-specialized on the SAME recent bars; training
+  accuracies are on different regime subsets, not comparable). Build: additive
+  model_name_override on predict_for_setup → offline compare harness → if it wins,
+  wire regime→model selection via gate's classify_regime (shadow-gated).
+- 🟡 P-TARGET(gap): session-gap redesign — only day-open gap ≥0.5%, fill within EARLY
+  window (first ~30m) vs gap-and-go. RETIRE daily/weekly gap_fill (not meaningful).
+- 🟡 P-RETIRE/fix: risk_of_ruin (6/6 collapsed), sector_relative (3/3), exit_timing (0.455 dead).
+- Separation discipline CONFIRMED: training pipeline (clean historical CV) must NOT
+  ingest live trade PnL; learning loop adapts posture via SHADOW mode only.
+
+## 2026-06-12 — v324 chart infinite history (SHIPPED, user-apply pending)
+- ✅ Issue "Chart historical lazy-loading/scrolling" → apply_v324.py @ https://paste.rs/peUbU
+  (md5 a77306d517c25cc540de613f1e673a69). Removes daysLoaded doubling; /chart-history
+  cursor pagination + per-symbol timeframe graying + auto-hop. Sandbox e2e PASSED.
+- NEXT UP: Deep TP/SL + Trade Management audit & unification (PT geometry off daily
+  ATR = unreachable; SmartStopService/BRACKET_V2 disconnected from evaluator).
+- Then: M0 OCA ladder validation (needs live scalp fill post-restart), INT-21 IGV
+  range-break guards, ELF→XLE _industry_to_etf mapping fix, thought-noise content
+  filter (v323c r2).
+
+## 2026-06-12 — v325 + v325b TP/SL geometry fix (SHIPPED, user-apply pending)
+- ✅ "Deep TP/SL audit & unification" root-cause phase → apply_v325.py @
+  https://paste.rs/SgWMB (md5 c41035a81d0dfe1a567fe9290db3432c). Horizon-scaled
+  stops + canonical daily-ATR basis + detector-stop cap + reach gate (block >1.5×).
+- ✅ Bracket geometry chart overlay → apply_v325b.py @ https://paste.rs/sQEqc
+  (md5 ef4ba7e6ed26cd19fc90cfd728df3b3b). Reach cone + PT reach badges + clock line.
+- VALIDATION PLAN: after a few sessions re-run diag_pt_reachability.py — PT1
+  touch-rate must move off 0%; entry_context.multipliers.hsbg stamps enable
+  before/after cohort compare. Watch stream for ✂️ horizon-cap / ⚠️ borderline /
+  🚫 reach-block events.
+- v326 (NEXT in TP/SL track): SmartStopService unification — merge SETUP_STOP_RULES
+  with evaluator SETUP_MULTIPLIERS into one source of truth; optionally wire
+  structure-snapping (S/R, hunt zones) into entry path; fix /audit-stops +
+  /fix-stop fake atr=2% inputs.
+- Still open: M0 OCA ladder live validation, INT-21 IGV guards, ELF→XLE mapping,
+  thought-noise content filter (v323c r2), Atlas password rotation (user).
+
+## 2026-06-12 — v326 SmartStop unification (SHIPPED, user-apply pending)
+- ✅ One SSOT for initial-stop sizing (evaluator SETUP_MULTIPLIERS), real daily ATR
+  in /audit-stops + /fix-stop, HSBG horizon parity in calculate_intelligent_stop.
+  apply_v326.py @ https://paste.rs/tM454 (md5 7844fa6c6a1286adddee49284e1ff12c).
+- TP/SL track remaining (later): optional structure-snapping into evaluator entry
+  path (S/R + hunt zones at trade creation); trailing-mode unification with
+  StopManager (smart_stop trailing modes still independent of stop_manager.py).
+
+## 2026-06-17 — NEW BACKLOG (operator-approved this session)
+- [P1] DETECTOR EDGE SCORECARD (saved idea): nightly read-only diag that replays each LIVE
+  detector's last-N-day realized R (entry/stop/target sim like v329/v330) → at-a-glance ranking of
+  which setups actually earn vs which to fix next. Build after the scalp generalization sweep.
+- [P1] SCALP GENERALIZATION SWEEP: apply find→trade-replay→rewrite to ALL scalps (not just
+  hitchhiker/second_chance/big_dog). PRE-STEP: setup-category audit — verify each "scalp" is tagged
+  correctly vs "intraday"/swing/etc.; recategorize mis-tagged setups.
+- [P1] TIME-DECAY AUDIT (NEW): investigate whether Multi-day / Swing / Position / Investment tier
+  trades have any time-decay / max-hold / time-stop exit triggers; decide if we should add time-based
+  exit limits per tier. Read-only audit first, then propose.
