@@ -1,4 +1,18 @@
-## 2026-06-18 — v386 IB-NATIVE fundamentals warm-fill (institutional 3%→high; float/valuation off Finnhub)
+## 2026-06-18 — v387 DEDICATED IB clientId for fundamentals (RTH-safe, no trading-socket contention)
+Operator ask: put fundamental fetches on a separate/new clientId so they can run during the trading day
+without slowing the bot. Built `services/ib_fundamentals_client.py` — a read-only ib_async singleton on
+its OWN clientId (`IB_FUNDAMENTALS_CLIENT_ID`, default **12**; pusher=10, bot-direct=11), lazy-connect
+(nothing at boot → zero startup risk). Rewired `unified_fundamentals_cache.py` (ReportSnapshot in
+get_cached_fundamentals + ReportsOwnership in refresh_institutional_ownership) to PREFER the dedicated
+client, falling back to the clientId-11 socket only if it's unavailable. Heavy multi-MB ReportsOwnership
+pulls no longer contend with orders/quotes.
+patch_v387 (paste.rs/1tWop): writes the module (base64) + 2 anchored cache rewires, py_compile-gated,
+--rollback. APPLY ORDER: v386 (paste.rs/0wyyW) FIRST, THEN v387 (cache PRE-SHA must be 7e98e9d8944f8266).
+Optional .env: IB_FUNDAMENTALS_CLIENT_ID=12 (ensure free in IB Gateway). After restart the warm-fill
+endpoint runs on clientId 12 → can be triggered during RTH.
+
+
+
 Operator Q: "can we get all this from IB instead of Finnhub?" Answer: **mostly yes.** IB `ReportSnapshot`
 (~10KB, already parsed) carries float, shares-out, P/E, P/B, market cap, beta, ROE, net margin,
 debt/equity, current ratio, dividend yield, 52w hi/lo, EPS change; IB `ReportsOwnership` carries

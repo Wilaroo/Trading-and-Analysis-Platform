@@ -117,24 +117,32 @@ async def get_cached_fundamentals(symbol: str, force_refresh: bool = False) -> O
     merged: Dict[str, Any] = {"symbol": symbol}
     source_chain = []
 
-    # 2. IB ReportSnapshot — prefer the LIVE ib_direct socket (clientId 11).
-    # The legacy ib_service worker is usually disconnected on this deploy
-    # (every cached doc historically came from Finnhub). ReportSnapshot is
-    # ~10KB and carries float + shares-out via <SharesOut TotalFloat=...>.
-    # (v19.34.202)
+    # 2. IB ReportSnapshot — v386b prefer the DEDICATED fundamentals client
+    # (separate clientId, so heavy reports never contend with the clientId-11
+    # trading socket — safe during RTH); fall back to the trading socket only if
+    # the dedicated client is unavailable. ReportSnapshot is ~10KB and carries
+    # float + shares-out via <SharesOut TotalFloat=...>.
     try:
-        from services.ib_direct_service import get_ib_direct_service
         from services.ib_fundamentals_parser import parse_report_snapshot
-        ibd = get_ib_direct_service()
-        if ibd is not None and ibd.is_connected():
-            xml = await ibd.get_fundamental_report(symbol, "ReportSnapshot")
-            if xml:
-                parsed = parse_report_snapshot(xml)
-                if parsed:
-                    merged.update(parsed)
-                    source_chain.append("ib_direct_report_snapshot")
+        xml = None
+        try:
+            from services.ib_fundamentals_client import get_fundamentals_ib_client
+            xml = await get_fundamentals_ib_client().get_fundamental_report(
+                symbol, "ReportSnapshot")
+        except Exception as exc:
+            logger.debug("fundamentals-client snapshot %s: %s", symbol, exc)
+        if not xml:
+            from services.ib_direct_service import get_ib_direct_service
+            ibd = get_ib_direct_service()
+            if ibd is not None and ibd.is_connected():
+                xml = await ibd.get_fundamental_report(symbol, "ReportSnapshot")
+        if xml:
+            parsed = parse_report_snapshot(xml)
+            if parsed:
+                merged.update(parsed)
+                source_chain.append("ib_direct_report_snapshot")
     except Exception as exc:
-        logger.debug("ib_direct fundamentals lookup failed for %s: %s", symbol, exc)
+        logger.debug("ib fundamentals lookup failed for %s: %s", symbol, exc)
 
     # 2b. Legacy ib_service ReportSnapshot — only if ib_direct didn't deliver.
     if "ib_direct_report_snapshot" not in source_chain:
@@ -255,10 +263,10 @@ async def refresh_institutional_ownership(symbol: str, db=None) -> Optional[floa
     if db is None:
         return None
     try:
-        from services.ib_direct_service import get_ib_direct_service
+        from services.ib_fundamentals_client import get_fundamentals_ib_client
         from services.ib_fundamentals_parser import parse_reports_ownership
-        ibd = get_ib_direct_service()
-        if ibd is None or not ibd.is_connected():
+        ibd = get_fundamentals_ib_client()  # v386b — dedicated clientId, RTH-safe
+        if not await ibd.connect():
             return None
 
         shares_out = None
