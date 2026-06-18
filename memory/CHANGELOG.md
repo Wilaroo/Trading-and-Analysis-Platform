@@ -1,3 +1,36 @@
+## 2026-06-18 — v362 (patch_v362) REWRITE `gap_give_go` to SMB DOCTRINE — BUILT + PASTED (awaiting DGX apply)
+
+### Why (operator flagged the Gap_Give_and_Go cheat sheet)
+The live `_check_gap_give_go` was a loose VWAP-pullback proxy (gap>3% + above_vwap + 0<distVWAP<1.5 +
+rvol≥2, VWAP stop, fixed HOD target) — it modeled NONE of the doctrine. Cheat-sheet doctrine is a
+1-min setup: gap-up → "give" (pullback holding above prior close, ≤50% gap fill) → 3-7 bar
+consolidation on declining volume → ENTER on consolidation-range break, STOP .02 below cons low,
+Move2Move exit.
+
+### Evidence (diag_v362b_gap_give_go_doctrine.py, 180d/300-sym, 1-min — history present ~390 bars/session)
+- code-mirror (5-min): winsorAvg +0.069 (breakeven; +0.018 after slippage levers).
+- DOCTRINE 2.0R fixed target, gap≥1% band≤0.6%: **n=492 win 47% winsorAvg +0.233R** (SHIPPED).
+- DOCTRINE double-bar-break exit: +0.125R; 2.0R/2.5R/3.0R all +EV (chose 2.0R for robustness + detector-only).
+- Ground truth (8 real fills) −1.32R but tiny + artifact closes.
+
+### Action
+- New `_check_gap_give_go` (detector-only): opening-drive only; fetches 1-min bars via
+  `ts._get_intraday_bars_from_db(symbol,"1 min",60)`; detects give→3-7bar consolidation (band≤0.6%,
+  declining vol, holds>prev_close, give≤50% gap fill); entry=cons_high+.01 (on range-break print),
+  stop=cons_low−.02, target=entry+2.0·risk. Behaviorally validated locally (valid fire + 5 invalidations).
+- Patcher `backend/scripts/patch_v362_gap_give_go_doctrine.py` (whole-file PRE-SHA `8df7dd8c…` guard,
+  `_check_gap_give_go` PRE_FUNC_SHA `c93d0b9e…`, OLD count==1, **py_compile of patched file**, --check,
+  auto-backup). Built via programmatic decode→rewrite→encode off the operator extract.
+- Regression test `backend/tests/test_v362_gap_give_go_doctrine.py` (6 cases). Build doc
+  `memory/v362_gap_give_go_build.md`. Re-audit doc `memory/v361b_big_dog_puppy_doctrine_reaudit.md`.
+- paste.rs: patcher `https://paste.rs/YkXil`, test `https://paste.rs/nzFZy` (both round-trip cmp-verified).
+
+### Also this session
+- **Re-audit big_dog & puppy_dog vs cheat sheets** (v361b doc): both are loose proxies missing the
+  mid-day window (big_dog: 11:00-13:30), above-PDH gate, consolidation-base stop, and double-bar-break
+  trail. v361 stays live (empirically +EV); logged a P1 big_dog/puppy_dog doctrine rewrite.
+
+
 ## 2026-06-18 — v361 (patch_v361) TIGHTEN `big_dog` (min-price $10 + min-stop 1.0%) — BUILT + PASTED (awaiting DGX apply)
 
 ### Why (diag_v361_big_dog_replay.py 180d/300-sym 5-min + diag_setup_ground_truth.py)
