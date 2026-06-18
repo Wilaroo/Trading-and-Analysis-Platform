@@ -1,3 +1,15 @@
+## 2026-06-18 — v369 MISSED-MOVERS FIX — DEPLOYED, COMMITTED (21d3f479), VERIFIED LIVE
+APPLIED on DGX (PRE-SHA matched both files; POST-SHA matched --check prediction exactly:
+enhanced_scanner 4aa42be2…, ib_historical_collector e44ee544…), committed 21d3f479, pushed,
+backend restarted clean (health 7g/1y/0r; yellow = pusher_rpc fresh-boot no-data, benign).
+VERIFIED via diag_v369_verify.py (paste.rs/9GbUz, read-only): all 6 source markers present;
+**scalp_rvol fail_closed=True drops AFTER deploy (16:41Z) = 0** (5,018 pre-deploy fail-closes in
+the 7d TTL window, latest 13:27Z — none new); SPCX now clears the gate. trade_drops 2d snapshot:
+universal_liquidity_gate 14,866 (scalp_rvol 5,883 / dollar_adv 5,758 / scalp_share_adv 2,300 /
+scalp_adrp 925). Watch-symbol NEXT-LAYER blockers revealed (post-v369): SNDK→smart_filter_skip
+(Issue 3), HON→dedup_cooldown (Issue 4), MRVL→measured rvol 0.91x<1x floor (Issue 1a or SCALP_MIN_RVOL
+calibration), TSLA→auto_exec_ineligible priority=medium<high (v320r class). v369 working as designed.
+
 ## 2026-06-18 — v369 MISSED-MOVERS FIX (RVOL defer + ATR ceiling waive) — BUILT + PASTED (awaiting DGX apply)
 
 ### Why (diags v376/v377 — SNDK/MRVL/SPCX/TSLA missed)
