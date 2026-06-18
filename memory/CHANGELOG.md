@@ -1,4 +1,18 @@
-## 2026-06-18 — v383/v384 FUNDAMENTAL PILLAR F1 (capture/coverage) — fundamentals are 55% blind
+## 2026-06-18 — v385 FUNDAMENTAL PILLAR F2a (scoring) — days_to_cover squeeze sub-score
+With F1 landing days_to_cover at ~80% coverage, wire it into scoring. `fundamental_quality.py`: when
+SI% is genuinely absent (no float), the short-interest sub-score previously went flat neutral-50; now
+it falls back to FINRA **days_to_cover** (squeeze fuel for longs / crowded-short risk for shorts, no
+float needed). patch_v385 (paste.rs/Zxp8O), 3 anchored chunks, py_compile-gated, `--rollback`.
+F1 coverage proven (diag_v383): float 35→71%, SI% 31→60%, days_to_cover 0→80%, FINRA de-staled to
+2026-05-29. NOTE: patch_v384 (paste.rs/233zJ, live-path days_to_cover capture) still to apply on DGX
+(was aborted by a path bug; warm-fill populated the cache directly so coverage is 80% now regardless).
+VALIDATE after next RTH: diag_v382 → fundamental pillar sd should rise from 3.8; composite should spread;
+more alerts crossing the 57/60 grade floors, esp. high-DTC squeeze names. NEXT F2b: EPS/rev beat-miss
+surprise (earnings_calendar). F2c: growth/margins/valuation (persist Finnhub metrics first). Deferred:
+institutional warm-fill (IB ReportsOwnership) + scheduled nightly warm-fill.
+
+
+
 Path B re-scoped from "de-weight/rescore" to "fix the data" (operator call). diag_v382 (6826 alerts)
 showed composite crushed to 43-68 (sd 4.0); fundamental pillar sd just 3.8 because short_interest(20%)
 + float(20%) + institutional(15%) = **55% of the pillar forced to neutral-50** when absent.
