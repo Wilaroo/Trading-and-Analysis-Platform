@@ -1,3 +1,24 @@
+## 2026-06-18 — v360 (patch_v360) SUPPRESS `first_move_up` + `first_move_down` — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diag_v360_first_move_replay.py, 180d / 300-sym, 5-min intraday)
+Both morning fades are structurally negative-EV counter-trend trades:
+- `first_move_up` (SHORT fade of fresh-HOD push): n=2392, win 27%, winsorAvg **−0.106 R/trade**, medR −1.0 (>50% hit full stop).
+- `first_move_down` (LONG fade of fresh-LOD flush): n=2274, win 24%, winsorAvg **−0.176 R/trade**, medR −1.0.
+Tightening push/RSI/rvol gates did not flip either to +EV. Ground truth too thin (up n=0, down n=2).
+Consistent with prior fade suppressions (vwap_bounce v354, fashionably_late v357, squeeze v359).
+
+### Action
+- Dual anchored-chunk patcher `backend/scripts/patch_v360_first_move_suppress.py` (whole-file
+  PRE-SHA `8ff8213235dd…` guard + BOTH OLD anchors matched once each + post-write verify; `--check`
+  dry-run; auto-backup). Swaps each body for `return None` + audit-citing docstring.
+- **Fixed blocker:** the OLD anchor base64 had 3 Cyrillic-homoglyph corruptions (`А`/`Б`/`Р` →
+  ASCII `A`/`B`/`R`) that broke decoding (cause of prior local test failures). Both anchors now
+  decode to exact live source; patcher compiles.
+- Regression test `backend/tests/test_v360_first_move_suppress.py` (both → None on would-fire snaps).
+- Build doc `memory/v360_first_move_build.md`.
+- paste.rs: patcher `https://paste.rs/qNcSK`, test `https://paste.rs/XNJKR` (both round-trip cmp-verified).
+
+
 ## 2026-06-17 (later) — v19.34.323 (patch_v336) SHORT-FADE entry gate + R-winsorization — SHIPPED + COMMITTED (9ae11efc) + LIVE
 
 ### Why (diag_v333 + diag_v334, READ-ONLY forensics on 120d genuine bot-own trades)
