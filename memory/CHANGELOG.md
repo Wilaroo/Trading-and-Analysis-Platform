@@ -1,4 +1,16 @@
-## 2026-06-18 — v389 FUNDAMENTAL PILLAR F2c — score the IB ReportSnapshot financials
+## 2026-06-18 — v390 FUNDAMENTAL PILLAR F2b — recent earnings BEAT/MISS surprise (post-earnings drift)
+The earnings sub-score only used proximity to UPCOMING earnings; it ignored the EPS/revenue
+BEAT/MISS surprise already captured in earnings_calendar. patch_v390 (paste.rs/Gn7Bg) queries the most
+recent reported earnings (<=10d) and overrides the earnings sub-score: BEAT 70 (78 if eps surprise>=10%,
++6 if revenue also beat, cap 92) → momentum drift tailwind; MISS 38 (30 if surprise<=-10%, -5 if rev
+miss, floor 22). Also guarded the earnings-absent neutralizer so a fresh drift score isn't clobbered when
+there's no upcoming earnings. 4 anchored chunks; PRE a68ab36b723b820d → POST 311679c13f99e544.
+APPLY ORDER: v389 (paste.rs/jdnIT) FIRST, THEN v390. This completes the Fundamental Pillar Overhaul
+inputs: float, short-interest%, days_to_cover, institutional, financials (ROE/margin/growth/leverage),
+and earnings surprise — all scored. VALIDATE next RTH via diag_v382 (pillar sd should rise well above 3.8).
+
+
+
 The IB-native warm-fill (v386/v387) now lands ROE, net margin, EPS growth (eps_change), debt/equity,
 P/E, P/B, beta in symbol_fundamentals_cache — but the pillar scored none of them. patch_v389
 (paste.rs/jdnIT) adds a `financial_score` sub-pillar (ROE + net margin + EPS growth + leverage, average

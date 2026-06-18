@@ -114,6 +114,7 @@ class FundamentalQualityService:
         is_long = direction.lower() == "long"
         _dtc = None  # v385 — FINRA days-to-cover (squeeze fallback when SI% absent)
         _fin = {}  # v389 — IB ReportSnapshot financials (roe/margin/growth/leverage)
+        _post_earn = None  # v390 — most recent reported earnings surprise (drift)
         
         # Fetch fundamental data if not provided
         # v19.34.177.1 — route through unified_fundamentals_cache. The
@@ -203,6 +204,24 @@ class FundamentalQualityService:
                         earnings_catalyst_score = upcoming.get("earnings_score", 0)
             except Exception as e:
                 logger.debug(f"Could not check earnings: {e}")
+
+        # v390 — recent earnings SURPRISE (post-earnings drift): a fresh BEAT is a
+        # strong momentum tailwind; a MISS is a drag. Looks back ~10 calendar days.
+        if self._db is not None:
+            try:
+                from datetime import datetime, timezone, timedelta
+                _now = datetime.now(timezone.utc)
+                recent = self._db["earnings_calendar"].find_one({
+                    "symbol": symbol, "is_reported": True,
+                    "date": {"$gte": (_now - timedelta(days=10)).isoformat(),
+                             "$lte": _now.isoformat()},
+                }, sort=[("date", -1)])
+                if recent and recent.get("eps_result"):
+                    _post_earn = {"result": recent.get("eps_result"),
+                                  "eps_surp": recent.get("eps_surprise_pct"),
+                                  "rev_result": recent.get("revenue_result")}
+            except Exception as e:
+                logger.debug(f"Could not check recent earnings: {e}")
                 
         # v19.34.309 — track which fundamental data points are genuinely
         # ABSENT. Pre-fix, absent institutional% defaulted to a 50% raw
@@ -364,6 +383,26 @@ class FundamentalQualityService:
                 result.earnings_score = 60
         else:
             result.earnings_score = 60  # No earnings soon - neutral
+
+        # v390 — post-earnings drift overrides proximity when a fresh report exists:
+        # a recent BEAT (esp. with revenue beat) is a momentum tailwind; MISS a drag.
+        if _post_earn:
+            _res = (_post_earn.get("result") or "").upper()
+            _sp = _post_earn.get("eps_surp")
+            _rev = (_post_earn.get("rev_result") or "").upper()
+            if _res == "BEAT":
+                _b = 78 if (_sp is not None and _sp >= 10) else 70
+                if _rev == "BEAT":
+                    _b += 6
+                result.earnings_score = min(92, _b)
+                result.factors.append(
+                    f"Recent earnings BEAT{' + rev beat' if _rev == 'BEAT' else ''} — drift (+)")
+            elif _res == "MISS":
+                _b = 30 if (_sp is not None and _sp <= -10) else 38
+                if _rev == "MISS":
+                    _b -= 5
+                result.earnings_score = max(22, _b)
+                result.factors.append("Recent earnings MISS — drift (-)")
             
         # v19.34.309 — absent-data → NEUTRAL 50 (not optimistic). Applied
         # AFTER per-component scoring so PRESENT data is scored exactly as
@@ -394,7 +433,7 @@ class FundamentalQualityService:
         if _inst_absent:
             result.institutional_score = 50.0
             result.factors.append("Institutional-ownership data absent → neutral 50")
-        if _earnings_absent:
+        if _earnings_absent and not _post_earn:  # v390 — keep post-earnings drift score
             result.earnings_score = 50.0
 
         # v389 — Financial-quality sub-score from IB ReportSnapshot (ROE, net
