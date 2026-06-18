@@ -83,22 +83,54 @@ def main():
 
     print(f"\n=== v368 SMB grade by trade_style — last {days}d ===")
 
-    # ── A) ALERTS: grade distribution by style ──────────────────────────────
-    coll = "alerts" if db["alerts"].estimated_document_count() else "live_alerts"
+    # ── A) ALERTS: grade distribution by style (robust collection + date handling) ──
+    def _pick_coll():
+        best, bn = None, -1
+        for name in ("live_alerts", "alerts"):
+            try:
+                nn = db[name].count_documents(
+                    {"$or": [{"smb_grade": {"$exists": True}},
+                             {"smb_score_total": {"$exists": True}},
+                             {"smb_5var_score": {"$exists": True}}]}, limit=5000)
+            except Exception:
+                nn = 0
+            if nn > bn:
+                best, bn = name, nn
+        return best, bn
+
+    def _ts_ok(v):
+        # accept datetime or ISO-string; keep if within window (best-effort)
+        try:
+            if isinstance(v, datetime):
+                dv = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+                return dv.isoformat() >= cut
+            if isinstance(v, str):
+                return v >= cut
+        except Exception:
+            return True
+        return True
+
+    coll, smb_n = _pick_coll()
     by_style_grade = defaultdict(Counter)
     by_style_score = defaultdict(list)
     n = 0
-    for a in db[coll].find(
-            {"$or": [{"created_at": {"$gte": cut}}, {"timestamp": {"$gte": cut}}]},
-            {"_id": 0, "trade_style": 1, "setup_type": 1, "smb_grade": 1,
-             "smb_score_total": 1, "smb_5var_score": 1}):
-        style = (a.get("trade_style") or "?").strip().lower() or "?"
-        by_style_grade[style][_grade_of(a)] += 1
-        s = _score_of(a)
-        if s is not None:
-            by_style_score[style].append(s)
-        n += 1
-    print(f"\n--- A) {coll}: {n} alerts; smb_grade distribution + avg score by trade_style ---")
+    if coll:
+        cur = db[coll].find(
+            {}, {"_id": 0, "trade_style": 1, "setup_type": 1, "smb_grade": 1,
+                 "smb_score_total": 1, "smb_5var_score": 1, "created_at": 1, "timestamp": 1}
+        ).sort([("_id", -1)]).limit(40000)
+        for a in cur:
+            ts = a.get("created_at") or a.get("timestamp")
+            if ts is not None and not _ts_ok(ts):
+                continue
+            style = (a.get("trade_style") or "?").strip().lower() or "?"
+            by_style_grade[style][_grade_of(a)] += 1
+            s = _score_of(a)
+            if s is not None:
+                by_style_score[style].append(s)
+            n += 1
+    print(f"\n--- A) coll='{coll}' (docs with smb fields≈{smb_n}); {n} alerts in window; "
+          f"smb_grade dist + avg score by trade_style ---")
     order = ["scalp", "intraday", "multi_day", "swing", "position", "?"]
     styles = order + [s for s in by_style_grade if s not in order]
     for st in styles:
