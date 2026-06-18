@@ -4868,40 +4868,85 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_spencer_scalp(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Spencer Scalp - Tight consolidation near HOD"""
-        dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-        
-        if dist_from_hod < 1.0 and snapshot.daily_range_pct < 3.0 and snapshot.rvol >= 1.5:
-            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"spencer_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="spencer_scalp",
-                strategy_name="Spencer Scalp (INT-22)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.high_of_day,
-                stop_loss=round(snapshot.current_price - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.high_of_day + (snapshot.atr * 1.5), 2),
-                risk_reward=3.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"📊 {symbol} Spencer Scalp - Near HOD {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Price {dist_from_hod:.1f}% from HOD ${snapshot.high_of_day:.2f}",
-                    f"Tight consolidation (range: {snapshot.daily_range_pct:.1f}%)",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}",
-                    "Entry: Break of consolidation high"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        return None
+        """Spencer Scalp (INT-22) - DOCTRINE rewrite (v363, LONG-only).
+        SMB cheat-sheet: a >=20-min tight consolidation (band < 15% of the day's range) in the UPPER
+        1/3 of the day range, then a VOLUME SURGE break of the range high (a methodical institutional
+        accumulation program). ENTER on the range-high break, STOP .02 below the range low, fixed 2.0R
+        target. 180d/300-sym 1-min replay: LONG +0.04-0.06R; SHORT ~0 (dropped); morning-only was -EV
+        so kept all-day. See memory/v363_spencer_scalp_build.md."""
+        CONS_LEN = 20
+        CONS_FRAC = 0.15        # consolidation band < 15% of the day range
+        UPPER_THIRD = 0.667     # consolidation must sit in the upper 1/3 of the day range
+        VOL_SURGE = 1.3         # break-bar volume >= 1.3x the consolidation avg
+        TARGET_RMULT = 2.0
+
+        hod = float(getattr(snapshot, "high_of_day", 0.0) or 0.0)
+        lod = float(getattr(snapshot, "low_of_day", 0.0) or 0.0)
+        cp = float(getattr(snapshot, "current_price", 0.0) or 0.0)
+        day_range = hod - lod
+        if cp <= 0 or day_range <= 0:
+            return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < CONS_LEN + 2:
+            return None
+
+        i = len(bars) - 1                          # most-recent bar = the range-break bar
+        win = bars[i - CONS_LEN:i]                  # the consolidation = prior CONS_LEN bars
+        try:
+            wh = max(b["high"] for b in win)
+            wl = min(b["low"] for b in win)
+            break_vol = bars[i].get("volume") or 0
+            break_high = bars[i]["high"]
+        except (KeyError, TypeError, ValueError):
+            return None
+        band = wh - wl
+        if band <= 0 or band > CONS_FRAC * day_range:
+            return None
+        if wl < lod + UPPER_THIRD * day_range:      # consolidation must be in the upper 1/3
+            return None
+        wv = [b["volume"] for b in win if (b.get("volume") or 0) > 0]
+        if wv and break_vol < VOL_SURGE * (sum(wv) / len(wv)):   # volume surge confirms the break
+            return None
+        entry = round(wh + 0.01, 2)
+        if not (cp >= entry or break_high >= entry):            # range break must be printing
+            return None
+        stop = round(wl - 0.02, 2)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        target = round(entry + TARGET_RMULT * risk, 2)
+
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        return LiveAlert(
+            id=f"spencer_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="spencer_scalp",
+            strategy_name="Spencer Scalp (INT-22)",
+            direction="long",
+            priority=priority,
+            current_price=cp,
+            trigger_price=entry,
+            stop_loss=stop,
+            target=target,
+            risk_reward=TARGET_RMULT,
+            trigger_probability=0.55,
+            win_probability=0.52,
+            minutes_to_trigger=5,
+            headline=f"📊 {symbol} Spencer Scalp - range break {'✓ TAPE' if tape.confirmation_for_long else ''}",
+            reasoning=[
+                f"20-min consolidation {wl:.2f}-{wh:.2f} (<15% of day range) in upper 1/3",
+                f"Volume surge on break (>={VOL_SURGE:g}x range avg)",
+                f"Break entry {entry:.2f}, stop {stop:.2f} (range low), 2R target {target:.2f}",
+                f"Tape: {tape.overall_signal.value}"
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        )
     
     async def _check_hitchhiker(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """HitchHiker - Strong drive off open, consolidation, continuation"""
