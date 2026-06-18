@@ -815,7 +815,7 @@ class OpportunityEvaluator:
             # ==================== SMART STRATEGY FILTERING ====================
             strategy_filter = bot._evaluate_strategy_filter(
                 setup_type=setup_type,
-                quality_score=alert.get('score', 70),
+                quality_score=int(alert.get('tqs_score') or alert.get('score') or 70),
                 symbol=symbol
             )
 
