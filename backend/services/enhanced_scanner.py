@@ -5836,86 +5836,15 @@ class EnhancedBackgroundScanner:
     # ==================== NEW SETUP CHECKERS ====================
     
     async def _check_squeeze(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Squeeze Detection: Bollinger Bands inside Keltner Channels = volatility compression"""
-        if not hasattr(snapshot, 'squeeze_on') or not snapshot.squeeze_on:
-            return None
-        if snapshot.rvol < 1.0:
-            return None
-        
-        direction = "long" if snapshot.squeeze_fire > 0 else "short"
-        
-        # Tighter BB width = more explosive
-        if snapshot.bb_width < 3.0:
-            priority = AlertPriority.CRITICAL
-        elif snapshot.bb_width < 5.0:
-            priority = AlertPriority.HIGH
-        else:
-            priority = AlertPriority.MEDIUM
-        
-        # Tape confirmation upgrades priority
-        if direction == "long" and tape.confirmation_for_long and priority != AlertPriority.CRITICAL:
-            priority = AlertPriority.HIGH
-        elif direction == "short" and tape.confirmation_for_short and priority != AlertPriority.CRITICAL:
-            priority = AlertPriority.HIGH
-        
-        # 2026-05-01 v19.20 — Bounded Squeeze stop so R:R stays viable on
-        # mega-caps. Previously `stop = bb_lower` could be >1.5 ATR away on
-        # wide-BB names (KO, PG, LIN), which pushed R:R below the 1.5 gate
-        # every cycle and the setup was effectively dead. Clamping the stop
-        # to within 1.0 ATR of the current price caps downside while still
-        # honouring the BB band structure — whichever is TIGHTER (closer to
-        # price) wins, so the BB still governs when it's tight enough.
-        #
-        # v19.34.183 — Anchor the ENTRY to where the trade actually enters.
-        # The breakout trigger is bb_upper (long) / bb_lower (short), but once
-        # price has ALREADY broken out and run past the band, that level is
-        # stale and sits on the WRONG side of an ATR stop anchored to current
-        # price (e.g. DIA: trigger 501.63 < stop 505.82 for a "long"). Clamp
-        # the entry to current price in that case so entry/stop/target geometry
-        # is always internally consistent, then anchor stop + target to `entry`.
-        cp = snapshot.current_price
-        if direction == "long":
-            entry = max(snapshot.bb_upper, cp)
-            raw_stop = snapshot.bb_lower
-            atr_floor = entry - (snapshot.atr * 1.0)
-            stop = max(raw_stop, atr_floor)  # LONG: higher stop = tighter (always < entry)
-            target = entry + (snapshot.atr * 2.5)
-        else:
-            entry = min(snapshot.bb_lower, cp)
-            raw_stop = snapshot.bb_upper
-            atr_ceil = entry + (snapshot.atr * 1.0)
-            stop = min(raw_stop, atr_ceil)  # SHORT: lower stop = tighter (always > entry)
-            target = entry - (snapshot.atr * 2.5)
-        risk = abs(entry - stop)
-        rr = abs(target - entry) / risk if risk > 0 else 1
-        
-        return LiveAlert(
-            id=f"squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
-            symbol=symbol,
-            setup_type="squeeze",
-            strategy_name=f"Squeeze Fire {direction.upper()}",
-            direction=direction,
-            priority=priority,
-            current_price=snapshot.current_price,
-            trigger_price=round(entry, 2),  # v19.34.183 — consistent entry anchor
-            stop_loss=round(stop, 2),
-            target=round(target, 2),
-            risk_reward=round(rr, 2),
-            trigger_probability=0.68,
-            win_probability=0.62,
-            minutes_to_trigger=10,
-            headline=f"SQUEEZE {symbol} {direction.upper()} - BB Width {snapshot.bb_width:.1f}% {'+ TAPE' if (tape.confirmation_for_long if direction == 'long' else tape.confirmation_for_short) else ''}",
-            reasoning=[
-                "Bollinger Bands INSIDE Keltner Channels = volatility squeeze",
-                f"BB Width: {snapshot.bb_width:.1f}% (tight = explosive breakout imminent)",
-                f"Momentum: {snapshot.squeeze_fire:+.2f} ({'bullish' if direction == 'long' else 'bearish'})",
-                f"RVOL: {snapshot.rvol:.1f}x | RSI: {snapshot.rsi_14:.0f}",
-                f"Tape: {tape.overall_signal.value} (score: {tape.tape_score:.2f})"
-            ],
-            time_window=self._get_current_time_window().value,
-            market_regime=self._market_regime.value,
-            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        )
+        """Squeeze — SUPPRESSED v359 (returns None).
+        This "intraday" detector is actually a DAILY-bar signal (squeeze_on / bb_width / atr /
+        rvol all come from daily bars in realtime_technical_service) and fully overlaps
+        daily_squeeze. Ground truth from 473 closed bot_trades: negative-EV on every cut —
+        ALL winsorAvg -0.158 (31% win, totR -128.8), LONG -0.080 (n=285), SHORT -0.277 (n=188).
+        Its market-order fill geometry replays to -0.475 R/trade. The genuine daily-compression
+        LONG edge is already captured by daily_squeeze (long-only, v358). Suppressed to dedupe a
+        high-frequency (~46k fires/yr) negative-EV duplicate. See memory/v359_squeeze_build.md."""
+        return None
     
     async def _check_mean_reversion(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Mean Reversion: RSI extreme + near support/resistance + volume"""
