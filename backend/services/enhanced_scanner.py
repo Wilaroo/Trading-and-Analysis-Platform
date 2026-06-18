@@ -5504,48 +5504,14 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_fashionably_late(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Fashionably Late - 9-EMA crosses VWAP"""
-        if (snapshot.above_ema9 and 
-            snapshot.ema_9 > snapshot.vwap and
-            (snapshot.ema_9 - snapshot.vwap) / snapshot.vwap * 100 < 0.5 and
-            snapshot.trend == "uptrend" and
-            snapshot.rvol >= 1.2):
-            
-            return LiveAlert(
-                id=f"fashionably_late_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="fashionably_late",
-                strategy_name="Fashionably Late (INT-26)",
-                direction="long",
-                # v19.34.320r — tape-gated HIGH branch (was hardcoded MEDIUM, which capped
-                # this intraday scalp below the auto-fire bar regardless of signal
-                # quality; see v320q + v320r-precheck). Only the tape-confirmed
-                # subset promotes; EV/win-rate gate still governs auto-fire.
-                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(  # v19.34.50
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.vwap - (snapshot.atr * 0.33),
-                    atr=getattr(snapshot, "atr", None),
-                    direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap + (snapshot.vwap - snapshot.low_of_day), 2),
-                risk_reward=3.0,
-                trigger_probability=0.55,
-                win_probability=0.60,
-                minutes_to_trigger=15,
-                headline=f"⏰ {symbol} Fashionably Late - 9-EMA crossing VWAP",
-                reasoning=[
-                    "9-EMA just crossed VWAP",
-                    "Momentum building",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+        """Fashionably Late — SUPPRESSED v357 (returns None).
+        Replay across 120d / 300-symbol IB intraday bars proved the 9-EMA×VWAP cross is
+        sub-cost negative-EV under EVERY tested geometry: SMB-doctrine measured-move 3:1
+        best subset = -0.018 R/trade BEFORE commissions/slippage (win 54%, avgRR 0.67);
+        the previous live ATR-floored-stop geometry was the worst variant at -0.27 to
+        -0.53 R/trade (win 13-23%). No quality gate (vol-convergence / fast-turn /
+        time-window) isolated a tradeable +EV subset. Suppressed like vwap_bounce (v354).
+        See memory/v357_fashionably_late_build.md for the full replay evidence."""
         return None
     
     async def _check_fading_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
