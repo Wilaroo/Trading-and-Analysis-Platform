@@ -1,3 +1,21 @@
+## 2026-06-18 — AGENTS.md known-issue watchlist TRIAGED (all 3 closed; no code fixes needed)
+Verified all three §6/§16 watchlist items against live code/data — 2 were stale notes, 1 disproven+moot.
+- **Stale-quote watchdog** → ✅ ALREADY FIXED (v19.34.82 `quote_resub_watchdog.py`, live 60s task,
+  env QUOTE_RESUB_WATCHDOG_ENABLED). AGENTS.md §6 note was stale; cleared.
+- **squeeze "scalp-only" narrator** → ✅ ALREADY FIXED (squeeze=intraday across trade_style_classifier,
+  _SCALP_SETUPS absent, sentcom SCALP_SETUPS absent, gameplan narrative accurate). Cleared.
+- **Scalp SMB grade not timeframe-aware** → ✅ CLOSED. diag_v368 (`JsUOT`) + diag_v369 (`iSpQN`):
+  §16 premise DISPROVEN (scalp avg smb 29.6 + profitable in-sample; intraday is the over-graded/worst
+  cell: smb 37.8 but 24% win / −0.26R, n=59). And MOOT for execution — `smb_grade` is AUDIT-ONLY since
+  v19.34.175 (canonical = `unified_grade`=`tqs_grade`; SMB=15% of one TQS pillar). Data caveat:
+  bot_trades doesn't persist smb_score_total (all "?") and 93% of closed trades carry lifecycle styles
+  (trade_2_hold/reconciled) — so grade→R validity isn't measurable from bot_trades; validate TQS if ever needed.
+- ⚠️ INCIDENTAL OBSERVATION (not the watchlist, worth noting): closed bot_trades skew net-negative —
+  intraday 24% win/−0.26R (n=59), multi_day 21%/−0.16R (n=19), overall 1420 trades 21% win/−0.04R.
+  Scalp positive but tiny n=7. This is a strategy-edge signal for the EV/replay track, not a grade bug.
+- New read-only diags: diag_v368_smb_grade_by_style.py, diag_v369_smb_grade_validity.py. AGENTS.md §6/§16 updated.
+
+
 ## 2026-06-18 — v367 P1-MULTI-TF multi-bar-size shadow logging — DEPLOYED & COMMITTED (e325857c), LIVE
 
 ### What shipped

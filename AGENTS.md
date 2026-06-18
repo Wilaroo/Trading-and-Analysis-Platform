@@ -1078,13 +1078,16 @@ GET /api/scanner/setup-trade-matrix
 Returns full matrix + live classifier stats so the UI can render the
 daily-Setup heat-grid.
 
-### Known bugs in scoring (status updated 2026-06-18)
-- **Scalp SMB grade** (PARTIAL): a timeframe-aware checklist shipped in v19.34.310
-  (`scoring_engine.evaluate_smb_checklist(..., timeframe=)`) but it is **env-gated OFF**
-  (`SMB_CHECKLIST_TIMEFRAME_AWARE=false`) and primarily *loosens* swing thresholds (so swings
-  stop clustering at C) — it does NOT yet specifically tighten the original concern (scalps
-  getting inflated full-day B grades). Verify with `diag_v368_smb_grade_by_style.py` before
-  enabling/extending. Tracked ROADMAP P2.
+### Known bugs in scoring (status updated 2026-06-18 — all 3 triaged, none open)
+- ~~**Scalp SMB grade not timeframe-aware**~~ ✅ CLOSED — verified 2026-06-18 (diag_v368/v369):
+  (1) the §16 premise is DISPROVEN — scalp alerts are *modestly* graded (avg smb 29.6) and were
+  profitable in-sample, while *intraday* carries the HIGHEST smb scores (37.8) yet the worst
+  outcome (24% win, −0.26R, n=59); and (2) MOOT for execution anyway — since v19.34.175 `smb_grade`
+  is AUDIT-ONLY and does NOT drive sizing (`unified_grade`=`tqs_grade` is the canonical grade; SMB is
+  15% of one TQS pillar). A timeframe-aware checklist exists (v310, env-gated OFF) but only loosens
+  *swing* thresholds. NOTE: bot_trades does NOT reliably persist smb_score_total (all "?") and 93% of
+  closed trades carry lifecycle styles (trade_2_hold/reconciled), so grade→R validity can't be measured
+  from bot_trades. If grade-validity ever matters, validate TQS (tqs_grade), not SMB.
 - ~~**AI rejection prompt staleness** (squeeze scalp-only)~~ ✅ RESOLVED — verified 2026-06-18:
   squeeze is consistently `intraday` across `trade_style_classifier.py:70`,
   `opportunity_evaluator._SCALP_SETUPS` (absent), `sentcom_service.SCALP_SETUPS` (absent),
