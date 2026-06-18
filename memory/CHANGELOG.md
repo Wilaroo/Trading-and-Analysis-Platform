@@ -1,5 +1,7 @@
-## 2026-06-18 — v385 FUNDAMENTAL PILLAR F2a (scoring) — days_to_cover squeeze sub-score
-With F1 landing days_to_cover at ~80% coverage, wire it into scoring. `fundamental_quality.py`: when
+## 2026-06-18 — v385 FUNDAMENTAL PILLAR F2a (scoring) — days_to_cover squeeze sub-score [APPLIED+PUSHED]
+APPLIED on DGX + pushed: patch_v384 (FINRA dtc capture, commit f3da0979) + patch_v385 (dtc squeeze
+sub-score, commit f96b86a9). Backend restarted clean (startup complete, IB connected, health green).
+With F1 landing days_to_cover at ~80% coverage, wired it into scoring. `fundamental_quality.py`: when
 SI% is genuinely absent (no float), the short-interest sub-score previously went flat neutral-50; now
 it falls back to FINRA **days_to_cover** (squeeze fuel for longs / crowded-short risk for shorts, no
 float needed). patch_v385 (paste.rs/Zxp8O), 3 anchored chunks, py_compile-gated, `--rollback`.
