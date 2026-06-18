@@ -16,15 +16,14 @@ Open priorities, deferred ideas, and backlog. Move items to
   2026-06-16 diag_v320x). classify_regime threshold LEFT UNCHANGED. Do NOT recalibrate 1.3.
 
 ## 🔴 NEXT SESSION (after 2026-06-18)
-- **P1 — VERIFY v379 (smart_filter grade-gate) live:** APPLIED on DGX (paste.rs/ow794), restart +
-  RTH pending. After restart, `diag_v379_smartfilter_input_probe.py --days 1` → borderline skips
-  should reason on the calibrated GRADE (not the mislabeled "TQS (60)"); B-grade borderlines should
-  fire. Tune live with SMART_FILTER_BORDERLINE_MIN_GRADE=C|B|A (no redeploy). Rollback: patcher --rollback.
-- **P1 — Issue 4: dedup_cooldown blocking continuation re-entries** (HON all-day trend). Investigate
-  why dedup blocks valid re-entries on trending names. (Was queued after Issue 3 = now v379.)
-- **P1 — Path B: de-compress the TQS scale itself** (the deeper root cause behind v379). Turn off
-  TQS_SETUP_DECOMPRESS once v310 C-1 confirmably feeds real SMB; re-baseline absent-fundamental→50 so
-  the raw composite spans 0-100. Re-rates the whole book → own validation pass (grade dist pre/post).
+- ✅ **P1 — v379 (smart_filter grade-gate) — LIVE-VERIFIED** (post-restart 18:43 UTC): 0 borderline
+  "TQS (X)…threshold(75)" skips; only legit low-win-rate skips remain. Full-RTH re-confirm next session
+  (plain `diag_v379 --days 1`); tune live with SMART_FILTER_BORDERLINE_MIN_GRADE=C|B|A if needed.
+- ✅ **P1 — Issue 4 / v381 (dedup mark_fired post-trade) — LIVE-VERIFIED** (post-restart): dedup_cooldown
+  drops = 0 (BLOCKED_NO_TRADE_DAY collapsed 92.9%→0). Full-RTH re-confirm next session.
+- 🟡 **P1 — Path B: de-compress the TQS scale itself** (the deeper root cause behind v379) — **ACTIVE**.
+  Read-only probe `diag_v382_tqs_pillar_compression.py` SHIPPED (paste.rs/Aw9pa). NEXT: run on DGX
+  (`--days 5`), read per-pillar stdev + absent-fundamental-50 pinning %, THEN scope the math:
 - **P1 — VERIFY v367 in the wild:** after RTH, `diag_v366_pwire_readiness.py --days 1` → bar_size
   distribution should show 1min/15min (not 100% 5min). Confirms multi-TF accrual.
 - **P1 — P-WIRE Phase 2 edge eval:** still data-gated (RESOLVED 92/200). Run `pwire_shadow_eval.py`

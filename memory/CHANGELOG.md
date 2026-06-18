@@ -1,3 +1,28 @@
+## 2026-06-18 — v382 TQS Path B probe shipped + v379/v381 LIVE-VERIFIED + diag `--since` filter
+Both prior fixes confirmed correct on post-restart (18:43 UTC) live data; Path B read-only probe built.
+
+### v381 (dedup mark_fired post-trade) — ✅ LIVE-VERIFIED
+`diag_v380 --days 1 --since "2026-06-18 18:43"` → `dedup_cooldown` drops = **0** (the dominant
+`BLOCKED_NO_TRADE_DAY` class collapsed from 92.9% to 0). After v381 the cooldown can only be *created*
+when a trade actually opens, so phantom cooldowns for never-traded keys are gone. (Full-RTH re-confirm
+next session with plain `--days 1`.)
+
+### v379 (smart_filter grade-gate) — ✅ LIVE-VERIFIED
+`diag_v379 --days 1 --since "2026-06-18 18:43"` → **0** borderline `"TQS (X)…threshold (75)"` skips
+(the impossible gate is gone); the only 3 smart_filter_skips are the legit low-win-rate branch
+(`win<0.35` / neg-EV — a different, correct gate v379 doesn't touch). Borderline band no longer
+hard-blocks. (~30 min late-afternoon sample; full-RTH re-confirm next session.)
+
+### Tooling
+- `diag_v379`/`diag_v380` gained a `--since "YYYY-MM-DD HH:MM"` (UTC) filter to isolate
+  post-restart-only drops from same-day pre-fix residue.
+- **`diag_v382_tqs_pillar_compression.py`** (READ-ONLY) shipped for **Path B** scoping (paste.rs/Aw9pa):
+  dumps per-pillar score distributions (setup/technical/fundamental/context/execution) + composite,
+  the absent-fundamental→50 pinning %, the `TQS_SETUP_DECOMPRESS` neutral-50 %, and composite
+  grade-floor headroom. **NEXT:** run on DGX (`--days 5`) to scope the TQS de-compression math before
+  touching any scoring.
+
+
 ## 2026-06-18 — v381 DEDUP mark_fired POST-TRADE (Issue 4 / "dedup_cooldown blocks continuation re-entries") — APPLIED on DGX (paste.rs/9Tw70), live-verify pending
 Built+APPLIED patch_v381_dedup_mark_fired_post_trade.py. PRE-SHA 7344020b… → POST a141edb6… (anchors 1/1,
 py_compile OK, mark_fired relocated to line ~4725, rollback byte-exact). Applied + backend restarted
