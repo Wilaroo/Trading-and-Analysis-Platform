@@ -1,3 +1,26 @@
+## 2026-06-18 — v361 (patch_v361) TIGHTEN `big_dog` (min-price $10 + min-stop 1.0%) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diag_v361_big_dog_replay.py 180d/300-sym 5-min + diag_setup_ground_truth.py)
+big_dog (INT-44 tight-coil HOD breakout, LONG) is NOT a suppress — it's a tighten:
+- LIVE trigger@HOD baseline: n=38166, win 46%, winsorAvg **−0.009R** (breakeven, realized RR ~1.05).
+- + min-stop≥1% + price≥$10: n=268, win 53%, winsorAvg **+0.097R**, medR +0.132 → +EV, healthy n.
+- Tighter coil ALONE (range<1.5%, distHOD<0.5%) did nothing (−0.013) → the lever is the stop/price floor.
+- Ground truth (5 real fills): avgR **−2.0**, every loss a sub-1% stop on a <$30 name gapping through
+  the stop (KRG $25.86 stop 25.74 → 25.53). Exactly the population the gates exclude.
+- MKT@signal cut −0.025R (worse) → HOD buy-stop is the right execution; only slippage gates needed.
+
+### Action
+- Patcher `backend/scripts/patch_v361_big_dog_gates.py` (anchored-chunk, whole-file PRE-SHA
+  `0569a724…` guard, `_check_big_dog` PRE_FUNC_SHA `5df2f583…`, `--check`, auto-backup). Adds to
+  `_check_big_dog`: (1) `current_price >= 10.0` entry gate; (2) precompute ATR-floored `stop` and
+  `return None` if `(cp-stop)/cp < 1.0%`. Geometry/coil/target unchanged. Built via programmatic
+  decode→transform→encode off the operator extract (no manual base64). Behaviorally validated +
+  test-logic validated locally against the patched fn (4/4).
+- Regression test `backend/tests/test_v361_big_dog_gates.py` (4 cases).
+- Build doc `memory/v361_big_dog_build.md`. Diag `diag_v361_big_dog_replay.py`.
+- paste.rs: patcher `https://paste.rs/k8eLK`, test `https://paste.rs/LF4j6` (both round-trip cmp-verified).
+
+
 ## 2026-06-18 — v360 (patch_v360) SUPPRESS `first_move_up` + `first_move_down` — BUILT + PASTED (awaiting DGX apply)
 
 ### Why (diag_v360_first_move_replay.py, 180d / 300-sym, 5-min intraday)
