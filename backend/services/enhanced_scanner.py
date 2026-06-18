@@ -8316,6 +8316,12 @@ class EnhancedBackgroundScanner:
         # Determine direction from momentum (close vs SMA)
         momentum = closes[-1] - sma20
         direction = "long" if momentum > 0 else "short"
+        # v358 — LONG-ONLY gate. Replay (365d / 400-sym daily) proved the momentum-SHORT
+        # branch is negative-EV in EVERY config (winsorAvg -0.04..-0.09, totW -0.8k..-1.1k),
+        # dragging a solidly +EV long side (+0.073 R/trade, 51% win) to breakeven. Suppress
+        # shorts; keep the long edge. See memory/v358_daily_squeeze_build.md.
+        if direction != "long":
+            return None
         
         current = closes[-1]
         # v19.34.54: ATR-floored stop using the squeeze-period structural
