@@ -6498,99 +6498,19 @@ class EnhancedBackgroundScanner:
     # existing detectors share. Risk-reward sized for intraday scalps (≥1.5).
     
     async def _check_first_move_up(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """First Move Up — SHORT (fade first morning push to HOD).
-
-        Trigger: price has pushed up making a fresh HOD off the open, RSI is
-        overbought, tape shows exhaustion / strong-ask, ready to fade back to
-        VWAP or the open.
-        """
-        if snapshot.high_of_day <= 0 or snapshot.atr <= 0:
-            return None
-        # Push must be meaningful: > 1.5% from open AND price within 0.5% of HOD
-        push_pct = ((snapshot.high_of_day - snapshot.open) / snapshot.open) * 100 if snapshot.open > 0 else 0
-        dist_from_hod_pct = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-        if (push_pct >= 1.5 and
-            dist_from_hod_pct <= 0.5 and
-            snapshot.rsi_14 >= 68 and
-            snapshot.dist_from_vwap >= 1.0 and
-            snapshot.rvol >= 1.5):
-            target_price = max(snapshot.vwap, snapshot.open)
-            stop = round(snapshot.high_of_day + (snapshot.atr * 0.25), 2)
-            risk = abs(stop - snapshot.current_price)
-            reward = abs(snapshot.current_price - target_price)
-            rr = (reward / risk) if risk > 0 else 1.5
-            return LiveAlert(
-                id=f"first_move_up_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="first_move_up",
-                strategy_name="First Move Up Fade (MORN-01)",
-                direction="short",
-                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=stop,
-                target=round(target_price, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🪂 {symbol} First-Move-Up Fade — HOD push +{push_pct:.1f}%",
-                reasoning=[
-                    f"Push from open: +{push_pct:.1f}% to HOD ${snapshot.high_of_day:.2f}",
-                    f"Within {dist_from_hod_pct:.2f}% of HOD",
-                    f"RSI overbought: {snapshot.rsi_14:.0f}",
-                    f"{snapshot.dist_from_vwap:+.1f}% extended above VWAP",
-                    f"Target: VWAP/open ${target_price:.2f}",
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
-            )
+        """First Move Up — SUPPRESSED v360 (returns None).
+        Intraday replay (180d / 300-sym, 5-min) proved this morning SHORT fade is negative-EV:
+        win 27%, winsorAvg -0.106 R/trade (>50% hit the full stop). Tighter gates (push 2.0,
+        RSI 72) did not help. Fading a volume-confirmed fresh-HOD push fights the momentum the
+        validated setups trade. Suppressed like vwap_bounce (v354). See memory/v360_first_move_build.md."""
         return None
 
     async def _check_first_move_down(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """First Move Down — LONG (fade first morning flush to LOD)."""
-        if snapshot.low_of_day <= 0 or snapshot.atr <= 0:
-            return None
-        flush_pct = ((snapshot.open - snapshot.low_of_day) / snapshot.open) * 100 if snapshot.open > 0 else 0
-        dist_from_lod_pct = ((snapshot.current_price - snapshot.low_of_day) / snapshot.current_price) * 100
-        if (flush_pct >= 1.5 and
-            dist_from_lod_pct <= 0.5 and
-            snapshot.rsi_14 <= 32 and
-            snapshot.dist_from_vwap <= -1.0 and
-            snapshot.rvol >= 1.5):
-            target_price = min(snapshot.vwap, snapshot.open)
-            stop = round(snapshot.low_of_day - (snapshot.atr * 0.25), 2)
-            risk = abs(snapshot.current_price - stop)
-            reward = abs(target_price - snapshot.current_price)
-            rr = (reward / risk) if risk > 0 else 1.5
-            return LiveAlert(
-                id=f"first_move_down_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="first_move_down",
-                strategy_name="First Move Down Reversal (MORN-02)",
-                direction="long",
-                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=stop,
-                target=round(target_price, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🪃 {symbol} First-Move-Down Reversal — LOD flush −{flush_pct:.1f}%",
-                reasoning=[
-                    f"Flush from open: −{flush_pct:.1f}% to LOD ${snapshot.low_of_day:.2f}",
-                    f"Within {dist_from_lod_pct:.2f}% of LOD",
-                    f"RSI oversold: {snapshot.rsi_14:.0f}",
-                    f"{snapshot.dist_from_vwap:+.1f}% below VWAP",
-                    f"Target: VWAP/open ${target_price:.2f}",
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
-            )
+        """First Move Down — SUPPRESSED v360 (returns None).
+        Intraday replay (180d / 300-sym, 5-min) proved this morning LONG fade is negative-EV:
+        win 24%, winsorAvg -0.176 R/trade (>50% hit the full stop). Tighter gates did not help.
+        Fading a volume-confirmed flush fights momentum. Suppressed like vwap_bounce (v354).
+        See memory/v360_first_move_build.md."""
         return None
 
     async def _check_back_through_open(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
