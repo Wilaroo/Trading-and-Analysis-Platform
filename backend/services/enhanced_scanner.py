@@ -952,6 +952,16 @@ class EnhancedBackgroundScanner:
                 os.environ.get("SCALP_MIN_RVOL", "1.0"))
         except (TypeError, ValueError):
             self._scalp_min_rvol = 1.0
+        # v368 — scalp/intraday ADRP (Average Daily Range %) floor. Index
+        # ETFs (EWT/IWF/FXI) & sleepy megacaps pass the volume floors but do
+        # NOT move enough to scalp. 0 disables. Sourced from
+        # symbol_adv_cache.adrp_20d with an ib_historical_data fallback.
+        try:
+            self._scalp_min_adrp = float(
+                os.environ.get("SCALP_MIN_ADRP", "2.0"))
+        except (TypeError, ValueError):
+            self._scalp_min_adrp = 2.0
+        self._adrp_cache: Dict[str, Any] = {}
         # v322r — leveraged-instrument scalp exclusion (2026-06-12 EXT_SL
         # autopsy: gap-throughs on geared products — ARMG -3.93R in a
         # 6-minute hold — account for the entire excess stop-slippage tail).
@@ -1865,10 +1875,13 @@ class EnhancedBackgroundScanner:
                         pass
                     return False
 
-            # Known-liquid bypass (operator decision 2026-06-XX): a transient
-            # ADV cache miss on AAPL/SPY must not block a legit signal.
-            if symbol in self._known_liquid_symbols:
-                return True
+            # v368 — known-liquid no longer FULLY bypasses the gate. The old
+            # `return True` let high-$/thin-share megacaps (HON 2.2M sh, plus
+            # 92 names < 3M sh) skip the scalp share/ADRP proof entirely. It
+            # now only WAIVES the dollar floor on a genuine cache MISS
+            # (adv_dollar <= 0, handled below); the scalp share/ADRP/RVOL
+            # proof ALWAYS runs.
+            _known_liquid = symbol in self._known_liquid_symbols
 
             tier, floor = self._liquidity_tier_floor(alert)
 
@@ -1893,7 +1906,7 @@ class EnhancedBackgroundScanner:
 
             reason = None
             ctx_extra: Dict[str, Any] = {}
-            if adv_dollar < floor:
+            if adv_dollar < floor and not (_known_liquid and adv_dollar <= 0):
                 reason = (
                     f"liquidity floor: avg_dollar_vol "
                     f"{'unknown/0' if adv_dollar <= 0 else f'${adv_dollar:,}'} "
@@ -1943,6 +1956,18 @@ class EnhancedBackgroundScanner:
                                          "share_adv": share_adv,
                                          "min_share_adv": self._scalp_min_share_adv,
                                          "fail_closed": share_adv <= 0}
+                    if reason is None and self._scalp_min_adrp > 0:
+                        adrp = await self._get_adrp_for_gate(symbol)
+                        if adrp < self._scalp_min_adrp:
+                            reason = (
+                                f"scalp ADRP floor: "
+                                f"{'unmeasured' if adrp <= 0 else f'{adrp:.2f}%'} "
+                                f"< {self._scalp_min_adrp:g}% (low intraday "
+                                f"range \u2014 poor scalp candidate)"
+                            )
+                            ctx_extra = {"check": "scalp_adrp", "adrp": adrp,
+                                         "min_adrp": self._scalp_min_adrp,
+                                         "fail_closed": adrp <= 0}
 
             if reason is None:
                 return True
@@ -3793,6 +3818,64 @@ class EnhancedBackgroundScanner:
             except Exception:
                 shares = 0
         return int(shares or 0)
+
+    async def _get_adrp_for_gate(self, symbol: str) -> float:
+        """v368 \u2014 Average Daily Range % (ADRP) for the scalp/intraday
+        movement floor. Reads symbol_adv_cache.adrp_20d first (warm-filled by
+        the IB collector), else computes on the fly. Memoized per
+        (symbol, UTC-date). Returns 0.0 when unprovable (caller treats that
+        as fail-closed for scalp/intraday)."""
+        from datetime import datetime, timezone
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cached = self._adrp_cache.get(symbol)
+        if cached and cached[0] == day:
+            return cached[1]
+
+        def _sync_lookup():
+            try:
+                from database import get_database
+                db = get_database()
+                if db is None:
+                    return None
+                doc = db["symbol_adv_cache"].find_one(
+                    {"symbol": symbol}, {"_id": 0, "adrp_20d": 1})
+                v = (doc or {}).get("adrp_20d")
+                return float(v) if isinstance(v, (int, float)) and v > 0 else None
+            except Exception:
+                return None
+
+        adrp = await asyncio.to_thread(_sync_lookup)
+        if adrp is None:
+            adrp = await self._compute_adrp_from_bars(symbol)
+        adrp = float(adrp or 0.0)
+        self._adrp_cache[symbol] = (day, adrp)
+        return adrp
+
+    async def _compute_adrp_from_bars(self, symbol: str, days: int = 20) -> float:
+        """On-the-fly ADRP from the last `days` daily bars in
+        ib_historical_data: mean((high-low)/close)*100. 0.0 on miss."""
+        def _sync():
+            try:
+                from database import get_database
+                db = getattr(self, "db", None) or get_database()
+                if db is None:
+                    return 0.0
+                bars = list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "high": 1, "low": 1, "close": 1, "date": 1}
+                ).sort([("date", -1)]).limit(days))
+                rngs = []
+                for b in bars:
+                    h, lo, c = b.get("high"), b.get("low"), b.get("close")
+                    if all(isinstance(x, (int, float)) for x in (h, lo, c)) and c > 0:
+                        rngs.append((h - lo) / c)
+                return (100.0 * sum(rngs) / len(rngs)) if rngs else 0.0
+            except Exception:
+                return 0.0
+        try:
+            return float(await asyncio.to_thread(_sync))
+        except Exception:
+            return 0.0
 
     async def _fetch_single_adv(self, symbol: str) -> int:
         """
