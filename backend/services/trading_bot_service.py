@@ -4692,8 +4692,14 @@ class TradingBotService:
                     )
                     continue
 
-                # Mark alert as fired (starts cooldown) BEFORE heavy evaluation
-                _dedup.mark_fired(symbol, setup, direction)
+                # v380 — mark_fired MOVED to AFTER a trade is created (the
+                # `if trade:` block below). It used to start the 300s
+                # (symbol,setup,dir) cooldown HERE, before evaluation, so every
+                # alert later REJECTED downstream still burned the cooldown —
+                # diag_v380: 92.9% of dedup_cooldown blocks (HON 96.4%) were
+                # keys that NEVER traded, silently suppressing re-evaluation on
+                # trending names. The open-position + pending checks above still
+                # prevent stacking on a live position.
 
                 # Reset the evaluator's specific-rejection flag. The evaluator
                 # sets this flag to True whenever it records a specific
@@ -4712,6 +4718,11 @@ class TradingBotService:
                 await asyncio.sleep(0)
                 
                 if trade:
+                    # v380 — start the (symbol,setup,dir) cooldown HERE: a real
+                    # trade was created. Also stops a duplicate same-key alert
+                    # later in this same batch from opening a second trade
+                    # before the open/pending dicts reflect this one.
+                    _dedup.mark_fired(symbol, setup, direction)
                     print(f"✅ [TradingBot] Trade created for {symbol}: {trade.direction.value} {trade.shares} shares @ ${trade.entry_price:.2f}")
                     if self._mode == BotMode.AUTONOMOUS:
                         # Execute immediately
