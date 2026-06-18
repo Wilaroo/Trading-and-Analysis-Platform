@@ -696,12 +696,25 @@ class IBWorkerThread(threading.Thread):
                 executions.append({
                     "exec_id": fill.execution.execId,
                     "order_id": fill.execution.orderId,
+                    # v19.34.316 — surface perm_id+account so the V5 HUD
+                    # can disambiguate live vs paper-channel executions.
+                    "perm_id": getattr(fill.execution, "permId", 0) or 0,
+                    "account": getattr(fill.execution, "acctNumber", "") or "",
                     "symbol": fill.contract.symbol,
                     "side": fill.execution.side,
                     "shares": fill.execution.shares,
                     "price": fill.execution.price,
                     "time": fill.execution.time.isoformat() if fill.execution.time else None,
-                    "commission": fill.commissionReport.commission if fill.commissionReport else 0
+                    "commission": fill.commissionReport.commission if fill.commissionReport else 0,
+                    # v19.34.316 — broker-reported realized PnL per fill.
+                    # Pre-v316 this was silently dropped from the payload
+                    # even though it lives on `commissionReport.realizedPNL`.
+                    # See diag_v311_partial_fill_attribution_today probe:
+                    # DVN scale-out attribution was invisible because of this.
+                    "realized_pnl": (
+                        getattr(fill.commissionReport, "realizedPNL", 0)
+                        if fill.commissionReport else 0
+                    ),
                 })
             
             return IBResponse(success=True, data=executions)
@@ -718,7 +731,7 @@ class IBWorkerThread(threading.Thread):
             return IBResponse(success=False, error="Not connected to IB")
         
         try:
-            from ib_insync import Stock, Index
+            from ib_insync import Stock
             
             symbol = params.get("symbol")
             duration = params.get("duration", "1 D")
@@ -729,12 +742,7 @@ class IBWorkerThread(threading.Thread):
             # Process event loop before heavy operation
             self.ib.sleep(0.1)
             
-            # VIX is a CBOE index, not a stock — a Stock contract returns 0 bars.
-            sym_u = symbol.upper()
-            if sym_u == "VIX":
-                contract = Index("VIX", "CBOE")
-            else:
-                contract = Stock(sym_u, "SMART", "USD")
+            contract = Stock(symbol.upper(), "SMART", "USD")
             self.ib.qualifyContracts(contract)
             
             logger.info(f"Contract qualified for {symbol}, making reqHistoricalData call...")

@@ -30,19 +30,15 @@ logger = logging.getLogger(__name__)
 SEQUENCE_LENGTH = 5  # Number of chart windows to look back
 DIRECTIONS = ["down", "flat", "up"]  # Triple-barrier class order: -1/0/+1
 
-# v19.34.311 — Validation forward-pass chunk size — see temporal_fusion_transformer.py. The
-# sequence dimension makes the all-at-once val forward even heavier here, so we
-# chunk it to avoid OOM-killing the subprocess on unified memory.
+# v19.34.311 — Validation forward-pass chunk size — see temporal_fusion_transformer.py.
+# The sequence dim makes the all-at-once val forward even heavier here, so we chunk
+# it to avoid OOM-killing the subprocess on unified memory.
 VAL_CHUNK = 8192
 
-# Triple-barrier hyperparameters (ATR multiples) — env-overridable via
-# TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD. Single source of truth lives in
-# triple_barrier_config so every training path rebalances together.
-from services.ai_modules.triple_barrier_config import (
-    DEFAULT_PT as TB_PT_MULT,
-    DEFAULT_SL as TB_SL_MULT,
-    DEFAULT_ATR_PERIOD as TB_ATR_PERIOD,
-)
+# Triple-barrier hyperparameters (ATR multiples)
+TB_PT_MULT = 2.0   # 2 × ATR profit target
+TB_SL_MULT = 1.0   # 1 × ATR stop loss
+TB_ATR_PERIOD = 14  # Lookback for ATR estimation
 
 
 def _try_import_torch():
@@ -234,8 +230,8 @@ class CNNLSTMModel:
             # Fill remaining features with derived indicators
             feat[14] = (closes[i] - lows[i]) / (highs[i] - lows[i]) if (highs[i] - lows[i]) > 0 else 0.5
             # feat 15: v19.34.311 — SCALE-FREE 50-bar return (was raw $ distance from
-            # closes[i]-mean(...), which dwarfed other features for high-priced
-            # names under the single global scaler).
+            # SMA20, which dwarfed other features for high-priced names under the
+            # single global scaler).
             feat[15] = (closes[i] / closes[max(0, i - 50)] - 1) * 100  # 50-bar return
 
             all_bar_features.append(feat)

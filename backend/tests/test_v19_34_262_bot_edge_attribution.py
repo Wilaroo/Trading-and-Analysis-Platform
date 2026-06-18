@@ -1,16 +1,12 @@
 """
 v19.34.262 — bot-edge attribution helper tests.
-
-Validates services.trade_outcome_hygiene.is_adopted_entry() — the single
-shared definition used by the Mission Control P&L split and the offline
-audit so the two always agree.
 """
 from services.trade_outcome_hygiene import is_adopted_entry
 
 
 def test_bot_fired_is_not_adopted():
     assert is_adopted_entry("bot_fired", "bot", "target_hit") is False
-    assert is_adopted_entry("", "", "") is False  # legacy/unstamped -> treated as bot
+    assert is_adopted_entry("", "", "") is False
     assert is_adopted_entry("strategy_entry_v123", "bot", "stop_loss") is False
 
 
@@ -29,7 +25,6 @@ def test_case_insensitive_and_none_safe():
 
 
 def test_realized_split_math():
-    """End-to-end bucketing math the positions endpoint performs."""
     rows = [
         {"entered_by": "bot_fired", "source": "bot", "close_reason": "target_hit", "net_pnl": 100.0},
         {"entered_by": "bot_fired", "source": "bot", "close_reason": "stop_loss", "net_pnl": -40.0},
@@ -42,5 +37,5 @@ def test_realized_split_math():
             adopted += t["net_pnl"]
         else:
             bot += t["net_pnl"]
-    assert bot == 60.0          # 100 - 40 (the bot's own edge)
-    assert adopted == 5250.0    # 5000 + 250 (adopted positions)
+    assert bot == 60.0
+    assert adopted == 5250.0

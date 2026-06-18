@@ -191,6 +191,49 @@ LATER_HORIZON_STYLES = {"swing", "position", "investment", "multi_day"}
 LATER_HORIZON_START_ET = (10, 15)  # (hour, minute) ET — inclusive start
 
 
+# v19.34.313 — Alert Cadence Governor.
+# The 8%-drift eviction in _cleanup_expired_alerts was killing daily/swing
+# alerts intraday (their trigger=daily-close drifts >8% naturally during
+# an open trending day). The next _scan_daily_setups cycle then re-fired
+# them because the in-memory dedup at _process_new_alert only checks
+# `self._live_alerts` and the row had been evicted (Mongo still
+# status='active'). Three layered fixes:
+#   Layer 1: only price-drift-evict scalp/intraday tier alerts.
+#   Layer 2: persistent-dedup fallback queries `live_alerts` collection.
+#   Layer 3: per-tier env-tunable refire cooldown windows.
+# Plus EOD eviction for daily-tier alerts at >= EOD_EVICTION_ET_HOUR so
+# they don't accumulate across sessions.
+SCALP_INTRADAY_STYLES = {"scalp", "intraday"}
+DAILY_TIER_STYLES = {"multi_day", "swing", "position", "investment"}
+EOD_EVICTION_ET_HOUR = 16  # daily-tier evicted at >= 16:00 ET
+
+try:
+    _COOLDOWN_S_SCALP = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_SCALP_S", "300"))      # 5 min default
+except (TypeError, ValueError):
+    _COOLDOWN_S_SCALP = 300
+try:
+    _COOLDOWN_S_INTRADAY = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_INTRADAY_S", "1800"))  # 30 min default
+except (TypeError, ValueError):
+    _COOLDOWN_S_INTRADAY = 1800
+try:
+    _COOLDOWN_S_DAILY = int(os.environ.get(
+        "SETUP_REFIRE_COOLDOWN_DAILY_S", "86400"))    # 24 h default
+except (TypeError, ValueError):
+    _COOLDOWN_S_DAILY = 86400
+
+
+def refire_cooldown_seconds(trade_style: str) -> int:
+    """Pick the per-tier refire cooldown by trade_style (v19.34.313)."""
+    ts = (trade_style or "").lower()
+    if ts == "scalp":
+        return _COOLDOWN_S_SCALP
+    if ts in DAILY_TIER_STYLES:
+        return _COOLDOWN_S_DAILY
+    return _COOLDOWN_S_INTRADAY
+
+
 # Strategy market regime preferences.
 #
 # 2026-04-29 architectural decision (post Setup-landscape v3): this map
@@ -746,8 +789,25 @@ class LiveAlert:
                     self.smb_is_a_plus = smb_score.is_a_plus
 
                     if smb_score.is_a_plus:
-                        self.trade_style = "multi_day"
-                        self.target_r_multiple = 5.0
+                        # v19.34.320p — A+ is a QUALITY flag, NOT a HORIZON
+                        # flag. Previously ANY A+ alert was force-stamped
+                        # trade_style="multi_day" + 5R, which hijacked
+                        # intraday/scalp-natured setups (gap_fade,
+                        # second_chance, backside, opening_drive, ...) into
+                        # 5R OVERNIGHT carries — simultaneously inflating the
+                        # multi-day count AND draining the best signals out of
+                        # the intraday book before they could fire intraday
+                        # (v320n/v320o diag: ~97 intraday setups/day relabeled;
+                        # INTRADAY smbA+=0% vs CARRY smbA+=43%). Now we only
+                        # promote to a multi-day hold when the setup is ALREADY
+                        # carry-natured; intraday/scalp setups keep their
+                        # natural horizon + target (option A) so A+ scalps stay
+                        # intraday and flatten at EOD per the intraday mandate.
+                        # smb_is_a_plus (quality/priority benefit) still flows.
+                        _natural_style = (self.trade_style or "").strip().lower()
+                        if _natural_style in ("multi_day", "swing", "position", "investment"):
+                            self.trade_style = "multi_day"
+                            self.target_r_multiple = 5.0
 
                 # Earnings score if available
                 if "earnings_score" in context:
@@ -892,6 +952,16 @@ class EnhancedBackgroundScanner:
                 os.environ.get("SCALP_MIN_RVOL", "1.0"))
         except (TypeError, ValueError):
             self._scalp_min_rvol = 1.0
+        # v368 — scalp/intraday ADRP (Average Daily Range %) floor. Index
+        # ETFs (EWT/IWF/FXI) & sleepy megacaps pass the volume floors but do
+        # NOT move enough to scalp. 0 disables. Sourced from
+        # symbol_adv_cache.adrp_20d with an ib_historical_data fallback.
+        try:
+            self._scalp_min_adrp = float(
+                os.environ.get("SCALP_MIN_ADRP", "2.0"))
+        except (TypeError, ValueError):
+            self._scalp_min_adrp = 2.0
+        self._adrp_cache: Dict[str, Any] = {}
         # v322r — leveraged-instrument scalp exclusion (2026-06-12 EXT_SL
         # autopsy: gap-throughs on geared products — ARMG -3.93R in a
         # 6-minute hold — account for the entire excess stop-slippage tail).
@@ -1805,10 +1875,13 @@ class EnhancedBackgroundScanner:
                         pass
                     return False
 
-            # Known-liquid bypass (operator decision 2026-06-XX): a transient
-            # ADV cache miss on AAPL/SPY must not block a legit signal.
-            if symbol in self._known_liquid_symbols:
-                return True
+            # v368 — known-liquid no longer FULLY bypasses the gate. The old
+            # `return True` let high-$/thin-share megacaps (HON 2.2M sh, plus
+            # 92 names < 3M sh) skip the scalp share/ADRP proof entirely. It
+            # now only WAIVES the dollar floor on a genuine cache MISS
+            # (adv_dollar <= 0, handled below); the scalp share/ADRP/RVOL
+            # proof ALWAYS runs.
+            _known_liquid = symbol in self._known_liquid_symbols
 
             tier, floor = self._liquidity_tier_floor(alert)
 
@@ -1833,7 +1906,7 @@ class EnhancedBackgroundScanner:
 
             reason = None
             ctx_extra: Dict[str, Any] = {}
-            if adv_dollar < floor:
+            if adv_dollar < floor and not (_known_liquid and adv_dollar <= 0):
                 reason = (
                     f"liquidity floor: avg_dollar_vol "
                     f"{'unknown/0' if adv_dollar <= 0 else f'${adv_dollar:,}'} "
@@ -1854,7 +1927,17 @@ class EnhancedBackgroundScanner:
                             rvol = float(getattr(alert, "rvol", 0) or 0)
                         except (TypeError, ValueError):
                             rvol = 0.0
-                        if rvol <= 0:
+                        # v369 - rvol == 0.0 means UNMEASURED (no live-volume
+                        # push for names outside the top-400 L1 set), NOT zero
+                        # volume. Fail-closing dropped the best movers
+                        # (SNDK/MRVL/SPCX/TSLA). Unmeasured now DEFERS to the
+                        # share-ADV + ADRP proofs below; a MEASURED rvol below
+                        # floor still blocks. Reversible: SCALP_RVOL_FAIL_CLOSED=true.
+                        import os as _os_v369
+                        _rvol_fail_closed = _os_v369.environ.get(
+                            "SCALP_RVOL_FAIL_CLOSED", "false"
+                        ).strip().lower() in ("1", "true", "yes")
+                        if rvol <= 0 and _rvol_fail_closed:
                             reason = (
                                 f"scalp RVOL proof: rvol unmeasured (0.0) — "
                                 f"scalp/intraday needs ≥{self._scalp_min_rvol:g}x "
@@ -1863,7 +1946,7 @@ class EnhancedBackgroundScanner:
                             ctx_extra = {"check": "scalp_rvol", "rvol": rvol,
                                          "min_rvol": self._scalp_min_rvol,
                                          "fail_closed": True}
-                        elif rvol < self._scalp_min_rvol:
+                        elif rvol > 0 and rvol < self._scalp_min_rvol:
                             reason = (
                                 f"scalp RVOL proof: rvol {rvol:.2f}x < "
                                 f"{self._scalp_min_rvol:g}x floor"
@@ -1883,6 +1966,18 @@ class EnhancedBackgroundScanner:
                                          "share_adv": share_adv,
                                          "min_share_adv": self._scalp_min_share_adv,
                                          "fail_closed": share_adv <= 0}
+                    if reason is None and self._scalp_min_adrp > 0:
+                        adrp = await self._get_adrp_for_gate(symbol)
+                        if adrp < self._scalp_min_adrp:
+                            reason = (
+                                f"scalp ADRP floor: "
+                                f"{'unmeasured' if adrp <= 0 else f'{adrp:.2f}%'} "
+                                f"< {self._scalp_min_adrp:g}% (low intraday "
+                                f"range \u2014 poor scalp candidate)"
+                            )
+                            ctx_extra = {"check": "scalp_adrp", "adrp": adrp,
+                                         "min_adrp": self._scalp_min_adrp,
+                                         "fail_closed": adrp <= 0}
 
             if reason is None:
                 return True
@@ -2380,31 +2475,13 @@ class EnhancedBackgroundScanner:
             else:
                 imbalance_signal = TapeSignal.NEUTRAL
             
-            # Momentum signal from RVOL and price action.
-            # v19.34.304 — GRADUATED RVOL momentum. The old hard `rvol>=2.0` gate
-            # gave ZERO momentum credit to moderate-momentum intraday setups
-            # (second_chance / big_dog / bouncy_ball cluster at rvol ~1.4-1.9). With
-            # no L2 imbalance their tape_score never cleared the tight-spread +0.2,
-            # so the tape pillar stayed weak and they rarely confirmed. Now rvol in
-            # [1.5, 2.0) earns a HALF-strength momentum contribution (±0.15) while
-            # >=2.0 keeps FULL strength (±0.3) — backward-compatible for the
-            # already-passing >=2.0 setups. Exhaustion (flat on huge volume) keeps
-            # its >=5.0 semantics.
-            momentum_strength = 0.0
+            # Momentum signal from RVOL and price action
             if snapshot.rvol >= 2.0 and snapshot.dist_from_ema9 > 0:
                 momentum_signal = TapeSignal.MOMENTUM_UP
-                momentum_strength = 0.30
             elif snapshot.rvol >= 2.0 and snapshot.dist_from_ema9 < 0:
                 momentum_signal = TapeSignal.MOMENTUM_DOWN
-                momentum_strength = 0.30
             elif snapshot.rvol >= 5.0:
                 momentum_signal = TapeSignal.EXHAUSTION
-            elif snapshot.rvol >= 1.5 and snapshot.dist_from_ema9 > 0:
-                momentum_signal = TapeSignal.MOMENTUM_UP
-                momentum_strength = 0.15
-            elif snapshot.rvol >= 1.5 and snapshot.dist_from_ema9 < 0:
-                momentum_signal = TapeSignal.MOMENTUM_DOWN
-                momentum_strength = 0.15
             else:
                 momentum_signal = TapeSignal.NEUTRAL
             
@@ -2420,11 +2497,11 @@ class EnhancedBackgroundScanner:
             # Imbalance contribution
             tape_score += imbalance * 0.4  # -0.4 to +0.4
             
-            # Momentum contribution (graduated by strength — see v19.34.304 above)
+            # Momentum contribution
             if momentum_signal == TapeSignal.MOMENTUM_UP:
-                tape_score += momentum_strength
+                tape_score += 0.3
             elif momentum_signal == TapeSignal.MOMENTUM_DOWN:
-                tape_score -= momentum_strength
+                tape_score -= 0.3
             
             # Overall signal
             if tape_score > 0.3:
@@ -3752,6 +3829,64 @@ class EnhancedBackgroundScanner:
                 shares = 0
         return int(shares or 0)
 
+    async def _get_adrp_for_gate(self, symbol: str) -> float:
+        """v368 \u2014 Average Daily Range % (ADRP) for the scalp/intraday
+        movement floor. Reads symbol_adv_cache.adrp_20d first (warm-filled by
+        the IB collector), else computes on the fly. Memoized per
+        (symbol, UTC-date). Returns 0.0 when unprovable (caller treats that
+        as fail-closed for scalp/intraday)."""
+        from datetime import datetime, timezone
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        cached = self._adrp_cache.get(symbol)
+        if cached and cached[0] == day:
+            return cached[1]
+
+        def _sync_lookup():
+            try:
+                from database import get_database
+                db = get_database()
+                if db is None:
+                    return None
+                doc = db["symbol_adv_cache"].find_one(
+                    {"symbol": symbol}, {"_id": 0, "adrp_20d": 1})
+                v = (doc or {}).get("adrp_20d")
+                return float(v) if isinstance(v, (int, float)) and v > 0 else None
+            except Exception:
+                return None
+
+        adrp = await asyncio.to_thread(_sync_lookup)
+        if adrp is None:
+            adrp = await self._compute_adrp_from_bars(symbol)
+        adrp = float(adrp or 0.0)
+        self._adrp_cache[symbol] = (day, adrp)
+        return adrp
+
+    async def _compute_adrp_from_bars(self, symbol: str, days: int = 20) -> float:
+        """On-the-fly ADRP from the last `days` daily bars in
+        ib_historical_data: mean((high-low)/close)*100. 0.0 on miss."""
+        def _sync():
+            try:
+                from database import get_database
+                db = getattr(self, "db", None) or get_database()
+                if db is None:
+                    return 0.0
+                bars = list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": "1 day"},
+                    {"_id": 0, "high": 1, "low": 1, "close": 1, "date": 1}
+                ).sort([("date", -1)]).limit(days))
+                rngs = []
+                for b in bars:
+                    h, lo, c = b.get("high"), b.get("low"), b.get("close")
+                    if all(isinstance(x, (int, float)) for x in (h, lo, c)) and c > 0:
+                        rngs.append((h - lo) / c)
+                return (100.0 * sum(rngs) / len(rngs)) if rngs else 0.0
+            except Exception:
+                return 0.0
+        try:
+            return float(await asyncio.to_thread(_sync))
+        except Exception:
+            return 0.0
+
     async def _fetch_single_adv(self, symbol: str) -> int:
         """
         Fetch ADV (Average Daily Volume) for a single symbol from MongoDB.
@@ -4358,163 +4493,184 @@ class EnhancedBackgroundScanner:
     # ==================== SETUP CHECKERS (with tape reading) ====================
     
     async def _check_rubber_band(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Rubber Band Scalp - Mean reversion from EMA9"""
-        # Long setup - extended below EMA9
-        if snapshot.dist_from_ema9 < -2.5 and snapshot.rsi_14 < 38 and snapshot.rvol >= 1.5:
-            extension = abs(snapshot.dist_from_ema9)
-            
-            # Higher priority with tape confirmation
-            if tape.confirmation_for_long and extension > 3.5:
-                priority = AlertPriority.CRITICAL
-            elif extension > 3.5:
-                priority = AlertPriority.HIGH
-            else:
-                priority = AlertPriority.MEDIUM
-            
-            # Calculate proper levels using S/R and ATR
-            stop_loss = round(min(snapshot.low_of_day - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
-            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
-            target_2 = round(snapshot.vwap, 2) if snapshot.vwap > snapshot.ema_9 else round(snapshot.ema_9 + snapshot.atr, 2)
-            
-            # Calculate R-multiple
-            risk = snapshot.current_price - stop_loss
-            reward = target_1 - snapshot.current_price
-            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
-            
-            # Get historical EV
-            ev_info = ""
-            if "rubber_band" in self._strategy_stats:
-                stats = self._strategy_stats["rubber_band"]
-                if stats.win_rate > 0:
-                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
-            
-            return LiveAlert(
-                id=f"rb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="rubber_band_long",
-                strategy_name="Rubber Band Long (INT-25)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.ema_9,
-                stop_loss=stop_loss,
-                target=target_1,
-                risk_reward=r_multiple,
-                trigger_probability=0.65,
-                win_probability=0.62,
-                minutes_to_trigger=10,
-                headline=f"🎯 {symbol} Rubber Band LONG - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Extended {extension:.1f}% below 9-EMA ${snapshot.ema_9:.2f}",
-                    f"RSI oversold at {snapshot.rsi_14:.0f}",
-                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} below support, Target: ${target_1:.2f})",
-                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else "Mean reversion to EMA9",
-                    "Entry: Double bar break above prior highs"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        
-        # Short setup - extended above EMA9
-        if snapshot.dist_from_ema9 > 3.0 and snapshot.rsi_14 > 65 and snapshot.rvol >= 1.5:
-            extension = snapshot.dist_from_ema9
-            
-            if tape.confirmation_for_short and extension > 4.0:
-                priority = AlertPriority.CRITICAL
-            elif extension > 4.0:
-                priority = AlertPriority.HIGH
-            else:
-                priority = AlertPriority.MEDIUM
-            
-            # Calculate proper levels using S/R and ATR
-            stop_loss = round(max(snapshot.high_of_day + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
-            target_1 = round(snapshot.ema_9, 2)  # Primary target: EMA9
-            target_2 = round(snapshot.vwap, 2) if snapshot.vwap < snapshot.ema_9 else round(snapshot.ema_9 - snapshot.atr, 2)  # noqa: F841
-            
-            # Calculate R-multiple
-            risk = stop_loss - snapshot.current_price
-            reward = snapshot.current_price - target_1
-            r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
-            
-            # Get historical EV
-            ev_info = ""
-            if "rubber_band" in self._strategy_stats:
-                stats = self._strategy_stats["rubber_band"]
-                if stats.win_rate > 0:
-                    ev_info = f"Historical: {stats.win_rate:.0%} win, EV {stats.expected_value_r:.2f}R"
-            
-            return LiveAlert(
-                id=f"rb_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="rubber_band_short",
-                strategy_name="Rubber Band Short (INT-25)",
-                direction="short",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.ema_9,
-                stop_loss=stop_loss,
-                target=target_1,
-                risk_reward=r_multiple,
-                trigger_probability=0.65,
-                win_probability=0.58,
-                minutes_to_trigger=10,
-                headline=f"🎯 {symbol} Rubber Band SHORT - {extension:.1f}% extended {'✓ TAPE' if tape.confirmation_for_short else ''}",
-                reasoning=[
-                    f"Extended {extension:.1f}% above 9-EMA ${snapshot.ema_9:.2f}",
-                    f"RSI overbought at {snapshot.rsi_14:.0f}",
-                    f"R:R = {r_multiple:.1f}:1 (Stop: ${stop_loss:.2f} above resistance, Target: ${target_1:.2f})",
-                    f"Support at ${snapshot.support:.2f}, Resistance at ${snapshot.resistance:.2f}",
-                    f"RVOL: {snapshot.rvol:.1f}x | Tape: {tape.overall_signal.value}",
-                    ev_info if ev_info else "Mean reversion to EMA9",
-                    "Entry: Double bar break below prior lows"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        
+        """Rubber Band Scalp — SMB snapback (v19.34.322 redesign).
+
+        Fires on the TRIGGER, not a %-from-EMA9 STATE: price must extend
+        >= EXT_FLOOR% from the SESSION OPEN, then a 1-min double-bar-break
+        snapback prints within +1..+4 bars of the extreme. Validated +EV on a
+        14d native-1min replay (v329 long +0.27R/76%; v330 short +0.59R/74%);
+        the edge lives in the +1..+4 window so the same-bar (+0) reversal is
+        excluded. Caps 2 fires/day per (symbol, side) — cheat-sheet 2-strikes.
+        """
+        EXT_FLOOR = 1.25       # % extension from the session open
+        TRIGGER_WIN = 4        # snapback must print within +1..+4 bars of the extreme
+        ACCEL = 1.3            # extreme-bar range >= ACCEL x median range so far
+        MIN_RVOL = 1.5
+
+        ts = self.technical_service
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+
+        rvol = float(getattr(snapshot, "rvol", 0.0) or 0.0)
+        if rvol < MIN_RVOL:
+            return None
+        open_px = float(getattr(snapshot, "open", 0.0) or bars[0].get("open", 0.0) or 0.0)
+        if open_px <= 0:
+            return None
+
+        caps = getattr(self, "_rb_daily_caps", None)
+        if caps is None:
+            caps = self._rb_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        # ----- LONG snapback: extended BELOW open, green bar clears prior-2 highs -----
+        lows = [(j, b["low"]) for j, b in enumerate(bars) if b.get("low") is not None]
+        if lows:
+            lod = min(v for _, v in lows)
+            lod_idx = max(j for j, v in lows if v == lod)
+            ext_long = (open_px - lod) / open_px * 100.0
+            accel_l = (med_r <= 0) or ((bars[lod_idx]["high"] - bars[lod_idx]["low"]) >= ACCEL * med_r)
+            green = last["close"] > last["open"]
+            clears_hi = i >= 2 and last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+            if (ext_long >= EXT_FLOOR and accel_l and green and clears_hi
+                    and 1 <= (i - lod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:long"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(min(lod - 0.02, snapshot.support - (snapshot.atr * 0.25)), 2)
+                target_1 = round(snapshot.ema_9, 2)
+                risk = snapshot.current_price - stop_loss
+                reward = target_1 - snapshot.current_price
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_long and ext_long > 3.0)
+                            else AlertPriority.HIGH if ext_long > 2.0 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "rubber_band" in self._strategy_stats:
+                    st = self._strategy_stats["rubber_band"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+                return LiveAlert(
+                    id=f"rb_long_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="rubber_band_long",
+                    strategy_name="Rubber Band Long (snapback)",
+                    direction="long",
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.76,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} Rubber Band LONG snapback — {ext_long:.1f}% below open {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_long:.1f}% below open ${open_px:.2f} → 1-min double-bar-break snapback",
+                        f"Snapback {i - lod_idx} bar(s) after LOD ${lod:.2f} (flush range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} below LOD, Target 9-EMA ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to 9-EMA (v329 replay +0.27R, 76% win)",
+                        "Entry: green bar cleared prior-2 highs (2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+                )
+
+        # ----- SHORT snapback: extended ABOVE open, red bar breaks prior-2 lows -----
+        highs = [(j, b["high"]) for j, b in enumerate(bars) if b.get("high") is not None]
+        if highs:
+            hod = max(v for _, v in highs)
+            hod_idx = max(j for j, v in highs if v == hod)
+            ext_short = (hod - open_px) / open_px * 100.0
+            accel_s = (med_r <= 0) or ((bars[hod_idx]["high"] - bars[hod_idx]["low"]) >= ACCEL * med_r)
+            red = last["close"] < last["open"]
+            breaks_lo = i >= 2 and last["low"] < min(bars[i - 1]["low"], bars[i - 2]["low"])
+            if (ext_short >= EXT_FLOOR and accel_s and red and breaks_lo
+                    and 1 <= (i - hod_idx) <= TRIGGER_WIN):
+                key = f"{symbol}:{today}:short"
+                if caps.get(key, 0) >= 2:
+                    return None
+                stop_loss = round(max(hod + 0.02, snapshot.resistance + (snapshot.atr * 0.25)), 2)
+                target_1 = round(snapshot.ema_9, 2)
+                risk = stop_loss - snapshot.current_price
+                reward = snapshot.current_price - target_1
+                r_multiple = round(reward / risk, 2) if risk > 0 else 2.0
+                priority = (AlertPriority.CRITICAL if (tape.confirmation_for_short and ext_short > 3.0)
+                            else AlertPriority.HIGH if ext_short > 2.0 else AlertPriority.MEDIUM)
+                ev_info = ""
+                if "rubber_band" in self._strategy_stats:
+                    st = self._strategy_stats["rubber_band"]
+                    if st.win_rate > 0:
+                        ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+                caps[key] = caps.get(key, 0) + 1
+                tape_tag = "\u2713 TAPE" if tape.confirmation_for_short else ""
+                return LiveAlert(
+                    id=f"rb_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+                    symbol=symbol,
+                    setup_type="rubber_band_short",
+                    strategy_name="Rubber Band Short (snapback)",
+                    direction="short",
+                    priority=priority,
+                    current_price=snapshot.current_price,
+                    trigger_price=round(min(bars[i - 1]["low"], bars[i - 2]["low"]), 2),
+                    stop_loss=stop_loss,
+                    target=target_1,
+                    risk_reward=r_multiple,
+                    trigger_probability=0.65,
+                    win_probability=0.74,
+                    minutes_to_trigger=0,
+                    headline=f"\U0001f3af {symbol} Rubber Band SHORT snapback — {ext_short:.1f}% above open {tape_tag}",
+                    reasoning=[
+                        f"Extended {ext_short:.1f}% above open ${open_px:.2f} → 1-min double-bar-break-down snapback",
+                        f"Snapback {i - hod_idx} bar(s) after HOD ${hod:.2f} (spike range >= {ACCEL:g}x median)",
+                        f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} above HOD, Target 9-EMA ${target_1:.2f})",
+                        f"RVOL {rvol:.1f}x | Tape: {tape.overall_signal.value}",
+                        ev_info if ev_info else "Mean reversion to 9-EMA (v330 replay +0.59R, 74% win)",
+                        "Entry: red bar broke prior-2 lows (2/day cap)",
+                    ],
+                    time_window=self._get_current_time_window().value,
+                    market_regime=self._market_regime.value,
+                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+                )
+
         return None
     
     async def _check_vwap_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """VWAP Bounce - Pullback to VWAP in uptrend"""
-        if (-0.8 < snapshot.dist_from_vwap < 0.3 and 
-            snapshot.trend == "uptrend" and 
-            snapshot.above_ema9 and
-            snapshot.rvol >= 1.5):
-            
-            dist = abs(snapshot.dist_from_vwap)
-            priority = AlertPriority.HIGH if dist < 0.3 and tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"vwap_bounce_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="vwap_bounce",
-                strategy_name="VWAP Bounce (INT-06)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(snapshot.vwap - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.vwap + (snapshot.atr * 1.5), 2),
-                risk_reward=3.0,
-                trigger_probability=0.60,
-                win_probability=0.60,
-                minutes_to_trigger=10,
-                headline=f"📍 {symbol} VWAP Bounce - ${snapshot.vwap:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Price {snapshot.dist_from_vwap:+.1f}% from VWAP",
-                    "Uptrend intact - above 9-EMA and 20-EMA",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}",
-                    "Entry: Rejection wick + bullish candle at VWAP"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+        """VWAP Bounce \u2014 DISABLED (v19.34.354, audit suppression).
+
+        Audit finding: the shipped near-VWAP-STATE rule (dist_from_vwap in (-0.8%, +0.3%),
+        trend==uptrend, above 9-EMA, rvol>=1.5; stop=VWAP-0.5*ATR, target=VWAP+1.5*ATR,
+        R:R hard-coded 3.0) is NEGATIVE-EV. 14d native-1min replay (diag_v354_vwap_bounce):
+        winsorAvg -0.101R over 2,387 fires (-242R total) \u2014 59%% win but BROKEN geometry
+        (realized avg R:R 0.85). A doctrine rewrite (SMB "First VWAP Pullback": opening-drive
+        up-leg -> pullback that HOLDS above rising VWAP -> confirmation bounce; stop just below
+        VWAP, target = measured move of the first leg) was tested across legmult 0.5/0.75/1.0,
+        minleg 0.5/0.75/1.0, single-attempt and RR caps 2.0-2.5: EVERY R:R band stayed negative
+        (doctrine entry only 30-43%% win; best band -0.049R). No validated +EV configuration
+        exists in the IB data, so this high-fire setup is SUPPRESSED to stop the bleed on the
+        unmanaged paper account. Re-enable only after a replay surfaces a band with
+        winsorAvg > 0. --rollback restores the prior near-VWAP rule.
+        """
         return None
     
     # v19.34.47 — ATR-floored stop helper.
@@ -4805,40 +4961,85 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_spencer_scalp(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Spencer Scalp - Tight consolidation near HOD"""
-        dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-        
-        if dist_from_hod < 1.0 and snapshot.daily_range_pct < 3.0 and snapshot.rvol >= 1.5:
-            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"spencer_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="spencer_scalp",
-                strategy_name="Spencer Scalp (INT-22)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.high_of_day,
-                stop_loss=round(snapshot.current_price - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.high_of_day + (snapshot.atr * 1.5), 2),
-                risk_reward=3.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"📊 {symbol} Spencer Scalp - Near HOD {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Price {dist_from_hod:.1f}% from HOD ${snapshot.high_of_day:.2f}",
-                    f"Tight consolidation (range: {snapshot.daily_range_pct:.1f}%)",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}",
-                    "Entry: Break of consolidation high"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-            )
-        return None
+        """Spencer Scalp (INT-22) - DOCTRINE rewrite (v363, LONG-only).
+        SMB cheat-sheet: a >=20-min tight consolidation (band < 15% of the day's range) in the UPPER
+        1/3 of the day range, then a VOLUME SURGE break of the range high (a methodical institutional
+        accumulation program). ENTER on the range-high break, STOP .02 below the range low, fixed 2.0R
+        target. 180d/300-sym 1-min replay: LONG +0.04-0.06R; SHORT ~0 (dropped); morning-only was -EV
+        so kept all-day. See memory/v363_spencer_scalp_build.md."""
+        CONS_LEN = 20
+        CONS_FRAC = 0.15        # consolidation band < 15% of the day range
+        UPPER_THIRD = 0.667     # consolidation must sit in the upper 1/3 of the day range
+        VOL_SURGE = 1.3         # break-bar volume >= 1.3x the consolidation avg
+        TARGET_RMULT = 2.0
+
+        hod = float(getattr(snapshot, "high_of_day", 0.0) or 0.0)
+        lod = float(getattr(snapshot, "low_of_day", 0.0) or 0.0)
+        cp = float(getattr(snapshot, "current_price", 0.0) or 0.0)
+        day_range = hod - lod
+        if cp <= 0 or day_range <= 0:
+            return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < CONS_LEN + 2:
+            return None
+
+        i = len(bars) - 1                          # most-recent bar = the range-break bar
+        win = bars[i - CONS_LEN:i]                  # the consolidation = prior CONS_LEN bars
+        try:
+            wh = max(b["high"] for b in win)
+            wl = min(b["low"] for b in win)
+            break_vol = bars[i].get("volume") or 0
+            break_high = bars[i]["high"]
+        except (KeyError, TypeError, ValueError):
+            return None
+        band = wh - wl
+        if band <= 0 or band > CONS_FRAC * day_range:
+            return None
+        if wl < lod + UPPER_THIRD * day_range:      # consolidation must be in the upper 1/3
+            return None
+        wv = [b["volume"] for b in win if (b.get("volume") or 0) > 0]
+        if wv and break_vol < VOL_SURGE * (sum(wv) / len(wv)):   # volume surge confirms the break
+            return None
+        entry = round(wh + 0.01, 2)
+        if not (cp >= entry or break_high >= entry):            # range break must be printing
+            return None
+        stop = round(wl - 0.02, 2)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        target = round(entry + TARGET_RMULT * risk, 2)
+
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        return LiveAlert(
+            id=f"spencer_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="spencer_scalp",
+            strategy_name="Spencer Scalp (INT-22)",
+            direction="long",
+            priority=priority,
+            current_price=cp,
+            trigger_price=entry,
+            stop_loss=stop,
+            target=target,
+            risk_reward=TARGET_RMULT,
+            trigger_probability=0.55,
+            win_probability=0.52,
+            minutes_to_trigger=5,
+            headline=f"📊 {symbol} Spencer Scalp - range break {'✓ TAPE' if tape.confirmation_for_long else ''}",
+            reasoning=[
+                f"20-min consolidation {wl:.2f}-{wh:.2f} (<15% of day range) in upper 1/3",
+                f"Volume surge on break (>={VOL_SURGE:g}x range avg)",
+                f"Break entry {entry:.2f}, stop {stop:.2f} (range low), 2R target {target:.2f}",
+                f"Tape: {tape.overall_signal.value}"
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+        )
     
     async def _check_hitchhiker(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """HitchHiker - Strong drive off open, consolidation, continuation"""
@@ -4893,289 +5094,621 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_orb(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Opening Range Breakout"""
+        """Opening Range Break — cheat-sheet-faithful TRUE 15-min OR (v19.34.355).
+
+        The shipped detector used the running HIGH/LOW OF DAY as the "opening range" (they
+        drift all morning) with stop=LOD-0.02 and target=price+2*(HOD-LOD). A 14d & 21d
+        native-1min replay (diag_v355) showed that rule is ~breakeven-to-negative (-91R/14d).
+        SMB Opening Range Break doctrine: define the OR = high/low of the FIRST 15 min from
+        09:30; ENTER on the first break ABOVE OR-high with a VOLUME expansion; STOP just below
+        the BREAKOUT BAR; TARGET = 2x measured move of the OR; hard time-exit ~11:30 ET. Gated
+        to R:R 1.5-2.5 (the only +EV slice) the doctrine validated: 14d n=59 49% win +0.321R;
+        21d n=95 42% win +0.183R, avg R:R 1.96 — +EV and beats the live rule. LONG only, one
+        breakout/day/symbol. 1-min bars from ib_historical_data (IB-only) via technical_service.
+        (The non-actionable "approaching_orb" heads-up branch is removed as unvalidated noise.)
+        """
+        OR_MIN = 15
+        VOLMULT = 1.5
+        STOPBUF = 0.05            # % below the breakout-bar low (stop just below breakout bar)
+        TMULT = 2.0              # target = OR_high + TMULT*OR_height (2x measured move)
+        OR_END = 570 + OR_MIN    # 09:45 ET (minutes from midnight)
+        TIME_EXIT = 690          # 11:30 ET — no new ORB entries after this
+        MIN_RR = 1.5
+        MAX_RR = 2.5
+
         current_window = self._get_current_time_window()
-        
-        if current_window not in [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM, TimeWindow.MORNING_SESSION]:
+        if current_window not in (TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM,
+                                  TimeWindow.MORNING_SESSION):
             return None
-        
-        if snapshot.rvol >= 2.0:
-            dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-            
-            # CONFIRMED ORB: Price broke above opening range high
-            if dist_from_hod < -0.1 and dist_from_hod > -1.5 and snapshot.above_vwap:
-                priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-                breakout_pct = abs(dist_from_hod)
-                
-                return LiveAlert(
-                    id=f"orb_long_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="orb_long_confirmed",
-                    strategy_name="ORB CONFIRMED (INT-03)",
-                    direction="long",
-                    priority=priority,
-                    current_price=snapshot.current_price,
-                    trigger_price=snapshot.high_of_day,
-                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
-                    target=round(snapshot.current_price + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
-                    risk_reward=2.0,
-                    trigger_probability=0.65,
-                    win_probability=0.58,
-                    minutes_to_trigger=0,
-                    headline=f"🚀 {symbol} ORB BREAKOUT CONFIRMED - Broke ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                    reasoning=[
-                        f"Price ABOVE opening range high by {breakout_pct:.2f}%",
-                        f"ORH was ${snapshot.high_of_day:.2f}, now ${snapshot.current_price:.2f}",
-                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"RVOL: {snapshot.rvol:.1f}x",
-                        f"Tape: {tape.overall_signal.value}"
-                    ],
-                    time_window=current_window.value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
-            
-            # APPROACHING ORB: Price near opening range high
-            if 0 < dist_from_hod < 0.5 and snapshot.above_vwap:
-                priority = AlertPriority.MEDIUM
-                
-                return LiveAlert(
-                    id=f"orb_long_approaching_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="approaching_orb",
-                    strategy_name="Approaching ORB (INT-03)",
-                    direction="long",
-                    priority=priority,
-                    current_price=snapshot.current_price,
-                    trigger_price=snapshot.high_of_day,
-                    stop_loss=round(snapshot.low_of_day - 0.02, 2),
-                    target=round(snapshot.high_of_day + (snapshot.high_of_day - snapshot.low_of_day) * 2, 2),
-                    risk_reward=2.0,
-                    trigger_probability=0.50,
-                    win_probability=0.52,
-                    minutes_to_trigger=10,
-                    headline=f"👀 {symbol} Approaching ORB - {dist_from_hod:.2f}% to ${snapshot.high_of_day:.2f} {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                    reasoning=[
-                        f"Price {dist_from_hod:.2f}% below ORH ${snapshot.high_of_day:.2f}",
-                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"RVOL: {snapshot.rvol:.1f}x",
-                        f"⚠️ Wait for confirmed break above ${snapshot.high_of_day:.2f}"
-                    ],
-                    time_window=current_window.value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
-        return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 120)
+        if not bars or len(bars) < OR_MIN + 1:
+            return None
+
+        caps = getattr(self, "_orb_daily_caps", None)
+        if caps is None:
+            caps = self._orb_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 1:
+            return None
+
+        try:
+            from zoneinfo import ZoneInfo
+            _ET = ZoneInfo("America/New_York")
+        except Exception:
+            return None
+
+        def _etm(bar):
+            try:
+                dt = datetime.fromisoformat(str(bar.get("timestamp") or bar.get("date")).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.astimezone(_ET)
+                return dt.hour * 60 + dt.minute
+            except Exception:
+                return None
+
+        or_bars = [b for b in bars if (_etm(b) is not None and 570 <= _etm(b) < OR_END)]
+        if not or_bars:
+            return None
+        or_high = max(b["high"] for b in or_bars)
+        or_low = min(b["low"] for b in or_bars)
+        or_h = or_high - or_low
+        if or_h <= 0:
+            return None
+        or_vol = sum((b.get("volume") or 0) for b in or_bars) / len(or_bars)
+
+        last = bars[-1]
+        last_etm = _etm(last)
+        if last_etm is None or last_etm < OR_END or last_etm > TIME_EXIT:
+            return None
+        if last.get("high") is None or last.get("low") is None or last.get("close") is None:
+            return None
+        # first breakout only: no earlier post-OR bar may have closed above OR-high.
+        for b in bars:
+            em = _etm(b)
+            if em is not None and OR_END <= em < last_etm and (b.get("close") or 0) > or_high:
+                return None
+        if not (last["close"] > or_high and last["high"] > or_high):
+            return None
+        if or_vol > 0 and (last.get("volume") or 0) < VOLMULT * or_vol:
+            return None
+
+        entry = round(last["close"], 2)
+        stop_loss = round(last["low"] * (1 - STOPBUF / 100.0), 2)
+        target = round(or_high + TMULT * or_h, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0 or target <= entry:
+            return None
+        rr = (target - entry) / risk
+        if rr < MIN_RR or rr > MAX_RR:
+            return None
+        r_multiple = round(rr, 2)
+
+        caps[key] = caps.get(key, 0) + 1
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        tape_tag = "✓ TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"orb_long_confirmed_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="orb_long_confirmed",
+            strategy_name="ORB CONFIRMED (INT-03)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target,
+            risk_reward=r_multiple,
+            trigger_probability=0.49,
+            win_probability=0.49,
+            minutes_to_trigger=0,
+            headline=f"🚀 {symbol} ORB BREAKOUT — broke 15-min OR high ${or_high:.2f} (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"15-min opening range ${or_low:.2f}-${or_high:.2f} (height ${or_h:.2f}); first break above on volume",
+                f"Breakout-bar vol {(last.get('volume') or 0):.0f} >= {VOLMULT:g}x OR avg {or_vol:.0f}",
+                f"STOP ${stop_loss:.2f} (just below breakout bar) · TARGET 2x OR ${target:.2f} · time-exit 11:30 ET",
+                f"R:R {r_multiple:.1f}:1 (v355 replay 42-49% win, +0.18..0.32R, RR-gated 1.5-2.5) · Tape: {tape.overall_signal.value}",
+            ],
+            time_window=current_window.value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
     
     async def _check_gap_give_go(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Gap Give and Go - Gap up, pullback, continuation"""
+        """Gap Give and Go (INT-34) - DOCTRINE rewrite (v362).
+        SMB cheat-sheet structure on 1-min bars: gap-up, a quick 'give' (pullback) that holds above
+        the prior close and does NOT fill >50% of the gap, then a 3-7 bar mini-consolidation on
+        declining volume; ENTER on the break of the consolidation high, STOP .02 below the
+        consolidation low, fixed 2.0R target. Opening-drive only. 180d/300-sym 1-min replay:
+        n=492 win 47% winsorAvg +0.233R (vs the prior loose VWAP-pullback code ~+0.07R).
+        See memory/v362_gap_give_go_build.md."""
         current_window = self._get_current_time_window()
-        
-        if current_window not in [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM]:
+        if current_window not in [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE]:
             return None
-        
-        if (snapshot.gap_pct > 3.0 and 
-            snapshot.holding_gap and
-            snapshot.above_vwap and
-            0 < snapshot.dist_from_vwap < 1.5 and
-            snapshot.rvol >= 2.0):
-            
-            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"gap_give_go_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="gap_give_go",
-                strategy_name="Gap Give and Go (INT-34)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.vwap - 0.02,
-                    atr=getattr(snapshot, "atr", None),
-                    direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.high_of_day, 2),
-                risk_reward=2.0,
-                trigger_probability=0.60,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🎁 {symbol} Gap Give and Go - {snapshot.gap_pct:.1f}% {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Gap up {snapshot.gap_pct:.1f}%",
-                    "Pulled back but holding VWAP",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=current_window.value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat()
-            )
-        return None
+
+        MIN_GAP = 1.0
+        CONS_MIN, CONS_MAX = 3, 7
+        CONS_BAND_MAX = 0.6      # consolidation band as % of price
+        VOL_DECLINE = 0.7        # cons avg vol must be <= 0.7x the give avg vol
+        GIVE_MAX_FILL = 50.0     # give must not retrace >50% of the gap
+        TARGET_RMULT = 2.0
+
+        gap_pct = float(getattr(snapshot, "gap_pct", 0.0) or 0.0)
+        prev_close = float(getattr(snapshot, "prev_close", 0.0) or 0.0)
+        day_open = float(getattr(snapshot, "open", 0.0) or 0.0)
+        cp = float(getattr(snapshot, "current_price", 0.0) or 0.0)
+        session_high = float(getattr(snapshot, "high_of_day", 0.0) or 0.0)
+        if gap_pct < MIN_GAP or prev_close <= 0 or cp <= 0 or day_open <= prev_close:
+            return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < CONS_MIN + 2:
+            return None
+
+        i = len(bars) - 1                       # current/most-recent bar = the range-break bar
+        last_high = bars[i].get("high")
+        if last_high is None:
+            return None
+
+        chosen = None
+        for w in range(CONS_MAX, CONS_MIN - 1, -1):
+            a = i - w
+            if a < 1:
+                continue
+            cw = bars[a:i]
+            try:
+                cons_high = max(b["high"] for b in cw)
+                cons_low = min(b["low"] for b in cw)
+            except (KeyError, TypeError, ValueError):
+                continue
+            band = cons_high - cons_low
+            if band <= 0 or band / cp * 100.0 > CONS_BAND_MAX:
+                continue
+            if session_high > 0 and cons_high >= session_high:      # a give/pullback must have happened
+                continue
+            if cons_low <= prev_close:                              # consolidation holds above support
+                continue
+            give_lows = [b["low"] for b in bars[:a] if b.get("low") is not None]
+            give_low = min(give_lows) if give_lows else cons_low
+            if (day_open - give_low) / (day_open - prev_close) * 100.0 > GIVE_MAX_FILL:
+                continue
+            give_v = [b["volume"] for b in bars[:a] if (b.get("volume") or 0) > 0]
+            cons_v = [b["volume"] for b in cw if (b.get("volume") or 0) > 0]
+            if give_v and cons_v and (sum(cons_v) / len(cons_v)) > VOL_DECLINE * (sum(give_v) / len(give_v)):
+                continue
+            chosen = (cons_high, cons_low)
+            break
+        if not chosen:
+            return None
+        cons_high, cons_low = chosen
+
+        entry = round(cons_high + 0.01, 2)
+        if not (cp >= entry or last_high >= entry):                 # range-break must be printing
+            return None
+        stop = round(cons_low - 0.02, 2)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        target = round(entry + TARGET_RMULT * risk, 2)
+
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        return LiveAlert(
+            id=f"gap_give_go_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="gap_give_go",
+            strategy_name="Gap Give and Go (INT-34)",
+            direction="long",
+            priority=priority,
+            current_price=cp,
+            trigger_price=entry,
+            stop_loss=stop,
+            target=target,
+            risk_reward=TARGET_RMULT,
+            trigger_probability=0.60,
+            win_probability=0.55,
+            minutes_to_trigger=5,
+            headline=f"🎁 {symbol} Gap Give and Go - {gap_pct:.1f}% break {'✓ TAPE' if tape.confirmation_for_long else ''}",
+            reasoning=[
+                f"Gap up {gap_pct:.1f}%, give held above prior close",
+                f"3-7 bar consolidation {cons_low:.2f}-{cons_high:.2f} on declining volume",
+                f"Break entry {entry:.2f}, stop {stop:.2f} (cons low), 2R target {target:.2f}",
+                f"Tape: {tape.overall_signal.value}"
+            ],
+            time_window=current_window.value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        )
     
     async def _check_second_chance(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Second Chance - Retest of broken level"""
-        dist_from_vwap = abs(snapshot.dist_from_vwap)
-        
-        if (dist_from_vwap < 0.5 and 
-            snapshot.above_vwap and 
-            snapshot.trend == "uptrend" and
-            snapshot.rvol >= 1.2):
-            
-            priority = AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"second_chance_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="second_chance",
-                strategy_name="Second Chance Scalp (INT-24)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.vwap,
-                stop_loss=round(snapshot.vwap - (snapshot.atr * 0.5), 2),
-                target=round(snapshot.high_of_day, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"🔄 {symbol} Second Chance - Retesting VWAP",
-                reasoning=[
-                    f"Retesting VWAP ${snapshot.vwap:.2f}",
-                    "Uptrend intact",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
-        return None
+        """Second Chance Scalp \u2014 cheat-sheet-faithful resistance break \u2192 low-vol retest (v19.34.353).
+
+        The shipped detector was a generic "near-VWAP momentum" filter (within 0.5% above VWAP,
+        uptrend, rvol>=1.2; stop=VWAP-0.5*ATR, target=HIGH_OF_DAY, R:R hard-coded 2.0). A 14d &
+        21d native-1min replay showed that rule is NEGATIVE-EV (winsorAvg -0.06R over 3,761 fires,
+        -233R total). The SMB "2nd Chance Scalp" is a RESISTANCE-RETEST scalp, NOT a VWAP play:
+          1) a resistance level breaks on a strong, HIGH-VOLUME rush out of range,
+          2) price PULLS BACK and RETESTS the broken level on LOW volume \u2014 old resistance must
+             HOLD as new support (do NOT fall back into the range),
+          3) ENTER on a confirmation candle that closes ABOVE the prior candle (buyers returned),
+          4) STOP = .02 below the LOW OF THE TURN CANDLE (new support),
+          5) TARGET = the HIGH OF THE INITIAL PULLBACK (the rush high that set up the scalp).
+        Validated (v353 replay, RR-gated 1.5-2.5 = the only +EV slice; the >=2.5 band was dead):
+          14d vol-filtered: n=211, 39% win, winsorAvg +0.092R, avg R:R 1.92;
+          21d: n=381, 38% win, winsorAvg +0.048R, avg R:R 1.89 \u2014 +EV and beats the live rule.
+        LONG only. 1-min bars from ib_historical_data (IB-only) via technical_service. Max 2
+        attempts/day/symbol (cheat-sheet "2 strikes and we're out").
+        """
+        RESLOOK = 15          # consolidation lookback = the resistance window before the rush
+        RUSHWIN = 6           # bars over which the breakout rush high is measured
+        RETTEST = 4           # bars over which the retest / turn-candle low is measured
+        RETTOL = 0.20         # retest low must come within RETTOL% above the broken level
+        SUPPORTTOL = 0.15     # turn low may dip at most SUPPORTTOL% below the level (support held)
+        MINBREAK = 0.10       # rush must clear resistance by >= MINBREAK%
+        VOLMULT = 1.3         # break volume must be >= VOLMULT * consolidation median volume
+        MAXBREAKMULT = 1.0    # rush height must be <= MAXBREAKMULT * prior range height
+        MIN_RR = 1.5          # RR gate (validated +EV slice is 1.5-2.5; doctrine ~1.9:1)
+        MAX_RR = 2.5
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        need = RESLOOK + RUSHWIN + RETTEST + 3
+        if not bars or len(bars) < need:
+            return None
+
+        caps = getattr(self, "_second_chance_daily_caps", None)
+        if caps is None:
+            caps = self._second_chance_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 2:
+            return None
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        last = bars[i]
+        for b in (bars[i], bars[i - 1]):
+            if (b.get("high") is None or b.get("low") is None
+                    or b.get("close") is None or b.get("open") is None):
+                return None
+
+        cons = bars[i - RESLOOK - RUSHWIN:i - RUSHWIN]   # consolidation before the rush
+        rush = bars[i - RUSHWIN:i]                        # rush + pullback (excl. entry bar)
+        ret = bars[i - RETTEST:i]                         # retest / turn region (excl. entry bar)
+        if not cons or not rush or not ret:
+            return None
+
+        resistance = max(b["high"] for b in cons)
+        cons_lo = min(b["low"] for b in cons)
+        prior_range = resistance - cons_lo
+        rush_high = max(b["high"] for b in rush)
+        turn_bar = min(ret, key=lambda b: b["low"])
+        turn_low = turn_bar["low"]
+        med_vol = _median([b.get("volume") or 0 for b in cons])
+        break_vol = max(b.get("volume") or 0 for b in rush)
+        retest_vol = min(b.get("volume") or 0 for b in ret)
+
+        broke = rush_high >= resistance * (1 + MINBREAK / 100.0)
+        near = turn_low <= resistance * (1 + RETTOL / 100.0)
+        held = turn_low >= resistance * (1 - SUPPORTTOL / 100.0)
+        vol_ok = (med_vol <= 0) or (break_vol >= VOLMULT * med_vol and retest_vol < break_vol)
+        confirm = (last["close"] > last["open"]) and (last["close"] > bars[i - 1]["high"])
+        not_too_tall = (MAXBREAKMULT <= 0) or (prior_range <= 0) or \
+            ((rush_high - resistance) <= MAXBREAKMULT * prior_range)
+
+        if not (broke and near and held and vol_ok and confirm and not_too_tall):
+            return None
+
+        entry = round(last["close"], 2)
+        stop_loss = round(turn_low - 0.02, 2)
+        target_1 = round(rush_high, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0 or target_1 <= entry:
+            return None
+        rr = (target_1 - entry) / risk
+        if rr < MIN_RR or rr > MAX_RR:
+            return None
+        r_multiple = round(rr, 2)
+
+        caps[key] = caps.get(key, 0) + 1
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        ev_info = ""
+        if "second_chance" in self._strategy_stats:
+            st = self._strategy_stats["second_chance"]
+            if st.win_rate > 0:
+                ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+        tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"second_chance_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="second_chance",
+            strategy_name="Second Chance Scalp (INT-24)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target_1,
+            risk_reward=r_multiple,
+            trigger_probability=0.40,
+            win_probability=0.40,
+            minutes_to_trigger=0,
+            headline=f"\U0001f504 {symbol} Second Chance \u2014 broken ${resistance:.2f} retested & held (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"Resistance ${resistance:.2f} broke on rush to ${rush_high:.2f}; low-vol retest held as support",
+                f"Turn-candle low ${turn_low:.2f}; confirm bar closed above prior high \u2014 buyers returned",
+                f"R:R = {r_multiple:.1f}:1 (STOP ${stop_loss:.2f} = .02 below turn low, TARGET rush high ${target_1:.2f})",
+                f"Tape: {tape.overall_signal.value}",
+                ev_info if ev_info else "Cheat-sheet 2nd Chance (v353 replay 38-39% win, +0.05..0.09R, avg R:R 1.9, RR-gated 1.5-2.5)",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
     
     async def _check_backside(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Back$ide - Recovery from LOD"""
-        if (snapshot.trend == "uptrend" and
-            snapshot.above_ema9 and
-            not snapshot.above_vwap and
-            snapshot.dist_from_vwap > -2.0 and
-            snapshot.rvol >= 1.2):
-            
-            return LiveAlert(
-                id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="backside",
-                strategy_name="Back$ide Scalp (INT-32)",
-                direction="long",
-                priority=AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.ema_9 - 0.02,
-                    atr=getattr(snapshot, "atr", None),
-                    direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap, 2),
-                risk_reward=2.0,
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=15,
-                headline=f"↗️ {symbol} Back$ide - Recovering to VWAP",
-                reasoning=[
-                    "Higher highs/lows above 9-EMA",
-                    f"Tape: {tape.overall_signal.value}",
-                    f"Target: VWAP ${snapshot.vwap:.2f}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+        """Back$ide \u2014 cheat-sheet-faithful VWAP-recovery scalp (v19.34.352).
+
+        Re-aligned to the OFFICIAL SMB Back$ide cheat sheet (v348 used a DEEP flush-low stop
+        which crushed R:R; doctrine uses a TIGHT stop .02 below the MOST RECENT HIGHER LOW).
+        LONG only. Rising phase after a distinct low: a HIGHER LOW (recent pullback low > the
+        session LOD) plus a HIGHER HIGH (green 1-min double-bar-high break = "break of a 1-min
+        bar from consolidation, pay the offer on the break"), price holding ABOVE the 9-EMA but
+        still BELOW VWAP, recovered MORE than halfway between LOD and VWAP. STOP = recent higher
+        low - 0.02 (tight). TARGET = VWAP (exit all). One-and-done (1/day/symbol). Ideal periods
+        10:00-13:30 ET. Only takes R:R >= 1.0. Validated on a 14d native-1min replay (v352:
+        63% win, winsorAvg +0.70R, medR +1.11R, avg R:R 4.8 to VWAP) \u2014 doctrine-faithful AND
+        far better than v348 (+0.28R). Cheat-sheet stats: 50-60% win, ~1.4:1 R:R.
+        """
+        RECENT_K = 5
+        ACCEL = 1.3
+        HALFWAY = 0.5
+        MIN_RR = 1.0
+
+        if self._get_current_time_window() not in (
+                TimeWindow.MORNING_SESSION, TimeWindow.LATE_MORNING, TimeWindow.MIDDAY):
+            return None
+        if not getattr(snapshot, "above_ema9", False):
+            return None
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < RECENT_K + 3:
+            return None
+        vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
+        ema9 = float(getattr(snapshot, "ema_9", 0.0) or 0.0)
+        if vwap <= 0 or ema9 <= 0:
+            return None
+
+        caps = getattr(self, "_backside_daily_caps", None)
+        if caps is None:
+            caps = self._backside_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:long"
+        if caps.get(key, 0) >= 1:
+            return None
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        if i < RECENT_K + 1:
+            return None
+        last = bars[i]
+        lows = [b["low"] for b in bars if b.get("low") is not None]
+        if not lows:
+            return None
+        lod = min(lows)
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        green = last["close"] > last["open"]
+        clears_hi = last["high"] > max(bars[i - 1]["high"], bars[i - 2]["high"])
+        entry = round(max(bars[i - 1]["high"], bars[i - 2]["high"]), 2)
+        recent_low = min(bars[j]["low"] for j in range(i - RECENT_K, i))
+        accel_ok = (med_r <= 0) or ((last["high"] - last["low"]) >= ACCEL * med_r)
+        if not (green and clears_hi and entry < vwap and last["close"] > ema9
+                and recent_low > lod
+                and entry > lod + HALFWAY * (vwap - lod)
+                and accel_ok):
+            return None
+
+        stop_loss = round(recent_low - 0.02, 2)
+        risk = entry - stop_loss
+        if risk <= 0 or entry <= 0:
+            return None
+        target_1 = round(vwap, 2)
+        rr = (target_1 - entry) / risk
+        if rr < MIN_RR:
+            return None
+        r_multiple = round(rr, 2)
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        ev_info = ""
+        if "backside" in self._strategy_stats:
+            st = self._strategy_stats["backside"]
+            if st.win_rate > 0:
+                ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+        caps[key] = caps.get(key, 0) + 1
+        hl_dist = (vwap - entry) / vwap * 100.0
+        tape_tag = "\u2713 TAPE" if tape.confirmation_for_long else ""
+        return LiveAlert(
+            id=f"backside_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="backside",
+            strategy_name="Back$ide Scalp (INT-32)",
+            direction="long",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target_1,
+            risk_reward=r_multiple,
+            trigger_probability=0.63,
+            win_probability=0.63,
+            minutes_to_trigger=0,
+            headline=f"\U0001f3af {symbol} Back$ide \u2014 higher-low reclaim to VWAP (R:R {r_multiple:.1f}) {tape_tag}",
+            reasoning=[
+                f"Rising back$ide: higher-low ${recent_low:.2f} > LOD ${lod:.2f}, green bar broke prior-2 highs",
+                f"Recovered {hl_dist:.1f}% below VWAP ${vwap:.2f} (>halfway from LOD), holding above 9-EMA",
+                f"R:R = {r_multiple:.1f}:1 (TIGHT stop ${stop_loss:.2f} = .02 below higher low, Target VWAP ${target_1:.2f})",
+                f"Tape: {tape.overall_signal.value}",
+                ev_info if ev_info else "Cheat-sheet back$ide (v352 replay 63% win, +0.70R, avg R:R 4.8 to VWAP)",
+                "One-and-done scalp, 10:00-13:30 ET window (SMB Back$ide doctrine)",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
         return None
     
     async def _check_off_sides(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Off Sides - Range break in fade market"""
+        """Off Sides \u2014 range-top fade SHORT snapback (v19.34.350 redesign).
+
+        Fires on the TRIGGER, not a state: in RANGE_BOUND/FADE regime, when price returns within
+        1.0% of the session HOD in a wide (>1.5%) range AND is near VWAP (|dist|<1.0% \u2014 the zone
+        that vwap_fade-short, which needs >1.0% ABOVE VWAP, structurally cannot serve), a RED 1-min
+        double-bar-LOW-break rejection must print (accel 1.3x). Validated +EV on a 14d risk-controlled
+        native-1min replay (v349 UNIQUE zone: LOD target win58%/+0.129R, VWAP target win78%/+0.140R;
+        the old far target LOD-(HOD-LOD) was the weakest at +0.099R \u2014 hence the closer target). The
+        loose live state-detector fired ~94% sub-edge alerts (9659/10296 gated by the 1.0% min-risk
+        floor in replay). Requires stop >= 1.0% of entry + 2 fires/day per symbol. Target = the
+        nearer-of(VWAP, LOD) below entry (VWAP mean-reversion if there is room, else the range low).
+        """
         if self._market_regime not in [MarketRegime.RANGE_BOUND, MarketRegime.FADE]:
             return None
-        
-        if abs(snapshot.dist_from_vwap) < 1.0 and snapshot.daily_range_pct > 1.5:
-            dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-            
-            if dist_from_hod < 1.0:
-                return LiveAlert(
-                    id=f"offsides_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                    symbol=symbol,
-                    setup_type="off_sides_short",
-                    strategy_name="Off Sides Scalp (INT-33)",
-                    direction="short",
-                    priority=AlertPriority.MEDIUM,
-                    current_price=snapshot.current_price,
-                    trigger_price=snapshot.low_of_day,
-                    stop_loss=self._atr_floored_stop(
-                        entry_price=snapshot.current_price,
-                        raw_stop=snapshot.high_of_day + 0.01,
-                        atr=getattr(snapshot, "atr", None),
-                        direction="short",
-                        min_atr_mult=0.5,
-                    ),
-                    target=round(snapshot.low_of_day - (snapshot.high_of_day - snapshot.low_of_day), 2),
-                    risk_reward=1.5,
-                    trigger_probability=0.50,
-                    win_probability=0.52,
-                    minutes_to_trigger=20,
-                    headline=f"⚔️ {symbol} Off Sides SHORT - Range break",
-                    reasoning=[
-                        f"Range: ${snapshot.low_of_day:.2f} - ${snapshot.high_of_day:.2f}",
-                        f"Regime: {self._market_regime.value}",
-                        f"Tape: {tape.overall_signal.value}"
-                    ],
-                    time_window=self._get_current_time_window().value,
-                    market_regime=self._market_regime.value,
-                    expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-                )
+        HOD_PROX = 1.0
+        MIN_RANGE = 1.5
+        ACCEL = 1.3
+        MIN_RISK_PCT = 1.0
+
+        if abs(snapshot.dist_from_vwap) >= 1.0 or snapshot.daily_range_pct <= MIN_RANGE:
+            return None
+        cp = snapshot.current_price
+        if not cp or cp <= 0:
+            return None
+        dist_from_hod = ((snapshot.high_of_day - cp) / cp) * 100
+        if dist_from_hod >= HOD_PROX:
+            return None
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < 5:
+            return None
+        vwap = float(getattr(snapshot, "vwap", 0.0) or 0.0)
+        hod = float(snapshot.high_of_day or 0.0)
+        lod = float(snapshot.low_of_day or 0.0)
+        if vwap <= 0 or hod <= 0 or lod <= 0 or hod <= lod:
+            return None
+
+        caps = getattr(self, "_off_sides_daily_caps", None)
+        if caps is None:
+            caps = self._off_sides_daily_caps = {}
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"{symbol}:{today}:short"
+        if caps.get(key, 0) >= 2:
+            return None
+
+        def _median(xs):
+            s = sorted(xs)
+            n = len(s)
+            if n == 0:
+                return 0.0
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+        i = len(bars) - 1
+        if i < 2:
+            return None
+        last = bars[i]
+        ranges = [(b["high"] - b["low"]) for b in bars[:i]
+                  if b.get("high") is not None and b.get("low") is not None]
+        med_r = _median(ranges)
+
+        red = last["close"] < last["open"]
+        breaks_lo = last["low"] < min(bars[i - 1]["low"], bars[i - 2]["low"])
+        accel_ok = (med_r <= 0) or ((last["high"] - last["low"]) >= ACCEL * med_r)
+        if not (red and breaks_lo and accel_ok):
+            return None
+
+        entry = round(min(bars[i - 1]["low"], bars[i - 2]["low"]), 2)
+        stop_loss = round(hod + 0.02, 2)
+        risk = stop_loss - entry
+        if risk <= 0 or entry <= 0 or (risk / entry * 100.0) < MIN_RISK_PCT:
+            return None
+        use_vwap = lod < vwap < entry
+        target_1 = round(vwap, 2) if use_vwap else round(lod, 2)
+        if target_1 >= entry:
+            return None
+        reward = entry - target_1
+        r_multiple = round(reward / risk, 2) if risk > 0 else 1.5
+        priority = AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM
+        ev_info = ""
+        if "off_sides" in self._strategy_stats:
+            st = self._strategy_stats["off_sides"]
+            if st.win_rate > 0:
+                ev_info = f"Historical: {st.win_rate:.0%} win, EV {st.expected_value_r:.2f}R"
+        caps[key] = caps.get(key, 0) + 1
+        tape_tag = "\u2713 TAPE" if tape.confirmation_for_short else ""
+        tgt_label = "VWAP" if use_vwap else "range-low"
+        return LiveAlert(
+            id=f"offsides_short_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="off_sides_short",
+            strategy_name="Off Sides Scalp (INT-33)",
+            direction="short",
+            priority=priority,
+            current_price=snapshot.current_price,
+            trigger_price=entry,
+            stop_loss=stop_loss,
+            target=target_1,
+            risk_reward=r_multiple,
+            trigger_probability=0.65,
+            win_probability=0.70,
+            minutes_to_trigger=0,
+            headline=f"\u2694\ufe0f {symbol} Off Sides SHORT snapback \u2014 range-top fade to {tgt_label} {tape_tag}",
+            reasoning=[
+                f"Faded within {dist_from_hod:.1f}% of HOD ${hod:.2f} in a {snapshot.daily_range_pct:.1f}% range \u2192 red 2-bar-low-break",
+                f"R:R = {r_multiple:.1f}:1 (Stop ${stop_loss:.2f} above HOD, Target {tgt_label} ${target_1:.2f})",
+                f"Regime: {self._market_regime.value} | Tape: {tape.overall_signal.value}",
+                ev_info if ev_info else "Range-top fade (v349 replay UNIQUE: +0.13R/58% to LOD, +0.14R/78% to VWAP)",
+                "Entry: red bar broke prior-2 lows (near-VWAP zone, 1% min-risk, 2/day cap)",
+            ],
+            time_window=self._get_current_time_window().value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        )
         return None
     
     async def _check_fashionably_late(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Fashionably Late - 9-EMA crosses VWAP"""
-        if (snapshot.above_ema9 and 
-            snapshot.ema_9 > snapshot.vwap and
-            (snapshot.ema_9 - snapshot.vwap) / snapshot.vwap * 100 < 0.5 and
-            snapshot.trend == "uptrend" and
-            snapshot.rvol >= 1.2):
-            
-            return LiveAlert(
-                id=f"fashionably_late_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="fashionably_late",
-                strategy_name="Fashionably Late (INT-26)",
-                direction="long",
-                priority=AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(  # v19.34.50
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.vwap - (snapshot.atr * 0.33),
-                    atr=getattr(snapshot, "atr", None),
-                    direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.vwap + (snapshot.vwap - snapshot.low_of_day), 2),
-                risk_reward=3.0,
-                trigger_probability=0.55,
-                win_probability=0.60,
-                minutes_to_trigger=15,
-                headline=f"⏰ {symbol} Fashionably Late - 9-EMA crossing VWAP",
-                reasoning=[
-                    "9-EMA just crossed VWAP",
-                    "Momentum building",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-            )
+        """Fashionably Late — SUPPRESSED v357 (returns None).
+        Replay across 120d / 300-symbol IB intraday bars proved the 9-EMA×VWAP cross is
+        sub-cost negative-EV under EVERY tested geometry: SMB-doctrine measured-move 3:1
+        best subset = -0.018 R/trade BEFORE commissions/slippage (win 54%, avgRR 0.67);
+        the previous live ATR-floored-stop geometry was the worst variant at -0.27 to
+        -0.53 R/trade (win 13-23%). No quality gate (vol-convergence / fast-turn /
+        time-window) isolated a tradeable +EV subset. Suppressed like vwap_bounce (v354).
+        See memory/v357_fashionably_late_build.md for the full replay evidence."""
         return None
     
     async def _check_fading_bounce(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
@@ -5500,86 +6033,15 @@ class EnhancedBackgroundScanner:
     # ==================== NEW SETUP CHECKERS ====================
     
     async def _check_squeeze(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Squeeze Detection: Bollinger Bands inside Keltner Channels = volatility compression"""
-        if not hasattr(snapshot, 'squeeze_on') or not snapshot.squeeze_on:
-            return None
-        if snapshot.rvol < 1.0:
-            return None
-        
-        direction = "long" if snapshot.squeeze_fire > 0 else "short"
-        
-        # Tighter BB width = more explosive
-        if snapshot.bb_width < 3.0:
-            priority = AlertPriority.CRITICAL
-        elif snapshot.bb_width < 5.0:
-            priority = AlertPriority.HIGH
-        else:
-            priority = AlertPriority.MEDIUM
-        
-        # Tape confirmation upgrades priority
-        if direction == "long" and tape.confirmation_for_long and priority != AlertPriority.CRITICAL:
-            priority = AlertPriority.HIGH
-        elif direction == "short" and tape.confirmation_for_short and priority != AlertPriority.CRITICAL:
-            priority = AlertPriority.HIGH
-        
-        # 2026-05-01 v19.20 — Bounded Squeeze stop so R:R stays viable on
-        # mega-caps. Previously `stop = bb_lower` could be >1.5 ATR away on
-        # wide-BB names (KO, PG, LIN), which pushed R:R below the 1.5 gate
-        # every cycle and the setup was effectively dead. Clamping the stop
-        # to within 1.0 ATR of the current price caps downside while still
-        # honouring the BB band structure — whichever is TIGHTER (closer to
-        # price) wins, so the BB still governs when it's tight enough.
-        #
-        # v19.34.183 — Anchor the ENTRY to where the trade actually enters.
-        # The breakout trigger is bb_upper (long) / bb_lower (short), but once
-        # price has ALREADY broken out and run past the band, that level is
-        # stale and sits on the WRONG side of an ATR stop anchored to current
-        # price (e.g. DIA: trigger 501.63 < stop 505.82 for a "long"). Clamp
-        # the entry to current price in that case so entry/stop/target geometry
-        # is always internally consistent, then anchor stop + target to `entry`.
-        cp = snapshot.current_price
-        if direction == "long":
-            entry = max(snapshot.bb_upper, cp)
-            raw_stop = snapshot.bb_lower
-            atr_floor = entry - (snapshot.atr * 1.0)
-            stop = max(raw_stop, atr_floor)  # LONG: higher stop = tighter (always < entry)
-            target = entry + (snapshot.atr * 2.5)
-        else:
-            entry = min(snapshot.bb_lower, cp)
-            raw_stop = snapshot.bb_upper
-            atr_ceil = entry + (snapshot.atr * 1.0)
-            stop = min(raw_stop, atr_ceil)  # SHORT: lower stop = tighter (always > entry)
-            target = entry - (snapshot.atr * 2.5)
-        risk = abs(entry - stop)
-        rr = abs(target - entry) / risk if risk > 0 else 1
-        
-        return LiveAlert(
-            id=f"squeeze_{symbol}_{direction}_{datetime.now().strftime('%H%M%S')}",
-            symbol=symbol,
-            setup_type="squeeze",
-            strategy_name=f"Squeeze Fire {direction.upper()}",
-            direction=direction,
-            priority=priority,
-            current_price=snapshot.current_price,
-            trigger_price=round(entry, 2),  # v19.34.183 — consistent entry anchor
-            stop_loss=round(stop, 2),
-            target=round(target, 2),
-            risk_reward=round(rr, 2),
-            trigger_probability=0.68,
-            win_probability=0.62,
-            minutes_to_trigger=10,
-            headline=f"SQUEEZE {symbol} {direction.upper()} - BB Width {snapshot.bb_width:.1f}% {'+ TAPE' if (tape.confirmation_for_long if direction == 'long' else tape.confirmation_for_short) else ''}",
-            reasoning=[
-                "Bollinger Bands INSIDE Keltner Channels = volatility squeeze",
-                f"BB Width: {snapshot.bb_width:.1f}% (tight = explosive breakout imminent)",
-                f"Momentum: {snapshot.squeeze_fire:+.2f} ({'bullish' if direction == 'long' else 'bearish'})",
-                f"RVOL: {snapshot.rvol:.1f}x | RSI: {snapshot.rsi_14:.0f}",
-                f"Tape: {tape.overall_signal.value} (score: {tape.tape_score:.2f})"
-            ],
-            time_window=self._get_current_time_window().value,
-            market_regime=self._market_regime.value,
-            expires_at=(datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
-        )
+        """Squeeze — SUPPRESSED v359 (returns None).
+        This "intraday" detector is actually a DAILY-bar signal (squeeze_on / bb_width / atr /
+        rvol all come from daily bars in realtime_technical_service) and fully overlaps
+        daily_squeeze. Ground truth from 473 closed bot_trades: negative-EV on every cut —
+        ALL winsorAvg -0.158 (31% win, totR -128.8), LONG -0.080 (n=285), SHORT -0.277 (n=188).
+        Its market-order fill geometry replays to -0.475 R/trade. The genuine daily-compression
+        LONG edge is already captured by daily_squeeze (long-only, v358). Suppressed to dedupe a
+        high-frequency (~46k fires/yr) negative-EV duplicate. See memory/v359_squeeze_build.md."""
+        return None
     
     async def _check_mean_reversion(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Mean Reversion: RSI extreme + near support/resistance + volume"""
@@ -6049,15 +6511,32 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_big_dog(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Big Dog Consolidation - Tight wedge 15+ min"""
+        """Big Dog Consolidation - Tight wedge 15+ min (LONG, HOD breakout).
+        v361 — + min-price $10 + min-stop 1.0% gates. 180d/300-sym 5-min replay: the
+        baseline trigger@HOD model is breakeven (winsorAvg -0.009R) but flips to +0.097R
+        (win 53%, medR +0.132, n=268) once tight-stop blow-throughs on low-priced/illiquid
+        names are excluded. Ground truth (n=5 real fills) was avgR -2.0 — all sub-1% stops
+        on <$30 names that gapped through the stop. See memory/v361_big_dog_build.md."""
         if (snapshot.daily_range_pct < 2.0 and
             snapshot.above_vwap and
             snapshot.above_ema9 and
-            snapshot.rvol >= 1.2):
+            snapshot.rvol >= 1.2 and
+            snapshot.current_price >= 10.0):  # v361 price floor (drop illiquid)
             
             dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
             
             if dist_from_hod < 1.0:
+                # v361 min-stop floor — reject tight-stop blow-throughs (the ground-truth
+                # bleed: n=5 avgR -2.0, all sub-1% stops on <$30 names that gapped through).
+                stop = self._atr_floored_stop(
+                    entry_price=snapshot.current_price,
+                    raw_stop=snapshot.ema_9 - 0.02,
+                    atr=getattr(snapshot, "atr", None),
+                    direction="long",
+                    min_atr_mult=0.5,
+                )
+                if snapshot.current_price <= 0 or (snapshot.current_price - stop) / snapshot.current_price * 100 < 1.0:
+                    return None
                 priority = AlertPriority.MEDIUM
                 
                 return LiveAlert(
@@ -6069,13 +6548,7 @@ class EnhancedBackgroundScanner:
                     priority=priority,
                     current_price=snapshot.current_price,
                     trigger_price=snapshot.high_of_day,
-                    stop_loss=self._atr_floored_stop(
-                        entry_price=snapshot.current_price,
-                        raw_stop=snapshot.ema_9 - 0.02,
-                        atr=getattr(snapshot, "atr", None),
-                        direction="long",
-                        min_atr_mult=0.5,
-                    ),
+                    stop_loss=stop,
                     target=round(snapshot.high_of_day + (snapshot.atr * 1.5), 2),
                     risk_reward=2.0,
                     trigger_probability=0.55,
@@ -6233,99 +6706,19 @@ class EnhancedBackgroundScanner:
     # existing detectors share. Risk-reward sized for intraday scalps (≥1.5).
     
     async def _check_first_move_up(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """First Move Up — SHORT (fade first morning push to HOD).
-
-        Trigger: price has pushed up making a fresh HOD off the open, RSI is
-        overbought, tape shows exhaustion / strong-ask, ready to fade back to
-        VWAP or the open.
-        """
-        if snapshot.high_of_day <= 0 or snapshot.atr <= 0:
-            return None
-        # Push must be meaningful: > 1.5% from open AND price within 0.5% of HOD
-        push_pct = ((snapshot.high_of_day - snapshot.open) / snapshot.open) * 100 if snapshot.open > 0 else 0
-        dist_from_hod_pct = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
-        if (push_pct >= 1.5 and
-            dist_from_hod_pct <= 0.5 and
-            snapshot.rsi_14 >= 68 and
-            snapshot.dist_from_vwap >= 1.0 and
-            snapshot.rvol >= 1.5):
-            target_price = max(snapshot.vwap, snapshot.open)
-            stop = round(snapshot.high_of_day + (snapshot.atr * 0.25), 2)
-            risk = abs(stop - snapshot.current_price)
-            reward = abs(snapshot.current_price - target_price)
-            rr = (reward / risk) if risk > 0 else 1.5
-            return LiveAlert(
-                id=f"first_move_up_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="first_move_up",
-                strategy_name="First Move Up Fade (MORN-01)",
-                direction="short",
-                priority=AlertPriority.HIGH if tape.confirmation_for_short else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=stop,
-                target=round(target_price, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🪂 {symbol} First-Move-Up Fade — HOD push +{push_pct:.1f}%",
-                reasoning=[
-                    f"Push from open: +{push_pct:.1f}% to HOD ${snapshot.high_of_day:.2f}",
-                    f"Within {dist_from_hod_pct:.2f}% of HOD",
-                    f"RSI overbought: {snapshot.rsi_14:.0f}",
-                    f"{snapshot.dist_from_vwap:+.1f}% extended above VWAP",
-                    f"Target: VWAP/open ${target_price:.2f}",
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
-            )
+        """First Move Up — SUPPRESSED v360 (returns None).
+        Intraday replay (180d / 300-sym, 5-min) proved this morning SHORT fade is negative-EV:
+        win 27%, winsorAvg -0.106 R/trade (>50% hit the full stop). Tighter gates (push 2.0,
+        RSI 72) did not help. Fading a volume-confirmed fresh-HOD push fights the momentum the
+        validated setups trade. Suppressed like vwap_bounce (v354). See memory/v360_first_move_build.md."""
         return None
 
     async def _check_first_move_down(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """First Move Down — LONG (fade first morning flush to LOD)."""
-        if snapshot.low_of_day <= 0 or snapshot.atr <= 0:
-            return None
-        flush_pct = ((snapshot.open - snapshot.low_of_day) / snapshot.open) * 100 if snapshot.open > 0 else 0
-        dist_from_lod_pct = ((snapshot.current_price - snapshot.low_of_day) / snapshot.current_price) * 100
-        if (flush_pct >= 1.5 and
-            dist_from_lod_pct <= 0.5 and
-            snapshot.rsi_14 <= 32 and
-            snapshot.dist_from_vwap <= -1.0 and
-            snapshot.rvol >= 1.5):
-            target_price = min(snapshot.vwap, snapshot.open)
-            stop = round(snapshot.low_of_day - (snapshot.atr * 0.25), 2)
-            risk = abs(snapshot.current_price - stop)
-            reward = abs(target_price - snapshot.current_price)
-            rr = (reward / risk) if risk > 0 else 1.5
-            return LiveAlert(
-                id=f"first_move_down_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="first_move_down",
-                strategy_name="First Move Down Reversal (MORN-02)",
-                direction="long",
-                priority=AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=stop,
-                target=round(target_price, 2),
-                risk_reward=round(rr, 2),
-                trigger_probability=0.55,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🪃 {symbol} First-Move-Down Reversal — LOD flush −{flush_pct:.1f}%",
-                reasoning=[
-                    f"Flush from open: −{flush_pct:.1f}% to LOD ${snapshot.low_of_day:.2f}",
-                    f"Within {dist_from_lod_pct:.2f}% of LOD",
-                    f"RSI oversold: {snapshot.rsi_14:.0f}",
-                    f"{snapshot.dist_from_vwap:+.1f}% below VWAP",
-                    f"Target: VWAP/open ${target_price:.2f}",
-                ],
-                time_window=self._get_current_time_window().value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat(),
-            )
+        """First Move Down — SUPPRESSED v360 (returns None).
+        Intraday replay (180d / 300-sym, 5-min) proved this morning LONG fade is negative-EV:
+        win 24%, winsorAvg -0.176 R/trade (>50% hit the full stop). Tighter gates did not help.
+        Fading a volume-confirmed flush fights momentum. Suppressed like vwap_bounce (v354).
+        See memory/v360_first_move_build.md."""
         return None
 
     async def _check_back_through_open(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
@@ -7980,6 +8373,12 @@ class EnhancedBackgroundScanner:
         # Determine direction from momentum (close vs SMA)
         momentum = closes[-1] - sma20
         direction = "long" if momentum > 0 else "short"
+        # v358 — LONG-ONLY gate. Replay (365d / 400-sym daily) proved the momentum-SHORT
+        # branch is negative-EV in EVERY config (winsorAvg -0.04..-0.09, totW -0.8k..-1.1k),
+        # dragging a solidly +EV long side (+0.073 R/trade, 51% win) to breakeven. Suppress
+        # shorts; keep the long edge. See memory/v358_daily_squeeze_build.md.
+        if direction != "long":
+            return None
         
         current = closes[-1]
         # v19.34.54: ATR-floored stop using the squeeze-period structural
@@ -8630,7 +9029,42 @@ class EnhancedBackgroundScanner:
                     filter="dedup_same_setup",
                 )
                 return
-        
+
+        # v19.34.313 — persistent dedup fallback (catches eviction races).
+        # The in-memory check above misses cases where the prior alert was
+        # evicted from self._live_alerts (e.g. by the 8%-drift cleanup) but
+        # remains status='active' in Mongo. Without this, the next scan
+        # cycle re-fires the same (symbol, setup) and the operator sees
+        # 10-25x duplicate cards on a normal trending day. Per-tier
+        # cooldown so scalp setups can legitimately re-arm after 5 min
+        # while daily setups stay one-per-session.
+        if self.db is not None:
+            cooldown_s = refire_cooldown_seconds(getattr(alert, "trade_style", None))
+            cutoff_iso = (datetime.now(timezone.utc)
+                          - timedelta(seconds=cooldown_s)).isoformat()
+            try:
+                persistent_hit = self.db["live_alerts"].find_one(
+                    {"symbol": alert.symbol,
+                     "setup_type": alert.setup_type,
+                     "status": "active",
+                     "created_at": {"$gte": cutoff_iso}},
+                    {"_id": 0, "alert_id": 1, "created_at": 1},
+                )
+            except Exception:
+                persistent_hit = None
+            if persistent_hit:
+                await self._emit_scanner_thought(
+                    symbol=alert.symbol, kind="skip",
+                    text=(
+                        f"🔁 {alert.symbol} {alert.setup_type} dedup — "
+                        f"persistent active alert within {cooldown_s}s cooldown"
+                    ),
+                    setup_type=alert.setup_type,
+                    direction=getattr(alert, 'direction_bias', None),
+                    filter="dedup_persistent_cooldown",
+                )
+                return
+
         # Per-symbol dedup: if another active alert exists for this symbol,
         # only keep the higher priority one (replaces if new is better)
         existing_for_symbol = [
@@ -8970,6 +9404,14 @@ class EnhancedBackgroundScanner:
         now = datetime.now(timezone.utc)
         to_remove = []
         
+        # v19.34.313 — resolve ET hour once per cleanup pass for EOD eviction.
+        now_et = None
+        try:
+            from zoneinfo import ZoneInfo
+            now_et = now.astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            pass
+
         for alert_id, alert in self._live_alerts.items():
             # Check expiration
             if alert.expires_at:
@@ -8980,7 +9422,26 @@ class EnhancedBackgroundScanner:
                         continue
                 except Exception:
                     pass
-            
+
+            alert_style = (getattr(alert, "trade_style", None) or "").lower()
+
+            # v19.34.313 — EOD eviction for daily-tier alerts at >= 16:00 ET
+            # so they don't accumulate across sessions. The Mongo `created_at`
+            # cooldown lookup in _process_new_alert still blocks intraday
+            # re-fires within the 24h cooldown window.
+            if alert_style in DAILY_TIER_STYLES and now_et is not None \
+                    and now_et.hour >= EOD_EVICTION_ET_HOUR:
+                to_remove.append(alert_id)
+                continue
+
+            # v19.34.313 — ONLY apply the 8% price-drift eviction to fresh-
+            # trigger scalp/intraday tiers. Daily/swing/position/investment
+            # alerts have a stale daily-close trigger by design; intraday
+            # drift >8% is NORMAL and was causing legitimate alerts to be
+            # evicted then re-fired by the next _scan_daily_setups pass.
+            if alert_style not in SCALP_INTRADAY_STYLES:
+                continue
+
             # Check price drift: if live IB price available, compare to trigger
             # Remove alerts where price has moved >8% from trigger (stale data)
             try:

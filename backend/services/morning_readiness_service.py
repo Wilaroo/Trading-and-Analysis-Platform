@@ -492,6 +492,163 @@ def _check_open_positions_clean(db, bot=None) -> Dict[str, Any]:
     }
 
 
+# ── v19.34.318 — "Held Overnight" section ──────────────────────────────
+# Surfaces every long-horizon position the bot carries into today's
+# session, with policy horizon (trade_style), setup_type, bracket
+# TIF inference, stop, and target ladder. Pre-v318 the operator had
+# to scan three panels to assemble this view at the open.
+_GTC_HORIZONS = {"swing", "multi_day", "investment", "position",
+                  "trade_2_hold"}
+
+
+def _infer_bracket_tif(trade_style: str) -> str:
+    """Long-horizon styles use GTC; everything else is DAY."""
+    return "GTC" if (trade_style or "").lower() in _GTC_HORIZONS else "DAY"
+
+
+def _held_overnight_summary(db, bot=None) -> Dict[str, Any]:
+    """v19.34.318 — informational check listing every long-horizon hold.
+
+    Status semantics:
+      green  — every held position has a working stop
+      yellow — at least one held position is missing a stop
+               (or bot service was unavailable)
+    """
+    if bot is None:
+        try:
+            from services.trading_bot_service import get_trading_bot_service
+            bot = get_trading_bot_service()
+        except Exception:
+            return {"status": "yellow",
+                    "detail": "trading bot unavailable for held-overnight scan",
+                    "held": [], "held_count": 0}
+    if bot is None:
+        return {"status": "yellow",
+                "detail": "trading bot unavailable for held-overnight scan",
+                "held": [], "held_count": 0}
+
+    # Use the policy authority — single source of truth for "is this a hold".
+    try:
+        from services.order_policy_registry import should_close_at_eod as _scae
+    except Exception:
+        _scae = lambda _t: True  # fail-safe: if policy missing, nothing is "held"
+
+    held: List[Dict[str, Any]] = []
+    horizon_counts: Dict[str, int] = {}
+    warnings: List[str] = []
+
+    for tid, trade in (bot._open_trades or {}).items():
+        try:
+            if _scae(trade):
+                continue  # intraday/force-close → not a hold
+            style = (getattr(trade, "trade_style", None) or "").lower() or "unknown"
+            horizon_counts[style] = horizon_counts.get(style, 0) + 1
+            tif = _infer_bracket_tif(style)
+            stop = getattr(trade, "stop_price", None)
+            targets = list(getattr(trade, "target_prices", None) or [])
+            shares = int(getattr(trade, "remaining_shares",
+                                 getattr(trade, "shares", 0)) or 0)
+            # v19.34.319 — gap_pct vs prior daily close. Reads last 2
+            # daily bars from ib_historical_data. None if unavailable.
+            # v19.34.319a — `gap_stale` true when prior bar >2 trading days old.
+            gap_pct = None
+            gap_stale = False
+            try:
+                if db is not None:
+                    bars = list(db["ib_historical_data"].aggregate([
+                        {"$match": {"symbol": getattr(trade, "symbol", "?"),
+                                     "bar_size": "1 day"}},
+                        {"$addFields": {"date_key": {"$substr":
+                            [{"$toString": "$date"}, 0, 10]}}},
+                        {"$sort": {"date": -1}},
+                        {"$group": {"_id": "$date_key",
+                                     "close": {"$first": "$close"}}},
+                        {"$sort": {"_id": -1}},
+                        {"$limit": 2},
+                    ], allowDiskUse=True))
+                    if len(bars) >= 2:
+                        latest, prior = bars[0]["close"], bars[1]["close"]
+                        latest_date = bars[0].get("_id")
+                        prior_date = bars[1].get("_id")
+                        if prior and prior > 0:
+                            gap_pct = round(
+                                100.0 * (float(latest) - float(prior))
+                                / float(prior), 3)
+                            # v19.34.319a — sanity guards on the gap calc.
+                            # 1) Cap at ±50% — anything beyond is almost always
+                            #    split-unadjusted data or a sparse-history IPO.
+                            # 2) Mark `gap_stale=True` if the two bars are more
+                            #    than 4 calendar days apart (>2 trading days),
+                            #    which means the "prior close" isn't really
+                            #    yesterday.
+                            try:
+                                if abs(gap_pct) > 50.0:
+                                    gap_pct = None
+                            except Exception:
+                                gap_pct = None
+                            try:
+                                from datetime import date as _date316a
+                                if latest_date and prior_date:
+                                    ld = _date316a.fromisoformat(str(latest_date)[:10])
+                                    pd_ = _date316a.fromisoformat(str(prior_date)[:10])
+                                    if (ld - pd_).days > 4:
+                                        gap_stale = True
+                                    else:
+                                        gap_stale = False
+                                else:
+                                    gap_stale = False
+                            except Exception:
+                                gap_stale = False
+                        else:
+                            gap_stale = False
+                    else:
+                        gap_stale = False
+            except Exception as _gap_exc:
+                logger.debug(f"[v19.34.319] gap calc skip {tid}: {_gap_exc}")
+
+            row = {
+                "trade_id": tid,
+                "symbol": getattr(trade, "symbol", "?"),
+                "direction": getattr(trade, "direction", None),
+                "shares": shares,
+                "trade_style": style,
+                "setup_type": getattr(trade, "setup_type", None),
+                "policy_horizon": style,
+                "bracket_tif": tif,
+                "stop_price": (round(float(stop), 4) if stop else None),
+                "target_prices": [round(float(t), 4) for t in targets if t],
+                "opened_at": getattr(trade, "opened_at", None),
+                "gap_pct": gap_pct,
+                # v19.34.319a — True when the prior bar is >2 trading days
+                # old, meaning the gap calc isn't literally "since yesterday".
+                "gap_stale": gap_stale,
+            }
+            if row["stop_price"] is None:
+                warnings.append(f"{row['symbol']}:no_stop")
+            held.append(row)
+        except Exception as e:
+            logger.debug(f"[v19.34.318] skip trade {tid}: {e}")
+
+    status = "yellow" if warnings else "green"
+    if not held:
+        detail = "No positions carried overnight."
+    else:
+        bits = [f"{c} {h}" for h, c in sorted(
+            horizon_counts.items(), key=lambda kv: -kv[1])]
+        detail = f"{len(held)} held overnight ({', '.join(bits)})."
+        if warnings:
+            detail += f" ⚠ {len(warnings)} no_stop"
+
+    return {
+        "status": status,
+        "detail": detail,
+        "held_count": len(held),
+        "held": held,
+        "horizon_counts": horizon_counts,
+        "warnings": ",".join(warnings),
+    }
+
+
 def _aggregate_verdict(checks: Dict[str, Dict[str, Any]]) -> str:
     statuses = {c.get("status", "yellow") for c in checks.values()}
     if "red" in statuses:
@@ -528,6 +685,8 @@ def compute_morning_readiness(db, bot=None) -> Dict[str, Any]:
         "trading_bot_configured": _check_trading_bot_configured(db, bot=bot),
         "scanner_running": _check_scanner_running(db),
         "open_positions_clean": _check_open_positions_clean(db, bot=bot),
+        # v19.34.318 — informational section listing every long-horizon hold.
+        "held_overnight": _held_overnight_summary(db, bot=bot),
     }
     verdict = _aggregate_verdict(checks)
     summary = _build_summary(verdict, checks)

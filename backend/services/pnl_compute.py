@@ -422,6 +422,27 @@ def _classify_outcome(outcome, r, pnl):
     return None
 
 
+_WIN_TOK = {"won", "win", "winner", "target", "target_hit", "profit", "tp",
+            "take_profit", "profit_target"}
+_LOSS_TOK = {"lost", "loss", "loser", "stopped", "stop", "stop_hit",
+             "stopped_out", "sl", "stop_loss"}
+
+
+def _classify_outcome(outcome, r, pnl):
+    """win/loss/None — outcome string first, then R, then pnl (matches
+    backfill_strategy_stats._classify)."""
+    o = str(outcome or "").lower().strip()
+    if o in _WIN_TOK:
+        return "win"
+    if o in _LOSS_TOK:
+        return "loss"
+    if r is not None and r != 0:
+        return "win" if r > 0 else "loss"
+    if pnl:
+        return "win" if pnl > 0 else "loss"
+    return None
+
+
 def recompute_strategy_stats_for_setup(base: str, genuine_only: bool = True) -> Optional[dict]:
     """v19.34.249 (F3) — CANONICAL strategy_stats recompute for ONE setup family
     from `alert_outcomes` (which is upserted 1-row-per-trade, keyed on trade_id).

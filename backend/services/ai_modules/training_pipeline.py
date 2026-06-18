@@ -35,8 +35,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-from services.ai_modules.triple_barrier_config import get_global_tb_defaults
-
 # Dedicated thread pool for CPU-intensive ML training + training DB reads.
 # ALL training I/O uses this pool, keeping the default asyncio pool 100% free
 # for FastAPI endpoints (push-data, health, etc.)
@@ -331,7 +329,7 @@ def _extract_setup_long_worker(args):
             # Accept legacy 3-tuple (type, fh, noise) OR new 6-tuple (type, fh, noise, pt, sl, atr)
             if len(item) == 3:
                 setup_type, fh, _noise_thr = item
-                tb_pt, tb_sl, tb_atr = get_global_tb_defaults()
+                tb_pt, tb_sl, tb_atr = 2.0, 1.0, 14
             else:
                 setup_type, fh, _noise_thr, tb_pt, tb_sl, tb_atr = item
             feat_names = get_setup_feature_names(setup_type)
@@ -437,7 +435,7 @@ def _extract_setup_short_worker(args):
         for item in setup_configs:
             if len(item) == 3:
                 setup_type, fh, _noise_thr = item
-                tb_pt, tb_sl, tb_atr = get_global_tb_defaults()
+                tb_pt, tb_sl, tb_atr = 2.0, 1.0, 14
             else:
                 setup_type, fh, _noise_thr, tb_pt, tb_sl, tb_atr = item
             feat_names = get_short_setup_feature_names(setup_type)
@@ -2853,10 +2851,10 @@ async def run_training_pipeline(
                                 raw_lbl = triple_barrier_labels(
                                     highs.astype(np.float64), lows.astype(np.float64), closes.astype(np.float64),
                                     entry_indices=idx_arr,
-                                    pt_atr_mult=get_global_tb_defaults()[0],
-                                    sl_atr_mult=get_global_tb_defaults()[1],
+                                    pt_atr_mult=2.0,
+                                    sl_atr_mult=1.0,
                                     max_bars=fh,
-                                    atr_period=get_global_tb_defaults()[2],
+                                    atr_period=14,
                                 )
                                 y_all = np.array([label_to_class_index(int(v)) for v in raw_lbl], dtype=np.float32)
 
@@ -3169,10 +3167,10 @@ async def run_training_pipeline(
                                 tb_raw_lbl = triple_barrier_labels(
                                     highs_ens, lows_ens, closes.astype(np.float64),
                                     entry_indices=tb_entry_idx,
-                                    pt_atr_mult=get_global_tb_defaults()[0],
-                                    sl_atr_mult=get_global_tb_defaults()[1],
+                                    pt_atr_mult=2.0,
+                                    sl_atr_mult=1.0,
                                     max_bars=anchor_fh,
-                                    atr_period=get_global_tb_defaults()[2],
+                                    atr_period=14,
                                 )
                                 tb_targets = np.array(
                                     [label_to_class_index(int(v)) for v in tb_raw_lbl],

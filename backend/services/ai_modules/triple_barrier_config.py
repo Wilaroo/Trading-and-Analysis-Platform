@@ -33,32 +33,17 @@ Usage:
 """
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 from datetime import datetime, timezone
-import os
 import logging
 
 logger = logging.getLogger(__name__)
 
 COLLECTION = "triple_barrier_config"
 
-# Global triple-barrier defaults — env-overridable so the operator can rebalance
-# the label distribution WITHOUT a code change. The historical hardcoded values
-# (PT=2.0, SL=1.0) make UP a rare ~18% class on most setups, starving long-side
-# learning. Set TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD in backend/.env (e.g.
-# symmetric "1.5"/"1.0" or "1.0"/"1.0") and restart with --force to retune.
-DEFAULT_PT = float(os.environ.get("TB_PT_MULT", "2.0"))
-DEFAULT_SL = float(os.environ.get("TB_SL_MULT", "1.0"))
-DEFAULT_ATR_PERIOD = int(os.environ.get("TB_ATR_PERIOD", "14"))
-
-
-def get_global_tb_defaults() -> Tuple[float, float, int]:
-    """Return (pt_mult, sl_mult, atr_period) global defaults from env.
-
-    Single source of truth for every training path that lacks a per-setup
-    DB override. Reads TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD (see module top).
-    """
-    return DEFAULT_PT, DEFAULT_SL, DEFAULT_ATR_PERIOD
+DEFAULT_PT = 2.0
+DEFAULT_SL = 1.0
+DEFAULT_ATR_PERIOD = 14
 
 
 def _key(setup_type: str, bar_size: str, trade_side: str) -> Dict[str, str]:

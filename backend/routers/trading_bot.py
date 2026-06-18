@@ -3076,24 +3076,6 @@ def get_open_trades():
     return {"success": True, "count": len(trades), "trades": trades}
 
 
-@router.post("/reload-strategy-stats")
-def reload_strategy_stats():
-    """v19.34.275 — hot-reload per-setup strategy_stats from Mongo with NO
-    restart. Use after `scripts/rebuild_strategy_stats_clean.py --commit`
-    so the Smart Filter / TQS setup pillar pick up the de-polluted
-    win-rates immediately."""
-    if not _trading_bot:
-        raise HTTPException(status_code=503, detail="Trading bot not initialized")
-    scanner = getattr(_trading_bot, "_enhanced_scanner", None)
-    if scanner is None:
-        raise HTTPException(status_code=503, detail="Scanner not connected")
-    scanner._load_strategy_stats()
-    return {
-        "success": True,
-        "setups_loaded": len(getattr(scanner, "_strategy_stats", {}) or {}),
-    }
-
-
 # ── v19.34.161 — Per-Style P&L card endpoint ────────────────────────────
 @router.get("/pnl-by-style")
 def get_pnl_by_style(days: int = Query(1, ge=1, le=365)):

@@ -420,19 +420,7 @@ class FTDSignalBlock(SignalBlock):
         
         # Analyze recent bars for FTD signals
         self._update_ftd_state(spy_bars)
-
-        # Collapse duplicate distribution entries to one-per-trading-day. Defends
-        # against legacy now()-stamped duplicates persisted before the dedup fix
-        # (which had inflated the count to 25 → "CRITICAL" and floored the score).
-        _seen_days = set()
-        _deduped = []
-        for _d in self.distribution_days:
-            _day = str(_d.get("date", ""))[:10]
-            if _day and _day not in _seen_days:
-                _seen_days.add(_day)
-                _deduped.append(_d)
-        self.distribution_days = _deduped[-25:]
-
+        
         score = 0
         
         # FTD confirmed (50 pts)
@@ -518,23 +506,15 @@ class FTDSignalBlock(SignalBlock):
         daily_change_pct = ((today_close - yesterday_close) / yesterday_close) * 100
         volume_increased = today_volume > yesterday_volume
         
-        # Check for distribution day — dedupe by the BAR's trading date, not
-        # wall-clock now(). Previously this stamped datetime.now() and appended
-        # on EVERY calculate() call, so a single down-day was re-counted on each
-        # refresh and inflated the distribution count (observed 25 duplicates →
-        # "CRITICAL" → score floored to 15).
+        # Check for distribution day
         if daily_change_pct <= -self.DISTRIBUTION_MIN_LOSS and volume_increased:
-            bar_date = today.get("timestamp") or today.get("date")
-            bar_day = str(bar_date)[:10] if bar_date else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            already_logged = any(str(d.get("date", ""))[:10] == bar_day for d in self.distribution_days)
-            if not already_logged:
-                self.distribution_days.append({
-                    "date": f"{bar_day}T00:00:00+00:00",
-                    "change_pct": round(daily_change_pct, 2),
-                    "volume_ratio": round(today_volume / yesterday_volume, 2) if yesterday_volume > 0 else 1
-                })
-                # Keep only the last 25 distinct distribution days
-                self.distribution_days = self.distribution_days[-25:]
+            self.distribution_days.append({
+                "date": datetime.now(timezone.utc).isoformat(),
+                "change_pct": round(daily_change_pct, 2),
+                "volume_ratio": round(today_volume / yesterday_volume, 2) if yesterday_volume > 0 else 1
+            })
+            # Keep only last 25 trading days
+            self.distribution_days = self.distribution_days[-25:]
         
         # State machine logic
         if self.ftd_state == FTDState.CORRECTION:
@@ -765,6 +745,89 @@ class MarketRegimeEngine:
     CONFIRMED_UP_THRESHOLD = 70
     CONFIRMED_DOWN_THRESHOLD = 30
     
+    async def _get_tf_bars_v322(self, symbol, bar_size, limit=120):
+        """v322 self-contained timeframe bar reader (ib_historical_data).
+
+        Private copy for the symbol-level regime path so the v322 patch has
+        ZERO dependencies on other engine internals (DGX tree drift proof).
+        Chronological OHLCV; [] when the timeframe isn't backfilled."""
+        import asyncio as _aio
+        db = getattr(self, "db", None)
+        if db is None:
+            try:
+                from database import get_database
+                db = get_database()
+            except Exception:
+                db = None
+        if db is None:
+            return []
+        try:
+            def _q():
+                return list(db["ib_historical_data"].find(
+                    {"symbol": symbol, "bar_size": bar_size},
+                    {"_id": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "date": 1}
+                ).sort("date", -1).limit(limit))
+            rows = await _aio.to_thread(_q)
+            if rows:
+                return [{
+                    "open": r.get("open"), "high": r.get("high"),
+                    "low": r.get("low"), "close": r.get("close"),
+                    "volume": r.get("volume"),
+                } for r in reversed(rows)]
+        except Exception as e:
+            print(f"v322 tf-bars error {symbol} {bar_size}: {e}")
+        return []
+
+    async def compute_symbol_multi_tf(self, symbol):
+        """Per-stock multi-timeframe regime (#1 / c2 foundation).
+
+        Runs the SAME lane scoring as the index regime, but on ONE symbol's
+        own bars — no index blend, no TICK internals (those are market-wide).
+        Returns the build_multi_tf shape (context / lanes / tf_alignment /
+        modes / recommendation) so a per-ticker RegimeStrip can render a trend
+        stack and the gate can read a candidate's OWN regime alignment.
+        Degrades gracefully (cold/missing lanes → context UNKNOWN)."""
+        try:
+            from services.multi_tf_regime import (
+                score_long_lane, score_intraday_lane, build_multi_tf)
+            daily = await self._get_tf_bars_v322(symbol, "1 day", 220)
+            h1 = await self._get_tf_bars_v322(symbol, "1 hour", 120)
+            m5 = await self._get_tf_bars_v322(symbol, "5 mins", 120)
+            m1 = await self._get_tf_bars_v322(symbol, "1 min", 120)
+            mtf = build_multi_tf(
+                score_long_lane(daily),
+                score_intraday_lane(h1, fast=20, slow=50, use_vwap=False),
+                score_intraday_lane(m5, fast=9, slow=21, use_vwap=True),
+                score_intraday_lane(m1, fast=9, slow=21, use_vwap=True),
+            )
+            mtf["symbol"] = symbol
+            return mtf
+        except Exception as e:
+            print(f"symbol multi-tf error {symbol}: {e}")
+            return {"context": "UNKNOWN", "error": str(e), "symbol": symbol}
+
+    async def compute_symbol_multi_tf_cached(self, symbol, ttl_s=300):
+        """TTL-cached wrapper around compute_symbol_multi_tf (v322 / c2).
+
+        The raw call does 4 Mongo bar queries per symbol — the cache makes it
+        safe for the confidence gate to consult on every alert evaluation.
+        Bounded (~600 symbols) with oldest-first eviction."""
+        import time as _time
+        sym = symbol.upper()
+        if not hasattr(self, "_symbol_mtf_cache"):
+            self._symbol_mtf_cache = {}
+        now = _time.time()
+        hit = self._symbol_mtf_cache.get(sym)
+        if hit and (now - hit[0]) < ttl_s:
+            return hit[1]
+        res = await self.compute_symbol_multi_tf(sym)
+        if len(self._symbol_mtf_cache) > 600:
+            for old_key in sorted(self._symbol_mtf_cache,
+                                  key=lambda k: self._symbol_mtf_cache[k][0])[:100]:
+                self._symbol_mtf_cache.pop(old_key, None)
+        self._symbol_mtf_cache[sym] = (now, res)
+        return res
+
     def __init__(self, alpaca_service=None, ib_service=None, db=None):
         self.alpaca_service = alpaca_service
         self.ib_service = ib_service
@@ -1004,90 +1067,6 @@ class MarketRegimeEngine:
             print(f"tf-bars error {symbol} {bar_size}: {e}")
         return []
 
-    async def _get_tf_bars_v322(self, symbol, bar_size, limit=120):
-        """v322 self-contained timeframe bar reader (ib_historical_data).
-
-        Private copy for the symbol-level regime path so the v322 patch has
-        ZERO dependencies on other engine internals (DGX tree drift proof).
-        Chronological OHLCV; [] when the timeframe isn't backfilled."""
-        import asyncio as _aio
-        db = getattr(self, "db", None)
-        if db is None:
-            try:
-                from database import get_database
-                db = get_database()
-            except Exception:
-                db = None
-        if db is None:
-            return []
-        try:
-            def _q():
-                return list(db["ib_historical_data"].find(
-                    {"symbol": symbol, "bar_size": bar_size},
-                    {"_id": 0, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1, "date": 1}
-                ).sort("date", -1).limit(limit))
-            rows = await _aio.to_thread(_q)
-            if rows:
-                return [{
-                    "open": r.get("open"), "high": r.get("high"),
-                    "low": r.get("low"), "close": r.get("close"),
-                    "volume": r.get("volume"),
-                } for r in reversed(rows)]
-        except Exception as e:
-            print(f"v322 tf-bars error {symbol} {bar_size}: {e}")
-        return []
-
-    async def compute_symbol_multi_tf(self, symbol):
-        """Per-stock multi-timeframe regime (#1 / c2 foundation).
-
-        Runs the SAME lane scoring as the index regime, but on ONE symbol's
-        own bars — no index blend, no TICK internals (those are market-wide).
-        Returns the build_multi_tf shape (context / lanes / tf_alignment /
-        modes / recommendation) so a per-ticker RegimeStrip can render a trend
-        stack and the gate can read a candidate's OWN regime alignment.
-        Degrades gracefully (cold/missing lanes → context UNKNOWN)."""
-        try:
-            from services.multi_tf_regime import (
-                score_long_lane, score_intraday_lane, build_multi_tf)
-            daily = await self._get_tf_bars_v322(symbol, "1 day", 220)
-            h1 = await self._get_tf_bars_v322(symbol, "1 hour", 120)
-            m5 = await self._get_tf_bars_v322(symbol, "5 mins", 120)
-            m1 = await self._get_tf_bars_v322(symbol, "1 min", 120)
-            mtf = build_multi_tf(
-                score_long_lane(daily),
-                score_intraday_lane(h1, fast=20, slow=50, use_vwap=False),
-                score_intraday_lane(m5, fast=9, slow=21, use_vwap=True),
-                score_intraday_lane(m1, fast=9, slow=21, use_vwap=True),
-            )
-            mtf["symbol"] = symbol
-            return mtf
-        except Exception as e:
-            print(f"symbol multi-tf error {symbol}: {e}")
-            return {"context": "UNKNOWN", "error": str(e), "symbol": symbol}
-
-    async def compute_symbol_multi_tf_cached(self, symbol, ttl_s=300):
-        """TTL-cached wrapper around compute_symbol_multi_tf (v322 / c2).
-
-        The raw call does 4 Mongo bar queries per symbol — the cache makes it
-        safe for the confidence gate to consult on every alert evaluation.
-        Bounded (~600 symbols) with oldest-first eviction."""
-        import time as _time
-        sym = symbol.upper()
-        if not hasattr(self, "_symbol_mtf_cache"):
-            self._symbol_mtf_cache = {}
-        now = _time.time()
-        hit = self._symbol_mtf_cache.get(sym)
-        if hit and (now - hit[0]) < ttl_s:
-            return hit[1]
-        res = await self.compute_symbol_multi_tf(sym)
-        if len(self._symbol_mtf_cache) > 600:
-            for old_key in sorted(self._symbol_mtf_cache,
-                                  key=lambda k: self._symbol_mtf_cache[k][0])[:100]:
-                self._symbol_mtf_cache.pop(old_key, None)
-        self._symbol_mtf_cache[sym] = (now, res)
-        return res
-
-
 
     def _calculate_confidence(self) -> float:
         """Calculate confidence based on signal block agreement."""
@@ -1209,67 +1188,8 @@ class MarketRegimeEngine:
         
         return []
     
-    async def _daily_change_from_bars(self, symbol: str) -> Dict:
-        """Compute (price, change_pct) from the two most recent cached daily bars.
-
-        IB-only fallback used when Alpaca is disabled. Uses `self.db` (the handle
-        the engine is actually constructed with) first — the module-level
-        get_database() returns None in this runtime, which is why breadth
-        previously flatlined to zero — then get_database(), then the IB service.
-        """
-        # Prefer the injected handle (proven valid by FTD persistence).
-        db = self.db
-        if db is None:
-            try:
-                from database import get_database
-                db = get_database()
-            except Exception:
-                db = None
-
-        if db is not None:
-            try:
-                def _q():
-                    return list(db["ib_historical_data"].find(
-                        {"symbol": symbol, "bar_size": "1 day"},
-                        {"_id": 0, "close": 1, "date": 1}
-                    ).sort("date", -1).limit(2))
-                rows = await asyncio.to_thread(_q)
-                if len(rows) >= 2:
-                    last_close = rows[0].get("close") or 0
-                    prev_close = rows[1].get("close") or 0
-                    if prev_close:
-                        return {
-                            "price": last_close,
-                            "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
-                        }
-            except Exception as e:
-                print(f"daily-change-from-bars mongo error for {symbol}: {e}")
-
-        # IB fallback (same source the trend block already uses successfully).
-        try:
-            if self.ib_service:
-                bars = await self.ib_service.get_historical_data(symbol, "1D", 3)
-                if bars and len(bars) >= 2:
-                    last_close = bars[-1].get("close") or 0
-                    prev_close = bars[-2].get("close") or 0
-                    if prev_close:
-                        return {
-                            "price": last_close,
-                            "change_pct": round((last_close - prev_close) / prev_close * 100, 2),
-                        }
-        except Exception as e:
-            print(f"daily-change-from-bars IB error for {symbol}: {e}")
-
-        return {}
-
     async def _get_quote(self, symbol: str) -> Dict:
-        """Get current quote with change percentage.
-
-        IB-only deployment: Alpaca is disabled, so when it's unavailable we derive
-        change_pct from the cached daily bars instead of returning zeros (which
-        silently flatlined the breadth block). A realtime overlay is layered in
-        Step 2 so the current day's change goes live like the charts.
-        """
+        """Get current quote with change percentage."""
         try:
             if self.alpaca_service:
                 quote = await self.alpaca_service.get_quote(symbol)
@@ -1281,12 +1201,7 @@ class MarketRegimeEngine:
                     }
         except Exception as e:
             print(f"Quote error for {symbol}: {e}")
-
-        # IB-only fallback: derive daily change from cached bars.
-        derived = await self._daily_change_from_bars(symbol)
-        if derived:
-            return {"price": derived["price"], "change_pct": derived["change_pct"], "rvol": 1.0}
-
+        
         return {"price": 0, "change_pct": 0, "rvol": 1.0}
     
     async def _get_vix_data(self) -> Dict:
@@ -1306,15 +1221,10 @@ class MarketRegimeEngine:
         return {"price": 20, "change_pct": 0}
     
     async def _get_sector_data(self) -> Dict[str, Dict]:
-        """Get sector ETF data for breadth analysis.
-
-        IB-only deployment: when Alpaca batch quotes are unavailable, derive each
-        sector's daily change from cached bars so breadth reflects real sector
-        rotation instead of all-zeros.
-        """
+        """Get sector ETF data for breadth analysis."""
         sector_etfs = ["XLK", "XLF", "XLE", "XLV", "XLI", "XLC", "XLY", "XLP", "XLU", "XLRE", "XLB"]
         sector_data = {}
-
+        
         try:
             if self.alpaca_service:
                 quotes = await self.alpaca_service.get_quotes_batch(sector_etfs)
@@ -1324,16 +1234,9 @@ class MarketRegimeEngine:
                             "price": quote.get("price", quote.get("last", 0)),
                             "change_pct": quote.get("change_pct", quote.get("changePercent", 0))
                         }
-                    return sector_data
         except Exception as e:
             print(f"Sector data error: {e}")
-
-        # IB-only fallback: derive each sector's daily change from cached bars.
-        for etf in sector_etfs:
-            derived = await self._daily_change_from_bars(etf)
-            if derived:
-                sector_data[etf] = {"price": derived["price"], "change_pct": derived["change_pct"]}
-
+        
         return sector_data
     
     async def _get_vold_ratio(self) -> float:

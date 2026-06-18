@@ -86,29 +86,6 @@ async def ib_direct_positions() -> Dict[str, Any]:
     return {"success": True, "count": len(positions), "positions": positions}
 
 
-@router.get("/historical/{symbol}")
-async def ib_direct_historical(
-    symbol: str,
-    duration: str = "1 Y",
-    bar_size: str = "1 day",
-    what_to_show: str = "TRADES",
-    use_rth: bool = True,
-) -> Dict[str, Any]:
-    """Historical bars over the live IB-direct socket (the only working
-    historical path on this deploy). Handles VIX as a CBOE index. Used by the
-    VIX-history backfill so the system can percentile-rank current vol against
-    COVID / tariff / geopolitical spike-and-bottom regimes."""
-    svc = get_ib_direct_service()
-    if not svc.is_connected():
-        return {"success": False, "error": "not connected — call /connect first", "bars": []}
-    bars = await svc.get_historical_data(
-        symbol, duration=duration, bar_size=bar_size,
-        what_to_show=what_to_show, use_rth=use_rth,
-    )
-    return {"success": True, "symbol": symbol.upper(), "bar_size": bar_size,
-            "duration": duration, "count": len(bars), "bars": bars}
-
-
 @router.post("/smoke-test")
 async def ib_direct_smoke_test() -> Dict[str, Any]:
     """Read-only smoke test: connect → fetch positions → return.

@@ -83,11 +83,11 @@ async def _monitor_training_process(task: _TrainingProcess):
             if result_doc:
                 _last_result = result_doc.get("result")
 
-            # v19.34.311 — Honest status. A SIGKILL/segfault (e.g. OOM kill, exit_code < 0)
-            # cannot be caught by the subprocess's try/except, so it never writes
-            # a failure status — leaving the dashboard stuck on the last RUNNING
-            # phase forever. Detect an abnormal exit with no successful result and
-            # mark the pipeline FAILED so the UI reflects reality immediately.
+            # v19.34.311 — Honest status. A SIGKILL/segfault (e.g. OOM kill,
+            # exit_code < 0) cannot be caught by the subprocess try/except, so it
+            # never writes a failure status — leaving the dashboard stuck on the
+            # last RUNNING phase. Detect an abnormal exit with no success result
+            # and mark the pipeline FAILED so the UI reflects reality.
             succeeded = bool(isinstance(_last_result, dict) and not _last_result.get("error"))
             if exit_code is not None and exit_code != 0 and not succeeded:
                 if exit_code < 0:

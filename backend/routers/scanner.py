@@ -799,7 +799,7 @@ def get_symbol_trace(symbol: str):
     except Exception:
         pass
 
-    # 5) Today's alert/trade counts (created_at is ISO string → lexical >= works).
+    # 5) Today's alert/trade counts (created_at is ISO string -> lexical >= works).
     today = now.strftime("%Y-%m-%d")
     counts = {}
     try:
@@ -881,15 +881,15 @@ def get_symbol_trace(symbol: str):
     verdict = "unknown"
     if in_universe is False:
         verdict = (f"NOT IN UNIVERSE — {sym} is below the intraday ADV floor "
-                   f"($50M/day) in symbol_adv_cache")
+                   "($50M/day) in symbol_adv_cache")
     elif last_eval is None:
         verdict = (f"NOT SCANNED — {sym} is in the universe but the wave never "
-                   f"dispatched it this session (tier rotation / not in wave)")
+                   "dispatched it this session (tier rotation / not in wave)")
     else:
         st = last_eval.get("stage")
         if st == "no_data":
             verdict = (f"DROPPED @ no_data — no intraday mongo bars for {sym} "
-                       f"(turbo-collector gap / cold cache). Setup was invisible.")
+                       "(turbo-collector gap / cold cache). Setup was invisible.")
         elif st == "rvol_skip":
             verdict = (f"DROPPED @ rvol_skip — RVOL {last_eval.get('rvol')} < floor "
                        f"{last_eval.get('min_rvol')} (liquid by ADV, just not 'in play' today)")

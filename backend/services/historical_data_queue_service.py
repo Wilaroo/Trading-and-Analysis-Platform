@@ -70,6 +70,12 @@ class HistoricalDataQueueService:
         self.db = db
         self.collection = db["historical_data_requests"]
         self._ensure_indexes()
+        # v19.34.314 — VIP-priority queue ordering. Cached symbol list so we
+        # don't query 6 collections on every batch claim (claims happen
+        # every few seconds during RTH).
+        self._vip_cache: Optional[List[str]] = None
+        self._vip_cache_ts: float = 0.0
+        self._VIP_CACHE_TTL_S: float = 30.0
     
     def _ensure_indexes(self):
         """Create indexes for efficient queries"""
@@ -86,6 +92,117 @@ class HistoricalDataQueueService:
         except Exception as e:
             logger.warning(f"Error creating indexes: {e}")
     
+    def _compute_vip_symbols(self) -> List[str]:
+        """v19.34.314 — return ordered VIP symbols for queue priority.
+
+        Layers in precedence (each de-duped against earlier layers):
+          1. Open positions  (bot_trades status in {open,filled,active})
+          2. Operator pins   (watchlists + smart_watchlist)
+          3. Data-gap events (data_gap_events kind=daily_missing, last 2h)
+          4. Today's priority (daily_scan_universe[today].priority_symbols)
+          5. Mega-cap watchlist (data.mega_cap_watchlist.MEGA_CAP_WATCHLIST)
+          6. Top-100 intraday by ADV (symbol_adv_cache, ADV>=$50M)
+
+        Returns a list (NOT a set) so precedence is preserved when we walk
+        it to fill reserved slots in get_pending_requests.
+        """
+        from datetime import timedelta
+        seen: set = set()
+        out: List[str] = []
+
+        def _add(syms):
+            for s in syms or ():
+                if isinstance(s, dict):
+                    s = s.get("symbol")
+                su = (s or "").upper()
+                if su and su not in seen:
+                    seen.add(su)
+                    out.append(su)
+
+        # Layer 1 — held positions
+        try:
+            for r in self.db["bot_trades"].find(
+                {"status": {"$in": ["open", "filled", "active",
+                                      "OPEN", "FILLED"]}},
+                {"symbol": 1, "_id": 0},
+            ):
+                _add([r.get("symbol")])
+        except Exception:
+            pass
+
+        # Layer 2 — operator pins (both collections)
+        for coll_name in ("watchlists", "smart_watchlist"):
+            try:
+                for r in self.db[coll_name].find({}, {"symbol": 1, "_id": 0}):
+                    _add([r.get("symbol")])
+            except Exception:
+                pass
+
+        # Layer 3 — recent data-gap events
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+            for r in self.db["data_gap_events"].find(
+                {"kind": "daily_missing", "created_at": {"$gte": cutoff}},
+                {"symbol": 1, "_id": 0},
+            ):
+                _add([r.get("symbol")])
+        except Exception:
+            pass
+
+        # Layer 4 — today's daily_scan_universe priority symbols
+        today_key = None
+        try:
+            from zoneinfo import ZoneInfo
+            today_key = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+        except Exception:
+            today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            doc = (self.db["daily_scan_universe"].find_one({"_id": today_key})
+                   or self.db["daily_scan_universe"].find_one({}, sort=[("_id", -1)]))
+            if doc:
+                for key in ("priority_symbols", "priority", "top_priority"):
+                    v = doc.get(key)
+                    if v:
+                        _add(v)
+                        break
+        except Exception:
+            pass
+
+        # Layer 5 — mega-cap watchlist (hard-coded list of 50 names)
+        try:
+            from data.mega_cap_watchlist import MEGA_CAP_WATCHLIST
+            _add(MEGA_CAP_WATCHLIST)
+        except Exception:
+            pass
+
+        # Layer 6 — top-100 intraday by ADV
+        try:
+            for r in self.db["symbol_adv_cache"].find(
+                {"avg_dollar_volume": {"$gte": 50_000_000},
+                 "unqualifiable": {"$ne": True}},
+                {"symbol": 1, "_id": 0},
+            ).sort("avg_dollar_volume", -1).limit(100):
+                _add([r.get("symbol")])
+        except Exception:
+            pass
+
+        return out
+
+    def _get_vip_symbols_cached(self) -> List[str]:
+        """v19.34.314 — TTL-cached VIP list (30s default)."""
+        import time
+        now = time.time()
+        if (self._vip_cache is not None
+                and (now - self._vip_cache_ts) < self._VIP_CACHE_TTL_S):
+            return self._vip_cache
+        try:
+            self._vip_cache = self._compute_vip_symbols()
+            self._vip_cache_ts = now
+        except Exception as e:
+            logger.warning(f"v19.34.314 VIP compute failed: {e}")
+            self._vip_cache = self._vip_cache or []
+        return self._vip_cache
+
     def create_request(self, symbol: str, duration: str = "1 M", 
                        bar_size: str = "1 day", callback_id: str = None,
                        skip_if_pending: bool = True,
@@ -204,11 +321,50 @@ class HistoricalDataQueueService:
             pipeline.append({"$limit": 10})
             candidates = list(self.collection.aggregate(pipeline))
         
-        if not candidates:
+        # v19.34.314 — VIP overlay. Reserve a fraction of the batch for
+        # symbols the operator actually cares about (held positions, watch-
+        # list, data-gap events, today's daily_scan priority, mega-caps,
+        # top-100 ADV) so they don't sit behind long-gap backfills under
+        # the count-DESC fairness rule. Env-tunable via
+        # HIST_QUEUE_VIP_RESERVE_FRACTION (default 0.5 = half the batch).
+        # Partition mode disables VIP overlay so multi-instance pushers
+        # don't double-claim the same VIP rows.
+        import os as _os_v314
+        try:
+            vip_fraction = float(_os_v314.environ.get(
+                "HIST_QUEUE_VIP_RESERVE_FRACTION", "0.5"))
+        except (TypeError, ValueError):
+            vip_fraction = 0.5
+        vip_reserved = int(round(limit * vip_fraction))
+        if symbol_partition is not None:
+            vip_reserved = 0  # don't VIP-overlay in partitioned mode
+
+        all_requests: List[Dict] = []
+        served_request_ids: set = set()
+
+        if vip_reserved > 0:
+            vip_symbols = self._get_vip_symbols_cached()
+            for vip_sym in vip_symbols:
+                if len(all_requests) >= vip_reserved:
+                    break
+                remaining = vip_reserved - len(all_requests)
+                vip_filter = dict(match_filter)
+                vip_filter["symbol"] = vip_sym
+                rows = list(self.collection.find(
+                    vip_filter, {"_id": 0}
+                ).limit(remaining))
+                if not rows:
+                    continue
+                rows.sort(key=lambda x: timeframe_priority.get(
+                    x.get("bar_size", ""), 99))
+                all_requests.extend(rows)
+                served_request_ids.update(
+                    r.get("request_id") for r in rows if r.get("request_id"))
+
+        if not candidates and not all_requests:
             return []
-        
-        # Fill batch from multiple symbols until we hit the limit
-        all_requests = []
+
+        # ─── existing count-DESC fairness fills remaining slots ───
         for candidate in candidates:
             if len(all_requests) >= limit:
                 break
@@ -221,6 +377,9 @@ class HistoricalDataQueueService:
                 find_filter["$and"] = _deep_request_exclusion()
             if bar_sizes:
                 find_filter["bar_size"] = {"$in": bar_sizes}
+            # v19.34.314 — never re-emit rows already served by the VIP overlay.
+            if served_request_ids:
+                find_filter["request_id"] = {"$nin": list(served_request_ids)}
             
             cursor = self.collection.find(
                 find_filter,

@@ -156,6 +156,86 @@ class OpportunityEvaluator:
             direction_str = alert.get('direction', 'long')
             direction = TradeDirection.LONG if direction_str == 'long' else TradeDirection.SHORT
 
+
+            # ── v19.34.320 — Daily-bar premarket gate ── BEGIN ────────
+            # Suppress daily-bar-consuming setups before the cutoff ET
+            # time. Today's daily bar isn't mature until the first 30
+            # min of RTH have passed (~10:00 ET). Setups whose
+            # trade_style in multi_day/swing/position/investment OR
+            # setup_type in daily-bar list read TODAY's daily OHLCV ->
+            # pre-cutoff fires consume incomplete/whippy data.
+            #
+            # Env: V320_DAILY_BAR_GATE_POLICY in {block,observe,off}
+            #      V320_DAILY_BAR_CUTOFF_ET (HH:MM America/New_York)
+            #      V320_DAILY_BAR_STYLES   (comma list)
+            #      V320_DAILY_BAR_SETUPS   (comma list)
+            try:
+                import os as _os_v320
+                _v320_policy = (_os_v320.environ.get(
+                    "V320_DAILY_BAR_GATE_POLICY", "block")
+                    or "block").lower().strip()
+                if _v320_policy not in ("block", "observe", "off"):
+                    _v320_policy = "block"
+                if _v320_policy != "off":
+                    from zoneinfo import ZoneInfo as _ZI_v320
+                    _v320_cutoff = (_os_v320.environ.get(
+                        "V320_DAILY_BAR_CUTOFF_ET", "10:00") or "10:00")
+                    _h, _m = _v320_cutoff.split(":")
+                    _cutoff_min = int(_h) * 60 + int(_m)
+                    _now_et = datetime.now(_ZI_v320("America/New_York"))
+                    _now_min = _now_et.hour * 60 + _now_et.minute
+                    if _now_min < _cutoff_min:
+                        _styles_env = _os_v320.environ.get(
+                            "V320_DAILY_BAR_STYLES",
+                            "multi_day,swing,position,investment")
+                        _setups_env = _os_v320.environ.get(
+                            "V320_DAILY_BAR_SETUPS",
+                            "daily_breakout,rs_leader_break,"
+                            "stage_2_breakout,power_trend_stack,"
+                            "pocket_pivot,three_week_tight,"
+                            "accumulation_entry,daily_squeeze")
+                        _v320_styles = {s.strip().lower() for s in _styles_env.split(",") if s.strip()}
+                        _v320_setups = {s.strip().lower() for s in _setups_env.split(",") if s.strip()}
+                        _alert_style = (alert.get("trade_style") or "").lower().strip()
+                        _alert_setup = (setup_type or "").lower().strip()
+                        _hit_style = _alert_style in _v320_styles
+                        _hit_setup = _alert_setup in _v320_setups
+                        if _hit_style or _hit_setup:
+                            if _v320_policy == "block":
+                                try:
+                                    bot.record_rejection(
+                                        symbol=symbol, setup_type=setup_type,
+                                        direction=direction_str,
+                                        reason_code="v320_daily_bar_premarket_gate",
+                                        context={
+                                            "policy": "v19.34.320_premarket_gate",
+                                            "cutoff_et": _v320_cutoff,
+                                            "now_et": _now_et.strftime("%H:%M"),
+                                            "matched_style": _alert_style if _hit_style else None,
+                                            "matched_setup": _alert_setup if _hit_setup else None,
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+                                logger.info(
+                                    "\U0001f6ab [v19.34.320] daily-bar gate BLOCK "
+                                    "%s/%s (style=%s, setup=%s, now=%s ET, cutoff=%s ET)",
+                                    symbol, setup_type, _alert_style or "-",
+                                    _alert_setup or "-",
+                                    _now_et.strftime("%H:%M"), _v320_cutoff,
+                                )
+                                return None
+                            elif _v320_policy == "observe":
+                                logger.info(
+                                    "\U0001f441\ufe0f [v19.34.320 OBSERVE] daily-bar gate would BLOCK "
+                                    "%s/%s (style=%s, setup=%s, now=%s ET)",
+                                    symbol, setup_type, _alert_style or "-",
+                                    _alert_setup or "-", _now_et.strftime("%H:%M"),
+                                )
+            except Exception as _v320_err:
+                logger.debug("v320 daily-bar gate threw (allowing through): %s", _v320_err)
+            # ── v19.34.320 — Daily-bar premarket gate ── END ──────────
+
             # ── v19.34.173 — Setup-grade F-gate ──────────────────────
             # Block alerts whose setup_type is graded F over the
             # rolling 30d window. The previous behaviour was
@@ -307,6 +387,96 @@ class OpportunityEvaluator:
             except Exception as _q9_err:
                 logger.debug(
                     "[v19.34.194 vol-floor] gate crashed (fail-open): %s", _q9_err,
+                )
+
+            # ── v19.34.323 — SHORT-FADE eligibility gate (v334 stop-overrun) ──
+            # diag_v334 proved the catastrophic stop-overrun tail (~$23k of
+            # $26k excess loss) is ~90% SHORTS and ~88% vwap_fade_short:
+            # shorting STRENGTH on low-priced / illiquid names with absurdly
+            # tight stops (WTI $2.84/2c stop->exit 3.21; PRCT $26.67/4c->27.02;
+            # USO 0.03% stop). The stop engine fired correctly — the loss is
+            # gap/squeeze slippage on a no-edge entry held overnight. Cheapest
+            # bulletproof fix: never enter the danger profile. Two fail-OPEN
+            # levers on SHORT fade/reversion setups only:
+            #   1. MIN_SHORT_FADE_PRICE  (default $5)  — kills sub-$5 squeezers.
+            #   2. MIN_SHORT_FADE_STOP_PCT (default 1.0%) — kills noise-stop
+            #      fades (stop distance < pct of price) that any squeeze blows
+            #      straight through.
+            # Env: SHORT_FADE_GATE_POLICY in {block,observe,off} (default block);
+            #      SHORT_FADE_SETUP_KEYWORDS (csv substring match on setup_type).
+            # Drops land in `trade_drops` via record_rejection.
+            try:
+                import os as _os_sf
+                _sf_policy = (_os_sf.environ.get(
+                    "SHORT_FADE_GATE_POLICY", "block") or "block").lower()
+                if _sf_policy != "off" and str(direction_str).lower().startswith("s"):
+                    _sym_sf = (symbol or "").upper()
+                    _su_l = str(setup_type or "").lower()
+                    _kw_raw = _os_sf.environ.get(
+                        "SHORT_FADE_SETUP_KEYWORDS",
+                        "fade,bounce,reversion,rubber_band,off_sides,backside",
+                    )
+                    _kws = [k.strip() for k in _kw_raw.split(",") if k.strip()]
+                    if any(k in _su_l for k in _kws):
+                        _px_sf = (alert.get("price") or alert.get("current_price")
+                                  or alert.get("entry_price")
+                                  or alert.get("trigger_price"))
+                        _stop_sf = (alert.get("stop_loss")
+                                    or alert.get("stop_price"))
+                        try:
+                            _px_sf = float(_px_sf) if _px_sf else None
+                        except (TypeError, ValueError):
+                            _px_sf = None
+                        try:
+                            _stop_sf = float(_stop_sf) if _stop_sf else None
+                        except (TypeError, ValueError):
+                            _stop_sf = None
+                        try:
+                            _min_price = float(_os_sf.environ.get(
+                                "MIN_SHORT_FADE_PRICE", "5.0"))
+                        except (TypeError, ValueError):
+                            _min_price = 5.0
+                        try:
+                            _min_stop_pct = float(_os_sf.environ.get(
+                                "MIN_SHORT_FADE_STOP_PCT", "0.010"))
+                        except (TypeError, ValueError):
+                            _min_stop_pct = 0.010
+                        _block_reason = None
+                        _sf_ctx = {}
+                        if (_px_sf is not None and _min_price > 0
+                                and _px_sf < _min_price):
+                            _block_reason = "short_fade_low_price"
+                            _sf_ctx = {"price": round(_px_sf, 4),
+                                       "min_price": _min_price}
+                        elif (_px_sf and _stop_sf and _min_stop_pct > 0):
+                            _sd_pct = abs(_stop_sf - _px_sf) / _px_sf
+                            if _sd_pct < _min_stop_pct:
+                                _block_reason = "short_fade_stop_too_tight"
+                                _sf_ctx = {"stop_pct": round(_sd_pct, 5),
+                                           "min_stop_pct": _min_stop_pct,
+                                           "price": round(_px_sf, 4),
+                                           "stop": round(_stop_sf, 4)}
+                        if _block_reason:
+                            logger.info(
+                                "\U0001f6ab [v19.34.323 short-fade] %s %s %s — %s %s",
+                                ("OBSERVE" if _sf_policy == "observe" else "BLOCK"),
+                                _sym_sf, setup_type, _block_reason, _sf_ctx,
+                            )
+                            if _sf_policy != "observe":
+                                try:
+                                    bot.record_rejection(
+                                        symbol=symbol, setup_type=setup_type,
+                                        direction=direction_str,
+                                        reason_code=_block_reason,
+                                        context=_sf_ctx,
+                                    )
+                                except Exception:
+                                    pass
+                                return None
+            except Exception as _sf_err:
+                logger.debug(
+                    "[v19.34.323 short-fade] gate crashed (fail-open): %s",
+                    _sf_err,
                 )
 
             # ── v19.34.44 — Stale Alert TTL (default 30s) ─────────────
@@ -645,7 +815,7 @@ class OpportunityEvaluator:
             # ==================== SMART STRATEGY FILTERING ====================
             strategy_filter = bot._evaluate_strategy_filter(
                 setup_type=setup_type,
-                quality_score=alert.get('score', 70),
+                quality_score=int(alert.get('tqs_score') or alert.get('score') or 70),
                 symbol=symbol
             )
 
@@ -1734,7 +1904,7 @@ class OpportunityEvaluator:
                 timeframe=timeframe_str,
                 quality_score=quality_score,
                 quality_grade=quality_grade,
-                trade_style=alert.get("trade_style", "trade_2_hold"),
+                trade_style=self._resolve_geometry_style(alert, setup_type),
                 smb_grade=alert.get("smb_grade", quality_grade),
                 tqs_score=float(tqs_score_final or 0),
                 tqs_grade=tqs_grade_final,

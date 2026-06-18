@@ -410,6 +410,99 @@ class IBHistoricalCollector:
         logger.warning("build_adv_cache() is deprecated — redirecting to rebuild_adv_from_ib_data()")
         return await self.rebuild_adv_from_ib_data()
         
+    @staticmethod
+    def _filter_pre_listing_pollution(
+        dates, volumes, highs, lows, closes,
+        *, gap_threshold_days: int = 30, vol_ratio_threshold: float = 50.0,
+    ):
+        """v19.34.320a — drop pre-listing residue from recycled tickers.
+
+        Walks newest→oldest. When a time-gap > gap_threshold_days is seen
+        AND the median volume on the NEWER side is >= vol_ratio_threshold ×
+        the median on the OLDER side, the older cohort is considered residue
+        from a previously-delisted listing under the same symbol (e.g. SPCX
+        post-IPO 2026-06-12: 24 stale ~$22 bars from a 2026-Q1 delisting
+        followed by a 91-day gap and a $167 IPO bar with 1.1M× volume).
+
+        Returns (dates, volumes, highs, lows, closes, meta) where the
+        sequences are truncated to the newest cohort, and meta contains
+        {"filter_applied": bool, "window_start_iso": str|None,
+         "removed_count": int}.
+
+        Input arrays MUST be sorted newest-first. Returns same order.
+        Missing fields are tolerated (None volumes ignored in medians).
+        """
+        from statistics import median as _median
+
+        meta = {"filter_applied": False, "window_start_iso": None,
+                "removed_count": 0}
+        n = min(len(dates), len(volumes), len(highs), len(lows), len(closes))
+        if n < 3:
+            return dates, volumes, highs, lows, closes, meta
+
+        # normalize date → NAIVE datetime (tzinfo stripped) so subtraction
+        # is uniform regardless of whether Mongo returned a BSON Date
+        # (naive via pymongo) or an ISO string (tz-aware from fromisoformat).
+        def _to_dt(x):
+            if x is None:
+                return None
+            if hasattr(x, "year"):
+                # already a datetime — strip tzinfo if present
+                try:
+                    return x.replace(tzinfo=None) if x.tzinfo else x
+                except Exception:
+                    return x
+            if isinstance(x, str):
+                try:
+                    from datetime import datetime as _dt
+                    dt = _dt.fromisoformat(x.replace("Z", "+00:00"))
+                    return dt.replace(tzinfo=None)
+                except Exception:
+                    return None
+            return None
+
+        dts = [_to_dt(d) for d in dates[:n]]
+
+        # walk pairs newest→oldest, find largest qualifying gap
+        cutoff_i = None  # index where newer cohort ENDS (exclusive)
+        for i in range(n - 1):
+            new_dt, old_dt = dts[i], dts[i + 1]
+            if new_dt is None or old_dt is None:
+                continue
+            gap_days = (new_dt - old_dt).days
+            if gap_days <= gap_threshold_days:
+                continue
+            # candidate gap. compare volume medians on either side.
+            newer_vols = [v for v in volumes[: i + 1] if v]
+            older_vols = [v for v in volumes[i + 1 : n] if v]
+            if not newer_vols or not older_vols:
+                continue
+            new_med = _median(newer_vols)
+            old_med = _median(older_vols)
+            if old_med <= 0:
+                # zero/None pre-gap volume is itself a strong residue signal
+                cutoff_i = i + 1
+                break
+            if (new_med / old_med) >= vol_ratio_threshold:
+                cutoff_i = i + 1
+                break
+
+        if cutoff_i is None:
+            return dates, volumes, highs, lows, closes, meta
+
+        kept = cutoff_i
+        removed = n - kept
+        meta["filter_applied"] = True
+        meta["removed_count"] = removed
+        # window_start = the OLDEST date in the kept cohort
+        if dts[kept - 1] is not None:
+            try:
+                meta["window_start_iso"] = dts[kept - 1].isoformat()
+            except Exception:
+                pass
+        return (dates[:kept], volumes[:kept], highs[:kept],
+                lows[:kept], closes[:kept], meta)
+
     async def rebuild_adv_from_ib_data(self) -> Dict[str, Any]:
         """
         Rebuild the ADV cache with dollar volume and ATR% from IB historical bars.
@@ -434,7 +527,9 @@ class IBHistoricalCollector:
         logger.info("=" * 60)
         
         try:
-            # Aggregate: get last 20 daily bars per symbol with OHLCV
+            # v19.34.320a — push dates too (for pre-listing pollution detection),
+            # and cap raw push at 200 newest per symbol (memory bound). The
+            # 20-bar slice + avg now happen in Python AFTER the filter.
             pipeline = [
                 {"$match": {"bar_size": "1 day"}},
                 {"$sort": {"date": -1}},
@@ -444,6 +539,7 @@ class IBHistoricalCollector:
                     "highs": {"$push": "$high"},
                     "lows": {"$push": "$low"},
                     "closes": {"$push": "$close"},
+                    "dates":  {"$push": "$date"},
                     "bar_count": {"$sum": 1},
                     "latest_date": {"$first": "$date"},
                 }},
@@ -452,23 +548,14 @@ class IBHistoricalCollector:
                     "_id": 0,
                     "bar_count": 1,
                     "latest_date": 1,
-                    "recent_volumes": {"$slice": ["$volumes", 20]},
-                    "recent_highs": {"$slice": ["$highs", 20]},
-                    "recent_lows": {"$slice": ["$lows", 20]},
-                    "recent_closes": {"$slice": ["$closes", 20]},
-                    "latest_close": {"$arrayElemAt": ["$closes", 0]},
+                    # cap to 200 newest to bound memory; pre-listing filter
+                    # operates on these, then we slice to 20 for the avg.
+                    "raw_volumes": {"$slice": ["$volumes", 200]},
+                    "raw_highs":   {"$slice": ["$highs",   200]},
+                    "raw_lows":    {"$slice": ["$lows",    200]},
+                    "raw_closes":  {"$slice": ["$closes",  200]},
+                    "raw_dates":   {"$slice": ["$dates",   200]},
                 }},
-                {"$project": {
-                    "symbol": 1,
-                    "bar_count": 1,
-                    "latest_date": 1,
-                    "latest_close": 1,
-                    "avg_volume": {"$avg": "$recent_volumes"},
-                    "days_used": {"$size": "$recent_volumes"},
-                    "recent_highs": 1,
-                    "recent_lows": 1,
-                    "recent_closes": 1,
-                }}
             ]
             
             logger.info("Calculating ADV + ATR from IB daily bars...")
@@ -489,19 +576,36 @@ class IBHistoricalCollector:
             
             for r in results:
                 symbol = r.get("symbol")
-                avg_vol = r.get("avg_volume", 0)
-                latest_close = r.get("latest_close", 0)
-                
-                if not symbol or avg_vol is None or not latest_close or latest_close <= 0:
+                if not symbol:
                     continue
-                
+
+                # v19.34.320a — strip pre-listing pollution from recycled tickers
+                # (delisted → relisted IPOs leave stale bars under the same
+                # symbol; see diag_spcx_forensics SPCX 2026-06-12 case).
+                f_dates, f_vols, f_highs, f_lows, f_closes, _meta = \
+                    self._filter_pre_listing_pollution(
+                        r.get("raw_dates", []),
+                        r.get("raw_volumes", []),
+                        r.get("raw_highs", []),
+                        r.get("raw_lows", []),
+                        r.get("raw_closes", []),
+                    )
+                # take most recent 20 of cleaned cohort for the rolling avg
+                vols20 = [v for v in f_vols[:20] if v is not None]
+                if not vols20 or not f_closes:
+                    continue
+                avg_vol = sum(vols20) / len(vols20) if vols20 else 0
+                latest_close = f_closes[0] if f_closes else 0
+                if avg_vol is None or not latest_close or latest_close <= 0:
+                    continue
+
                 # Compute dollar volume
                 avg_dollar_volume = avg_vol * latest_close
-                
-                # Compute ATR% (14-day ATR / close price)
-                highs = r.get("recent_highs", [])
-                lows = r.get("recent_lows", [])
-                closes = r.get("recent_closes", [])
+
+                # Compute ATR% (14-day ATR / close price)  — uses cleaned cohort
+                highs = f_highs[:20]
+                lows = f_lows[:20]
+                closes = f_closes[:20]
                 
                 atr_pct = 0
                 if len(highs) >= 2 and len(lows) >= 2 and len(closes) >= 2:
@@ -526,6 +630,12 @@ class IBHistoricalCollector:
                 if tier == "skip" and atr_pct > 0 and (atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]):
                     skipped_atr += 1
                 
+                # v19.34.320a — stamp the data-window start + filter flag so
+                # the v311 share-volume gate, gap_pct consumers and any future
+                # ADV-aware code can see whether pre-listing rows were excised.
+                _filter_applied = bool(_meta.get("filter_applied"))
+                _window_start = _meta.get("window_start_iso")
+
                 # Upsert into ADV cache
                 adv_cache_col.update_one(
                     {"symbol": symbol},
@@ -537,10 +647,12 @@ class IBHistoricalCollector:
                         "latest_close": round(latest_close, 2),
                         "tier": tier,
                         "source": "ib_historical_recalc",
-                        "days_used": r.get("days_used", 0),
+                        "days_used": len(vols20),
                         "bar_count": r.get("bar_count", 0),
                         "latest_date": r.get("latest_date"),
-                        "updated_at": now
+                        "updated_at": now,
+                        "data_window_start": _window_start,
+                        "pre_listing_filter_applied": _filter_applied,
                     }},
                     upsert=True
                 )
@@ -1366,7 +1478,24 @@ class IBHistoricalCollector:
         # ATR% filter — skip symbols outside tradeable range
         # v19.34.34: bypass ATR gate for high-flow ETFs on ATR_BYPASS_WATCHLIST
         if atr_pct is not None and (symbol is None or symbol not in self.ATR_BYPASS_WATCHLIST):
-            if atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]:
+            # v369: waive the UPPER "chaos ceiling" (atr_pct > max) for highly
+            # liquid names ($-vol >= intraday tier). The 10% ceiling excluded
+            # explosive, deeply-liquid movers (MRVL/SPCX/SMCI) from the
+            # universe. MIN floor + thin-name ceiling preserved.
+            # Reversible: ATR_CEILING_WAIVE_LIQUID=false.
+            import os as _os_v369
+            _waive_ceiling_liquid = _os_v369.environ.get(
+                "ATR_CEILING_WAIVE_LIQUID", "true"
+            ).strip().lower() in ("1", "true", "yes")
+            _highly_liquid = (
+                avg_dollar_volume is not None
+                and avg_dollar_volume >= self.DOLLAR_VOL_THRESHOLDS["intraday"]
+            )
+            if atr_pct < self.ATR_PCT_THRESHOLDS["min"]:
+                return "skip"
+            if atr_pct > self.ATR_PCT_THRESHOLDS["max"] and not (
+                _waive_ceiling_liquid and _highly_liquid
+            ):
                 return "skip"
         
         # Use dollar volume if available
@@ -2657,12 +2786,14 @@ class IBHistoricalCollector:
         from .symbol_universe import (
             DOLLAR_VOL_THRESHOLDS as _UNI_THRESHOLDS,
             classify_tier as _classify_tier,
+            get_qualified_filter as _qual_filter,  # v19.34.311 share-volume gate
         )
         min_dv = _UNI_THRESHOLDS["investment"]
         qualified: Dict[str, List[str]] = {"intraday": [], "swing": [], "investment": []}
+        # v19.34.311 - qualified filter applies BOTH dollar-vol AND share-vol gates
+        # so thin high-priced names (ALX, NIHI, EDGF, ...) are skipped at planning.
         for doc in adv.find(
-            {"avg_dollar_volume": {"$gte": min_dv},
-             "unqualifiable": {"$ne": True}},
+            _qual_filter("investment"),
             {"_id": 0, "symbol": 1, "avg_dollar_volume": 1, "tier": 1},
         ):
             sym = doc.get("symbol")

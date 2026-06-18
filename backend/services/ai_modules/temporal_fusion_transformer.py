@@ -33,10 +33,10 @@ TFT_TIMEFRAMES = ["5 mins", "15 mins", "1 hour", "1 day"]
 FEATURES_PER_TF = 12  # Features extracted per timeframe
 TOTAL_INPUT_DIM = len(TFT_TIMEFRAMES) * FEATURES_PER_TF  # 48 (4 timeframes × 12)
 
-# v19.34.311 — Validation forward-pass chunk size. The full val set (450k+ rows) run through
-# the model in ONE forward call builds multi-GB activation tensors per epoch,
-# which OOM-kills the subprocess on the DGX Spark's unified memory. Chunking
-# keeps the transient footprint flat.
+# v19.34.311 — Validation forward-pass chunk size. Running the full val set
+# (450k+ rows) through the model in ONE forward call builds multi-GB activation
+# tensors per epoch, which OOM-kills the subprocess on the DGX Spark's unified
+# memory. Chunking keeps the transient footprint flat.
 VAL_CHUNK = 16384
 
 # v19.34.312 — Training window. The daily axis spans ~20yr but intraday history only
@@ -64,15 +64,6 @@ def _date_to_epoch(d) -> float:
         return float(np.datetime64(d).astype("datetime64[s]").astype("int64"))
     except Exception:
         return float("nan")
-
-
-# Triple-barrier hyperparameters (ATR multiples) — env-overridable via
-# TB_PT_MULT / TB_SL_MULT / TB_ATR_PERIOD (single source: triple_barrier_config).
-from services.ai_modules.triple_barrier_config import (
-    DEFAULT_PT as TB_PT_MULT,
-    DEFAULT_SL as TB_SL_MULT,
-    DEFAULT_ATR_PERIOD as TB_ATR_PERIOD,
-)
 
 
 def _try_import_torch():
@@ -453,7 +444,7 @@ class TFTModel:
             from services.ai_modules.event_intervals import (
                 build_event_intervals_from_triple_barrier,
             )
-            atr_series = _atr(daily_highs, daily_lows, daily_closes, period=TB_ATR_PERIOD)
+            atr_series = _atr(daily_highs, daily_lows, daily_closes, period=14)
 
             # Build triple-barrier targets per usable feature row
             targets_raw = []
@@ -476,8 +467,8 @@ class TFTModel:
                 tb = triple_barrier_label_single(
                     daily_highs, daily_lows, daily_closes,
                     entry_idx=current_idx,
-                    pt_atr_mult=TB_PT_MULT,
-                    sl_atr_mult=TB_SL_MULT,
+                    pt_atr_mult=2.0,
+                    sl_atr_mult=1.0,
                     max_bars=5,  # 5-bar horizon matches prior design
                     atr_value=float(atr_val),
                 )
@@ -497,8 +488,8 @@ class TFTModel:
             local_intervals = build_event_intervals_from_triple_barrier(
                 daily_highs, daily_lows, daily_closes,
                 entry_indices=np.array(kept_entry_indices, dtype=np.int64),
-                pt_atr_mult=TB_PT_MULT, sl_atr_mult=TB_SL_MULT,
-                max_bars=5, atr_period=TB_ATR_PERIOD,
+                pt_atr_mult=2.0, sl_atr_mult=1.0,
+                max_bars=5, atr_period=14,
             )
             per_symbol_intervals.append(local_intervals)
             per_symbol_n_bars.append(int(len(daily_closes)))
@@ -523,16 +514,14 @@ class TFTModel:
         logger.info(f"[TFT] Training data: {X.shape[0]:,} samples from {symbols_used} symbols, {X.shape[1]} features")
 
         # v19.34.311 — Multi-timeframe coverage diagnostic — fraction of rows with any
-        # value per timeframe block. After the alignment fix this reveals whether
-        # intraday data is actually present (all-zero intraday blocks → the model
-        # is effectively daily-only, which is fine but worth knowing).
+        # non-zero value per timeframe block (reveals real intraday coverage).
         try:
-            cov = []
+            _cov = []
             for _p, _tf in enumerate(TFT_TIMEFRAMES):
                 _blk = X[:, _p * FEATURES_PER_TF:(_p + 1) * FEATURES_PER_TF]
                 _frac = float(np.mean(np.any(_blk != 0.0, axis=1))) if len(X) else 0.0
-                cov.append(f"{_tf}={_frac:.1%}")
-            logger.info(f"[TFT] Timeframe coverage (non-zero rows): {', '.join(cov)}")
+                _cov.append(f"{_tf}={_frac:.1%}")
+            logger.info(f"[TFT] Timeframe coverage (non-zero rows): {', '.join(_cov)}")
         except Exception:
             pass
 
@@ -656,9 +645,8 @@ class TFTModel:
             scheduler.step()
 
             # v19.34.311 — Validate CHUNKED to avoid a multi-GB activation spike on
-            # unified memory. Running the full val set (450k+ rows) through the
-            # model in one forward call was OOM-killing the subprocess (SIGKILL,
-            # no traceback). empty_cache() after keeps fragmentation flat.
+            # unified memory (the all-at-once forward over the full val set was
+            # OOM-killing the subprocess; SIGKILL, no traceback).
             self._model.eval()
             correct = 0
             with torch.no_grad():
@@ -828,10 +816,10 @@ class TFTModel:
             "device": str(self._device),
             "label_scheme": "triple_barrier_atr",
             "label_params": {
-                "pt_atr_mult": TB_PT_MULT,
-                "sl_atr_mult": TB_SL_MULT,
+                "pt_atr_mult": 2.0,
+                "sl_atr_mult": 1.0,
                 "max_bars": 5,
-                "atr_period": TB_ATR_PERIOD,
+                "atr_period": 14,
             },
             "class_weights": class_w_np.tolist(),
             "sample_weight_mean": float(sample_w_np.mean()) if len(sample_w_np) else 1.0,

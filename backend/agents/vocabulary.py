@@ -80,7 +80,7 @@ in your response. When unclear, ask which horizon the operator is asking about.
 """.strip()
 
 
-# v19.34.270 (m4) — append the SSOT-generated strategy_family × exit_archetype
+# v19.34.270 (m4) — append the SSOT-generated strategy_family x exit_archetype
 # section so the NIA/agent vocabulary stays in lock-step with
 # services/setup_taxonomy.py and can never drift. Best-effort: if the SSOT is
 # unavailable, fall back to the static block only.

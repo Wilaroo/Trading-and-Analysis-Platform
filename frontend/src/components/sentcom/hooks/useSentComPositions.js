@@ -21,6 +21,10 @@ const _empty = {
   adoptedPnlToday: 0,
   botRealizedPnlToday: 0,
   adoptedRealizedPnlToday: 0,
+  // v19.34.316 — Scale-out attribution. Sum of realized PnL booked
+  // TODAY against still-open positions (ladder scale-outs).
+  totalPartialRealizedToday: 0,
+  partialRealizedBySymbol: {},
 };
 
 export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup only, WS is primary
@@ -68,6 +72,13 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
   const [adoptedRealizedPnlToday, setAdoptedRealizedPnlToday] = useState(
     cachedPositions?.data?.adoptedRealizedPnlToday ?? _empty.adoptedRealizedPnlToday
   );
+  // v19.34.316 — Scale-out attribution state.
+  const [totalPartialRealizedToday, setTotalPartialRealizedToday] = useState(
+    cachedPositions?.data?.totalPartialRealizedToday ?? _empty.totalPartialRealizedToday
+  );
+  const [partialRealizedBySymbol, setPartialRealizedBySymbol] = useState(
+    cachedPositions?.data?.partialRealizedBySymbol ?? _empty.partialRealizedBySymbol
+  );
   const [loading, setLoading] = useState(!cachedPositions?.data);
 
   const _applyPayload = useCallback((data) => {
@@ -94,6 +105,9 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     setAdoptedPnlToday(data.adopted_pnl_today ?? 0);
     setBotRealizedPnlToday(data.bot_realized_pnl_today ?? 0);
     setAdoptedRealizedPnlToday(data.adopted_realized_pnl_today ?? 0);
+    // v19.34.316 — Scale-out attribution from backend.
+    setTotalPartialRealizedToday(data.total_partial_realized_today ?? 0);
+    setPartialRealizedBySymbol(data.partial_realized_by_symbol ?? {});
     setCached(
       'sentcomPositions',
       {
@@ -112,6 +126,8 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
         adoptedPnlToday: data.adopted_pnl_today ?? 0,
         botRealizedPnlToday: data.bot_realized_pnl_today ?? 0,
         adoptedRealizedPnlToday: data.adopted_realized_pnl_today ?? 0,
+        totalPartialRealizedToday: data.total_partial_realized_today ?? 0,
+        partialRealizedBySymbol: data.partial_realized_by_symbol ?? {},
       },
       15000,
     );
@@ -148,6 +164,8 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
       setAdoptedPnlToday(cached.data.adoptedPnlToday ?? 0);
       setBotRealizedPnlToday(cached.data.botRealizedPnlToday ?? 0);
       setAdoptedRealizedPnlToday(cached.data.adoptedRealizedPnlToday ?? 0);
+      setTotalPartialRealizedToday(cached.data.totalPartialRealizedToday ?? 0);
+      setPartialRealizedBySymbol(cached.data.partialRealizedBySymbol ?? {});
       setLoading(false);
     } else {
       const timer = setTimeout(() => fetchPositions(), 4000);
@@ -186,6 +204,9 @@ export const useSentComPositions = (pollInterval = 60000) => {  // HTTP backup o
     adoptedPnlToday,
     botRealizedPnlToday,
     adoptedRealizedPnlToday,
+    // v19.34.316 — Scale-out attribution surfaced to the HUD.
+    totalPartialRealizedToday,
+    partialRealizedBySymbol,
     loading,
     refresh: fetchPositions,
   };

@@ -1450,6 +1450,7 @@ class ConfidenceGate:
         try:
             from services.ai_modules.timeseries_service import get_timeseries_ai
             import asyncio
+            import os as _os
             
             ts_ai = get_timeseries_ai()
             if ts_ai is None or ts_ai._db is None:
@@ -1457,6 +1458,10 @@ class ConfidenceGate:
             
             # Get recent bars for this symbol (need bars for feature extraction)
             # Use the most recent bars from ib_historical_data
+            # v19.34.367 P1-MULTI-TF (read-only): widen the regime-shadow corpus
+            # across bar sizes. Reversible via PWIRE_MULTI_TF_SHADOW=0.
+            _multi_tf = _os.environ.get("PWIRE_MULTI_TF_SHADOW", "1") not in ("0", "false", "False")
+            _shadow_tfs = ["1 min", "5 mins", "15 mins"]
             def _fetch_and_predict():
                 try:
                     bar_size_used = "5 mins"
@@ -1474,7 +1479,7 @@ class ConfidenceGate:
                         ).sort("date", -1).limit(200))
                     
                     if len(bars) < 50:
-                        return None, None
+                        return None, None, []
                     
                     # Reverse to chronological order (oldest first)
                     bars.reverse()
@@ -1485,14 +1490,38 @@ class ConfidenceGate:
                     shadow = self._compute_regime_shadow(
                         ts_ai, symbol, setup_type, bars, bar_size_used, prediction
                     )
-                    return prediction, shadow
+                    # v19.34.367 P1-MULTI-TF: additionally compute shadow records
+                    # across 1min/5min/15min (read-only — never affects execution).
+                    shadows = []
+                    if shadow is not None:
+                        shadows.append(shadow)
+                    if _multi_tf:
+                        for _tf in _shadow_tfs:
+                            if _tf == bar_size_used:
+                                continue  # primary already computed above
+                            try:
+                                _tb = list(ts_ai._db["ib_historical_data"].find(
+                                    {"symbol": symbol, "bar_size": _tf},
+                                    {"_id": 0}
+                                ).sort("date", -1).limit(200))
+                                if len(_tb) < 50:
+                                    continue
+                                _tb.reverse()
+                                _sh = self._compute_regime_shadow(
+                                    ts_ai, symbol, setup_type, _tb, _tf, prediction
+                                )
+                                if _sh is not None:
+                                    shadows.append(_sh)
+                            except Exception:
+                                continue
+                    return prediction, shadow, shadows
                 except Exception as e:
                     logger.debug(f"Live prediction fetch/predict failed for {symbol}: {e}")
-                    return None, None
+                    return None, None, []
             
             # Run in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
-            prediction, shadow = await loop.run_in_executor(None, _fetch_and_predict)
+            prediction, shadow, shadows = await loop.run_in_executor(None, _fetch_and_predict)
             
             if prediction is None:
                 return result
@@ -1502,6 +1531,10 @@ class ConfidenceGate:
                 # Rides inside live_prediction → persisted to confidence_gate_log
                 # under the decision_id (no schema/flow changes needed).
                 result["regime_shadow"] = shadow
+            # v19.34.367 P1-MULTI-TF: full per-bar-size shadow list (additive;
+            # the single 'regime_shadow' above stays for backward-compat readers).
+            if shadows:
+                result["regime_shadows"] = shadows
             result["direction"] = prediction.get("direction", "flat")
             result["confidence"] = prediction.get("confidence", 0.0)
             result["prob_up"] = prediction.get("probability_up", 0.5)

@@ -14,38 +14,24 @@ These five rules cover the biggest historical $$ losses + the most
 counterintuitive traps in this codebase. Violating any of them has
 cost real money or required emergency patches.
 
-1. **VERIFY-BEFORE-CLAIM.** Before stating any finding, recommendation,
-   or next action to the user: (a) read the actual code path (don't
-   trust log strings or comments), (b) cross-check at least one piece
-   of independent evidence (Mongo query, code grep, or earlier
-   CHANGELOG entry), and (c) explicitly state confidence (HIGH / MEDIUM
-   / NEEDS-VERIFICATION) for non-trivial claims. **If a hypothesis can
-   be tested with a sub-minute read-only diag, run that diag FIRST.**
-   *(2026-06-15: agent twice misread shadow-verify output as a "Legacy
-   LightGBM" model bug and a "MODEL_CONFIGS doesn't register regime
-   variants" bug — both were misleading logs and quarantine-flag
-   working as designed. A 30-second code read of timeseries_service.py
-   would have caught either. Also: agent recommended a destructive bulk
-   delete of 386,919 "mislabeled" bars; verification showed 64.5% were
-   unique records that would have been lost.)*
-2. **`close_trade`, `submit_with_bracket`, and the kill-switch loop
+1. **`close_trade`, `submit_with_bracket`, and the kill-switch loop
    are SAFETY-CRITICAL.** Fork via `_custom` siblings; don't patch in
    place. *(v19.34.123: $25k operator loss when kill-switch was
    bypassed because the daily-loss check only ran inside the scan
    loop and the scanner was rate-limited.)*
-3. **NEVER send a close at IB without `_cancel_ib_bracket_orders` +
+2. **NEVER send a close at IB without `_cancel_ib_bracket_orders` +
    the 8s primary + 5s retry wait.** *(2026-05-20: MKT close raced a
    bracket-child cancel — both filled in a 50-200ms window — IB
    position flipped direction while the bot thought it was flat.)*
-4. **`_open_trades` is keyed by `trade_id`, NOT symbol.** Iterate
+3. **`_open_trades` is keyed by `trade_id`, NOT symbol.** Iterate
    `.values()` and filter by `symbol`. Multiple trades on the same
    `(symbol, direction)` is a real state, not a bug. *(b415ed5f
    phantom incident — sym-dir-cap latched on a stale phantom and
    blocked all new entries for hours.)*
-5. **`position_reconciler` MUST skip `entered_by="reconciled_excess_*"`**
+4. **`position_reconciler` MUST skip `entered_by="reconciled_excess_*"`**
    on the orphan path or it treats its own emit as a fresh orphan and
    spawns a new excess slice every 60s. *(v19.34.22 fix.)*
-6. **Always project `{"_id": 0}` on Mongo reads.** ObjectId is not
+5. **Always project `{"_id": 0}` on Mongo reads.** ObjectId is not
    JSON-serializable; the response will 500 with no helpful trace.
 
 **Escape hatches:**
@@ -294,11 +280,8 @@ Use `datetime.now(timezone.utc)`. The codebase has fully migrated.
 **Cause**: The pusher dropped the subscription silently. The
 `_stale_resub_set` trigger fires but the Windows-side pusher
 subscribe_symbols handler doesn't always recover.
-**Status**: ✅ RESOLVED in v19.34.82 — `services/quote_resub_watchdog.py` (redesigned from v19.34.80)
-runs as a live 60s task (`trading_bot_service.py:~4124`, env `QUOTE_RESUB_WATCHDOG_ENABLED=true`),
-cross-checks IB `subscriptions()`, force-cycles unsub+resub on a missing sub, and escalates to
-`quote_resub_watchdog_events` (severity=high) after 3 failed cycles. (Verified 2026-06-18.)
-**Workaround (if watchdog disabled)**: Manual restart of Windows pusher.
+**Status**: Known issue. v19.34.74+ should add a real watchdog.
+**Workaround**: Manual restart of Windows pusher.
 
 ### 🔥 Bracket-leg stacking (GM/LIN pattern)
 **Symptom**: Bot=N sh, IB pending_target_qty=N×K (multiple PT orders
@@ -1078,21 +1061,12 @@ GET /api/scanner/setup-trade-matrix
 Returns full matrix + live classifier stats so the UI can render the
 daily-Setup heat-grid.
 
-### Known bugs in scoring (status updated 2026-06-18 — all 3 triaged, none open)
-- ~~**Scalp SMB grade not timeframe-aware**~~ ✅ CLOSED — verified 2026-06-18 (diag_v368/v369):
-  (1) the §16 premise is DISPROVEN — scalp alerts are *modestly* graded (avg smb 29.6) and were
-  profitable in-sample, while *intraday* carries the HIGHEST smb scores (37.8) yet the worst
-  outcome (24% win, −0.26R, n=59); and (2) MOOT for execution anyway — since v19.34.175 `smb_grade`
-  is AUDIT-ONLY and does NOT drive sizing (`unified_grade`=`tqs_grade` is the canonical grade; SMB is
-  15% of one TQS pillar). A timeframe-aware checklist exists (v310, env-gated OFF) but only loosens
-  *swing* thresholds. NOTE: bot_trades does NOT reliably persist smb_score_total (all "?") and 93% of
-  closed trades carry lifecycle styles (trade_2_hold/reconciled), so grade→R validity can't be measured
-  from bot_trades. If grade-validity ever matters, validate TQS (tqs_grade), not SMB.
-- ~~**AI rejection prompt staleness** (squeeze scalp-only)~~ ✅ RESOLVED — verified 2026-06-18:
-  squeeze is consistently `intraday` across `trade_style_classifier.py:70`,
-  `opportunity_evaluator._SCALP_SETUPS` (absent), `sentcom_service.SCALP_SETUPS` (absent),
-  `gameplan_narrative_service.py` (accurate). No stale "scalp-only" reference remains.
-
+### Known bugs in scoring (open)
+- **Scalp SMB grade**: scoring is not timeframe-aware — scalps get
+  full-day SMB B grades that don't reflect intraday context. Tracked
+  in ROADMAP P2.
+- **AI rejection prompt staleness**: the LLM rejection narrator still
+  believes `squeeze` is scalp-only despite intraday promotion.
 
 ---
 

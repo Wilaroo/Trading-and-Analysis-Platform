@@ -135,6 +135,11 @@ export const PipelineHUDV5 = ({
   adoptedPnlToday,
   botRealizedPnlToday,
   adoptedRealizedPnlToday,
+  // v19.34.316 — Scale-out attribution. Realized $$ booked TODAY
+  // against still-open positions (ladder scale-outs not yet fully
+  // closed). Surfaces previously-invisible IB scale-out PnL.
+  totalPartialRealizedToday,
+  partialRealizedBySymbol,
   // v19.31.9 — additional stages
   scanRows,
   evalRows,
@@ -346,6 +351,30 @@ export const PipelineHUDV5 = ({
                 <span data-testid="pipeline-pnl-unrealized" className={unrealizedColor}>
                   U {formatMoney(unrealizedNum)}
                 </span>
+                {/* v19.34.316 — Scale-out (S) chip. Real $$ booked TODAY
+                    against open positions via ladder scale-outs. Hidden
+                    when zero so the chip doesn't get noisy. Tooltip lists
+                    every contributing symbol. */}
+                {Number(totalPartialRealizedToday || 0) !== 0 && (
+                  <span
+                    data-testid="pipeline-pnl-scaleout"
+                    className={Number(totalPartialRealizedToday) >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+                    title={
+                      `Scale-outs today (open positions, ladder fills):\n` +
+                      `  S total: ${formatMoney(Number(totalPartialRealizedToday))}\n\n` +
+                      `Per-symbol:\n` +
+                      (partialRealizedBySymbol && Object.keys(partialRealizedBySymbol).length
+                        ? Object.entries(partialRealizedBySymbol)
+                            .filter(([, v]) => v && Number(v.realized || 0) !== 0)
+                            .sort((a, b) => Math.abs(Number(b[1].realized || 0)) - Math.abs(Number(a[1].realized || 0)))
+                            .map(([s, v]) => `  ${s}: ${formatMoney(Number(v.realized || 0))} (${v.shares_closed || 0} sh / ${v.fills || 0} fills)`)
+                            .join('\n')
+                        : '  (none)')
+                    }
+                  >
+                    S {formatMoney(Number(totalPartialRealizedToday))}
+                  </span>
+                )}
               </div>
               {/* v19.34.58 — Inline synthetic-bookings line.
                   Pre-v19.34.58 the synthetic-closeout context lived ONLY

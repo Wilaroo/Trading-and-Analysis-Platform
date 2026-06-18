@@ -8,19 +8,11 @@ pip install pymongo lightgbm numpy pandas scikit-learn psutil
 ```
 
 ### 2. Set MongoDB Connection
-
-> **SECURITY:** Never hardcode credentials in this repo. Set them as environment
-> variables (or load them from `backend/.env`, which is git-ignored). The previously
-> committed Atlas credential has been removed — **rotate that password in the Atlas
-> console immediately, as it was exposed in git history.**
-
 ```bash
-# Set your own MongoDB connection string (do NOT commit it)
-export MONGO_URL="mongodb+srv://<user>:<password>@<cluster-host>/?appName=<app>"
+# Your MongoDB Atlas connection string
+export MONGO_URL="mongodb+srv://wilsonerik0_db_user:t1GH7fNMayacsZT6@sentcom.xqmcbz.mongodb.net/?appName=sentcom"
 export DB_NAME="tradecommand"
 ```
-
-Or simply rely on `backend/.env`, which the training scripts already read.
 
 ### 3. Run Training
 

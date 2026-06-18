@@ -1017,10 +1017,19 @@ class LearningLoopService:
             if not rs:
                 return None
             wins = sum(1 for r in rs if r > 0)
+            # v19.34.323 — winsorize each R to ±R_WINSOR_CLAMP for the mean so a
+            # single blown-stop / tiny-risk artifact (e.g. -261R) can't poison
+            # the meta-labeler's edge estimate. win_rate uses sign only.
+            import os as _os_w
+            try:
+                _cl = float(_os_w.environ.get("R_WINSOR_CLAMP", "3.0"))
+            except (TypeError, ValueError):
+                _cl = 3.0
+            _rs_w = [max(-_cl, min(_cl, r)) for r in rs] if _cl > 0 else rs
             return {
                 "n":         len(rs),
                 "win_rate":  round(wins / len(rs), 3),
-                "mean_r":    round(sum(rs) / len(rs), 3),
+                "mean_r":    round(sum(_rs_w) / len(_rs_w), 3),
             }
 
         sg_f, sg_n = [], []

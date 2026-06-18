@@ -209,7 +209,16 @@ class HistoricalDataService:
         # Map timeframe to bar_size
         bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
                         "15Min": "15 mins", "1Hour": "1 hour"}
-        bar_size = bar_size_map.get(timeframe, "1 day")
+        bar_size = bar_size_map.get(timeframe)
+        if bar_size is None:
+            # v19.34.320d — was silently defaulting to "1 day", causing
+            # minute-bar pollution of the daily collection (386k mislabels
+            # confirmed in 2026 audit). Fail loudly instead.
+            raise ValueError(
+                f"_store_bars/_update_data_stats: unmapped timeframe={timeframe!r}; "
+                f"valid keys: {sorted(bar_size_map.keys())}. "
+                f"Refusing to silently default to '1 day' (v19.34.320d guard)."
+            )
         is_daily = "day" in bar_size.lower()
             
         stored = 0
@@ -257,7 +266,16 @@ class HistoricalDataService:
         # Map timeframe to bar_size
         bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
                         "15Min": "15 mins", "1Hour": "1 hour"}
-        bar_size = bar_size_map.get(timeframe, "1 day")
+        bar_size = bar_size_map.get(timeframe)
+        if bar_size is None:
+            # v19.34.320d — was silently defaulting to "1 day", causing
+            # minute-bar pollution of the daily collection (386k mislabels
+            # confirmed in 2026 audit). Fail loudly instead.
+            raise ValueError(
+                f"_store_bars/_update_data_stats: unmapped timeframe={timeframe!r}; "
+                f"valid keys: {sorted(bar_size_map.keys())}. "
+                f"Refusing to silently default to '1 day' (v19.34.320d guard)."
+            )
             
         # Get first and last bars using new schema
         first_bar = self._historical_bars_col.find_one(
@@ -354,7 +372,16 @@ class HistoricalDataService:
         # Map timeframe to bar_size
         bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
                         "15Min": "15 mins", "1Hour": "1 hour"}
-        bar_size = bar_size_map.get(timeframe, "1 day")
+        bar_size = bar_size_map.get(timeframe)
+        if bar_size is None:
+            # v19.34.320d — was silently defaulting to "1 day", causing
+            # minute-bar pollution of the daily collection (386k mislabels
+            # confirmed in 2026 audit). Fail loudly instead.
+            raise ValueError(
+                f"_store_bars/_update_data_stats: unmapped timeframe={timeframe!r}; "
+                f"valid keys: {sorted(bar_size_map.keys())}. "
+                f"Refusing to silently default to '1 day' (v19.34.320d guard)."
+            )
             
         query = {"symbol": symbol.upper(), "bar_size": bar_size}
         
@@ -423,7 +450,16 @@ class HistoricalDataService:
         if timeframe:
             bar_size_map = {"1Day": "1 day", "1day": "1 day", "5Min": "5 mins", "5min": "5 mins", 
                             "15Min": "15 mins", "1Hour": "1 hour"}
-            bar_size = bar_size_map.get(timeframe, "1 day")
+            bar_size = bar_size_map.get(timeframe)
+        if bar_size is None:
+            # v19.34.320d — was silently defaulting to "1 day", causing
+            # minute-bar pollution of the daily collection (386k mislabels
+            # confirmed in 2026 audit). Fail loudly instead.
+            raise ValueError(
+                f"_store_bars/_update_data_stats: unmapped timeframe={timeframe!r}; "
+                f"valid keys: {sorted(bar_size_map.keys())}. "
+                f"Refusing to silently default to '1 day' (v19.34.320d guard)."
+            )
             query["bar_size"] = bar_size
             
         result = self._historical_bars_col.delete_many(query)

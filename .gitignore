@@ -3545,3 +3545,8 @@ __pycache__/
 scripts/watch_*.sh
 *.bak.v*
 *.bak_*
+
+# applier backups
+*.bak
+*.bak.*
+v*_backup_*/

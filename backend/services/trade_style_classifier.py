@@ -122,7 +122,7 @@ def _strip_directional_suffix(key: str) -> str:
     `rubber_band_scalp_long`, `breakout_confirmed`, or `big_dawg` now resolve.
 
     Note: `_setup_lookup` checks the RAW key in SETUP_TO_STYLE *first*, so
-    explicit entries (e.g. `breakdown_confirmed`→multi_day) are unaffected —
+    explicit entries (e.g. `breakdown_confirmed`->multi_day) are unaffected —
     delegation only improves the fall-through case. Falls back to the legacy
     local strip if the SSOT import is unavailable.
     """

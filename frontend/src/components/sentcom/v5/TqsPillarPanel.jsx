@@ -169,12 +169,18 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
   const overallScore = tqs.score != null
     ? Math.round(Number(tqs.score))
     : (tqs.post_gate_score != null ? Math.round(Number(tqs.post_gate_score)) : null);
-  // v19.34.259 — trusted drawer: derive the grade FROM the score (single
-  // source of truth) so it never contradicts the displayed number. The
-  // stored unified_grade/post_gate_grade can be the legacy 3-tier value.
-  const overallGrade = overallScore != null
-    ? gradeFromScore(overallScore)
-    : (tqs.unified_grade || tqs.post_gate_grade || '');
+  // v19.34.312 — match TqsBadge: prefer the backend's calibrated
+  // grade (percentile-banded against the 5-day rolling reference) over
+  // the static score-ladder. This stops the drawer-header (TqsBadge,
+  // shows backend grade) from contradicting the pillar-panel below it
+  // (which was re-deriving from the static ladder and could disagree
+  // by a full grade-band on borderline scores). Static ladder remains
+  // only as a fallback when no backend grade was stamped.
+  const backendOverallGrade = String(
+    tqs.unified_grade || tqs.post_gate_grade || ''
+  ).toUpperCase();
+  const overallGrade = backendOverallGrade
+    || (overallScore != null ? gradeFromScore(overallScore) : '');
 
   const weightLabel = (key) => {
     const w = weights[key];
@@ -212,11 +218,16 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
           const pb = breakdown[key] || {};
           const score = pb.score != null ? pb.score : pillarScores[key];
           if (score == null && !pb.grade && !pillarGrades[key]) return null;
-          // v19.34.259 — derive per-pillar grade from its score too, so the
-          // grade chip always agrees with the bar/number.
-          const derivedGrade = score != null
-            ? gradeFromScore(Number(score))
-            : (pb.grade || pillarGrades[key] || '');
+          // v19.34.312 — prefer backend-stamped pillar grade over the
+          // static score-ladder so the per-pillar chips agree with the
+          // calibrated overall grade above. Falls back to the static
+          // ladder only when the backend did not stamp a grade for this
+          // pillar (legacy rows pre v19.34.228).
+          const backendPillarGrade = String(
+            pb.grade || pillarGrades[key] || ''
+          ).toUpperCase();
+          const derivedGrade = backendPillarGrade
+            || (score != null ? gradeFromScore(Number(score)) : '');
           return (
             <PillarRow
               key={key}

@@ -4254,6 +4254,21 @@ async def startup_event():
             await _asyncio.sleep(30)
     asyncio.create_task(_order_dead_letter_loop())
     print("Order-queue dead-letter reconciler started (30s cadence)")
+
+    # ── v19.34.315 — ib_executions persister (R2 background poll) ──
+    # The `ib_executions` collection has never had a writer; downstream
+    # forensics (unmatched_short_close, scale-out attribution) was blind.
+    # Polls ibd._ib.fills() every 30s and upserts unseen exec_ids.
+    try:
+        from services.ib_executions_persister import ib_executions_persist_loop
+        asyncio.create_task(
+            ib_executions_persist_loop(db, interval_s=30, stagger_s=20),
+            name="ib_executions_persister",
+        )
+        print("v19.34.315 [IB-EXEC PERSISTER] background writer started (30s cadence)")
+    except Exception as _persist_exc:
+        print(f"v19.34.315 [IB-EXEC PERSISTER] start failed: {_persist_exc}")
+
     # Start market intel scheduler (auto-generates reports at scheduled times)
     asyncio.create_task(market_intel_service.start_scheduler())
     print("Market intel scheduler started")

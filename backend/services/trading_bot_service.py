@@ -1203,7 +1203,7 @@ class TradingBotService:
             "breaking_news", "volume_capitulation", "range_break", "breakout",
             # New strategies
             "squeeze", "relative_strength", "relative_strength_leader", "relative_strength_laggard",
-            "mean_reversion", "gap_fade", "chart_pattern",
+            "gap_fade", "chart_pattern",  # mean_reversion suppressed v19.34.327 (97% vwap_fade duplicate, v345)
             # REVERSAL-family scanner bases (2026-04-24) — required for
             # SHORT_REVERSAL (Sharpe 1.94, +7.6pp edge, promoted) to actually
             # receive scanner alerts. Without these bases in the filter the
@@ -5955,7 +5955,10 @@ class TradingBotService:
         try:
             if (source_info or {}).get("tier") == "pusher_orders_snapshot":
                 from routers.ib import _pushed_ib_data
-                from datetime import datetime, timezone
+                # v19.34.320L — use module-global datetime/timezone (line 19).
+                # The prior local "from datetime import datetime, timezone" here
+                # bound them function-wide, causing UnboundLocalError at the
+                # naked-sweep telemetry write (~L6530) when this branch wasn't taken.
                 _lu = (_pushed_ib_data or {}).get("last_update")
                 if _lu:
                     _last_dt = datetime.fromisoformat(str(_lu).replace("Z", "+00:00"))

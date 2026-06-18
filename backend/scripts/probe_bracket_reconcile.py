@@ -113,12 +113,7 @@ def print_geometry(setup_type, entry, atr, shares, direction):
         st = desc.get("stats", {}) or {}
         note = ""
         if desc.get("enabled") and not desc.get("horizon_locked"):
-            reason = str(st.get("reason", "n/a"))
-            if reason.startswith("error"):
-                note = _yellow("  (no live DB in CLI — geometry from prior; "
-                               "use the /exit-archetype endpoint for live data)")
-            else:
-                note = _yellow(f"  (prior held: {reason}, n={st.get('n', 0)})")
+            note = _yellow(f"  (prior held: {st.get('reason', 'n/a')}, n={st.get('n', 0)})")
         print(f"{_bold(setup_type)}  →  exit_archetype = {_bold(arch)}{note}")
     print(f"{_bold('━' * 64)}")
     if rules is None:
