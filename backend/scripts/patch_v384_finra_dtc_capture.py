@@ -10,7 +10,9 @@ Run from repo root:
 import hashlib, py_compile, sys
 from pathlib import Path
 
-F = Path("services/unified_fundamentals_cache.py")
+F = next((p for p in (Path("backend/services/unified_fundamentals_cache.py"),
+                      Path("services/unified_fundamentals_cache.py")) if p.exists()),
+         Path("backend/services/unified_fundamentals_cache.py"))
 MARKER = "v384: days_to_cover and raw"
 
 OLD = '''    # 3.5 Short-interest % — FINRA short-interest shares ÷ shares-outstanding.
