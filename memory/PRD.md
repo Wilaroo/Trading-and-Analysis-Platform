@@ -1217,3 +1217,21 @@ NEW INVESTIGATIONS (P1, operator-requested 2026-06-12):
   idempotent, byte-identical, round-trip verified.
   PENDING USER: apply v335 (paste.rs/rQXvb) then v336 (paste.rs/JPAgD),
   commit, restart backend, check kill-switch state after restart.
+
+---
+## 2026-06-18 — Setup-EV cheat-sheet adjudication COMPLETE (v353→v363, all DEPLOYED on DGX)
+Replay→Validate→(cheat-sheet)→Rewrite/Tighten/Suppress, all via SHA-guarded paste.rs patchers + pytest:
+- v357 fashionably_late SUPPRESS · v358 daily_squeeze LONG-only · v359 squeeze SUPPRESS
+- v360 first_move_up/down SUPPRESS (negative-EV morning fades)
+- v361 big_dog TIGHTEN (min-price $10 + min-stop 1%; breakeven -> +0.097R n=268)
+- v361b big_dog/puppy_dog DOCTRINE RE-AUDIT (both loose proxies; v361 kept live; P1 doctrine rewrite queued)
+- v362 gap_give_go DOCTRINE REWRITE (1-min give->consolidation->range-break, cons-low stop, 2R; +0.233R n=492)
+- v363 spencer_scalp DOCTRINE REWRITE (LONG-only; 20-min tight range <15% dayRange upper-1/3, vol-surge break, range-low stop, 2R; +0.04-0.06R; short dropped, all-day)
+Live whole-file SHA after v363: 0d9b24b150296d2bf252da31b2c3da9fe44bce47439d2ef2f958a1781327482a
+
+### Remaining / backlog (P1/P2)
+- P0: rotate Atlas MongoDB password (old creds in git history) — BLOCKED on operator.
+- P1: scaled measured-move exits (spencer 1R/2R/3R; gap_give_go Move2Move double-bar-break trail) — position-mgmt layer.
+- P1: big_dog/puppy_dog doctrine rewrite (mid-day 11:00-13:30 window + above-PDH + consolidation-base stop + trail).
+- P1: P-WIRE Phase 2 eval; multi-bar-size shadow logging; live-detector monitoring (diag_live_setup_fires.py).
+- P2: GET /api/scanner/setup-ev-audit endpoint + V5 tile (visualize v353-v363 verdicts); oca-finalize-health tile; server.py monolith breakup.
