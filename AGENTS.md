@@ -294,8 +294,11 @@ Use `datetime.now(timezone.utc)`. The codebase has fully migrated.
 **Cause**: The pusher dropped the subscription silently. The
 `_stale_resub_set` trigger fires but the Windows-side pusher
 subscribe_symbols handler doesn't always recover.
-**Status**: Known issue. v19.34.74+ should add a real watchdog.
-**Workaround**: Manual restart of Windows pusher.
+**Status**: ✅ RESOLVED in v19.34.82 — `services/quote_resub_watchdog.py` (redesigned from v19.34.80)
+runs as a live 60s task (`trading_bot_service.py:~4124`, env `QUOTE_RESUB_WATCHDOG_ENABLED=true`),
+cross-checks IB `subscriptions()`, force-cycles unsub+resub on a missing sub, and escalates to
+`quote_resub_watchdog_events` (severity=high) after 3 failed cycles. (Verified 2026-06-18.)
+**Workaround (if watchdog disabled)**: Manual restart of Windows pusher.
 
 ### 🔥 Bracket-leg stacking (GM/LIN pattern)
 **Symptom**: Bot=N sh, IB pending_target_qty=N×K (multiple PT orders
@@ -1075,12 +1078,18 @@ GET /api/scanner/setup-trade-matrix
 Returns full matrix + live classifier stats so the UI can render the
 daily-Setup heat-grid.
 
-### Known bugs in scoring (open)
-- **Scalp SMB grade**: scoring is not timeframe-aware — scalps get
-  full-day SMB B grades that don't reflect intraday context. Tracked
-  in ROADMAP P2.
-- **AI rejection prompt staleness**: the LLM rejection narrator still
-  believes `squeeze` is scalp-only despite intraday promotion.
+### Known bugs in scoring (status updated 2026-06-18)
+- **Scalp SMB grade** (PARTIAL): a timeframe-aware checklist shipped in v19.34.310
+  (`scoring_engine.evaluate_smb_checklist(..., timeframe=)`) but it is **env-gated OFF**
+  (`SMB_CHECKLIST_TIMEFRAME_AWARE=false`) and primarily *loosens* swing thresholds (so swings
+  stop clustering at C) — it does NOT yet specifically tighten the original concern (scalps
+  getting inflated full-day B grades). Verify with `diag_v368_smb_grade_by_style.py` before
+  enabling/extending. Tracked ROADMAP P2.
+- ~~**AI rejection prompt staleness** (squeeze scalp-only)~~ ✅ RESOLVED — verified 2026-06-18:
+  squeeze is consistently `intraday` across `trade_style_classifier.py:70`,
+  `opportunity_evaluator._SCALP_SETUPS` (absent), `sentcom_service.SCALP_SETUPS` (absent),
+  `gameplan_narrative_service.py` (accurate). No stale "scalp-only" reference remains.
+
 
 ---
 
