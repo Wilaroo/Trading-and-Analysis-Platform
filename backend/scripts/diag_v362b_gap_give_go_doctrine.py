@@ -111,6 +111,7 @@ def main():
     vol_decline = _arg('--vol-decline', 0.7, float)
     min_stop_pct = _arg('--min-stop-pct', 0.0, float)
     min_price = _arg('--min-price', 0.0, float)
+    target_rmult = _arg('--target-rmult', 0.0, float)  # 0 = double-bar-break exit; >0 = fixed N*risk target
     win_start = _hhmm(_argstr('--winstart', '09:30'), time(9, 30))
     win_end = _hhmm(_argstr('--winend', '09:45'), time(9, 45))
     tz_assume = _argstr('--tz', 'auto')
@@ -128,6 +129,7 @@ def main():
           f"win={win_start.strftime('%H:%M')}-{win_end.strftime('%H:%M')}ET gap>={gap_min:g}% "
           f"giveFill<={give_max_fill:g}% cons={cons_min}-{cons_max}bar band<={cons_band_max:g}% "
           f"volDecl<={vol_decline:g} minStop>={min_stop_pct:g}% minPx>=${min_price:g} "
+          f"exit={'rmult='+str(target_rmult) if target_rmult>0 else 'double-bar-break'} "
           f"hold={maxhold}b tz={tz_assume} winsor=±{cap:g}R ===\n")
     print(f"universe: {len(syms)} symbols\n")
 
@@ -239,16 +241,28 @@ def main():
                 n_trig += 1; last_fire_idx = i
                 risk = entry - stop
                 end = min(i + maxhold, len(rb) - 1)
-                # exit: double-bar-break lower (two consecutive bars each closing below prior bar low)
                 r = None
-                for j in range(i + 1, end + 1):
-                    if l[j] <= stop:
-                        r = (stop - entry) / risk; break
-                    if j >= i + 2 and c[j] < l[j - 1] and c[j - 1] < l[j - 2]:
-                        r = (c[j] - entry) / risk; break
-                if r is None:
-                    r = (c[end] - entry) / risk
-                rr = (h[end] - entry) / risk if (h[end] - entry) > 0 else 0.0
+                if target_rmult > 0:
+                    # SHIPPABLE detector-only exit: fixed target = entry + N*risk (or stop, or maxhold)
+                    tgt = entry + target_rmult * risk
+                    for j in range(i + 1, end + 1):
+                        if l[j] <= stop:
+                            r = (stop - entry) / risk; break
+                        if h[j] >= tgt:
+                            r = target_rmult; break
+                    if r is None:
+                        r = (c[end] - entry) / risk
+                    rr = target_rmult
+                else:
+                    # doctrine exit: double-bar-break lower (two consecutive bars each closing below prior bar low)
+                    for j in range(i + 1, end + 1):
+                        if l[j] <= stop:
+                            r = (stop - entry) / risk; break
+                        if j >= i + 2 and c[j] < l[j - 1] and c[j - 1] < l[j - 2]:
+                            r = (c[j] - entry) / risk; break
+                    if r is None:
+                        r = (c[end] - entry) / risk
+                    rr = (h[end] - entry) / risk if (h[end] - entry) > 0 else 0.0
                 ev.append((round(r, 3), rr))
 
     print("=== SANITY ===")
