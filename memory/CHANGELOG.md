@@ -1,4 +1,30 @@
-## 2026-06-18 — v382 TQS Path B probe shipped + v379/v381 LIVE-VERIFIED + diag `--since` filter
+## 2026-06-18 — v383/v384 FUNDAMENTAL PILLAR F1 (capture/coverage) — fundamentals are 55% blind
+Path B re-scoped from "de-weight/rescore" to "fix the data" (operator call). diag_v382 (6826 alerts)
+showed composite crushed to 43-68 (sd 4.0); fundamental pillar sd just 3.8 because short_interest(20%)
++ float(20%) + institutional(15%) = **55% of the pillar forced to neutral-50** when absent.
+
+### Coverage audit (diag_v383, evaluated universe = 1364 distinct symbols, last 5d)
+float 35% · short_interest% 31% · institutional **3%**. FINNHUB key IS set. Root causes:
+- `finra_short_interest` already covers **80%** of the universe but is **stale (settlement 2026-03-13)**
+  and **not wired into the pillar**; `days_to_cover` (a no-float squeeze signal) was trapped behind the
+  float gate in `unified_fundamentals_cache`.
+- `symbol_fundamentals_cache` under-populated (639/1364) — no universe warm-fill.
+- `institutional_ownership_cache` 103 docs (weekly IB ReportsOwnership sweep barely runs).
+We ALSO already fetch (via Finnhub /stock/metric=all) ROE/margins/EPS+rev growth/valuation/beta and
+full earnings BEAT/MISS surprise (earnings_calendar) — none of it scored. (→ F2.)
+
+### F1 deliverables (data-capture only, no scoring change)
+- **patch_v384** (paste.rs/tkgl1): `unified_fundamentals_cache.py` captures `days_to_cover` + raw short
+  shares REGARDLESS of float (un-gates the 80% FINRA squeeze signal); SI% still computed when float known.
+- **warmfill_fundamentals.py** (paste.rs/IpRH4): self-contained FREE warm-fill — Finnhub profile2 (float,
+  market cap) + local FINRA (short shares, days_to_cover) → compute SI% → upsert symbol_fundamentals_cache
+  for the evaluated universe. Throttled (~1.1s, Finnhub 60/min). No IB socket needed.
+- **diag_v383** (paste.rs/dczKg): +days_to_cover coverage line.
+- FINRA refresh: `POST /api/short-data/finra/fetch {"force":true}` (free, de-stales the March settlement).
+- NEXT (F2): use these in scoring — days_to_cover squeeze sub-score, EPS/rev surprise, growth/margins.
+
+
+
 Both prior fixes confirmed correct on post-restart (18:43 UTC) live data; Path B read-only probe built.
 
 ### v381 (dedup mark_fired post-trade) — ✅ LIVE-VERIFIED

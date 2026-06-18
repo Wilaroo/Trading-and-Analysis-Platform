@@ -30,7 +30,7 @@ def cov(coll, field, q=None):
 
 fc = "symbol_fundamentals_cache"
 print(f"{fc}: {db[fc].count_documents({})} docs total")
-for f in ("float_shares", "short_interest_percent", "institutional_ownership_percent"):
+for f in ("float_shares", "short_interest_percent", "days_to_cover", "institutional_ownership_percent"):
     c = cov(fc, f)
     print(f"  evaluated symbols with real {f:<32}: {c}/{U}  ({pct(c,U)})")
 

@@ -184,20 +184,26 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
         except Exception as exc:
             logger.debug("Finnhub fundamentals lookup failed for %s: %s", symbol, exc)
 
-    # 3.5 Short-interest % — FINRA short-interest shares ÷ shares-outstanding.
-    # Float/shares come from IB ReportSnapshot above; FINRA gives raw short
-    # shares (no %). FINRA is bi-monthly (the accurate cadence). (v19.34.202)
-    shares_out = merged.get("shares_outstanding") or merged.get("float_shares")
-    if shares_out and float(shares_out) > 0 and db is not None:
+    # 3.5 Short interest — FINRA (bi-monthly, free). v384: days_to_cover and raw
+    # short shares need NO float, so capture them for the full ~80% FINRA universe
+    # (the squeeze signal for explosive movers); compute SI% only when float is
+    # known. Previously the whole block was gated on float → days_to_cover was
+    # silently dropped for the ~65% of names without a known float.
+    if db is not None:
         try:
             from services.short_interest_service import ShortInterestService
             si = await ShortInterestService(db).get_short_data_for_symbol(symbol)
             si_shares = (si or {}).get("short_interest")
-            pct = compute_short_interest_pct(si_shares, shares_out)
-            if pct is not None:
-                merged["short_interest_percent"] = pct
-                if (si or {}).get("days_to_cover") is not None:
-                    merged["days_to_cover"] = si["days_to_cover"]
+            if (si or {}).get("days_to_cover") is not None:
+                merged["days_to_cover"] = si["days_to_cover"]
+            if si_shares:
+                merged["short_interest_shares"] = si_shares
+            shares_out = merged.get("shares_outstanding") or merged.get("float_shares")
+            if shares_out and float(shares_out) > 0:
+                pct = compute_short_interest_pct(si_shares, shares_out)
+                if pct is not None:
+                    merged["short_interest_percent"] = pct
+            if si_shares or (si or {}).get("days_to_cover") is not None:
                 source_chain.append("finra_short")
         except Exception as exc:
             logger.debug("Short-interest lookup failed for %s: %s", symbol, exc)
