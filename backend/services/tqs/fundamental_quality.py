@@ -110,6 +110,7 @@ class FundamentalQualityService:
         """
         result = FundamentalQualityScore()
         is_long = direction.lower() == "long"
+        _dtc = None  # v385 — FINRA days-to-cover (squeeze fallback when SI% absent)
         
         # Fetch fundamental data if not provided
         # v19.34.177.1 — route through unified_fundamentals_cache. The
@@ -128,6 +129,7 @@ class FundamentalQualityService:
                     float_shares = cached.get("float_shares")
                 if institutional_pct is None:
                     institutional_pct = cached.get("institutional_ownership_percent")
+                _dtc = cached.get("days_to_cover")  # v385
         except Exception as e:
             logger.debug(f"unified_fundamentals_cache lookup failed for {symbol}: {e}")
                 
@@ -360,8 +362,23 @@ class FundamentalQualityService:
         # this, a symbol we have no fundamentals on scored inst=80,
         # float=65, earnings=60 → an unearned ~57 pillar baseline.
         if _si_absent:
-            result.short_interest_score = 50.0
-            result.factors.append("Short-interest data absent → neutral 50")
+            # v385 — before neutralising, fall back to FINRA days-to-cover (needs
+            # NO float, ~80% universe coverage). High DTC = squeeze fuel for longs /
+            # crowded-short risk for shorts. Only when SI% is genuinely unavailable.
+            if _dtc and _dtc > 0:
+                if is_long:
+                    result.short_interest_score = (95 if _dtc >= 10 else 85 if _dtc >= 7
+                                                   else 70 if _dtc >= 5 else 60 if _dtc >= 3
+                                                   else 52 if _dtc >= 1.5 else 45)
+                    result.factors.append(f"Days-to-cover {_dtc:.1f} — squeeze fuel (+)")
+                else:
+                    result.short_interest_score = (30 if _dtc >= 10 else 42 if _dtc >= 7
+                                                   else 55 if _dtc >= 5 else 65 if _dtc >= 3
+                                                   else 75 if _dtc >= 1.5 else 80)
+                    result.factors.append(f"Days-to-cover {_dtc:.1f} — crowded short (-)")
+            else:
+                result.short_interest_score = 50.0
+                result.factors.append("Short-interest data absent → neutral 50")
         if _float_absent:
             result.float_score = 50.0
             result.factors.append("Float data absent → neutral 50")
