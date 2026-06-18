@@ -6314,15 +6314,32 @@ class EnhancedBackgroundScanner:
         return None
     
     async def _check_big_dog(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Big Dog Consolidation - Tight wedge 15+ min"""
+        """Big Dog Consolidation - Tight wedge 15+ min (LONG, HOD breakout).
+        v361 — + min-price $10 + min-stop 1.0% gates. 180d/300-sym 5-min replay: the
+        baseline trigger@HOD model is breakeven (winsorAvg -0.009R) but flips to +0.097R
+        (win 53%, medR +0.132, n=268) once tight-stop blow-throughs on low-priced/illiquid
+        names are excluded. Ground truth (n=5 real fills) was avgR -2.0 — all sub-1% stops
+        on <$30 names that gapped through the stop. See memory/v361_big_dog_build.md."""
         if (snapshot.daily_range_pct < 2.0 and
             snapshot.above_vwap and
             snapshot.above_ema9 and
-            snapshot.rvol >= 1.2):
+            snapshot.rvol >= 1.2 and
+            snapshot.current_price >= 10.0):  # v361 price floor (drop illiquid)
             
             dist_from_hod = ((snapshot.high_of_day - snapshot.current_price) / snapshot.current_price) * 100
             
             if dist_from_hod < 1.0:
+                # v361 min-stop floor — reject tight-stop blow-throughs (the ground-truth
+                # bleed: n=5 avgR -2.0, all sub-1% stops on <$30 names that gapped through).
+                stop = self._atr_floored_stop(
+                    entry_price=snapshot.current_price,
+                    raw_stop=snapshot.ema_9 - 0.02,
+                    atr=getattr(snapshot, "atr", None),
+                    direction="long",
+                    min_atr_mult=0.5,
+                )
+                if snapshot.current_price <= 0 or (snapshot.current_price - stop) / snapshot.current_price * 100 < 1.0:
+                    return None
                 priority = AlertPriority.MEDIUM
                 
                 return LiveAlert(
@@ -6334,13 +6351,7 @@ class EnhancedBackgroundScanner:
                     priority=priority,
                     current_price=snapshot.current_price,
                     trigger_price=snapshot.high_of_day,
-                    stop_loss=self._atr_floored_stop(
-                        entry_price=snapshot.current_price,
-                        raw_stop=snapshot.ema_9 - 0.02,
-                        atr=getattr(snapshot, "atr", None),
-                        direction="long",
-                        min_atr_mult=0.5,
-                    ),
+                    stop_loss=stop,
                     target=round(snapshot.high_of_day + (snapshot.atr * 1.5), 2),
                     risk_reward=2.0,
                     trigger_probability=0.55,
