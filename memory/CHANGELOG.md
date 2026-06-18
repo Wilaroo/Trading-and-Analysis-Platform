@@ -1,3 +1,43 @@
+## 2026-06-18 — v379 SMART_FILTER GRADE-GATE (Issue 3 / "borderline setups hard-blocked") — APPLIED on DGX, VERIFICATION PENDING (restart + RTH)
+APPLIED via patch_v379_smartfilter_grade_gate.py (paste.rs/ow794). PRE-SHA matched BOTH files
+(opportunity_evaluator eecb760f…, smart_filter 86fd6ac4…); POST smart_filter 42fd651e… (== --check
+prediction), opportunity_evaluator 0dc997f3…; py_compile OK both; .bak.v379 backups written. Restart
++ live diag_v379 verification still pending.
+
+### Root cause (CORRECTED via diag_v379 — overturned the original "TQS 75 unreachable" diagnosis)
+The original read (diag_v378c) assumed smart_filter compares the TQS (max ~68) to high_tqs_requirement=75.
+diag_v379 (read-only, paste.rs/gS9i6) PROVED on live data (49/49 joinable smart_filter_skip drops,
+SNDK 32/32) that the MAIN bot loop feeds smart_filter `quality_score = alert['score'] =
+trigger_probability×100` (trading_bot_service.py builds that dict), NOT the TQS. 19 compared values
+were >68 — mathematically impossible for the TQS (a 5-pillar AVERAGE crushed to ~48-68 per
+grade_calibration.py) — so they could only be trigger_probability. The reject string hard-coded the
+word "TQS" → the 60 the operator saw was trigger_prob 0.60 mislabeled. These setups
+(stage_2_breakout / rs_leader_break / pocket_pivot / power_trend_stack) carry a base trigger_prob
+≈0.60 → 60 < 75 → EVERY borderline-win-rate setup permanently hard-blocked. The auto-execute path
+(scanner_integration.py) DOES pass the real TQS, so the input was also inconsistent across entry paths.
+
+### Fix (2 files, fully reversible, no safety-critical path)
+- **O1 opportunity_evaluator.py** — feed the REAL TQS: `quality_score = int(alert.get('tqs_score')
+  or alert.get('score') or 70)` (mirrors the confidence-gate GAP-1 fix; both entry paths now consistent).
+- **S1 smart_filter.py** — add `import os`, `_GRADE_RANK` ladder, env-tunable
+  `borderline_min_grade` (SMART_FILTER_BORDERLINE_MIN_GRADE, default "B") in DEFAULT_CONFIG.
+- **S2 smart_filter.py** — borderline band PROCEEDs when `calibrate_grade(quality_score) ≥ B`
+  (calibrated grade, consistent with the grade system), not the unreachable absolute 75.
+  `high_tqs_requirement` kept ONLY as a crash/no-reference fallback. Self-adapts if Path B later
+  de-compresses the scale. Container-validated: A/B→PROCEED, C+/C/F→SKIP, default=B, fallback→75.
+
+### Also checked (benign — no action)
+- ACTION_THRESHOLDS (STRONG_BUY≥80/BUY≥65) + tqs_action: never used as an execution gate (metadata/
+  display only). The unreachable cutoffs only affect a cosmetic label.
+
+### Follow-ups
+- **VERIFY v379 live:** restart (./start_backend.sh --force) → after RTH, diag_v379 should show
+  borderline skips reasoning on real grade; B-grade borderlines (SNDK TQS 57-58) should fire.
+- **Path B (P1, after Issue 4):** de-compress the TQS scale itself — turn off TQS_SETUP_DECOMPRESS
+  once v310 C-1 feeds real SMB, re-baseline absent-fundamental→50 so the raw composite uses 0-100.
+- **Issue 4 (P1):** dedup_cooldown blocking continuation re-entries (HON).
+
+
 ## 2026-06-18 — v369 MISSED-MOVERS FIX — DEPLOYED, COMMITTED (21d3f479), VERIFIED LIVE
 APPLIED on DGX (PRE-SHA matched both files; POST-SHA matched --check prediction exactly:
 enhanced_scanner 4aa42be2…, ib_historical_collector e44ee544…), committed 21d3f479, pushed,
