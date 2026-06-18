@@ -68,6 +68,16 @@ def main():
         q['created_at'] = {'$gte': cutoff}
 
     rows = list(db.bot_trades.find(q, {'_id': 0}))
+    include_synth = '--include-synthetic' in sys.argv
+    if not include_synth:
+        def _real(sym):
+            s = str(sym or '')
+            if '_' in s:
+                return False
+            return not any(s.upper().startswith(p) for p in ('TEST', 'E2E', 'SIM', 'DEMO', 'FAKE'))
+        before = len(rows)
+        rows = [t for t in rows if _real(t.get('symbol'))]
+        print(f"(excluded {before - len(rows)} synthetic/test trades; pass --include-synthetic to keep)")
     print(f"\n=== v359b SQUEEZE ground-truth — bot_trades  (days={'all' if days == 0 else days}) ===")
     print(f"matched trades: {len(rows)}\n")
     if not rows:
