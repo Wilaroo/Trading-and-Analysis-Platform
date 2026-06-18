@@ -1,5 +1,22 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-18 — v369 MISSED-MOVERS FIX BUILT + PASTED (DGX apply pending).
+> Diags v376/v377 proved SNDK/MRVL/SPCX/TSLA were structurally filtered out by two
+> bugs: (1b) `_passes_universal_liquidity_gate` fail-closed scalp/intraday alerts on
+> `rvol <= 0` — but rvol==0.0 means UNMEASURED (no live-vol push outside top-400 L1),
+> not zero; (2) `get_symbol_tier` skipped any `atr_pct > 10%`, excluding explosive
+> deeply-liquid movers (MRVL/SPCX/SMCI). v369 (paste.rs/3Q8L5, §2.2 patcher, PRE-SHA
+> enhanced_scanner 6cd66335… / ib_historical_collector a3cc6467…): rvol-unmeasured now
+> DEFERS to the share-ADV + ADRP proofs (PASS if those + adv_dollar clear); a MEASURED
+> rvol below floor still blocks (SCALP_RVOL_FAIL_CLOSED=true reverts). ATR ceiling
+> WAIVED for $-vol >= intraday tier (ATR_CEILING_WAIVE_LIQUID=false reverts); MIN floor
+> + thin-name ceiling kept. Whole-fn / ASCII-anchor chunks, auto-backup, py_compile,
+> --check/--apply/--rollback, full local round-trip test green, paste cmp IDENTICAL.
+> NO safety-critical path touched. VERIFY next RTH (diag_v376/v377). NEXT: Issue 3
+> recompute strategy_stats on sanitized data; Issue 4 dedup_cooldown re-entries. DGX
+> patcher workflow ONLY — no testing_agent. English.**
+
+
 > **✅ 2026-06-17 (latest) — v19.34.323 (patch_v336) SHORT-FADE GATE + R-WINSOR
 > DEPLOYED & COMMITTED (9ae11efc), LIVE. diag_v333/v334 forensics: trade_2_hold is
 > net +$56.9k (the "-878R" was a risk_amount artifact); the REAL P0 = $26.4k EXCESS

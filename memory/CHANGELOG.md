@@ -1,3 +1,47 @@
+## 2026-06-18 — v369 MISSED-MOVERS FIX (RVOL defer + ATR ceiling waive) — BUILT + PASTED (awaiting DGX apply)
+
+### Why (diags v376/v377 — SNDK/MRVL/SPCX/TSLA missed)
+Two structural bugs were filtering out the market's best intraday movers:
+- **1b (RVOL fail-close):** `_passes_universal_liquidity_gate` rejected scalp/intraday alerts
+  whenever `rvol <= 0`. But `rvol == 0.0` means UNMEASURED (no live-volume push for names outside
+  the top-400 L1 set), NOT zero volume — ~97% of scalp/intraday drops were this fail-close.
+- **2 (ATR chaos ceiling):** `get_symbol_tier` marked any `atr_pct > 10%` as `tier=skip`, excluding
+  explosive, deeply-liquid names (MRVL/SPCX/SMCI) from the universe entirely.
+
+### What v369 does (both env-reversible, no safety-critical path touched)
+- **enhanced_scanner._passes_universal_liquidity_gate** (whole-fn replace, PRE_FUNC_SHA
+  `8494288681…`): when `rvol <= 0` (unmeasured), DEFER to the share-ADV + ADRP proofs below instead
+  of fail-closing. adv_dollar already proven to reach this branch, so a name passing share-ADV + ADRP
+  with unmeasured RVOL now PASSES. A MEASURED rvol genuinely below floor still blocks
+  (`elif rvol > 0 and rvol < min`). Reversible: `SCALP_RVOL_FAIL_CLOSED=true` restores old behavior.
+- **ib_historical_collector.get_symbol_tier** (ATR-gate sub-block, ASCII anchor): waive the UPPER
+  ceiling (`atr_pct > ATR_PCT_THRESHOLDS["max"]`) for highly-liquid names
+  (`avg_dollar_volume >= DOLLAR_VOL_THRESHOLDS["intraday"]`). MIN floor + thin-name ceiling preserved.
+  Reversible: `ATR_CEILING_WAIVE_LIQUID=false`.
+
+### §2.2 compliance / validation
+Patcher `patch_v369.py` (paste.rs/3Q8L5, round-trip cmp IDENTICAL, 37KB): whole-file PRE-SHA256 drift
+guard per file (enhanced_scanner `6cd66335…`, ib_historical_collector `a3cc6467…`), base64 (old,new)
+anchored chunks (each count==1 asserted), auto-backup `.bak.v369`, py_compile gate, prints POST-SHA,
+`--check/--apply/--rollback`, idempotent NOOP when already patched. Built programmatically from the
+operator's exact extracts (no manual base64). Full local round-trip test passed
+(`/tmp/v369/test_patch_v369.py`): check(no-write)→apply(both edits structurally verified)→idempotent
+NOOP→rollback(exact PRE-SHA)→drift-guard abort. Generator: `/tmp/v369/build_patch_v369.py`.
+
+### DGX deploy (operator)
+```
+curl -sS -o /tmp/patch_v369.py https://paste.rs/3Q8L5
+.venv/bin/python /tmp/patch_v369.py --check     # dry run + py_compile
+.venv/bin/python /tmp/patch_v369.py --apply
+git add backend/services/enhanced_scanner.py backend/services/ib_historical_collector.py \
+  && git commit -m "v369: RVOL-unmeasured defer + ATR ceiling waive for liquid movers" && git push origin main
+./start_backend.sh --force
+```
+Verify next RTH: SNDK/MRVL/SPCX-class names should pass the gate (re-run diag_v376/v377) and
+no longer show `tier=skip`. After verified, NEXT: Issue 3 (recompute strategy_stats on sanitized
+recent data), Issue 4 (dedup_cooldown continuation re-entries).
+
+
 ## 2026-06-18 — v368 known-liquid bypass CLOSED + scalp/intraday ADRP floor — DEPLOYED, COMMITTED (0bb8ba83), VERIFIED LIVE
 Root cause chain (operator-driven, diags v370/v372/v374): user flagged scalps on HON/EWT/IWF/FXI.
 - v370: all 4 are liquid ($488M–$722M $-vol, ≫ $50M floor). NOT a liquidity failure. second_chance/backside ARE scalp-doctrine.
