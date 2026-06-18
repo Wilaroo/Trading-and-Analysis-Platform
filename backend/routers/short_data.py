@@ -71,19 +71,29 @@ async def warm_fundamentals(request: WarmFundamentalsRequest):
                                "started_at": datetime.now(timezone.utc).isoformat(),
                                "finished_at": None})
         for sym in uni:
+            # v388 — refresh institutional FIRST so get_cached_fundamentals merges
+            # it into symbol_fundamentals_cache on the SAME pass; skip if already
+            # fresh (<7d) so re-runs are cheap and don't re-pull multi-MB reports.
+            if request.institutional:
+                try:
+                    ex = mongo_db.institutional_ownership_cache.find_one(
+                        {"symbol": sym}, {"fetched_at": 1})
+                    fa = ex.get("fetched_at") if ex else None
+                    fresh = fa is not None and (datetime.now(timezone.utc) - fa).days < 7
+                    if fresh:
+                        _warm_progress["institutional"] += 1
+                    else:
+                        pct = await refresh_institutional_ownership(sym, db=mongo_db)
+                        if pct is not None:
+                            _warm_progress["institutional"] += 1
+                except Exception as exc:
+                    logger.debug("warm institutional %s: %s", sym, exc)
             try:
                 merged = await get_cached_fundamentals(sym, force_refresh=True)
                 if merged and merged.get("float_shares"):
                     _warm_progress["ib_float"] += 1
             except Exception as exc:
                 logger.debug("warm float %s: %s", sym, exc)
-            if request.institutional:
-                try:
-                    pct = await refresh_institutional_ownership(sym, db=mongo_db)
-                    if pct is not None:
-                        _warm_progress["institutional"] += 1
-                except Exception as exc:
-                    logger.debug("warm institutional %s: %s", sym, exc)
             _warm_progress["done"] += 1
             await asyncio.sleep(request.throttle)
         _warm_progress["running"] = False
