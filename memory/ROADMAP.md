@@ -3,6 +3,29 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+## ✅ RESOLVED 2026-06-18 (this session — v365/v366/v367)
+- ✅ **P0 "suppressed setups firing live"** = FALSE ALARM. diag_v365_leak_recency proved stale
+  pre-deploy residue (every fire predates its suppression commit). No leak, no patch.
+- ✅ **P1 scaled measured-move exits** = EVALUATED → KEEP flat-2R. diag_v365_scaled_exit_eval:
+  flat_2R ties scaled_123 on mean EV (robust across winsor); trail/m2m lose. No EV gain to justify
+  the position-mgmt build. (Re-open only if a kill-switch losing-streak problem appears live —
+  deferred option B: drawdown/streak sim.)
+- ✅ **P1 multi-bar-size shadow logging (P1-MULTI-TF)** = SHIPPED (v367, committed e325857c). Shadow
+  now logs 1/5/15min. Env-reversible PWIRE_MULTI_TF_SHADOW=0.
+- ✅ **Regime "91% high_vol" / threshold recalibration** = RE-CONFIRMED misdiagnosis (matches
+  2026-06-16 diag_v320x). classify_regime threshold LEFT UNCHANGED. Do NOT recalibrate 1.3.
+
+## 🔴 NEXT SESSION (after 2026-06-18)
+- **P1 — VERIFY v367 in the wild:** after RTH, `diag_v366_pwire_readiness.py --days 1` → bar_size
+  distribution should show 1min/15min (not 100% 5min). Confirms multi-TF accrual.
+- **P1 — P-WIRE Phase 2 edge eval:** still data-gated (RESOLVED 92/200). Run `pwire_shadow_eval.py`
+  once RESOLVED≥200. NOTE: dominant 5min_high_vol variant is QUARANTINED (PBO=1.00) → 77% of records
+  have no comparison model; multi-TF widens the trainable cells. Re-run readiness in ~2 weeks.
+- 🔴 **Rotate Atlas MongoDB password** (old creds in git history) — still pending operator action.
+- **P2 backlog:** `GET /api/scanner/setup-ev-audit` + V5 tile; OCA-finalize-health endpoint + tile;
+  horizon-scaled bracket geometry; break up `server.py` monolith.
+
+
 ## ✅ RESOLVED 2026-06-18 (was NEXT SESSION P0s)
 - ✅ P0 Part A EOD-flatten: HISTORICAL residue; live stack (v245/v261/v301/v322s) already seals it. No patch. (v338/v339)
 - ✅ P0 breakdown 2470/0: correct suppression (disabled setup), not a bug. (v337)

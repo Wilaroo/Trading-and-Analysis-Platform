@@ -1,3 +1,47 @@
+## 2026-06-18 — v367 P1-MULTI-TF multi-bar-size shadow logging — DEPLOYED & COMMITTED (e325857c), LIVE
+
+### What shipped
+`ConfidenceGate._get_live_prediction` (confidence_gate.py) now computes the P-WIRE regime-shadow
+across **1min / 5min / 15min** (additive `result["regime_shadows"]` list) instead of only 5min.
+The PRIMARY live prediction path is BYTE-FOR-BYTE UNCHANGED (drives confidence/execution); the single
+`result["regime_shadow"]` (5min/daily) is preserved for backward-compat readers. Read-only shadow —
+never affects execution. Env-reversible via `PWIRE_MULTI_TF_SHADOW=0`. `pwire_shadow_eval.py` updated
+to consume `regime_shadows[]` (falls back to the single record) + a bar_size distribution line.
+- Patcher `patch_v367_multi_tf_shadow.py` (whole-file PRE `454318302b85…`→POST `f8e4a542…`,
+  `_get_live_prediction` PRE_FUNC_SHA `ef039ab3…`, anchor==1, py_compile, --check, auto-backup).
+  paste.rs: patcher `Gh8Jj`, eval `CZtfV`, test `QlXg7`. 2/2 pytest green (test_v367_multi_tf_shadow.py).
+- Verified bars exist for all TFs (diag_v367_barsize_inventory.py `MxOfg`): 1min 73M docs/3417 syms,
+  15min 32M/4105 — multi-TF will accrue. VERIFY NEXT RTH: diag_v366 --days 1 → 1min/15min in bar_size dist.
+
+### Why (P-WIRE Phase-2 unblock)
+Phase-2 regime-vs-generic edge eval is data-gated (RESOLVED 92→needs ~200) and 100% of shadow records
+were 5min. Multi-TF 2-3×'s the corpus per gate decision across all (bar_size,regime) cells. Phase-2
+itself remains time/data-gated (re-run pwire_shadow_eval once RESOLVED≥200; note dominant 5min_high_vol
+variant is QUARANTINED PBO=1.00 so 77% of records have no comparison model).
+
+## 2026-06-18 — v366 P-WIRE readiness + regime diagnosis — NO CODE CHANGE (misdiagnosis re-confirmed)
+diag_v366_pwire_readiness.py (`OBDuI`) + diag_v366b_regime_live_trace.py (`wjwyB`) independently
+RE-CONFIRMED the 2026-06-16 diag_v320x finding: the "~91% high_vol" is a per-decision SAMPLING ARTIFACT,
+NOT a threshold bug. Live trace: SPY daily atr_5/atr_20 = **1.358 → high_vol is CORRECT today** (clean,
+recent, deduped bars); SPY-daily `>1.3` only fires 15.9% of *days* (≈ the true 14% high_vol). **classify_regime
+threshold LEFT UNCHANGED** — recalibrating 1.3→1.5 would blind the classifier to real volatility (the
+PRD's proposed P0-CLASSIFIER fix is a misfix). Doc: memory/v366_pwire_regime_diagnosis.md.
+
+## 2026-06-18 — v365 scaled / measured-move EXIT eval — VERDICT: KEEP flat-2R (no build)
+diag_v365_scaled_exit_eval.py (`Mv5Va`) ran 5 exit policies head-to-head on the EXACT shipped
+spencer_scalp(v363)+gap_give_go(v362) entries (180d/300-sym). On mean EV flat_2R ≈ scaled_123 (tie,
+Δ −0.002..−0.008R), ROBUST across winsor ±3R/±2R (flat_2R is NOT a fat-tail artifact; the trail/m2m
+policies ARE tail-dependent and decay). Pure double-bar-break trail clearly LOSES. Operator chose to keep
+flat-2R (no EV gain to justify touching the safety-adjacent scale-out engine). Doc: memory/v365_scaled_exit_eval.md.
+
+## 2026-06-18 — P0 "suppressed setups firing live" — FALSE ALARM / CLOSED
+diag_v365_leak_recency.py (`6nTwV`) proved every squeeze/vwap_bounce/fashionably_late fire predates its
+suppression COMMIT (latest fire 15:56 ET Jun 17 < v354@17:27 / v357@20:50 / v359@21:42 ET) — stale
+pre-deploy residue from Jun 17 RTH (which ran on old code; suppressions committed/restarted that evening),
+NOT a live leak. The prior agent's "market_simulator/predictive_scanner secondary emitter" hypothesis was
+wrong (neither writes live_alerts/executes). Added generic extractor extract_func_generic.py (`jERWM`).
+
+
 ## 2026-06-18 — v363 (patch_v363) REWRITE `spencer_scalp` to SMB DOCTRINE (LONG-only) — BUILT + PASTED (awaiting DGX apply)
 
 ### Why (consulted Spencer+Scalp cheat sheet)
