@@ -5082,53 +5082,112 @@ class EnhancedBackgroundScanner:
         )
     
     async def _check_gap_give_go(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
-        """Gap Give and Go - Gap up, pullback, continuation"""
+        """Gap Give and Go (INT-34) - DOCTRINE rewrite (v362).
+        SMB cheat-sheet structure on 1-min bars: gap-up, a quick 'give' (pullback) that holds above
+        the prior close and does NOT fill >50% of the gap, then a 3-7 bar mini-consolidation on
+        declining volume; ENTER on the break of the consolidation high, STOP .02 below the
+        consolidation low, fixed 2.0R target. Opening-drive only. 180d/300-sym 1-min replay:
+        n=492 win 47% winsorAvg +0.233R (vs the prior loose VWAP-pullback code ~+0.07R).
+        See memory/v362_gap_give_go_build.md."""
         current_window = self._get_current_time_window()
-        
-        if current_window not in [TimeWindow.OPENING_DRIVE, TimeWindow.MORNING_MOMENTUM]:
+        if current_window not in [TimeWindow.OPENING_AUCTION, TimeWindow.OPENING_DRIVE]:
             return None
-        
-        if (snapshot.gap_pct > 3.0 and 
-            snapshot.holding_gap and
-            snapshot.above_vwap and
-            0 < snapshot.dist_from_vwap < 1.5 and
-            snapshot.rvol >= 2.0):
-            
-            priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
-            
-            return LiveAlert(
-                id=f"gap_give_go_{symbol}_{datetime.now().strftime('%H%M%S')}",
-                symbol=symbol,
-                setup_type="gap_give_go",
-                strategy_name="Gap Give and Go (INT-34)",
-                direction="long",
-                priority=priority,
-                current_price=snapshot.current_price,
-                trigger_price=snapshot.current_price,
-                stop_loss=self._atr_floored_stop(
-                    entry_price=snapshot.current_price,
-                    raw_stop=snapshot.vwap - 0.02,
-                    atr=getattr(snapshot, "atr", None),
-                    direction="long",
-                    min_atr_mult=0.5,
-                ),
-                target=round(snapshot.high_of_day, 2),
-                risk_reward=2.0,
-                trigger_probability=0.60,
-                win_probability=0.55,
-                minutes_to_trigger=10,
-                headline=f"🎁 {symbol} Gap Give and Go - {snapshot.gap_pct:.1f}% {'✓ TAPE' if tape.confirmation_for_long else ''}",
-                reasoning=[
-                    f"Gap up {snapshot.gap_pct:.1f}%",
-                    "Pulled back but holding VWAP",
-                    f"RVOL: {snapshot.rvol:.1f}x",
-                    f"Tape: {tape.overall_signal.value}"
-                ],
-                time_window=current_window.value,
-                market_regime=self._market_regime.value,
-                expires_at=(datetime.now(timezone.utc) + timedelta(minutes=45)).isoformat()
-            )
-        return None
+
+        MIN_GAP = 1.0
+        CONS_MIN, CONS_MAX = 3, 7
+        CONS_BAND_MAX = 0.6      # consolidation band as % of price
+        VOL_DECLINE = 0.7        # cons avg vol must be <= 0.7x the give avg vol
+        GIVE_MAX_FILL = 50.0     # give must not retrace >50% of the gap
+        TARGET_RMULT = 2.0
+
+        gap_pct = float(getattr(snapshot, "gap_pct", 0.0) or 0.0)
+        prev_close = float(getattr(snapshot, "prev_close", 0.0) or 0.0)
+        day_open = float(getattr(snapshot, "open", 0.0) or 0.0)
+        cp = float(getattr(snapshot, "current_price", 0.0) or 0.0)
+        session_high = float(getattr(snapshot, "high_of_day", 0.0) or 0.0)
+        if gap_pct < MIN_GAP or prev_close <= 0 or cp <= 0 or day_open <= prev_close:
+            return None
+
+        ts = getattr(self, "technical_service", None)
+        if ts is None:
+            return None
+        bars = ts._get_intraday_bars_from_db(symbol, "1 min", 60)
+        if not bars or len(bars) < CONS_MIN + 2:
+            return None
+
+        i = len(bars) - 1                       # current/most-recent bar = the range-break bar
+        last_high = bars[i].get("high")
+        if last_high is None:
+            return None
+
+        chosen = None
+        for w in range(CONS_MAX, CONS_MIN - 1, -1):
+            a = i - w
+            if a < 1:
+                continue
+            cw = bars[a:i]
+            try:
+                cons_high = max(b["high"] for b in cw)
+                cons_low = min(b["low"] for b in cw)
+            except (KeyError, TypeError, ValueError):
+                continue
+            band = cons_high - cons_low
+            if band <= 0 or band / cp * 100.0 > CONS_BAND_MAX:
+                continue
+            if session_high > 0 and cons_high >= session_high:      # a give/pullback must have happened
+                continue
+            if cons_low <= prev_close:                              # consolidation holds above support
+                continue
+            give_lows = [b["low"] for b in bars[:a] if b.get("low") is not None]
+            give_low = min(give_lows) if give_lows else cons_low
+            if (day_open - give_low) / (day_open - prev_close) * 100.0 > GIVE_MAX_FILL:
+                continue
+            give_v = [b["volume"] for b in bars[:a] if (b.get("volume") or 0) > 0]
+            cons_v = [b["volume"] for b in cw if (b.get("volume") or 0) > 0]
+            if give_v and cons_v and (sum(cons_v) / len(cons_v)) > VOL_DECLINE * (sum(give_v) / len(give_v)):
+                continue
+            chosen = (cons_high, cons_low)
+            break
+        if not chosen:
+            return None
+        cons_high, cons_low = chosen
+
+        entry = round(cons_high + 0.01, 2)
+        if not (cp >= entry or last_high >= entry):                 # range-break must be printing
+            return None
+        stop = round(cons_low - 0.02, 2)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        target = round(entry + TARGET_RMULT * risk, 2)
+
+        priority = AlertPriority.HIGH if tape.confirmation_for_long else AlertPriority.MEDIUM
+        return LiveAlert(
+            id=f"gap_give_go_{symbol}_{datetime.now().strftime('%H%M%S')}",
+            symbol=symbol,
+            setup_type="gap_give_go",
+            strategy_name="Gap Give and Go (INT-34)",
+            direction="long",
+            priority=priority,
+            current_price=cp,
+            trigger_price=entry,
+            stop_loss=stop,
+            target=target,
+            risk_reward=TARGET_RMULT,
+            trigger_probability=0.60,
+            win_probability=0.55,
+            minutes_to_trigger=5,
+            headline=f"🎁 {symbol} Gap Give and Go - {gap_pct:.1f}% break {'✓ TAPE' if tape.confirmation_for_long else ''}",
+            reasoning=[
+                f"Gap up {gap_pct:.1f}%, give held above prior close",
+                f"3-7 bar consolidation {cons_low:.2f}-{cons_high:.2f} on declining volume",
+                f"Break entry {entry:.2f}, stop {stop:.2f} (cons low), 2R target {target:.2f}",
+                f"Tape: {tape.overall_signal.value}"
+            ],
+            time_window=current_window.value,
+            market_regime=self._market_regime.value,
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        )
     
     async def _check_second_chance(self, symbol: str, snapshot, tape: TapeReading) -> Optional[LiveAlert]:
         """Second Chance Scalp \u2014 cheat-sheet-faithful resistance break \u2192 low-vol retest (v19.34.353).
