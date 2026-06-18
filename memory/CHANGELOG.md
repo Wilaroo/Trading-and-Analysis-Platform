@@ -1,3 +1,27 @@
+## 2026-06-18 — v368 known-liquid bypass CLOSED + scalp/intraday ADRP floor — DEPLOYED, COMMITTED (0bb8ba83), VERIFIED LIVE
+Root cause chain (operator-driven, diags v370/v372/v374): user flagged scalps on HON/EWT/IWF/FXI.
+- v370: all 4 are liquid ($488M–$722M $-vol, ≫ $50M floor). NOT a liquidity failure. second_chance/backside ARE scalp-doctrine.
+- v371: 61% alert→trade trade_style divergence (collapse to trade_2_hold) — but v373 proved this is STALE history;
+  DGX line 1907 `_resolve_geometry_style` already persists canonical style (0% generic in last 3d). trade_style patch DROPPED.
+- v372: HON probe — gate WOULD block (2.2M sh < 3M) but HON sits in `_known_liquid_symbols` (228 hardcoded) which
+  `return True`d the WHOLE gate, skipping the v322m scalp share-ADV floor. Root cause = the static bypass.
+- v374: universe/tradeability audit — 92/228 hardcoded names < 3M sh (silently bypassed). EWT/IWF/FXI issue is
+  LOW ADRP (movement) not liquidity: ADRP 1.18–2.28% vs real movers 7–17%. Index ETFs/sleepy megacaps cluster low.
+Fix (patch_v368_scalp_adrp_gate.py, paste.rs r3w8c; PRE-SHA 0d9b24b1 → applied; all in enhanced_scanner.py):
+- E1: known-liquid no longer FULLY bypasses; only WAIVES dollar floor on genuine cache MISS. Scalp proof ALWAYS runs.
+- E2: dollar-floor check waived only when `_known_liquid and adv_dollar<=0`.
+- E3: NEW scalp/intraday ADRP floor check (after share-ADV check).
+- E4: `SCALP_MIN_ADRP` env knob (default 2.0, 0 disables) + `_adrp_cache`.
+- E5: `_get_adrp_for_gate` (reads symbol_adv_cache.adrp_20d → ib_historical_data 20-bar fallback, memoized per UTC-day)
+  + `_compute_adrp_from_bars`.
+Thresholds LOCKED by operator: ADRP≥2.0, KEEP share≥3M + dollar≥$50M (all three for scalp/intraday).
+VERIFIED (diag_v375, 6h post-deploy): scalp_adrp=58 drops (IEF/GDX/SLV/FXI/NFLX/WFC…), scalp_share_adv=61 (ACN×26/CMI/RTX…),
+existing scalp_rvol(2559)/dollar_adv(1824) intact. Watch-list verdicts exact: HON→BLOCKED(share), IWF/FXI/SPY/QQQ→BLOCKED(adrp),
+EWT→eligible (2.28>2.0), AAPL→eligible. Known-liquid set literal left intact (bypass removal neutralizes stale entries).
+DEFERRED: (1) collector adrp_20d warm-fill (fast-path; fallback already correct). (2) optional bump SCALP_MIN_ADRP=2.5 to catch EWT.
+New read-only diags: diag_v370/v371/v372/v373/v374/v375; helper extract_region_generic.py.
+
+
 ## 2026-06-18 — AGENTS.md known-issue watchlist TRIAGED (all 3 closed; no code fixes needed)
 Verified all three §6/§16 watchlist items against live code/data — 2 were stale notes, 1 disproven+moot.
 - **Stale-quote watchdog** → ✅ ALREADY FIXED (v19.34.82 `quote_resub_watchdog.py`, live 60s task,
