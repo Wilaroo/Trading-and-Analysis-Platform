@@ -23,6 +23,8 @@
 #
 # Flags: --days --barsize --universe --maxhold(bars) --cooldown(bars) --trigwin(bars)
 #        --range-max(%) --disthod(%) --winstart/--winend (ET, default 09:30-16:00)
+#        --min-stop-pct(%) [reject signals whose (cp-stop)/cp < X — kills tight-stop blow-throughs]
+#        --min-price($)    [reject low-priced/illiquid names]
 #        --tz auto|utc|et --winsor(R)
 
 import sys
@@ -130,6 +132,8 @@ def main():
     trigwin = _arg('--trigwin', 12, int)
     range_max = _arg('--range-max', 2.0, float)
     disthod = _arg('--disthod', 1.0, float)
+    min_stop_pct = _arg('--min-stop-pct', 0.0, float)
+    min_price = _arg('--min-price', 0.0, float)
     win_start = _hhmm(_argstr('--winstart', '09:30'), time(9, 30))
     win_end = _hhmm(_argstr('--winend', '16:00'), time(16, 0))
     tz_assume = _argstr('--tz', 'auto')
@@ -146,7 +150,8 @@ def main():
     print(f"\n=== v361 BIG DOG replay — {days}d bar='{barsize}' "
           f"win={win_start.strftime('%H:%M')}-{win_end.strftime('%H:%M')}ET "
           f"range<{range_max:g}% distHOD<{disthod:g}% trigwin={trigwin}b hold={maxhold}b "
-          f"cooldown={cooldown}b tz={tz_assume} winsor=±{cap:g}R ===")
+          f"cooldown={cooldown}b minStop>={min_stop_pct:g}% minPx>=${min_price:g} "
+          f"tz={tz_assume} winsor=±{cap:g}R ===")
     print("NOTE: live daily-rvol>=1.2 gate NOT applied (superset of live fires)\n")
     print(f"universe: {len(syms)} symbols\n")
 
@@ -200,12 +205,15 @@ def main():
                     continue
                 rng = (hod - lod) / lod * 100.0
                 dist_hod = (hod - cp) / cp * 100.0
-                if not (rng < range_max and cp > vwap[i] and cp > ema9[i] and 0 <= dist_hod < disthod):
+                if not (rng < range_max and cp > vwap[i] and cp > ema9[i]
+                        and 0 <= dist_hod < disthod and cp >= min_price):
                     continue
-                n_signals += 1; last_fire = i
-                end = min(i + maxhold, len(rb) - 1)
                 raw_stop = ema9[i] - 0.02
                 stop = min(raw_stop, cp - 0.5 * atr)
+                if min_stop_pct > 0 and cp > 0 and (cp - stop) / cp * 100.0 < min_stop_pct:
+                    continue  # tight-stop blow-through risk — reject
+                n_signals += 1; last_fire = i
+                end = min(i + maxhold, len(rb) - 1)
 
                 # --- MKT @ signal cut: enter at cp now, ATR geometry off cp ---
                 m_risk = cp - stop; m_tgt = cp + 1.5 * atr; m_reward = m_tgt - cp
@@ -266,7 +274,8 @@ def main():
     print("  -> +EV (keep/tune). Negative -> suppress (like vwap_bounce/squeeze/first_move).")
     print("• If MKT@signal is +EV but LIVE trigger@HOD is -EV -> the HOD breakout-chase is the")
     print("  bleed; a v359-style entry-anchor rewrite (enter at cp, geometry off entry) may rescue it.")
-    print("• Probes: --range-max 1.5 (tighter coil) ; --disthod 0.5 ; --trigwin 6 ; --winend 11:00.\n")
+    print("• Probes: --range-max 1.5 (tighter coil) ; --disthod 0.5 ; --trigwin 6 ; --winend 11:00 ;")
+    print("          --min-stop-pct 1.0 (kill blow-throughs) ; --min-price 10 (drop illiquid).\n")
 
 
 if __name__ == '__main__':
