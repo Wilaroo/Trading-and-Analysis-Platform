@@ -63,10 +63,43 @@ class SetupQualityScore:
     
     # Reasoning
     factors: list = None
+    display_ctx: dict = None  # v391 — extra raw bits for sub-score descriptors
     
     def __post_init__(self):
         if self.factors is None:
             self.factors = []
+        if self.display_ctx is None:
+            self.display_ctx = {}
+
+    def _display(self) -> Dict:
+        from services.tqs.descriptors import disp, humanize
+        c = self.display_ctx
+        base = c.get("base_setup") or "unknown"
+        pat_read = (f"{humanize(base)} pattern"
+                    + (" · unranked (neutral)" if c.get("pattern_unranked") else ""))
+        wr_read = f"{self.win_rate*100:.0f}% historical win rate"
+        if c.get("ev_is_proxy"):
+            ev_read = f"Est. from {c.get('risk_reward', 0):.1f}:1 R:R · no live expectancy"
+        else:
+            ev_read = f"Expectancy {self.expected_value_r:+.2f}R"
+        tr = c.get("tape_raw", 0.0)
+        if self.tape_confirmation:
+            tape_read = "Order-flow confirms setup"
+        elif tr >= 4:
+            tape_read = f"Tape reading {tr:.0f}/10"
+        elif tr > 0:
+            tape_read = f"Weak tape reading {tr:.0f}/10"
+        else:
+            tape_read = "No tape-reading data"
+        smb_read = f"Grade {self.smb_grade or '—'} · 5-var {c.get('smb_5var', 0)}/50"
+        return {
+            "pattern": disp("Pattern", self.pattern_score, pat_read),
+            "win_rate": disp("Win Rate", self.win_rate_score, wr_read),
+            "expected_value": disp("Expected Value", self.ev_score, ev_read,
+                                   absent=c.get("ev_is_proxy")),
+            "tape": disp("Tape", self.tape_score, tape_read, absent=(tr == 0 and not self.tape_confirmation)),
+            "smb": disp("SMB", self.smb_score, smb_read),
+        }
     
     def to_dict(self) -> Dict:
         return {
@@ -79,6 +112,7 @@ class SetupQualityScore:
                 "tape": round(self.tape_score, 1),
                 "smb": round(self.smb_score, 1)
             },
+            "display": self._display(),
             "raw_values": {
                 "win_rate": round(self.win_rate, 3),
                 "expected_value_r": round(self.expected_value_r, 2),
@@ -312,6 +346,16 @@ class SetupQualityService:
                 result.ev_score = max(0, result.ev_score - 10)
                 result.factors.append(f"Poor R:R of {risk_reward:.1f}:1 (-)")
             
+        # v391 — stash raw bits the to_dict descriptor layer needs.
+        result.display_ctx = {
+            "base_setup": base_setup,
+            "pattern_unranked": base_setup not in self.SETUP_BASE_SCORES,
+            "ev_is_proxy": bool(_decompress_setup and not has_ev_data),
+            "risk_reward": risk_reward if (risk_reward and risk_reward > 0) else 2.0,
+            "tape_raw": tape_score,
+            "smb_5var": smb_5var_score,
+        }
+
         # Calculate weighted total
         # v19.34.305 — rebalance sub-weights so realized EXPECTANCY (EV) carries
         # the most authority and raw win-rate carries less. Win rate alone isn't
