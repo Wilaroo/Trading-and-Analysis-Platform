@@ -43,6 +43,55 @@ cost real money or required emergency patches.
 
 ---
 
+## 0.5 Codebase sync protocol — keep DGX ↔ repo ↔ sandbox together
+
+> **Why this exists:** there are THREE copies of this code and they drift.
+> A 2026-06-18 audit found the Emergent sandbox was ~50 commits behind the
+> DGX (missing v336–v379) while the repo's `memory/` notes were stuck at v320
+> even though the code was at v379. Drift is the #1 silent time-sink. These
+> rules keep all three in lockstep as we grow.
+
+**The three copies (and who is authoritative):**
+
+| Copy | Role | Authoritative for |
+|---|---|---|
+| **DGX Spark** (`~/Trading-and-Analysis-Platform`) | the LIVE running app | the running system — **single source of truth** |
+| **GitHub repo** (`Wilaroo/Trading-and-Analysis-Platform`) | durable record / history | what every agent reads to get current |
+| **Emergent sandbox** (`/app`) | build & diagnostics scratch | **NOTHING** — it DRIFTS; never trust its files as a patch baseline |
+
+**Golden rules (NEVER violate):**
+1. **Direction is fixed.** Code flows **DGX → repo** (operator `git push` from the
+   DGX) and **repo → sandbox** (Emergent "Pull from GitHub"). **NEVER** "Save to
+   Github" from the sandbox — it would clobber live DGX work with stale code.
+2. **Commit code AND notes together, every time.** After applying a patch on the
+   DGX, the operator runs `git add -A` (so `memory/CHANGELOG.md` + `PRD.md` +
+   `ROADMAP.md` ride along with the code) → `commit` → `push`. The biggest past
+   drift was committing code but NOT the notes. **Put the commit hash in the
+   CHANGELOG entry.**
+3. **Build patchers against LIVE DGX bytes, never the sandbox.** Always run
+   `extract_region_generic.py` / `extract_func_generic.py` on the DGX and pin the
+   patcher to the returned `OLD_B64` + PRE-SHA. A sandbox-derived patch will
+   hash-mismatch (best case) or silently apply to drifted code (worst case).
+4. **Session-start sync check (do this FIRST, every session):**
+   ```bash
+   git clone --depth 1 https://github.com/Wilaroo/Trading-and-Analysis-Platform.git /tmp/repo
+   git -C /tmp/repo log --oneline -1            # repo HEAD + latest vNNN
+   grep -c "<latest version marker>" backend/services/<file>   # does sandbox have it?
+   ```
+   If the sandbox is behind → "Pull from GitHub" before doing any work. If the
+   sandbox is somehow ahead (e.g. notes written here), ship the delta to the DGX
+   and commit it — don't let the lead evaporate.
+5. **`memory/` can diverge — PREPEND, don't blind-overwrite the CHANGELOG.** The
+   append-only CHANGELOG often has same-day entries on one side the other lacks;
+   prepend the newer block (idempotent on a version anchor) instead of
+   overwriting. `PRD.md` / `ROADMAP.md` are edited-in-place → full overwrite is OK.
+
+**Cadence:** sync-check at session start, and commit+push from the DGX after
+*every* applied patch (not in batches) so the repo never trails the live system
+by more than one change.
+
+---
+
 ## 1. What this app is (one paragraph)
 
 **SentCom** is a self-improving AI trading bot running natively on a
