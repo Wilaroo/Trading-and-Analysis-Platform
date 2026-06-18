@@ -1478,7 +1478,24 @@ class IBHistoricalCollector:
         # ATR% filter — skip symbols outside tradeable range
         # v19.34.34: bypass ATR gate for high-flow ETFs on ATR_BYPASS_WATCHLIST
         if atr_pct is not None and (symbol is None or symbol not in self.ATR_BYPASS_WATCHLIST):
-            if atr_pct < self.ATR_PCT_THRESHOLDS["min"] or atr_pct > self.ATR_PCT_THRESHOLDS["max"]:
+            # v369: waive the UPPER "chaos ceiling" (atr_pct > max) for highly
+            # liquid names ($-vol >= intraday tier). The 10% ceiling excluded
+            # explosive, deeply-liquid movers (MRVL/SPCX/SMCI) from the
+            # universe. MIN floor + thin-name ceiling preserved.
+            # Reversible: ATR_CEILING_WAIVE_LIQUID=false.
+            import os as _os_v369
+            _waive_ceiling_liquid = _os_v369.environ.get(
+                "ATR_CEILING_WAIVE_LIQUID", "true"
+            ).strip().lower() in ("1", "true", "yes")
+            _highly_liquid = (
+                avg_dollar_volume is not None
+                and avg_dollar_volume >= self.DOLLAR_VOL_THRESHOLDS["intraday"]
+            )
+            if atr_pct < self.ATR_PCT_THRESHOLDS["min"]:
+                return "skip"
+            if atr_pct > self.ATR_PCT_THRESHOLDS["max"] and not (
+                _waive_ceiling_liquid and _highly_liquid
+            ):
                 return "skip"
         
         # Use dollar volume if available

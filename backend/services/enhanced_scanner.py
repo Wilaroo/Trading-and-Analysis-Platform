@@ -1927,7 +1927,17 @@ class EnhancedBackgroundScanner:
                             rvol = float(getattr(alert, "rvol", 0) or 0)
                         except (TypeError, ValueError):
                             rvol = 0.0
-                        if rvol <= 0:
+                        # v369 - rvol == 0.0 means UNMEASURED (no live-volume
+                        # push for names outside the top-400 L1 set), NOT zero
+                        # volume. Fail-closing dropped the best movers
+                        # (SNDK/MRVL/SPCX/TSLA). Unmeasured now DEFERS to the
+                        # share-ADV + ADRP proofs below; a MEASURED rvol below
+                        # floor still blocks. Reversible: SCALP_RVOL_FAIL_CLOSED=true.
+                        import os as _os_v369
+                        _rvol_fail_closed = _os_v369.environ.get(
+                            "SCALP_RVOL_FAIL_CLOSED", "false"
+                        ).strip().lower() in ("1", "true", "yes")
+                        if rvol <= 0 and _rvol_fail_closed:
                             reason = (
                                 f"scalp RVOL proof: rvol unmeasured (0.0) — "
                                 f"scalp/intraday needs ≥{self._scalp_min_rvol:g}x "
@@ -1936,7 +1946,7 @@ class EnhancedBackgroundScanner:
                             ctx_extra = {"check": "scalp_rvol", "rvol": rvol,
                                          "min_rvol": self._scalp_min_rvol,
                                          "fail_closed": True}
-                        elif rvol < self._scalp_min_rvol:
+                        elif rvol > 0 and rvol < self._scalp_min_rvol:
                             reason = (
                                 f"scalp RVOL proof: rvol {rvol:.2f}x < "
                                 f"{self._scalp_min_rvol:g}x floor"
