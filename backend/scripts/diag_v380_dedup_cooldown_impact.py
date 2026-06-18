@@ -103,6 +103,10 @@ def main():
     only = _arg("--symbol", None)
     only = only.upper() if only else None
     since = datetime.now(timezone.utc).timestamp() - days * 86400
+    since_str = _arg("--since", None)
+    if since_str:
+        since = datetime.fromisoformat(since_str.replace(" ", "T")).replace(tzinfo=timezone.utc).timestamp()
+        print(f"[--since {since_str} UTC — only drops at/after this time counted]")
     db = _load_db()
 
     # 1) dedup drops (cooldown + open_position for context)
