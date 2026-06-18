@@ -1,4 +1,17 @@
-## 2026-06-18 — v387 DEDICATED IB clientId for fundamentals (RTH-safe, no trading-socket contention)
+## 2026-06-18 — v388 fix warm-fundamentals sweep ORDER (institutional was landing one pass late)
+Bug found via diag_v383: institutional_ownership_cache climbed to 15% but symbol_fundamentals_cache.
+institutional_ownership_percent only 6%. Cause: the v386 sweep called get_cached_fundamentals (which
+MERGES institutional from institutional_ownership_cache) BEFORE refresh_institutional_ownership wrote it
+→ institutional merged one pass late, so the LIVE pillar (reads symbol_fundamentals_cache on a cache-hit)
+stayed blind until the 48h TTL. patch_v388 (paste.rs/KEATR): refresh institutional FIRST, then merge —
+plus a <7d freshness skip so re-runs are cheap (no multi-MB ReportsOwnership re-pull). PRE-SHA
+e3c31d9788989487 → POST bc84750098d31c66. ROLLOUT: let the in-flight heavy sweep finish (populates
+institutional_ownership_cache ~80%), then apply v388 + restart + commit, then re-run the sweep — the
+freshness-skip makes it a fast ReportSnapshot-only merge pass that fills symbol_fundamentals_cache
+institutional. Capped-50 run already proved clientId-12 healthy: institutional 40/50, float 43/50.
+
+
+
 Operator ask: put fundamental fetches on a separate/new clientId so they can run during the trading day
 without slowing the bot. Built `services/ib_fundamentals_client.py` — a read-only ib_async singleton on
 its OWN clientId (`IB_FUNDAMENTALS_CLIENT_ID`, default **12**; pusher=10, bot-direct=11), lazy-connect
