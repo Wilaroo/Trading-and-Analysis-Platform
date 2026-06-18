@@ -11,7 +11,13 @@ to consume `regime_shadows[]` (falls back to the single record) + a bar_size dis
   `_get_live_prediction` PRE_FUNC_SHA `ef039ab3…`, anchor==1, py_compile, --check, auto-backup).
   paste.rs: patcher `Gh8Jj`, eval `CZtfV`, test `QlXg7`. 2/2 pytest green (test_v367_multi_tf_shadow.py).
 - Verified bars exist for all TFs (diag_v367_barsize_inventory.py `MxOfg`): 1min 73M docs/3417 syms,
-  15min 32M/4105 — multi-TF will accrue. VERIFY NEXT RTH: diag_v366 --days 1 → 1min/15min in bar_size dist.
+  15min 32M/4105.
+- ✅ VERIFIED LIVE (diag_v367_verify.py `fAtwP`, 17min into RTH): post-v367 docs carry
+  `live_prediction.regime_shadows[]` length 3 spanning 5min/1min/15min. BONUS: at 1min & 15min the
+  high_vol variant is regime_model_available=True & directions_agree=True — i.e. multi-TF immediately
+  yields COMPARABLE regime records, unlike the quarantined 5min_high_vol variant (available=False).
+  NOTE: diag_v366 readiness reads the single `regime_shadow` (always 5min) so it can't show multi-TF —
+  use diag_v367_verify.py / pwire_shadow_eval.py (now reads the list) to inspect multi-TF accrual.
 
 ### Why (P-WIRE Phase-2 unblock)
 Phase-2 regime-vs-generic edge eval is data-gated (RESOLVED 92→needs ~200) and 100% of shadow records
