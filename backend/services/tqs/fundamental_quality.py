@@ -28,6 +28,7 @@ class FundamentalQualityScore:
     float_score: float = 50.0
     institutional_score: float = 50.0
     earnings_score: float = 50.0
+    financial_score: float = 50.0  # v389 — ROE/margin/growth/leverage
     
     # Raw values
     has_catalyst: bool = False
@@ -54,7 +55,8 @@ class FundamentalQualityScore:
                 "short_interest": round(self.short_interest_score, 1),
                 "float": round(self.float_score, 1),
                 "institutional": round(self.institutional_score, 1),
-                "earnings": round(self.earnings_score, 1)
+                "earnings": round(self.earnings_score, 1),
+                "financial": round(self.financial_score, 1)
             },
             "raw_values": {
                 "has_catalyst": self.has_catalyst,
@@ -111,6 +113,7 @@ class FundamentalQualityService:
         result = FundamentalQualityScore()
         is_long = direction.lower() == "long"
         _dtc = None  # v385 — FINRA days-to-cover (squeeze fallback when SI% absent)
+        _fin = {}  # v389 — IB ReportSnapshot financials (roe/margin/growth/leverage)
         
         # Fetch fundamental data if not provided
         # v19.34.177.1 — route through unified_fundamentals_cache. The
@@ -130,6 +133,12 @@ class FundamentalQualityService:
                 if institutional_pct is None:
                     institutional_pct = cached.get("institutional_ownership_percent")
                 _dtc = cached.get("days_to_cover")  # v385
+                _fin = {  # v389 — IB ReportSnapshot financials
+                    "roe": cached.get("roe_pct"),
+                    "margin": cached.get("net_margin_pct"),
+                    "growth": cached.get("eps_change_pct"),
+                    "d2e": cached.get("debt_to_equity"),
+                }
         except Exception as e:
             logger.debug(f"unified_fundamentals_cache lookup failed for {symbol}: {e}")
                 
@@ -388,13 +397,41 @@ class FundamentalQualityService:
         if _earnings_absent:
             result.earnings_score = 50.0
 
-        # Calculate weighted total
+        # v389 — Financial-quality sub-score from IB ReportSnapshot (ROE, net
+        # margin, EPS growth, leverage). Average the available components; absent
+        # → neutral 50 (no penalty for names IB doesn't cover).
+        _fc = []
+        _roe = _fin.get("roe")
+        if _roe is not None:
+            _fc.append(90 if _roe >= 20 else 78 if _roe >= 15 else 66 if _roe >= 10
+                       else 56 if _roe >= 5 else 48 if _roe >= 0 else 35)
+        _mg = _fin.get("margin")
+        if _mg is not None:
+            _fc.append(90 if _mg >= 20 else 75 if _mg >= 10 else 62 if _mg >= 5
+                       else 50 if _mg >= 0 else 35)
+        _gr = _fin.get("growth")
+        if _gr is not None:
+            _fc.append(88 if _gr >= 25 else 72 if _gr >= 10 else 58 if _gr >= 0
+                       else 45 if _gr >= -10 else 32)
+        _de = _fin.get("d2e")
+        if _de is not None:
+            _fc.append(80 if _de <= 0.3 else 68 if _de <= 0.7 else 55 if _de <= 1.5
+                       else 45 if _de <= 3 else 35)
+        if _fc:
+            result.financial_score = sum(_fc) / len(_fc)
+            result.factors.append(
+                f"Financials {result.financial_score:.0f} (ROE/margin/growth/lev, {len(_fc)}/4)")
+        else:
+            result.financial_score = 50.0
+
+        # Calculate weighted total (v389 — added financial 0.20; trimmed others)
         result.score = (
-            result.catalyst_score * 0.30 +
+            result.catalyst_score * 0.25 +
             result.short_interest_score * 0.20 +
-            result.float_score * 0.20 +
-            result.institutional_score * 0.15 +
-            result.earnings_score * 0.15
+            result.float_score * 0.15 +
+            result.institutional_score * 0.10 +
+            result.earnings_score * 0.10 +
+            result.financial_score * 0.20
         )
         
         # Assign grade

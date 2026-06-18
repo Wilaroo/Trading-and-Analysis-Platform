@@ -1,4 +1,15 @@
-## 2026-06-18 — v388 fix warm-fundamentals sweep ORDER (institutional was landing one pass late)
+## 2026-06-18 — v389 FUNDAMENTAL PILLAR F2c — score the IB ReportSnapshot financials
+The IB-native warm-fill (v386/v387) now lands ROE, net margin, EPS growth (eps_change), debt/equity,
+P/E, P/B, beta in symbol_fundamentals_cache — but the pillar scored none of them. patch_v389
+(paste.rs/jdnIT) adds a `financial_score` sub-pillar (ROE + net margin + EPS growth + leverage, average
+of available components, absent→neutral 50 so no penalty for names IB doesn't cover) and re-weights the
+fundamental composite: catalyst .30→.25, float .20→.15, institutional .15→.10, earnings .15→.10,
+short_interest .20 kept, + financial .20 new (sum 1.00). 5 anchored chunks; PRE 5c05c1b6cfd3e7da →
+POST a68ab36b723b820d. Apply after warm-fill (financials only score once the cache carries them).
+VALIDATE next RTH via diag_v382. NEXT F2b: EPS/revenue BEAT/MISS surprise (earnings_calendar).
+
+
+
 Bug found via diag_v383: institutional_ownership_cache climbed to 15% but symbol_fundamentals_cache.
 institutional_ownership_percent only 6%. Cause: the v386 sweep called get_cached_fundamentals (which
 MERGES institutional from institutional_ownership_cache) BEFORE refresh_institutional_ownership wrote it
