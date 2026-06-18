@@ -84,7 +84,7 @@ def _ttl_hours_for(symbol: str, db) -> int:
     return DEFAULT_TTL_HOURS
 
 
-async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
+async def get_cached_fundamentals(symbol: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
     """Return cached fundamentals for ``symbol``, fetching via IB or
     Finnhub on cache miss. Returns ``None`` only if EVERY source fails.
 
@@ -101,8 +101,8 @@ async def get_cached_fundamentals(symbol: str) -> Optional[Dict[str, Any]]:
     symbol = symbol.upper()
     db = _get_db()
 
-    # 1. Mongo cache hit?
-    if db is not None:
+    # 1. Mongo cache hit? (v386 — force_refresh bypasses to re-fetch from IB)
+    if db is not None and not force_refresh:
         try:
             cached = db[COLLECTION].find_one({"symbol": symbol})
             if cached:

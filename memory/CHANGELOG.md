@@ -1,4 +1,22 @@
-## 2026-06-18 — v385 FUNDAMENTAL PILLAR F2a (scoring) — days_to_cover squeeze sub-score [APPLIED+PUSHED]
+## 2026-06-18 — v386 IB-NATIVE fundamentals warm-fill (institutional 3%→high; float/valuation off Finnhub)
+Operator Q: "can we get all this from IB instead of Finnhub?" Answer: **mostly yes.** IB `ReportSnapshot`
+(~10KB, already parsed) carries float, shares-out, P/E, P/B, market cap, beta, ROE, net margin,
+debt/equity, current ratio, dividend yield, 52w hi/lo, EPS change; IB `ReportsOwnership` carries
+institutional %. The ONLY thing IB does NOT publish is short interest %/days-to-cover → stays FINRA (free).
+The Finnhub warm-fill only used Finnhub because it ran *standalone* (no live IB socket); `get_cached_
+fundamentals` already prefers IB ReportSnapshot when run in-process.
+
+patch_v386 (paste.rs/0wyyW), 2 files, anchored + py_compile-gated + --rollback:
+- `unified_fundamentals_cache.py`: + `force_refresh` param (bypasses cache-hit to re-fetch from IB).
+- `routers/short_data.py`: `POST /api/short-data/warm-fundamentals` (+ `/status`) — in-process sweep of
+  the evaluated universe calling get_cached_fundamentals(force_refresh=True) [IB ReportSnapshot] +
+  refresh_institutional_ownership [IB ReportsOwnership]. Body {days,limit,throttle,institutional}.
+  Heavy (ReportsOwnership multi-MB) → off-hours; poll /status for progress.
+DGX expected PRE-SHA: cache 7924a374725404e2, short_data 151cb92149157e52. NEXT: run off-hours,
+re-check diag_v383 (institutional should jump from 3%). Then F2c can score the IB valuation/margins.
+
+
+
 APPLIED on DGX + pushed: patch_v384 (FINRA dtc capture, commit f3da0979) + patch_v385 (dtc squeeze
 sub-score, commit f96b86a9). Backend restarted clean (startup complete, IB connected, health green).
 With F1 landing days_to_cover at ~80% coverage, wired it into scoring. `fundamental_quality.py`: when
