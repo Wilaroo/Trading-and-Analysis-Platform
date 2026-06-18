@@ -66,12 +66,14 @@ def main():
 
     cur = col.find(
         {"live_prediction.regime_shadow": {"$exists": True}},
-        {"live_prediction.regime_shadow": 1, "decision": 1, "direction": 1,
+        {"live_prediction.regime_shadow": 1, "live_prediction.regime_shadows": 1,
+         "decision": 1, "direction": 1,
          "trade_outcome": 1, "outcome_pnl": 1, "outcome_tracked": 1, "regime_state": 1},
     )
 
     total = 0
     regime_dist = defaultdict(int)
+    barsize_dist = defaultdict(int)
     variant_available = 0
     agree = 0
     resolved = 0
@@ -80,36 +82,43 @@ def main():
     ev_n = {"generic": 0, "regime": 0}
 
     for d in cur:
-        sh = (d.get("live_prediction") or {}).get("regime_shadow")
-        if not sh:
+        lp = d.get("live_prediction") or {}
+        primary = lp.get("regime_shadow")
+        # v367 P1-MULTI-TF: prefer the per-bar-size list; fall back to the single record.
+        shs = lp.get("regime_shadows") or ([primary] if primary else [])
+        if not shs:
             continue
-        total += 1
-        regime_dist[sh.get("regime", "?")] += 1
-        g = sh.get("generic_base", {})
-        r = sh.get("regime_specialized", {})
-        if r.get("available"):
-            variant_available += 1
-        if sh.get("directions_agree"):
-            agree += 1
-
         actual = _outcome_dir(d) if d.get("outcome_tracked") else None
         if actual is not None:
             resolved += 1
-            gh = _hit(g.get("direction"), actual)
-            if gh is not None:
-                hits["generic"][1] += 1
-                hits["generic"][0] += int(gh)
-            rh = _hit(r.get("direction"), actual) if r.get("available") else None
-            if rh is not None:
-                hits["regime"][1] += 1
-                hits["regime"][0] += int(rh)
-            # signed EV: ev_proxy aligned to realized direction
-            if isinstance(g.get("ev_proxy"), (int, float)):
-                ev_sum["generic"] += g["ev_proxy"] * (1 if actual == "up" else -1)
-                ev_n["generic"] += 1
-            if r.get("available") and isinstance(r.get("ev_proxy"), (int, float)):
-                ev_sum["regime"] += r["ev_proxy"] * (1 if actual == "up" else -1)
-                ev_n["regime"] += 1
+        for sh in shs:
+            if not sh:
+                continue
+            total += 1
+            regime_dist[sh.get("regime", "?")] += 1
+            barsize_dist[sh.get("bar_size", "?")] += 1
+            g = sh.get("generic_base", {})
+            r = sh.get("regime_specialized", {})
+            if r.get("available"):
+                variant_available += 1
+            if sh.get("directions_agree"):
+                agree += 1
+            if actual is not None:
+                gh = _hit(g.get("direction"), actual)
+                if gh is not None:
+                    hits["generic"][1] += 1
+                    hits["generic"][0] += int(gh)
+                rh = _hit(r.get("direction"), actual) if r.get("available") else None
+                if rh is not None:
+                    hits["regime"][1] += 1
+                    hits["regime"][0] += int(rh)
+                # signed EV: ev_proxy aligned to realized direction
+                if isinstance(g.get("ev_proxy"), (int, float)):
+                    ev_sum["generic"] += g["ev_proxy"] * (1 if actual == "up" else -1)
+                    ev_n["generic"] += 1
+                if r.get("available") and isinstance(r.get("ev_proxy"), (int, float)):
+                    ev_sum["regime"] += r["ev_proxy"] * (1 if actual == "up" else -1)
+                    ev_n["regime"] += 1
 
     print("=" * 64)
     print("P-WIRE SHADOW EVALUATION")
@@ -122,6 +131,7 @@ def main():
           f"({100*variant_available/max(total,1):.1f}%)")
     print(f"generic↔regime agree:   {agree}/{total} ({100*agree/max(total,1):.1f}%)")
     print(f"regime distribution:    {dict(regime_dist)}")
+    print(f"bar_size distribution:  {dict(barsize_dist)}")
     print(f"resolved (w/ outcome):  {resolved}")
     print("-" * 64)
 
