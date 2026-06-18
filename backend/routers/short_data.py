@@ -31,6 +31,76 @@ class FINRAFetchRequest(BaseModel):
     force: bool = False
 
 
+class WarmFundamentalsRequest(BaseModel):
+    days: float = 5
+    limit: int = 0
+    throttle: float = 0.8
+    institutional: bool = True
+
+
+_warm_progress = {"running": False, "done": 0, "total": 0, "ib_float": 0,
+                  "institutional": 0, "started_at": None, "finished_at": None}
+
+
+@router.post("/warm-fundamentals")
+async def warm_fundamentals(request: WarmFundamentalsRequest):
+    """v386 IB-native fundamentals warm-fill (runs in-process → live clientId-11
+    socket). Sweeps the evaluated universe (distinct live_alerts symbols):
+    get_cached_fundamentals(force_refresh) → IB ReportSnapshot float/valuation/
+    margins + FINRA short interest; and (institutional=True) refresh_institutional_
+    ownership → IB ReportsOwnership. Heavy → off-hours. Poll /warm-fundamentals/status."""
+    from server import db as mongo_db
+    if mongo_db is None:
+        raise HTTPException(status_code=503, detail="Database not connected")
+    if _warm_progress["running"]:
+        return {"started": False, "reason": "already running", **_warm_progress}
+    from datetime import datetime, timezone, timedelta
+    since = (datetime.now(timezone.utc) - timedelta(days=request.days)).strftime("%Y-%m-%d")
+    uni = sorted(mongo_db.live_alerts.distinct(
+        "symbol", {"created_at": {"$gte": since}, "tqs_score": {"$gt": 0}}))
+    if request.limit:
+        uni = uni[:request.limit]
+
+    async def _sweep():
+        import asyncio
+        from datetime import datetime, timezone
+        from services.unified_fundamentals_cache import (
+            get_cached_fundamentals, refresh_institutional_ownership)
+        _warm_progress.update({"running": True, "done": 0, "total": len(uni),
+                               "ib_float": 0, "institutional": 0,
+                               "started_at": datetime.now(timezone.utc).isoformat(),
+                               "finished_at": None})
+        for sym in uni:
+            try:
+                merged = await get_cached_fundamentals(sym, force_refresh=True)
+                if merged and merged.get("float_shares"):
+                    _warm_progress["ib_float"] += 1
+            except Exception as exc:
+                logger.debug("warm float %s: %s", sym, exc)
+            if request.institutional:
+                try:
+                    pct = await refresh_institutional_ownership(sym, db=mongo_db)
+                    if pct is not None:
+                        _warm_progress["institutional"] += 1
+                except Exception as exc:
+                    logger.debug("warm institutional %s: %s", sym, exc)
+            _warm_progress["done"] += 1
+            await asyncio.sleep(request.throttle)
+        _warm_progress["running"] = False
+        _warm_progress["finished_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info("[warm-fundamentals] complete: %s", dict(_warm_progress))
+
+    import asyncio
+    asyncio.get_event_loop().create_task(_sweep())
+    return {"started": True, "total": len(uni),
+            "institutional": request.institutional, "throttle": request.throttle}
+
+
+@router.get("/warm-fundamentals/status")
+def warm_fundamentals_status():
+    return {"success": True, **_warm_progress}
+
+
 def _get_service():
     from server import db as mongo_db
     if mongo_db is None:
