@@ -1,5 +1,24 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **✅ 2026-06-19 — v399 + v399b SHIPPED, VERIFIED LIVE ON DGX, PUSHED (main @ 4c0dafe2).**
+> v399 (scheduler boot staleness-guard): `services/scheduler_catchup.py` re-runs cron jobs
+> missed while the app was closed — auto-staggered (Mongo 20s / IB 120s), HOLIDAY-AWARE
+> (2026 US calendar; market-unsafe jobs run on the free socket during holidays/weekends).
+> Wired in server.py startup. Also added nightly Fundamentals Warm-Fill cron (18:30 ET Mon-Fri)
+> = Issue 2 closed. BONUS: fixed `gate_calibrator.py` `{**v}`→`{**buckets[k]}` NameError that
+> had silently killed gate calibration for 35 DAYS (now "Calibrated from 239 outcomes").
+> v399b (Diagnostics tab): NEW `routers/data_diagnostics.py` → `GET /api/diagnostics/data-schedule`
+> (job punchlist: last-run/last-success/next-fire/output-freshness/issue-flag + catch-up result)
+> and `GET /api/tqs/coverage` (real-vs-default % per pillar/sub-score). Two new V5 sub-tabs
+> (DataSchedulePanel, TqsCoveragePanel). Verified: coverage 87.2%, schedule 21/22 OK.
+> Build docs: memory/v399_scheduler_catchup_build.md, memory/v399b_diagnostics_tiles_build.md.
+> TQS coverage baseline (post-audit): Setup 71% (Tape 0% = no live feed, EV 57% = strategy_ev_r
+> unstamped), Technical 100%, Fundamental 83%, Context 96% (Sector 77%), Execution 80%
+> (Entry-Tendency 0% = only 2% of trade_outcomes carry real entry_slippage — DEFER, do NOT
+> schedule run_daily_analysis or it resurrects the v391 false-positive). 🟡 Financials/Float/
+> Institutional/Sector on auto-improve path via nightly warm-fundamentals + draining backfill.
+
+
 > **🔜 2026-06-18 — v369 MISSED-MOVERS FIX BUILT + PASTED (DGX apply pending).
 > Diags v376/v377 proved SNDK/MRVL/SPCX/TSLA were structurally filtered out by two
 > bugs: (1b) `_passes_universal_liquidity_gate` fail-closed scalp/intraday alerts on
