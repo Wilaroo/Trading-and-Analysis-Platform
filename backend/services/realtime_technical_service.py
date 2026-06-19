@@ -496,6 +496,7 @@ class RealTimeTechnicalService:
     async def get_technical_snapshot(
         self, symbol: str, force_refresh: bool = False,
         mongo_only: bool = False, max_age_sec: Optional[float] = None,
+        allow_stale_price: bool = False,
     ) -> Optional[TechnicalSnapshot]:
         """
         Get comprehensive technical snapshot for a symbol.
@@ -557,7 +558,7 @@ class RealTimeTechnicalService:
             ib_quote = self._get_ib_quote(symbol)
             ib_pusher_live = ib_quote and ib_quote.get("price", 0) > 0
 
-            if not ib_pusher_live and self._check_staleness(intraday_bars):
+            if not ib_pusher_live and not allow_stale_price and self._check_staleness(intraday_bars):
                 logger.debug(f"Stale or missing intraday data for {symbol}, no live IB quote — skipping")
                 intraday_bars = None  # Will use fallback estimates
                 intraday_source = "mongo_only"
@@ -568,6 +569,22 @@ class RealTimeTechnicalService:
             # Get current quote - IB Pusher ONLY (no stale MongoDB fallback)
             if ib_pusher_live:
                 quote = ib_quote
+            elif allow_stale_price:
+                # v397/v398 — TQS SCORING path only. With no live pusher quote we
+                # would otherwise return None and default the whole 25% Technical
+                # pillar (rsi 50 / rvol 1.0 / levels 50 / neutral trend) for ~45%
+                # of alerts (diag v397). For QUALITY SCORING (not a live trade
+                # trigger) the latest stored bar is good enough — compute from
+                # Mongo bars instead. The scanner/auto-exec paths do NOT pass this
+                # flag and keep their fail-closed (return None) behaviour.
+                stale_price = 0.0
+                if intraday_bars:
+                    stale_price = intraday_bars[-1].get("close", 0) or 0.0
+                if stale_price <= 0 and daily_bars:
+                    stale_price = daily_bars[-1].get("close", 0) or 0.0
+                if stale_price <= 0:
+                    return None
+                quote = {"price": stale_price, "stale": True}
             else:
                 # No live IB data = no scan. Scanner requires real-time prices.
                 return None
