@@ -74,6 +74,39 @@ def _et_now():
     return datetime.now(pytz.timezone("US/Eastern"))
 
 
+# US equity-market full-day holidays (no live session -> IB sockets free).
+# Half-days still trade, so they are intentionally NOT listed here.
+_US_MARKET_HOLIDAYS_2026 = {
+    "2026-01-01",  # New Year's Day
+    "2026-01-19",  # MLK Jr. Day
+    "2026-02-16",  # Presidents' Day
+    "2026-04-03",  # Good Friday
+    "2026-05-25",  # Memorial Day
+    "2026-06-19",  # Juneteenth
+    "2026-07-03",  # Independence Day (observed)
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-12-25",  # Christmas
+}
+
+
+def _is_market_holiday(now_et):
+    return now_et.strftime("%Y-%m-%d") in _US_MARKET_HOLIDAYS_2026
+
+
+def _market_currently_open(trading_scheduler, now_et):
+    """Holiday-aware live-session check. is_market_hours() only knows
+    weekday + clock, so on a full-day holiday it wrongly reports open. On a
+    holiday the live session is dark and the IB sockets are free, so we treat
+    the market as CLOSED -> market-unsafe catch-ups are allowed to run."""
+    if _is_market_holiday(now_et):
+        return False
+    try:
+        return bool(trading_scheduler.is_market_hours())
+    except Exception:
+        return False
+
+
 def _last_expected_fire_utc(now_et, hour, minute, dow):
     """Most recent scheduled fire <= now (business-day aware), as UTC dt."""
     for back in range(0, 10):
@@ -199,11 +232,11 @@ async def run_catch_up_sweep(db, trading_scheduler, eod_service=None):
         now_et = _et_now()
         now_utc = datetime.now(timezone.utc)
 
-        market_open = False
-        try:
-            market_open = bool(trading_scheduler.is_market_hours())
-        except Exception:
-            pass
+        market_open = _market_currently_open(trading_scheduler, now_et)
+        if _is_market_holiday(now_et):
+            logger.info("[catchup] %s is a US market holiday — treating "
+                        "session as CLOSED (IB sockets free)",
+                        now_et.strftime("%Y-%m-%d"))
 
         overdue = []
         for (name, method_attr, sched, source, coll_field, market_safe, heavy) in _JOBS:
