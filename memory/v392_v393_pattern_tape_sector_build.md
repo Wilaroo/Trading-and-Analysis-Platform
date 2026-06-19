@@ -35,10 +35,20 @@ Probe checks: (1) ib_historical_data daily bars for the 10 sector ETFs
 (XLK/XLF/XLE/XLV/XLI/XLC/XLY/XLP/XLU/XLB), (2) symbol_adv_cache.sector universe
 coverage, (3) alert-symbol coverage. Verdict → FIXABLE via IB bars or names blockers.
 
-### PLANNED Sector fix (pending probe output) — v254-style
-Rank sector ETFs from ib_historical_data daily 1d %, map symbol→sector from
-symbol_adv_cache.sector, compute stock_vs_sector from the symbol's own daily 1d %
-vs its ETF. No alpaca dependency. Gated on probe confirming bars + tags exist.
+### Probe results (live DGX): 10/10 sector ETFs have daily bars (→2026-06-17);
+symbol_adv_cache.sector stores the ETF TICKER directly (XLK/XLF/...); alert-symbol
+coverage 61% (1732/2858). FIXABLE confirmed.
+
+## v394 — Context pillar IB-bar sector fallback (paste.rs https://paste.rs/dCGhB) ON TOP OF v391
+context_quality.py  PRE 2db8ff56e52fd008 (v391) → POST d2eb514735187d35
+- Added _SECTOR_ETFS (11), _sector_rankings() (rank ETFs by 1d % from ib_historical_data
+  daily bars, cached in _bench_cache like v254 RS/regime), _symbol_sector_etf() (reads
+  symbol_adv_cache.sector). In calculate_score, when sector is None/unknown, resolve
+  sector + rank + is_sector_leader (own 1d % − ETF 1d % > 1%). No alpaca dependency.
+- Symbols without a sector tag stay honest "Sector data unavailable" / No-data (v391).
+- Verified locally with injected bars: AAPL→XLK rank 1/11 leader (Strong); unmapped→No data.
+- Expected: Sector 100% blind → ~39% (the untagged remainder); improves as sector_tag_service
+  tags more of the universe.
 
 ## Deferred (no honest scoring fix)
 - EV: cold-start learning-data gap (strategy_ev_r only stamped when setup has
