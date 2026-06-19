@@ -190,6 +190,54 @@ class ContextQualityService:
         # scan doesn't re-read the same index bars for every symbol.
         self._bench_cache = {}  # bench -> (ts, [closes newest-first])
         self._bench_ttl = 300
+        self._sym_sector_cache = {}  # v394 — symbol -> sector ETF (static-ish)
+
+    # v394 — sector ETFs (ticker == the value stored in symbol_adv_cache.sector).
+    _SECTOR_ETFS = {
+        "XLK": "Technology", "XLF": "Financials", "XLE": "Energy",
+        "XLV": "Healthcare", "XLI": "Industrials", "XLC": "Communication",
+        "XLY": "Consumer Discretionary", "XLP": "Consumer Staples",
+        "XLU": "Utilities", "XLB": "Materials", "XLRE": "Real Estate",
+    }
+
+    def _sector_rankings(self):
+        """v394 — rank sector ETFs by 1-day % from ib_historical_data daily bars
+        (alpaca-free; mirrors the v254 RS/regime fix). Cached per scan in
+        _bench_cache. Returns {etf: {'rank': int, 'chg': float}}."""
+        now = time.time()
+        c = self._bench_cache.get("__sectors__")
+        if c and now - c[0] < self._bench_ttl:
+            return c[1]
+        rows = []
+        for etf in self._SECTOR_ETFS:
+            r = self._ret(self._benchmark_closes(etf), 1)
+            if r is not None:
+                rows.append((etf, r))
+        rows.sort(key=lambda x: x[1], reverse=True)
+        ranks = {etf: {"rank": i + 1, "chg": chg} for i, (etf, chg) in enumerate(rows)}
+        self._bench_cache["__sectors__"] = (now, ranks)
+        return ranks
+
+    def _symbol_sector_etf(self, symbol):
+        """v394 — symbol → sector ETF ticker from symbol_adv_cache.sector."""
+        if self._db is None or not symbol:
+            return None
+        sym = symbol.upper()
+        if sym in self._sym_sector_cache:
+            return self._sym_sector_cache[sym]
+        etf = None
+        try:
+            d = self._db["symbol_adv_cache"].find_one(
+                {"symbol": sym}, {"_id": 0, "sector": 1})
+            if d:
+                s = str(d.get("sector") or "").upper()
+                if s in self._SECTOR_ETFS:
+                    etf = s
+        except Exception as e:
+            logger.debug(f"[context] sector tag lookup failed {sym}: {e}")
+        self._sym_sector_cache[sym] = etf
+        return etf
+
 
     def set_services(self, alpaca_service=None, sector_service=None, ib_service=None, db=None):
         """Wire up dependencies"""
@@ -375,7 +423,23 @@ class ContextQualityService:
                     is_sector_leader = sector_context.get("is_sector_leader", False)
             except Exception as e:
                 logger.debug(f"Could not fetch sector data: {e}")
-                
+
+        # v394 — IB-bar sector fallback. On the ib-direct DGX alpaca is dead, so
+        # sector_service.get_stock_sector_context() returned None for 100% of the
+        # book (diag v392b). Rank sector ETFs from daily bars and map the symbol
+        # to its sector ETF via symbol_adv_cache. No alpaca dependency.
+        if (sector is None or sector == "unknown") and self._db is not None:
+            etf = self._symbol_sector_etf(symbol)
+            if etf:
+                rinfo = self._sector_rankings().get(etf)
+                if rinfo:
+                    sector = self._SECTOR_ETFS.get(etf, etf)
+                    sector_rank = rinfo["rank"]
+                    sc = self._recent_closes(symbol, 3)
+                    stock_1d = self._ret(sc, 1)
+                    if stock_1d is not None:
+                        is_sector_leader = (stock_1d - rinfo["chg"]) > 1.0
+
         # Use defaults
         # v19.34.254 — when no live SPY quote is available (the common case on
         # the ib-direct DGX, which froze regime at range_bound→55), fall back to
