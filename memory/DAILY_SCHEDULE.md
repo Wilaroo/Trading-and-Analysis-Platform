@@ -71,6 +71,27 @@
 | 17:30 | Learning-Stats Full Rebuild (v19.34.200) | `trading_scheduler` |
 | 17:30 | RS Leadership Nightly Compute (v322) | `trading_scheduler` |
 | 18:00 | Multiplier Threshold Optimizer | `eod_generation_service` |
+| 18:30 | Nightly Fundamentals Warm-Fill (v399) | `scheduler_catchup` (cron on `trading_scheduler`'s APScheduler) — clientId-11; lifts `symbol_fundamentals_cache` coverage hands-free |
+
+## 5b. BOOT-TIME CATCH-UP / STALENESS GUARD (v399)
+> `services/scheduler_catchup.py`, wired in `server.py` startup. Fixes the
+> in-memory `BackgroundScheduler` flaw (no persistence / no misfire grace →
+> missed jobs silently skip when the app is closed during a cron window).
+- **~startup+120s**: `run_catch_up_sweep()` checks each catch-up-eligible job's
+  last *successful* run (from `scheduled_task_logs` / output-collection
+  freshness) vs its last *expected* fire (business-day aware). Overdue jobs are
+  **auto-staggered** and re-run (Mongo-only 20s apart; IB/heavy 120s apart).
+- **Holiday-aware**: `_is_market_holiday()` (2026 US calendar baked in) +
+  `_market_currently_open()` — on a full-day holiday the live session is treated
+  as CLOSED so market-unsafe catch-ups (warm-fundamentals on clientId-11,
+  entry-price sync) may run on the free socket instead of wrongly deferring.
+- Writes a `catch_up_sweep` row to `scheduled_task_logs` each boot (visible in
+  `diag_v399`). NOTE: `[catchup]` `logger.info` lines are NOT captured by the
+  console log handler — the Mongo row is the source of truth.
+- KNOWN MINOR: jobs that don't call `_log_task_result` (`learning_stats_rebuild`,
+  `earnings_calendar_refresh`) have no task-log row → probe returns None → they
+  re-run on every boot (harmless/idempotent). Refine to collection-probe if the
+  needless re-run ever matters.
 
 ## 6. WEEKEND
 | Time | What | Where |
@@ -92,3 +113,11 @@
 - **Post-close cascade ordering** → gate calibration (16:30) needs Daily
   Analysis (16:00) outcomes; RS leadership (17:30) needs daily-bar top-up
   (16:35) + ADV rebuild (17:10). Don't reorder casually.
+- **App not running 24/7** → wall-clock cron jobs silently skip when the app
+  is closed during their window (no persistence/grace in BackgroundScheduler).
+  Mitigated by the v399 boot catch-up sweep (§5b).
+- **gate_calibration was DEAD for 35 days** (≤ 2026-06-19) — `name 'v' is not
+  defined` NameError in `gate_calibrator.py` bucket_analysis ({**v} → {**buckets[k]}).
+  Fired nightly but crashed at result assembly → thresholds never recalibrated.
+  Fixed v399. Watch `last_run_age` vs `last_ok_age` gaps in `diag_v399` — a large
+  gap = a job firing but failing every time.
