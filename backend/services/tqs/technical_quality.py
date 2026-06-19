@@ -149,7 +149,7 @@ class TechnicalQualityService:
         # Fetch technical data if not provided
         if self._technical_service and any(v is None for v in [rsi, ma_stack, atr_percent, rvol]):
             try:
-                snapshot = await self._technical_service.get_technical_snapshot(symbol)
+                snapshot = await self._technical_service.get_technical_snapshot(symbol, allow_stale_price=True)
                 if snapshot:
                     # TechnicalSnapshot is a dataclass, access attributes directly
                     rsi = rsi if rsi is not None else getattr(snapshot, "rsi_14", 50)
