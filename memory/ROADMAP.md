@@ -3,6 +3,31 @@
 Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
+
+## 🎨 2026-06-19 — UI redesign direction LOCKED + build kickoff (Track B+ glass)
+- **Design locked:** "Track B+" glass cockpit = Track B skeleton (5px heartbeat
+  bar, 22px risk rail, Regime Weather header + time scrubber, **Why-Trace funnel
+  hero**, right consoles Position Health / Safety / Setup Grade) **+ absorbed
+  Track A trust chips** (provenance ring, style-lens chip, GO/STAND-DOWN verdict)
+  **+ conversational NIA layer** (pinned/auto-rotate THINKING pane + on-chart
+  narration bubbles, Live/Narration tabs, context-scoped chat). Heavy
+  glassmorphism (floating frosted panels), dense+scrollable full pages.
+- **Full mockup deck (operator-approved visuals):** `/app/design_mockups/`
+  — DECK_01–17 (full pages incl. Data&Connections, Decision, Scanner, Positions,
+  Strategy Autonomy, Brain, Journal, Diagnostics, Risk&Safety, Morning Prep,
+  EOD Recap, Premarket, Briefings Hub, Settings, Data Confidence, Autopilot
+  Go/No-Go) + MODAL_01–09 (Why-Trace, Position, IB Connection, Training run,
+  Strategy, NIA ⌘K drawer, Close/Flatten confirm, TQS 5-pillar drawer, Shadow).
+  Index: `/app/design_mockups/DECK.md` · `FAVORITES`/contract pending.
+- **Docs written:** `ARCHITECTURE_REVIEW_2026-06.md` (6-seam program),
+  `DATA_INTEGRITY_PLAN_2026-06.md` (feed/calc verification + north-star scorecard).
+- **DEFERRED UI screens** (operator: "good ideas… once we see the new design
+  working and functioning then we can possibly add them"): Notifications/alerts
+  center · Mobile/compact view · Weekend deep-dive briefing · Onboarding/first-run.
+- **BUILD KICKOFF (operator: "lets do A first"):** Step A = read-only data
+  integrity audit sweep (capture BEFORE) → then P1 (Style=Pattern + persist
+  weights_used), env-flag `TQS_STYLE_FROM_PATTERN`, paste.rs patcher.
+
 ## ✅ RESOLVED 2026-06-18 (this session — v365/v366/v367)
 - ✅ **P0 "suppressed setups firing live"** = FALSE ALARM. diag_v365_leak_recency proved stale
   pre-deploy residue (every fire predates its suppression commit). No leak, no patch.
