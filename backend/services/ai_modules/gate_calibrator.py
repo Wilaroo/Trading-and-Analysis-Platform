@@ -129,7 +129,7 @@ class GateCalibrator:
             "base_reduce_threshold": base_reduce,
             "thresholds": calibrated,
             "bucket_analysis": {
-                str(k): {**v, "win_rate": round(buckets[k]["wins"] / buckets[k]["total"], 3) if buckets[k]["total"] > 0 else 0}
+                str(k): {**buckets[k], "win_rate": round(buckets[k]["wins"] / buckets[k]["total"], 3) if buckets[k]["total"] > 0 else 0}
                 for k in sorted_buckets
             },
             "cumulative_analysis": {

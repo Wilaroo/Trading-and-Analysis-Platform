@@ -4468,6 +4468,22 @@ async def startup_event():
     except Exception as e:
         print(f"[WARN] Trading scheduler failed: {e}")
 
+    # v399 — boot-time staleness guard / catch-up sweep + nightly
+    # fundamentals warm-fill cron. Re-runs any scheduled job whose window
+    # was missed while the app was closed (auto-staggered; market-unsafe
+    # jobs defer until the market is closed).
+    try:
+        from services.scheduler_catchup import (
+            run_catch_up_sweep, install_warm_fundamentals_cron)
+        _ts = get_trading_scheduler()
+        install_warm_fundamentals_cron(_ts, db)
+        asyncio.create_task(
+            run_catch_up_sweep(db, _ts, eod_service),
+            name="scheduler_catch_up_sweep")
+        print("v399 scheduler catch-up sweep scheduled (boot staleness guard)")
+    except Exception as e:
+        print(f"[WARN] scheduler catch-up sweep failed to start: {e}")
+
     # Standalone FinBERT sentiment refresh — daily 07:45 AM ET pre-market.
     # Uses AsyncIOScheduler so it shares uvicorn's running loop (no new loop,
     # avoiding the uvloop conflict that bit us with module-level init).
