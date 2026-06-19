@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""
+patch_v393_pattern_tape.py  —  Setup pillar: Pattern taxonomy fallback + Tape absent->neutral
+
+APPLIES ON TOP OF v391 (PRE-SHA below = the v391 setup_quality.py).
+
+  • PATTERN — when a setup_type's canonical base is missing from
+    SETUP_BASE_SCORES it no longer pins to a flat 50. It derives a
+    tier-appropriate base from the shared setup taxonomy:
+      breakout 68 / continuation 66 / reversion 62 / reversal 58 /
+      rotation 60 / swing 64 / position 62 / unknown 55.
+    Explicit SETUP_BASE_SCORES stays the override for tier-1/2 names
+    (orb 80, bull_flag 78, ...). Diag v392: fixes 62.5%% of the book (44 setups).
+  • TAPE — tape_score==0 means NO tape/L2 reading was available (68%% of the
+    book), not a weak read. Absent tape now scores neutral 50 instead of the
+    punitive 30. Measured-weak (0<score<4) keeps its penalty.
+
+USAGE (repo root):
+  .venv/bin/python backend/scripts/patch_v393_pattern_tape.py --check
+  .venv/bin/python backend/scripts/patch_v393_pattern_tape.py
+  ./start_backend.sh --force
+"""
+import base64, gzip, hashlib, os, sys
+
+CHECK = "--check" in sys.argv
+PATH = 'backend/services/tqs/setup_quality.py'
+PRE = 'c1ca91932e190b96947f1d4c777c38ed1d20e40e33f229ffb6882ba4e324e7c2'
+POST = 'dfc16585849894bff667e219c54c77e922a34662ea2a919db8ae53ba7cf43cbe'
+B64 = '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'
+
+
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def main():
+    if not os.path.exists(PATH):
+        print(f"[MISSING!] {PATH}"); sys.exit(1)
+    cur = sha(open(PATH, "rb").read())
+    if cur == POST:
+        print(f"[ALREADY v393] {PATH}")
+        if CHECK: sys.exit(0)
+        return
+    if cur != PRE:
+        print(f"[DRIFT!] {PATH}\n  on-disk {cur}\n  expected PRE (v391) {PRE}\n  --> apply v391 first, or investigate drift.")
+        sys.exit(1)
+    print(f"[OK] {PATH}  PRE {PRE[:16]} -> POST {POST[:16]}")
+    if CHECK:
+        print("--check OK. Re-run without --check."); sys.exit(0)
+    open(PATH + ".bak.v393", "wb").write(open(PATH, "rb").read())
+    open(PATH, "wb").write(gzip.decompress(base64.b64decode(B64)))
+    print(f"WROTE {PATH}  POST {sha(open(PATH,'rb').read())[:16]} (backup .bak.v393). Restart backend.")
+
+
+if __name__ == "__main__":
+    main()
