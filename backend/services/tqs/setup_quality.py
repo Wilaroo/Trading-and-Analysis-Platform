@@ -75,8 +75,15 @@ class SetupQualityScore:
         from services.tqs.descriptors import disp, humanize
         c = self.display_ctx
         base = c.get("base_setup") or "unknown"
-        pat_read = (f"{humanize(base)} pattern"
-                    + (" · unranked (neutral)" if c.get("pattern_unranked") else ""))
+        src = c.get("pattern_source", "")
+        if src.startswith("family:"):
+            pat_read = f"{humanize(base)} · {src.split(':',1)[1]} family (est.)"
+        elif src.startswith("class:"):
+            pat_read = f"{humanize(base)} · {src.split(':',1)[1]} class (est.)"
+        elif src == "unknown":
+            pat_read = f"{humanize(base)} · unranked (neutral)"
+        else:
+            pat_read = f"{humanize(base)} pattern"
         wr_read = f"{self.win_rate*100:.0f}% historical win rate"
         if c.get("ev_is_proxy"):
             ev_read = f"Est. from {c.get('risk_reward', 0):.1f}:1 R:R · no live expectancy"
@@ -172,6 +179,33 @@ class SetupQualityService:
         """Wire up dependencies"""
         self._learning_loop = learning_loop
         self._scanner = scanner
+
+    # v393 — taxonomy-derived pattern base. When a setup's canonical base is not
+    # in the hand-tuned SETUP_BASE_SCORES, derive a tier-appropriate base from
+    # the shared setup taxonomy (strategy_family → setup_class) instead of the
+    # old punitive flat 50. Anchored to the explicit map's tiers so the fallback
+    # slots just below the tier-1 named patterns of the same family. Future-proof:
+    # any new classified setup auto-gets a sensible base, never 50 again.
+    _FAMILY_BASE = {
+        "breakout": 68, "continuation": 66, "reversion": 62,
+        "reversal": 58, "rotation": 60, "swing": 64, "position": 62,
+    }
+
+    def _pattern_base(self, base_setup: str):
+        """Return (base_score:int, source:str). explicit → family → class → unknown."""
+        if base_setup in self.SETUP_BASE_SCORES:
+            return self.SETUP_BASE_SCORES[base_setup], "explicit"
+        try:
+            from services.setup_taxonomy import strategy_family, setup_class
+            fam = strategy_family(base_setup)
+            if fam in self._FAMILY_BASE:
+                return self._FAMILY_BASE[fam], f"family:{fam}"
+            cls = setup_class(base_setup)
+            if cls in self._FAMILY_BASE:
+                return self._FAMILY_BASE[cls], f"class:{cls}"
+        except Exception:
+            pass
+        return 55, "unknown"
         
     async def calculate_score(
         self,
@@ -202,7 +236,7 @@ class SetupQualityService:
         
         # 1. Pattern Base Score (20% weight)
         base_setup = _canonical_base_setup(setup_type)
-        pattern_base = self.SETUP_BASE_SCORES.get(base_setup, 50)
+        pattern_base, _pattern_src = self._pattern_base(base_setup)
         result.pattern_score = pattern_base
         
         if pattern_base >= 75:
@@ -293,16 +327,24 @@ class SetupQualityService:
             result.factors.append(f"Negative EV: {ev_r:.2f}R (-)")
             
         # 4. Tape Confirmation Score (20% weight)
-        # tape_score is typically 0-10 from scanner
-        normalized_tape = min(tape_score / 10.0, 1.0) * 100 if tape_score > 0 else 30
-        
-        if tape_confirmation:
-            result.tape_score = max(normalized_tape, 80)
-            result.factors.append("Tape reading confirms setup (+)")
+        # tape_score is typically 0-10 from scanner.
+        # v393 — INTEGRITY FIX: tape_score == 0 means NO tape/L2 reading was
+        # available (diag v392: 68% of the book), not a weak read. The old
+        # `else 30` punished absence as if it were a weak tape. Distinguish
+        # genuinely-absent (→ neutral 50) from measured-weak (0<score<4 → keep
+        # the penalty). Mirrors the v391 absent→neutral philosophy.
+        _tape_absent = (tape_score is None or tape_score <= 0) and not tape_confirmation
+        if _tape_absent:
+            result.tape_score = 50.0
         else:
-            result.tape_score = min(normalized_tape, 60)
-            if tape_score < 4:
-                result.factors.append("Weak tape reading (-)")
+            normalized_tape = min(tape_score / 10.0, 1.0) * 100 if tape_score > 0 else 30
+            if tape_confirmation:
+                result.tape_score = max(normalized_tape, 80)
+                result.factors.append("Tape reading confirms setup (+)")
+            else:
+                result.tape_score = min(normalized_tape, 60)
+                if 0 < tape_score < 4:
+                    result.factors.append("Weak tape reading (-)")
                 
         # 5. SMB Grade Score (15% weight)
         smb_grade_scores = {"A+": 100, "A": 95, "B+": 80, "B": 65, "C+": 50, "C": 35, "D": 20, "F": 0}
@@ -349,7 +391,7 @@ class SetupQualityService:
         # v391 — stash raw bits the to_dict descriptor layer needs.
         result.display_ctx = {
             "base_setup": base_setup,
-            "pattern_unranked": base_setup not in self.SETUP_BASE_SCORES,
+            "pattern_source": _pattern_src,
             "ev_is_proxy": bool(_decompress_setup and not has_ev_data),
             "risk_reward": risk_reward if (risk_reward and risk_reward > 0) else 2.0,
             "tape_raw": tape_score,
