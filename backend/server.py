@@ -1578,6 +1578,12 @@ app.include_router(system_banner_router)
 app.include_router(dashboard_router)
 app.include_router(dynamic_universe_router)
 app.include_router(sentiment_refresh_router)
+# v399b — Data-health Diagnostics surfaces (Data Schedule punchlist + TQS coverage)
+try:
+    from routers.data_diagnostics import router as data_diagnostics_router
+    app.include_router(data_diagnostics_router)
+except Exception as _e:
+    print(f"[WARN] data_diagnostics router not registered: {_e}")
 # Tier 2-4 routers registered during startup via _deferred_routers
 
 class StockQuote(BaseModel):

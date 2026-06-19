@@ -14,6 +14,9 @@ import { Microscope, TrendingUp, TrendingDown, Copy, RefreshCw, Filter } from 'l
 import TradeTypeChip from '../components/sentcom/v5/TradeTypeChip';
 // v19.34.12 (2026-05-06) — rejection heatmap sub-tab.
 import RejectionHeatmap from '../components/sentcom/v5/RejectionHeatmap';
+// v399b — Data-health surfaces: schedule punchlist + TQS coverage gauge.
+import DataSchedulePanel from '../components/sentcom/v5/DataSchedulePanel';
+import TqsCoveragePanel from '../components/sentcom/v5/TqsCoveragePanel';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -25,6 +28,8 @@ const SUB_TABS = [
   { id: 'day_tape', label: 'Day Tape' },
   { id: 'forensics', label: 'Trade Forensics' },
   { id: 'shadow', label: 'Shadow Decisions' },
+  { id: 'data_schedule', label: 'Data Schedule' },
+  { id: 'tqs_coverage', label: 'TQS Coverage' },
   { id: 'export', label: 'Export Report' },
 ];
 
@@ -1810,6 +1815,8 @@ export default function DiagnosticsPage() {
         {tab === 'day_tape' && <DayTapeView />}
         {tab === 'forensics' && <TradeForensicsView />}
         {tab === 'shadow' && <ShadowDecisionsView />}
+        {tab === 'data_schedule' && <DataSchedulePanel />}
+        {tab === 'tqs_coverage' && <TqsCoveragePanel />}
         {tab === 'export' && <ExportReport />}
       </main>
     </div>
