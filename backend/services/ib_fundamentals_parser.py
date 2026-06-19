@@ -51,6 +51,11 @@ _RATIO_FIELDS = {
     "DivYieldPCT": ("dividend_yield_pct", float),
     "EPSCHANGE":   ("eps_change_pct", float),
     "ROEPCT":      ("roe_pct", float),
+    "TTMROEPCT":   ("roe_pct", float),        # v396 — the REAL IB ROE code
+    "TTMNIAC":     ("ttm_net_income", float), # v396 — for net-margin derivation
+    "TTMREV":      ("ttm_revenue", float),    # v396 — for net-margin derivation
+    "TTMGROSMGN":  ("gross_margin_pct", float),  # v396 — gross (sentinel-guarded)
+    "TTMEPSXCLX":  ("ttm_eps", float),        # v396
     "NHIG":        ("high_52w", float),  # 52-week high
     "NLOW":        ("low_52w", float),
     "VOL10DAVG":   ("vol_10d_avg", float),
@@ -87,6 +92,10 @@ def parse_report_snapshot(xml_str: Optional[str]) -> Dict[str, Any]:
             out[canonical] = caster(txt)
         except (TypeError, ValueError):
             continue
+        # v396 — IB encodes "no data" as the -99999.99 sentinel; reject it so it
+        # never reaches scoring as a real value (e.g. TTMGROSMGN for financials).
+        if isinstance(out[canonical], float) and out[canonical] <= -99999:
+            del out[canonical]
 
     # CoGeneralInfo — country, employees, etc.
     for hq in root.iter("CompanyHeadquarters"):
@@ -144,6 +153,31 @@ def parse_report_snapshot(xml_str: Optional[str]) -> Dict[str, Any]:
     # Convert dividend yield to decimal (IB reports as PCT)
     if "dividend_yield_pct" in out and "dividend_yield" not in out:
         out["dividend_yield"] = out["dividend_yield_pct"] / 100.0
+
+    # v396 — ReportSnapshot has NO net-margin ratio (TTMNIPEREM is absent; gross
+    # TTMGROSMGN is a -99999 sentinel for financials). Derive net margin from
+    # net income / revenue — robust across sectors. Only when not already set.
+    if "net_margin_pct" not in out:
+        ni, rev = out.get("ttm_net_income"), out.get("ttm_revenue")
+        if ni is not None and rev:
+            out["net_margin_pct"] = round(ni / rev * 100.0, 2)
+
+    # v396 — forward long-term growth estimate lives in <ForecastData>, not the
+    # main <Ratios> block (where ProjLTGrowthRate is blank). Use it as the
+    # growth signal for the financial sub-score.
+    for fd in root.iter("ForecastData"):
+        for r in fd.iter("Ratio"):
+            if r.get("FieldName") == "ProjLTGrowthRate":
+                v = r.find("Value")
+                txt = (v.text or "").strip() if v is not None else ""
+                if txt:
+                    try:
+                        g = float(txt)
+                        if g > -99999:
+                            out["proj_lt_growth_pct"] = g
+                    except (TypeError, ValueError):
+                        pass
+        break
 
     return out
 

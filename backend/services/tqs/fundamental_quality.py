@@ -186,10 +186,12 @@ class FundamentalQualityService:
                 if institutional_pct is None:
                     institutional_pct = cached.get("institutional_ownership_percent")
                 _dtc = cached.get("days_to_cover")  # v385
-                _fin = {  # v389 — IB ReportSnapshot financials
+                _fin = {  # v389 — IB ReportSnapshot financials (v396 codes)
                     "roe": cached.get("roe_pct"),
                     "margin": cached.get("net_margin_pct"),
-                    "growth": cached.get("eps_change_pct"),
+                    "growth": (cached.get("proj_lt_growth_pct")
+                               if cached.get("proj_lt_growth_pct") is not None
+                               else cached.get("eps_change_pct")),
                     "d2e": cached.get("debt_to_equity"),
                 }
         except Exception as e:
