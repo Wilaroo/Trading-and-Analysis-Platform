@@ -3553,3 +3553,6 @@ v*_backup_*/
 *.bak_v399
 patch_v399.py
 diag_v399_schedule_audit.py
+*.bak_v399
+patch_v*.py
+diag_v*.py
