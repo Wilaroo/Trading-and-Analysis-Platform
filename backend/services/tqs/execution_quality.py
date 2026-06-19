@@ -234,12 +234,49 @@ class ExecutionQualityScore:
     # Reasoning
     factors: list = None
     warnings: list = None  # Critical warnings about execution
+    display_ctx: dict = None  # v391 — extra raw bits for sub-score descriptors
     
     def __post_init__(self):
         if self.factors is None:
             self.factors = []
         if self.warnings is None:
             self.warnings = []
+        if self.display_ctx is None:
+            self.display_ctx = {}
+
+    def _display(self) -> Dict:
+        from services.tqs.descriptors import disp
+        c = self.display_ctx
+        n = c.get("recent_sample", 0)
+        # History
+        hn = c.get("history_n")
+        hist_read = (f"Setup exec track record (n={hn})" if hn
+                     else "Limited execution history")
+        # Tilt
+        tilt_read = ("No tilt · 0 consecutive losses" if not self.is_tilted
+                     else f"{self.tilt_severity.title()} tilt · {self.consecutive_losses} consec losses")
+        # Entry tendency
+        if c.get("entry_data_absent"):
+            entry_read = "No entry-execution data yet"
+        elif self.tends_to_chase:
+            entry_read = f"Chases entries · slippage {self.avg_entry_slippage_pct:.2f}%"
+        else:
+            entry_read = f"Avg entry slippage {self.avg_entry_slippage_pct:.2f}%"
+        # Exit tendency
+        exit_read = (f"R-capture {self.avg_r_capture_pct:.0f}%"
+                     + (" · exits early" if self.tends_to_exit_early else ""))
+        # Streak
+        streak_read = (f"{self.recent_win_rate*100:.0f}% win rate"
+                       + (f" · last {n} closes" if n else ""))
+        return {
+            "history": disp("History", self.history_score, hist_read),
+            "tilt": disp("Tilt", self.tilt_score, tilt_read),
+            "entry_tendency": disp("Entry Tendency", self.entry_tendency_score,
+                                   entry_read, absent=c.get("entry_data_absent")),
+            "exit_tendency": disp("Exit Tendency", self.exit_tendency_score, exit_read),
+            "streak": disp("Streak", self.streak_score, streak_read,
+                           absent=(n == 0)),
+        }
     
     def to_dict(self) -> Dict:
         return {
@@ -265,7 +302,8 @@ class ExecutionQualityScore:
                 "pnl_today": round(self.pnl_today, 2)
             },
             "factors": self.factors,
-            "warnings": self.warnings
+            "warnings": self.warnings,
+            "display": self._display()
         }
 
 
@@ -345,6 +383,7 @@ class ExecutionQualityService:
                 # last-resort fallback to the loop (e.g. tests with a fake loop)
                 recent = await self._learning_loop.get_recent_outcomes(limit=30)
             live = _derive_live_execution_state(recent)
+            result.display_ctx["recent_sample"] = live["sample"]
             if live["sample"] > 0:
                 result.recent_win_rate = live["recent_win_rate"]
                 result.consecutive_losses = live["consecutive_losses"]
@@ -401,6 +440,7 @@ class ExecutionQualityService:
                 hmap = _setup_history_map()
                 rec = hmap.get(_norm_setup(setup_type))
                 if rec and rec.get("n", 0) > 0:
+                    result.display_ctx["history_n"] = int(rec["n"])
                     K = float(_env_int("TQS_EXEC_HIST_SHRINK_K", 10))
                     n = float(rec["n"])
                     raw = float(rec["score"])
@@ -438,7 +478,15 @@ class ExecutionQualityService:
             result.warnings.append(f"Down ${abs(result.pnl_today):.0f} today - Consider taking a break")
             
         # 3. Entry Tendency Score (15% weight)
-        if result.tends_to_chase:
+        # v391 — INTEGRITY FIX: entry slippage / chase ONLY come from the EOD
+        # `trader_profiles` batch (no live derivation, unlike exit-tendency).
+        # When that profile is empty, slippage defaulted to 0.0 → scored 85 +
+        # "Excellent entry execution (+)" — i.e. ABSENCE was reported as
+        # EXCELLENCE. Neutralise to 50 with an honest descriptor instead.
+        _entry_data_absent = not profile_has_data
+        if _entry_data_absent:
+            result.entry_tendency_score = 50
+        elif result.tends_to_chase:
             result.entry_tendency_score = 40
             result.factors.append(f"Tendency to chase entries (avg slippage: {result.avg_entry_slippage_pct:.2f}%) (-)")
         elif result.avg_entry_slippage_pct > 0.3:
@@ -488,6 +536,7 @@ class ExecutionQualityService:
             result.factors.append("Large position size - Ensure proper risk management")
             
         # Calculate weighted total
+        result.display_ctx["entry_data_absent"] = _entry_data_absent
         result.score = (
             result.history_score * 0.25 +
             result.tilt_score * 0.30 +

@@ -61,6 +61,17 @@ const humanizeComponent = (key) =>
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+// v391 — verdict chip colours (mirrors descriptors.verdict_for bands).
+const VERDICT_TONE = {
+  Strong: 'text-emerald-300 bg-emerald-950/60 border-emerald-800/60',
+  Favorable: 'text-sky-300 bg-sky-950/60 border-sky-800/60',
+  Neutral: 'text-amber-300 bg-amber-950/60 border-amber-800/60',
+  Caution: 'text-orange-300 bg-orange-950/60 border-orange-800/60',
+  Weak: 'text-rose-300 bg-rose-950/60 border-rose-800/60',
+  'No data': 'text-zinc-500 bg-zinc-900/60 border-zinc-700/60',
+};
+const verdictTone = (v) => VERDICT_TONE[v] || 'text-zinc-400 bg-zinc-900/60 border-zinc-700/60';
+
 // Module-level cache — the pillar roster is static config, fetch once.
 let _pillarMetaPromise = null;
 const fetchPillarMeta = () => {
@@ -77,6 +88,7 @@ const fetchPillarMeta = () => {
 const PillarRow = ({ pillarKey, meta, breakdown, score, grade, weight, testIdSuffix }) => {
   const [open, setOpen] = useState(false);
   const components = (breakdown && breakdown.components) || {};
+  const display = (breakdown && breakdown.display) || {};
   const factors = (breakdown && Array.isArray(breakdown.factors)) ? breakdown.factors : [];
   const hasDetail = Object.keys(components).length > 0 || factors.length > 0;
   const scoreNum = score != null ? Math.round(Number(score)) : null;
@@ -121,14 +133,39 @@ const PillarRow = ({ pillarKey, meta, breakdown, score, grade, weight, testIdSuf
           data-testid={`${testId}-detail`}
         >
           {Object.keys(components).length > 0 && (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
-              {Object.entries(components).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between text-[11px]">
-                  <span className="text-zinc-500 truncate">{humanizeComponent(k)}</span>
-                  <span className="text-zinc-300 v5-mono ml-2">{Math.round(Number(v) || 0)}</span>
-                </div>
-              ))}
-            </div>
+            Object.keys(display).length > 0 ? (
+              <div className="space-y-1 pt-1">
+                {Object.entries(components).map(([k, v]) => {
+                  const d = display[k] || {};
+                  const verdict = d.verdict || '';
+                  return (
+                    <div key={k} className="flex items-center gap-2 text-[11px]" data-testid={`tqs-subscore-${k}-${testId}`}>
+                      <span className="w-[92px] shrink-0 text-zinc-400 truncate" title={d.label || humanizeComponent(k)}>
+                        {d.label || humanizeComponent(k)}
+                      </span>
+                      {verdict && (
+                        <span className={`shrink-0 px-1 py-0 rounded-sm border text-[9px] uppercase tracking-wide ${verdictTone(verdict)}`}>
+                          {verdict}
+                        </span>
+                      )}
+                      <span className="flex-1 text-zinc-500 truncate" title={d.reading || ''}>
+                        {d.reading || ''}
+                      </span>
+                      <span className="shrink-0 text-zinc-400 v5-mono">{Math.round(Number(v) || 0)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 pt-1">
+                {Object.entries(components).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between text-[11px]">
+                    <span className="text-zinc-500 truncate">{humanizeComponent(k)}</span>
+                    <span className="text-zinc-300 v5-mono ml-2">{Math.round(Number(v) || 0)}</span>
+                  </div>
+                ))}
+              </div>
+            )
           )}
           {factors.length > 0 && (
             <div className="space-y-0.5 pt-0.5">

@@ -41,11 +41,62 @@ class FundamentalQualityScore:
     
     # Reasoning
     factors: list = None
+    display_ctx: dict = None  # v391 — extra raw bits for sub-score descriptors
     
     def __post_init__(self):
         if self.factors is None:
             self.factors = []
-    
+        if self.display_ctx is None:
+            self.display_ctx = {}
+
+    def _display(self) -> Dict:
+        from services.tqs.descriptors import disp
+        c = self.display_ctx
+        # Catalyst
+        if self.has_catalyst and self.catalyst_type:
+            cat_read = f"{self.catalyst_type.replace('_', ' ').title()} catalyst"
+        elif c.get("has_recent_news"):
+            sent = c.get("news_sentiment", 0.0)
+            tone = "positive" if sent > 0.1 else "negative" if sent < -0.1 else "mixed"
+            cat_read = f"Recent {tone} news"
+        else:
+            cat_read = "No clear catalyst"
+        # Short interest
+        if c.get("si_absent"):
+            dtc = c.get("days_to_cover")
+            si_read = (f"Days-to-cover {dtc:.1f} (no SI%)" if dtc
+                       else "No short-interest data")
+        else:
+            si_read = f"Short interest {self.short_interest_pct:.1f}%"
+        # Float
+        fl = self.float_shares_millions
+        flt_read = ("No float data" if c.get("float_absent")
+                    else (f"Float {fl/1000:.2f}B" if fl >= 1000 else f"Float {fl:.0f}M"))
+        # Institutional
+        inst_read = ("No institutional data" if c.get("inst_absent")
+                     else f"Institutional ownership {self.institutional_pct:.0f}%")
+        # Earnings
+        if self.days_to_earnings is not None:
+            earn_read = f"Earnings in {self.days_to_earnings}d"
+        elif c.get("post_earnings"):
+            earn_read = f"Recent earnings {c.get('post_earnings')}"
+        else:
+            earn_read = "No earnings within 14d"
+        # Financial
+        fin_read = (f"IB financials ({c.get('financial_n', 0)}/4 metrics)"
+                    if c.get("has_financials") else "No IB financials")
+        return {
+            "catalyst": disp("Catalyst", self.catalyst_score, cat_read),
+            "short_interest": disp("Short Interest", self.short_interest_score,
+                                   si_read, absent=c.get("si_absent") and not c.get("days_to_cover")),
+            "float": disp("Float", self.float_score, flt_read, absent=c.get("float_absent")),
+            "institutional": disp("Institutional", self.institutional_score,
+                                  inst_read, absent=c.get("inst_absent")),
+            "earnings": disp("Earnings", self.earnings_score, earn_read),
+            "financial": disp("Financials", self.financial_score, fin_read,
+                              absent=not c.get("has_financials")),
+        }
+
     def to_dict(self) -> Dict:
         return {
             "score": round(self.score, 1),
@@ -58,6 +109,7 @@ class FundamentalQualityScore:
                 "earnings": round(self.earnings_score, 1),
                 "financial": round(self.financial_score, 1)
             },
+            "display": self._display(),
             "raw_values": {
                 "has_catalyst": self.has_catalyst,
                 "catalyst_type": self.catalyst_type,
@@ -344,22 +396,29 @@ class FundamentalQualityService:
             result.factors.append(f"Large float ({float_millions:.0f}M) - harder to move (-)")
             
         # 4. Institutional Ownership Score (15% weight)
-        # 30-70% is ideal - smart money but not over-owned
-        if 40 <= institutional_pct <= 70:
-            result.institutional_score = 80
-            result.factors.append(f"Good institutional ownership ({institutional_pct:.0f}%) (+)")
-        elif 30 <= institutional_pct < 40:
-            result.institutional_score = 70
-        elif 70 < institutional_pct <= 85:
-            result.institutional_score = 60
-        elif institutional_pct > 85:
-            result.institutional_score = 45
-            result.factors.append(f"Over-owned by institutions ({institutional_pct:.0f}%) (-)")
-        elif 15 <= institutional_pct < 30:
-            result.institutional_score = 55
-        else:
-            result.institutional_score = 40
-            result.factors.append(f"Low institutional ownership ({institutional_pct:.0f}%) (-)")
+        # 30-70% is ideal - smart money but not over-owned.
+        # v391 — INTEGRITY FIX: only score/annotate when data is genuinely
+        # present. Pre-fix, absent inst data fell to the placeholder default
+        # 50% which landed in the 40-70 "ideal" band and emitted a FALSE
+        # positive factor ("Good institutional ownership (50%) (+)") moments
+        # before the absent-data neutraliser overwrote the score to 50 —
+        # leaving a contradictory, fabricated green factor on the alert.
+        if not _inst_absent:
+            if 40 <= institutional_pct <= 70:
+                result.institutional_score = 80
+                result.factors.append(f"Good institutional ownership ({institutional_pct:.0f}%) (+)")
+            elif 30 <= institutional_pct < 40:
+                result.institutional_score = 70
+            elif 70 < institutional_pct <= 85:
+                result.institutional_score = 60
+            elif institutional_pct > 85:
+                result.institutional_score = 45
+                result.factors.append(f"Over-owned by institutions ({institutional_pct:.0f}%) (-)")
+            elif 15 <= institutional_pct < 30:
+                result.institutional_score = 55
+            else:
+                result.institutional_score = 40
+                result.factors.append(f"Low institutional ownership ({institutional_pct:.0f}%) (-)")
             
         # 5. Earnings Proximity Score (15% weight)
         if days_to_earnings is not None:
@@ -462,6 +521,19 @@ class FundamentalQualityService:
                 f"Financials {result.financial_score:.0f} (ROE/margin/growth/lev, {len(_fc)}/4)")
         else:
             result.financial_score = 50.0
+
+        # v391 — stash raw bits the to_dict descriptor layer needs.
+        result.display_ctx = {
+            "has_recent_news": bool(has_recent_news),
+            "news_sentiment": news_sentiment,
+            "si_absent": _si_absent,
+            "days_to_cover": _dtc,
+            "float_absent": _float_absent,
+            "inst_absent": _inst_absent,
+            "post_earnings": ((_post_earn.get("result") or "").upper() or None) if _post_earn else None,
+            "has_financials": bool(_fc),
+            "financial_n": len(_fc),
+        }
 
         # Calculate weighted total (v389 — added financial 0.20; trimmed others)
         result.score = (

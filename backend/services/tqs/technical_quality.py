@@ -40,10 +40,47 @@ class TechnicalQualityScore:
     
     # Reasoning
     factors: list = None
+    display_ctx: dict = None  # v391 — extra raw bits for sub-score descriptors
     
     def __post_init__(self):
         if self.factors is None:
             self.factors = []
+        if self.display_ctx is None:
+            self.display_ctx = {}
+
+    def _display(self) -> Dict:
+        from services.tqs.descriptors import disp
+        c = self.display_ctx
+        # Trend
+        stack = {"bullish": "Bullish MA stack", "bearish": "Bearish MA stack"}.get(
+            self.ma_stack, "Neutral / no clear MA stack")
+        if self.squeeze_active:
+            stack += " · squeeze on"
+        # RSI
+        r = self.rsi
+        zone = ("overbought" if r >= 70 else "oversold" if r <= 30
+                else "momentum" if r >= 55 else "neutral")
+        rsi_read = f"RSI {r:.0f} · {zone}"
+        # Levels
+        sd, rd = c.get("support_distance_pct"), c.get("resistance_distance_pct")
+        if sd is not None or rd is not None:
+            parts = []
+            if sd is not None:
+                parts.append(f"{sd:.1f}% to support")
+            if rd is not None:
+                parts.append(f"{rd:.1f}% to resistance")
+            lvl_read = " · ".join(parts)
+        else:
+            lvl_read = "S/R levels"
+        vol_read = f"ATR {self.atr_percent:.1f}% volatility"
+        rvol_read = f"RVOL {self.rvol:.1f}x"
+        return {
+            "trend": disp("Trend", self.trend_score, stack),
+            "rsi": disp("RSI", self.rsi_score, rsi_read),
+            "levels": disp("Levels", self.levels_score, lvl_read),
+            "volatility": disp("Volatility", self.volatility_score, vol_read),
+            "volume": disp("Volume", self.volume_score, rvol_read),
+        }
     
     def to_dict(self) -> Dict:
         return {
@@ -64,6 +101,7 @@ class TechnicalQualityScore:
                 "vwap_distance_pct": round(self.vwap_distance_pct, 2),
                 "squeeze_active": self.squeeze_active
             },
+            "display": self._display(),
             "factors": self.factors
         }
 
@@ -310,6 +348,12 @@ class TechnicalQualityService:
             result.volume_score = 25
             result.factors.append(f"RVOL {rvol:.1f}x - low volume (-)")
             
+        # v391 — stash raw bits for the to_dict descriptor layer.
+        result.display_ctx = {
+            "support_distance_pct": support_distance_pct,
+            "resistance_distance_pct": resistance_distance_pct,
+        }
+
         # Calculate weighted total
         result.score = (
             result.trend_score * 0.25 +

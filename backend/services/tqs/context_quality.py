@@ -48,6 +48,7 @@ class ContextQualityScore:
     vix_score: float = 50.0
     day_score: float = 50.0
     rs_score: float = 50.0  # v19.34.254 — per-symbol relative strength
+    ai_score: float = 50.0  # v391 — AI-model alignment (was factor-only)
 
     # Raw values
     market_regime: str = "unknown"
@@ -65,10 +66,62 @@ class ContextQualityScore:
     
     # Reasoning
     factors: list = None
+    display_ctx: dict = None  # v391 — extra raw bits for sub-score descriptors
     
     def __post_init__(self):
         if self.factors is None:
             self.factors = []
+        if self.display_ctx is None:
+            self.display_ctx = {}
+
+    def _display(self, is_long: bool = True) -> Dict:
+        from services.tqs.descriptors import disp, humanize, weekday_name, vix_descriptor
+        c = self.display_ctx
+        side = "longs" if is_long else "shorts"
+        reg = humanize(self.market_regime)
+        bias = {
+            "strong_uptrend": "favors longs" if is_long else "against shorts",
+            "weak_uptrend": "mild tailwind for longs" if is_long else "headwind for shorts",
+            "range_bound": f"neutral for {side}",
+            "weak_downtrend": "headwind for longs" if is_long else "mild tailwind for shorts",
+            "strong_downtrend": "against longs" if is_long else "favors shorts",
+        }.get(self.market_regime, f"neutral for {side}")
+        reg_read = f"{reg} · {bias}"
+        if self.rs_benchmark:
+            rs_read = f"{self.rs_1d:+.1f}% 1d / {self.rs_5d:+.1f}% 5d vs {self.rs_benchmark}"
+        else:
+            rs_read = "No relative-strength data"
+        time_read = humanize(self.time_of_day)
+        if c.get("sector_absent") or self.sector in (None, "", "unknown"):
+            sector_read = "Sector data unavailable"
+            sector_absent = True
+        else:
+            lead = " · leader" if self.is_sector_leader else ""
+            sector_read = f"{humanize(self.sector)} · rank {self.sector_rank}/11{lead}"
+            sector_absent = False
+        vix_read = f"VIX {self.vix_level:.1f} · {vix_descriptor(self.vix_level)}"
+        day_read = weekday_name(self.day_of_week)
+        if c.get("ai_has_signal"):
+            ad = c.get("ai_direction") or "—"
+            ac = c.get("ai_confidence")
+            conf = f" ({ac*100:.0f}% conf)" if ac is not None else ""
+            if c.get("ai_agrees"):
+                ai_read = f"Model confirms {ad}{conf}"
+            else:
+                ai_read = f"Model predicts {ad} · against trade{conf}"
+        else:
+            ai_read = "No model signal"
+        return {
+            "regime": disp("Market Regime", self.regime_score, reg_read),
+            "relative_strength": disp("Relative Strength", self.rs_score, rs_read,
+                                      absent=not self.rs_benchmark),
+            "time": disp("Time of Day", self.time_score, time_read),
+            "sector": disp("Sector", self.sector_score, sector_read, absent=sector_absent),
+            "vix": disp("VIX", self.vix_score, vix_read),
+            "day": disp("Day of Week", self.day_score, day_read),
+            "ai_model": disp("AI Model", self.ai_score, ai_read,
+                             absent=not c.get("ai_has_signal")),
+        }
     
     def to_dict(self) -> Dict:
         return {
@@ -80,8 +133,10 @@ class ContextQualityScore:
                 "time": round(self.time_score, 1),
                 "sector": round(self.sector_score, 1),
                 "vix": round(self.vix_score, 1),
-                "day": round(self.day_score, 1)
+                "day": round(self.day_score, 1),
+                "ai_model": round(self.ai_score, 1)
             },
+            "display": self._display(self.display_ctx.get("is_long", True)),
             "raw_values": {
                 "market_regime": self.market_regime,
                 "time_of_day": self.time_of_day,
@@ -487,6 +542,17 @@ class ContextQualityService:
                 result.factors.append(f"Relative strength against {direction} ({_tf}) (-)")
         else:
             result.rs_score = 50.0  # neutral when no daily bars
+
+        # v391 — persist AI sub-score + stash raw bits for the descriptor layer.
+        result.ai_score = ai_score
+        result.display_ctx = {
+            "is_long": is_long,
+            "sector_absent": (sector == "unknown"),
+            "ai_has_signal": (ai_model_agrees is not None and ai_model_confidence is not None),
+            "ai_direction": ai_model_direction,
+            "ai_confidence": ai_model_confidence,
+            "ai_agrees": ai_model_agrees,
+        }
 
         # Calculate weighted total (v19.34.254 weights — added per-symbol RS at
         # 20%, fed regime the multi-index composite, and trimmed the dead
