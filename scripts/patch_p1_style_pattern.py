@@ -2,25 +2,33 @@
 """
 patch_p1_style_pattern.py  —  P1: Style = Pattern, Liquidity = Feasibility.
 
-Four anchored, idempotent edits (SHA-reported, .bak backups, reversible):
+Three anchored, idempotent edits (SHA-reported, .p1bak backups, reversible):
 
   1. setup_taxonomy.style_of   — pass RAW setup (not canonicalize(raw)) so the
      classifier's raw-first _setup_lookup honors explicit horizon entries
-     (breakdown_confirmed->multi_day) before canonicalize() strips the suffix.
-     Fixes the SSOT over-collapse (diag_style_reconcile SSOT_BUG = 1822 alerts).
-  2. trade_style_classifier.SETUP_TO_STYLE — add 4 operator-ratified entries
-     (approaching_breakout/range_break/orb -> intraday; carry_forward_watch -> swing)
-     to clear the REVIEW bucket (style_of=unknown).
-  3. tqs_engine.calculate_tqs — the TQS WEIGHTING lens now follows the pattern's
+     (breakdown_confirmed->multi_day) BEFORE canonicalize() strips the suffix.
+     Fixes the SSOT over-collapse (diag_style_reconcile SSOT_BUG bucket).
+  2. tqs_engine.calculate_tqs — the TQS WEIGHTING lens now follows the pattern's
      intrinsic style (SSOT style_of), NOT the liquidity-inflated stamp.
      Reversible via env TQS_STYLE_FROM_PATTERN=false. Execution stamp untouched.
-  4. enhanced_scanner._enrich_alert_with_tqs — persist float weights_used +
+  3. enhanced_scanner._enrich_alert_with_tqs — persist float weights_used +
      scoring_style INSIDE tqs_breakdown for audit + UI drill.
+
+REVIEW bucket (operator-ratified 2026-06) — NO edit, intentional:
+  The anticipatory TRIGGERS approaching_breakout / approaching_hod /
+  approaching_orb / approaching_range_break are NOT trades — they are pre-fire
+  "checks in favor" that put a real setup ON WATCH. carry_forward_watch is an
+  EOD watchlist carry-over tag (tomorrow's plan), also not a trade. All are
+  ALREADY edge-excluded in setup_taxonomy (approaching_ prefix + carry_forward_
+  watch exact), so they correctly resolve to style_of=unknown and get NO forced
+  trade horizon for the scoring lens. The REAL setups orb / breakout /
+  hod_breakout / range_break remain intraday in SETUP_TO_STYLE — unaffected.
+  diag_p1_verify SKIPS edge-excluded rows so they aren't false "mismatches".
 
 Usage (run from repo root, e.g. ~/Trading-and-Analysis-Platform):
     python3 scripts/patch_p1_style_pattern.py --check     # dry-run, report
-    python3 scripts/patch_p1_style_pattern.py --apply      # write + .bak
-    python3 scripts/patch_p1_style_pattern.py --rollback   # restore .bak
+    python3 scripts/patch_p1_style_pattern.py --apply      # write + .p1bak
+    python3 scripts/patch_p1_style_pattern.py --rollback   # restore .p1bak
 After --apply: restart backend, then run diag_p1_verify.py.
 """
 import os
@@ -44,20 +52,7 @@ EDITS = [
         "applied_marker": "    return style_bucket_for_setup(raw)\n",
     },
     {
-        "id": "2-SETUP_TO_STYLE (+4 ratified)",
-        "path": "backend/services/trade_style_classifier.py",
-        "old": "    \"two_hundred_day_loss\": \"position\",\n}\n",
-        "new": (
-            "    \"two_hundred_day_loss\": \"position\",\n"
-            "    # \u2500\u2500 ANTICIPATORY / WATCH (P1 2026-06, operator-ratified) \u2500\u2500\u2500\u2500\u2500\u2500\n"
-            "    \"approaching_breakout\": \"intraday\", \"approaching_range_break\": \"intraday\",\n"
-            "    \"approaching_orb\": \"intraday\", \"carry_forward_watch\": \"swing\",\n"
-            "}\n"
-        ),
-        "applied_marker": "\"approaching_range_break\": \"intraday\"",
-    },
-    {
-        "id": "3-tqs_engine.calculate_tqs (pattern weighting)",
+        "id": "2-tqs_engine.calculate_tqs (pattern weighting)",
         "path": "backend/services/tqs/tqs_engine.py",
         "old": (
             "        # Get weights for this trade style\n"
@@ -68,6 +63,8 @@ EDITS = [
             "        # pattern's intrinsic style (SSOT setup_taxonomy.style_of), NOT the\n"
             "        # liquidity-inflated stamped trade_style. Liquidity stays a feasibility/\n"
             "        # size concern (brackets/TIF), never a silent relabel of the score lens.\n"
+            "        # Watch/diagnostic triggers (approaching_*, carry_forward_watch) return\n"
+            "        # style_of=unknown -> the guard below leaves their stamp untouched.\n"
             "        import os as _os\n"
             "        _scoring_style = trade_style\n"
             "        if _os.environ.get(\"TQS_STYLE_FROM_PATTERN\", \"true\").strip().lower() not in (\"false\", \"0\", \"no\", \"off\"):\n"
@@ -86,7 +83,7 @@ EDITS = [
         "applied_marker": "TQS_STYLE_FROM_PATTERN",
     },
     {
-        "id": "4-enhanced_scanner persist weights_used+scoring_style",
+        "id": "3-enhanced_scanner persist weights_used+scoring_style",
         "path": "backend/services/enhanced_scanner.py",
         "old": (
             "                    alert.tqs_weights = tqs_result.weights_used or {}\n"
@@ -96,8 +93,9 @@ EDITS = [
         "new": (
             "                    alert.tqs_weights = tqs_result.weights_used or {}\n"
             "                    # P1 (2026-06): persist float weight profile + the pattern\n"
-            "                    # scoring lens INSIDE tqs_breakdown so audits (diag [D]) and\n"
-            "                    # the UI Style-Lens / TQS drawer can verify which lens scored it.\n"
+            "                    # scoring lens INSIDE tqs_breakdown so audits (diag_p1_verify)\n"
+            "                    # and the UI Style-Lens / TQS drawer can verify which lens\n"
+            "                    # scored it.\n"
             "                    if isinstance(alert.tqs_breakdown, dict):\n"
             "                        alert.tqs_breakdown[\"weights_used\"] = dict(tqs_result.weights_used or {})\n"
             "                        alert.tqs_breakdown[\"scoring_style\"] = tqs_result.trade_style\n"

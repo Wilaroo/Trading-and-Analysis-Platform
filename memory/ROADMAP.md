@@ -4103,3 +4103,34 @@ Audit: /app/memory/AUDIT_model_families_2026-06-10.md  (110 models: 59 dead, 46 
 - [P1] TIME-DECAY AUDIT (NEW): investigate whether Multi-day / Swing / Position / Investment tier
   trades have any time-decay / max-hold / time-stop exit triggers; decide if we should add time-based
   exit limits per tier. Read-only audit first, then propose.
+
+## 2026-06-19 — P1 STYLE=PATTERN patch DELIVERED (operator-apply pending)
+- GOAL: TQS scoring lens = pattern's intrinsic style (setup_taxonomy.style_of),
+  NOT the liquidity-inflated stamped trade_style. Closes the 42% style drift.
+- DELIVERED via paste.rs (operator runs on DGX; sandbox is hardware-blocked):
+  - patch_p1_style_pattern.py @ https://paste.rs/0Qzy0 (sha256 d45dfab0aa0a0c63)
+  - diag_p1_verify.py        @ https://paste.rs/bLpby (sha256 a045bcbfb2d07702)
+- 3 anchored/idempotent/reversible edits (.p1bak backups; --check/--apply/--rollback):
+  1. setup_taxonomy.style_of → pass RAW setup (not canonicalize(raw)) so raw-first
+     _setup_lookup honors explicit horizons. Fixes SSOT over-collapse
+     (breakdown_confirmed: was intraday → now multi_day; VERIFIED locally).
+  2. tqs_engine.calculate_tqs → WEIGHTING lens follows style_of(setup_type),
+     guarded (unknown + STYLE_WEIGHTS membership). Reversible via env
+     TQS_STYLE_FROM_PATTERN=false. Execution stamp untouched (brackets/TIF).
+  3. enhanced_scanner._enrich_alert_with_tqs → persist weights_used + scoring_style
+     INSIDE tqs_breakdown for audit + UI drill.
+- WATCH/DIAGNOSTIC TRIGGERS (operator-ratified): approaching_breakout/hod/orb/
+  range_break = pre-fire "checks in favor" that put a real setup ON WATCH (NOT
+  trades). carry_forward_watch = EOD watchlist carry-over tag (tomorrow's plan).
+  All already edge-excluded → resolve to style_of=unknown, get NO forced horizon.
+  The REAL orb/breakout/hod_breakout/range_break stay intraday (unaffected).
+  Old draft Edit #2 (force approaching_*→intraday) was DROPPED per this ruling.
+  diag_p1_verify SKIPS edge-excluded rows (reports them separately, never as
+  mismatches).
+- LOCAL VALIDATION (sandbox): py_compile OK; --check = 3 edits READY/unique
+  anchors; logic proofs confirmed (Edit#1 breakdown_confirmed→multi_day; watch
+  triggers edge-excluded→unknown; real setups intraday). paste.rs SHA == local.
+- NEXT: operator --apply + restart + diag_p1_verify --days 1
+  (target [2] pattern-correct ~100%, [3] weight fidelity ~100%, [4] non-zero=OK).
+  THEN unblocks: UI Track A (Decision tab + AI drawer), EV strategy_ev_r stamping,
+  adrp_20d warm-fill, TQS↔Confidence-Gate unify, entry-tendency slippage plumbing.
