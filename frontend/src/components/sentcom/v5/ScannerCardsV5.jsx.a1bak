@@ -22,7 +22,6 @@ import TradeStyleChip from './TradeStyleChip';
 // v19.34.258 — TQS is now the single source of truth on the card face.
 // SetupGradeChip / SMB / edge-rank scatter folds into the drill-down drawer.
 import TqsBadge from './TqsBadge';
-import ScoredAsChip from './ScoredAsChip';
 import { openTqsDrawer } from './tqsDrawerBus';
 // v19.34.29 (2026-05-14, mid-market) — Operator feedback: scanner cards
 // were showing only ONE Bot: line ("45sh · Holding ABNB @ ..."), no
@@ -396,15 +395,6 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
             source={card.source || 'alert'}
             testIdSuffix={`scanner-${card.symbol}`}
           />
-          {/* v19.34.272 (UI Track A / P1) — grading style TQS scored with
-              (pattern, not liquidity). Distinct from the horizon chip above. */}
-          {(card.setup_type || card.trade_style) && (
-            <ScoredAsChip
-              row={{ trade_style: card.trade_style, setup_type: card.setup_type }}
-              size="xs"
-              testIdSuffix={`scanner-${card.symbol}`}
-            />
-          )}
           {card.stage_note && card.stage_note !== 'setup' && card.stage !== 'manage' && card.stage !== 'close' && (
             <span
               className="v5-chip"
