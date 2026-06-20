@@ -3558,3 +3558,7 @@ patch_v*.py
 diag_v*.py
 diag_*.py
 *.p1bak
+
+*.a1bak
+*.p1bak
+*.bak.v*
