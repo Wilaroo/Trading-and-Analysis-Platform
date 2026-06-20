@@ -343,8 +343,26 @@ class TQSEngine:
         if not trade_style:
             trade_style = self._infer_trade_style(setup_type)
         
-        # Get weights for this trade style
-        weights = self._get_weights_for_style(trade_style)
+        # P1 (2026-06) TQS_STYLE_FROM_PATTERN: the WEIGHTING lens follows the
+        # pattern's intrinsic style (SSOT setup_taxonomy.style_of), NOT the
+        # liquidity-inflated stamped trade_style. Liquidity stays a feasibility/
+        # size concern (brackets/TIF), never a silent relabel of the score lens.
+        # Watch/diagnostic triggers (approaching_*, carry_forward_watch) return
+        # style_of=unknown -> the guard below leaves their stamp untouched.
+        import os as _os
+        _scoring_style = trade_style
+        if _os.environ.get("TQS_STYLE_FROM_PATTERN", "true").strip().lower() not in ("false", "0", "no", "off"):
+            try:
+                from services.setup_taxonomy import style_of as _style_of
+                _ps = (_style_of(setup_type) or "").strip().lower()
+                if _ps and _ps != "unknown" and _ps in self.STYLE_WEIGHTS:
+                    _scoring_style = _ps
+            except Exception as _se:
+                logger.warning("[tqs-p1] style_of(%s) failed: %s", setup_type, _se)
+        trade_style = _scoring_style
+
+        # Get weights for this (pattern-intrinsic) trade style
+        weights = self._get_weights_for_style(_scoring_style)
         
         try:
             # Calculate all 5 pillar scores (could parallelize these)

@@ -9606,6 +9606,13 @@ class EnhancedBackgroundScanner:
                     alert.tqs_pillar_grades = tqs_result.pillar_grades or {}
                     alert.tqs_breakdown = _td.get("breakdown", {}) or {}
                     alert.tqs_weights = tqs_result.weights_used or {}
+                    # P1 (2026-06): persist float weight profile + the pattern
+                    # scoring lens INSIDE tqs_breakdown so audits (diag_p1_verify)
+                    # and the UI Style-Lens / TQS drawer can verify which lens
+                    # scored it.
+                    if isinstance(alert.tqs_breakdown, dict):
+                        alert.tqs_breakdown["weights_used"] = dict(tqs_result.weights_used or {})
+                        alert.tqs_breakdown["scoring_style"] = tqs_result.trade_style
                 except Exception:
                     pass
                 
