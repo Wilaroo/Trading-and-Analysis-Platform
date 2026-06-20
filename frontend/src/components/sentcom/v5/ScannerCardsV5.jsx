@@ -23,6 +23,7 @@ import TradeStyleChip from './TradeStyleChip';
 // SetupGradeChip / SMB / edge-rank scatter folds into the drill-down drawer.
 import TqsBadge from './TqsBadge';
 import ScoredAsChip from './ScoredAsChip';
+import ProvenanceRing from './ProvenanceRing';
 import { openTqsDrawer } from './tqsDrawerBus';
 // v19.34.29 (2026-05-14, mid-market) — Operator feedback: scanner cards
 // were showing only ONE Bot: line ("45sh · Holding ABNB @ ..."), no
@@ -118,6 +119,8 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       setup_type: s.setup_type || s.type || null,
       trade_style: s.trade_style || s.scan_tier || s.tier || null,
       tqs_score: s.tqs_score ?? s.confidence ?? null,
+      tqs_grade: s.tqs_grade ?? null,
+      tqs_pillar_grades: s.tqs_pillar_grades || null,
       source: 'alert',
       change_pct: s.change_pct ?? s.relative_change ?? null,
       bot_text: s.bot_note || s.narrative || `${s.setup_type || 'setup'} flagged${s.confidence ? ` · conf ${formatPct(s.confidence)}` : ''}${s.relative_volume ? ` · RVol ${formatNum(s.relative_volume, 1)}×` : ''}.`,
@@ -158,6 +161,8 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       setup_type: a.setup_type || a.alert_type || null,
       trade_style: a.trade_style || a.scan_tier || a.tier || a.symbol_tier || null,
       tqs_score: a.tqs_score ?? a.confidence ?? null,
+      tqs_grade: a.tqs_grade ?? null,
+      tqs_pillar_grades: a.tqs_pillar_grades || null,
       source: 'alert',
       change_pct: a.change_pct ?? null,
       // Wave-1 (#2) — counter-trend warning. Surfaces the v17 soft-gate
@@ -252,6 +257,7 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
       trade_style: p.trade_style || p.scan_tier || p.tier || null,
       tqs_score: p.tqs_score ?? null,
       tqs_grade: p.tqs_grade ?? null,
+      tqs_pillar_grades: p.tqs_pillar_grades || (p.entry_context && p.entry_context.tqs && p.entry_context.tqs.pillar_grades) || null,
       source: 'position',
       change_pct: p.change_pct ?? null,
       // v19.34.56 — show the CONSOLIDATED share total, not whichever
@@ -357,6 +363,20 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          {/* v19.34.273 (UI Track A / A2) — provenance ring: 5 pillar arcs
+              colored by grade, TQS grade in center. Composition at a glance;
+              the TQS badge still shows the number. Click opens the drawer. */}
+          {card.tqs_pillar_grades && (
+            <ProvenanceRing
+              symbol={card.symbol}
+              source={card.source || 'alert'}
+              pillarGrades={card.tqs_pillar_grades}
+              grade={card.tqs_grade}
+              score={card.tqs_score}
+              size={28}
+              testIdSuffix={`scanner-${card.symbol}`}
+            />
+          )}
           <span
             className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors cursor-pointer"
             data-testid={`scanner-card-symbol-${card.symbol}`}

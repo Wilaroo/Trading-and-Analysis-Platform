@@ -3562,3 +3562,4 @@ diag_*.py
 *.a1bak
 *.p1bak
 *.bak.v*
+*.a2bak
