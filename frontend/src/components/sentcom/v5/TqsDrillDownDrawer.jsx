@@ -17,6 +17,7 @@ import { X, TrendingUp, TrendingDown } from 'lucide-react';
 import { TQS_OPEN_EVENT } from './tqsDrawerBus';
 import TqsBadge from './TqsBadge';
 import TqsPillarPanel from './TqsPillarPanel';
+import { gradingStyleKey } from '../../../utils/tradeStyleMeta';
 
 const fmtPx = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : `$${Number(v).toFixed(2)}`);
 const fmtPct = (v) => {
@@ -118,6 +119,12 @@ const TqsDrillDownDrawer = () => {
         weights: detail.weights || {},
         breakdown: detail.breakdown || {},
       }
+    : null;
+
+  // v19.34.272 (UI Track A / P1) — grading style (pattern, not liquidity).
+  // Prefer the persisted scoring_style; fall back to the setup-derived pattern.
+  const scoringStyle = detail
+    ? gradingStyleKey({ scoring_style: detail.scoring_style, setup_type: detail.setup_type })
     : null;
 
   return (
@@ -240,7 +247,7 @@ const TqsDrillDownDrawer = () => {
               )}
 
               {/* 5 weighted pillars */}
-              {pillarTqs && <TqsPillarPanel tqs={pillarTqs} testIdSuffix="drawer" />}
+              {pillarTqs && <TqsPillarPanel tqs={pillarTqs} scoringStyle={scoringStyle} testIdSuffix="drawer" />}
 
               {/* Folded-in context */}
               <div>

@@ -96,7 +96,7 @@ export const SETUP_TO_STYLE = {
   tidal_wave: 'intraday',                            // SSOT: momentum/breakout → intraday (was 'scalp')
   // ── SWING — pre-existing daily setups (multi_day) + v19.34.95 new (swing)
   base_breakout: 'swing',                            // v19.34.32 — re-mapped from 'position' (1-3 weeks is the realistic hold horizon)
-  breakdown_confirmed: 'intraday',                   // SSOT: breakdown family → intraday (was 'multi_day')
+  breakdown_confirmed: 'multi_day',                  // v19.34.271 P1: SSOT style_of (raw-first) → multi_day (was stale 'intraday')
   daily_breakout: 'multi_day',
   daily_squeeze: 'multi_day',
   day_2_continuation: 'swing',
@@ -296,6 +296,28 @@ export const getTradeStyleMeta = (row) => {
   const key = resolveTradeStyle(row);
   return TRADE_STYLE_META[key] || TRADE_STYLE_META.unknown;
 };
+
+/**
+ * v19.34.272 (UI Track A / P1) — PATTERN-INTRINSIC grading style.
+ *
+ * The style TQS used to WEIGHT the score (mirrors backend
+ * services/setup_taxonomy.style_of) — deliberately IGNORES the liquidity
+ * `trade_style` horizon stamp (that drives brackets/TIF, not the score lens).
+ *
+ * Precedence: persisted `scoring_style` (tqs_breakdown.scoring_style) →
+ * setup-derived pattern style via the live SSOT bridge (`setupLookup`).
+ * Returns a TRADE_STYLE_META key or 'unknown'.
+ */
+export const gradingStyleKey = (row = {}) => {
+  const ss = String(
+    row.scoring_style || (row.tqs_breakdown && row.tqs_breakdown.scoring_style) || ''
+  ).trim().toLowerCase();
+  if (ss && TRADE_STYLE_META[ss]) return ss;
+  return setupLookup(row.setup_variant) || setupLookup(row.setup_type) || 'unknown';
+};
+
+export const getGradingStyleMeta = (row) =>
+  TRADE_STYLE_META[gradingStyleKey(row)] || TRADE_STYLE_META.unknown;
 
 /**
  * Setup-name humaniser used in trade rows. Drops underscores, title-

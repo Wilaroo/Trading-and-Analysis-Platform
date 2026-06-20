@@ -22,6 +22,17 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { gradeFromScore } from './TqsBadge';
+import { TRADE_STYLE_META } from '../../../utils/tradeStyleMeta';
+
+// v19.34.272 (UI Track A / P1) — grading-style chip tone by style key.
+const GRADING_STYLE_TONE = {
+  fuchsia: 'text-fuchsia-300 border-fuchsia-800/70 bg-fuchsia-950/40',
+  sky:     'text-sky-300 border-sky-800/70 bg-sky-950/40',
+  emerald: 'text-emerald-300 border-emerald-800/70 bg-emerald-950/40',
+  amber:   'text-amber-300 border-amber-800/70 bg-amber-950/40',
+  rose:    'text-rose-300 border-rose-800/70 bg-rose-950/40',
+  slate:   'text-slate-400 border-slate-700 bg-slate-900/60',
+};
 
 // Canonical pillar order (matches services/tqs/tqs_engine.py weighting).
 const PILLAR_ORDER = ['setup', 'technical', 'fundamental', 'context', 'execution'];
@@ -182,7 +193,7 @@ const PillarRow = ({ pillarKey, meta, breakdown, score, grade, weight, testIdSuf
   );
 };
 
-const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
+const TqsPillarPanel = ({ tqs, scoringStyle = null, testIdSuffix = '' }) => {
   const [meta, setMeta] = useState({});
 
   useEffect(() => {
@@ -248,6 +259,22 @@ const TqsPillarPanel = ({ tqs, testIdSuffix = '' }) => {
           )}
         </span>
       </div>
+
+      {scoringStyle && TRADE_STYLE_META[scoringStyle] && (
+        <div
+          className="flex items-center gap-1.5 mb-2 -mt-0.5"
+          data-testid={`tqs-grading-style-${testIdSuffix}`}
+        >
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Grading style</span>
+          <span
+            className={`px-1.5 py-0 text-[11px] uppercase rounded-sm border font-bold tracking-wide ${GRADING_STYLE_TONE[TRADE_STYLE_META[scoringStyle].tone] || GRADING_STYLE_TONE.slate}`}
+            title={`TQS weighted this trade as ${TRADE_STYLE_META[scoringStyle].label} (${TRADE_STYLE_META[scoringStyle].horizon}) — pattern, not liquidity.`}
+          >
+            {TRADE_STYLE_META[scoringStyle].label}
+          </span>
+          <span className="text-[10px] text-zinc-600">weights below — pattern, not liquidity</span>
+        </div>
+      )}
 
       <div>
         {PILLAR_ORDER.map((key) => {
