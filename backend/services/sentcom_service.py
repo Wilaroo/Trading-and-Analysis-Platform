@@ -2862,6 +2862,14 @@ class SentComService:
                         "risk_reward": f"{alert.risk_reward:.1f}:1" if alert.risk_reward else "2:1",
                         "confidence": int(alert.tqs_score) if alert.tqs_score else int(alert.trigger_probability * 100) if alert.trigger_probability else 60,
                         "grade": alert.tqs_grade or alert.trade_grade,
+                        # v19.34.282 (A2i) — surface the per-pillar A-F breakdown +
+                        # canonical TQS score/grade so the Provenance Ring renders on
+                        # EVAL scanner cards. The /api/sentcom/setups feed (this dict)
+                        # previously dropped these, leaving every EVAL card ringless
+                        # even after A2h populated the alert objects.
+                        "tqs_score": (int(alert.tqs_score) if getattr(alert, "tqs_score", None) else None),
+                        "tqs_grade": getattr(alert, "tqs_grade", None) or getattr(alert, "trade_grade", None),
+                        "tqs_pillar_grades": getattr(alert, "tqs_pillar_grades", None) or {},
                         "priority": alert.priority.value if alert.priority else "medium",
                         "headline": alert.headline,
                         "timestamp": timestamp,
