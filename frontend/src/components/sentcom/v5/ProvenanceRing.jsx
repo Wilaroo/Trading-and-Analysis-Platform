@@ -2,8 +2,10 @@
  * ProvenanceRing — v19.34.273 (UI Track A / A2) · v19.34.276 scalable rail
  *
  * Compact SVG "provenance ring": 5 equal arcs, one per TQS pillar
- * (setup · technical · fundamental · context · execution), each colored by
- * that pillar's grade. The overall TQS grade letter sits in the center.
+ * (setup · technical · fundamental · context · execution). Each pillar has a
+ * FIXED identity color (5 always-distinct hues) and its grade drives the bright
+ * fill length over a faint track, so the ring shows composition AND per-pillar
+ * strength at a glance. The overall TQS grade letter sits in the center.
  *
  * It answers "where does this score come from?" at a glance — the
  * <TqsBadge/> still shows the precise number; this shows its composition.
@@ -44,6 +46,24 @@ const GRADE_STROKE = {
 };
 const MISSING = '#52525b'; // zinc-600 — visible neutral arc for an ungraded pillar
 const strokeFor = (g) => GRADE_STROKE[String(g || '').toUpperCase()] || MISSING;
+
+// v19.34.284 (A2k-ring) — each TQS pillar gets a FIXED identity color so the ring
+// always shows 5 distinct hues. Previously arcs were colored by GRADE, so
+// same-grade pillars (e.g. Technical B vs Context C+, or Setup D vs Execution F)
+// read as a single color and the ring looked like ~3 colors instead of 5. The
+// per-pillar grade now drives the bright fill LENGTH over a faint full track, so
+// you still see weak (short) vs strong (full) pillars at a glance.
+const PILLAR_COLOR = {
+  setup: '#8b5cf6', // violet-500
+  technical: '#22d3ee', // cyan-400
+  fundamental: '#f59e0b', // amber-500
+  context: '#34d399', // emerald-400
+  execution: '#fb7185', // rose-400
+};
+const GRADE_FRAC = {
+  'A+': 1.0, A: 0.95, 'B+': 0.84, B: 0.76, 'C+': 0.62, C: 0.54, D: 0.40, F: 0.24,
+};
+const fracFor = (g) => GRADE_FRAC[String(g || '').toUpperCase()] ?? 0;
 
 const polar = (cx, cy, r, deg) => {
   const a = ((deg - 90) * Math.PI) / 180;
@@ -122,21 +142,36 @@ export default function ProvenanceRing({
       <svg width={svgDim} height={svgDim} viewBox={`0 0 ${NOM} ${NOM}`} style={{ display: 'block' }}>
         {/* track */}
         <circle cx={c} cy={c} r={r} fill="none" stroke="#18181b" strokeWidth={sw} />
-        {/* pillar arcs */}
+        {/* pillar arcs — v19.34.284 (A2k-ring): each pillar has a FIXED identity
+            hue (5 always-distinct colors) and its GRADE drives the bright fill
+            length over a faint full-segment track, so the ring reads as 5 colors
+            at a glance while still showing weak (short) vs strong (full) pillars. */}
         {PILLAR_ORDER.map((k, i) => {
           const start = i * seg + gap / 2;
           const end = (i + 1) * seg - gap / 2;
+          const col = PILLAR_COLOR[k];
+          const frac = fracFor(grades[k]);
+          const fillEnd = start + (end - start) * frac;
           return (
-            <path
-              key={k}
-              d={arcPath(c, c, r, start, end)}
-              fill="none"
-              stroke={strokeFor(grades[k])}
-              strokeWidth={sw}
-              strokeLinecap="round"
-              data-pillar={k}
-              data-grade={grades[k] || ''}
-            />
+            <g key={k} data-pillar={k} data-grade={grades[k] || ''}>
+              <path
+                d={arcPath(c, c, r, start, end)}
+                fill="none"
+                stroke={col}
+                strokeOpacity={0.2}
+                strokeWidth={sw}
+                strokeLinecap="round"
+              />
+              {frac > 0.001 && (
+                <path
+                  d={arcPath(c, c, r, start, fillEnd)}
+                  fill="none"
+                  stroke={col}
+                  strokeWidth={sw}
+                  strokeLinecap="round"
+                />
+              )}
+            </g>
           );
         })}
         {/* center: numeric TQS score with the grade letter beneath it (when
