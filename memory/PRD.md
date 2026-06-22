@@ -9,7 +9,9 @@
 > scanner cards (source==='alert') that arrive WITH grades teach the cache; cards WITHOUT are
 > backfilled (grades + grade + score). Persists across REST/WS turnover AND page reloads.
 > Local: yarn build clean, 8/8 reconcile smoke, patcher round-trip IDENTICAL + idempotent +
-> rollback clean. PATCHER paste.rs/rHYt8 (patch_a2c_sticky_grades_cache.py). VERIFY next:
+> rollback clean + DRIFT-safe; PRE/POST SHA256 hash-guarded (AGENTS.md §2.2): PRE 4a7db055b416…
+> (repo HEAD 1721aa9, == live DGX) / POST 605bb2993cfe…. PATCHER paste.rs/xJ33R
+> (patch_a2c_sticky_grades_cache.py). VERIFY next:
 > apply on DGX → `cd frontend && yarn build` → hard-refresh, confirm rings stay. NEXT after
 > A2 verified: A1b backend (card-detail returns persisted scoring_style) → A3 Why-Trace modal.
 > DGX patcher workflow ONLY — no testing_agent. English.**

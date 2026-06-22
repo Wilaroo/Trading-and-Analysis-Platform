@@ -10,9 +10,11 @@ backfilled from it (grades + center grade + score). Ring now persists across RES
 turnover AND full page reloads. Closed/position cards untouched. 2 anchored idempotent edits to
 ScannerCardsV5.jsx (helpers + reconcile pass in the cards memo + debounced persist effect).
 Local verify: `yarn build` clean (no new warnings); 8/8 reconcile smoke (`__a2_reconcile.smoke.mjs`);
-patcher round-trip APPLY byte-identical to verified build, idempotent, rollback clean; paste cmp
-IDENTICAL. PATCHER: paste.rs/rHYt8 (`patch_a2c_sticky_grades_cache.py`, .a2cbak backups,
---check/--apply/--rollback). NEXT after apply: `cd frontend && yarn build` + hard-refresh.
+patcher round-trip APPLY byte-identical to verified build, idempotent, rollback clean, DRIFT
+aborts safely; paste cmp IDENTICAL. Per AGENTS.md §2.2 the patcher carries PRE/POST SHA256
+hash guards: PRE 4a7db055b416… (repo HEAD 1721aa9, == live DGX) / POST 605bb2993cfe…. PATCHER:
+paste.rs/xJ33R (`patch_a2c_sticky_grades_cache.py`, .a2cbak backups, --check/--apply/--rollback).
+NEXT after apply: `cd frontend && yarn build` + hard-refresh.
 DGX patcher workflow ONLY — no testing_agent. AWAITING DGX APPLY + operator live verification.
 
 
