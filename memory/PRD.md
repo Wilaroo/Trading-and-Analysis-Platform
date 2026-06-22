@@ -1,5 +1,15 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-22 SESSION ROLLUP (newest first).** Patcher-only delivery (paste.rs, span-SHA guarded).
+> - ✅ **A10 trigger-drift gate** — LIVE on DGX (commit 99da78b0), block mode. Stops stale/extended auto-exec entries (skip when live price drifts > AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT, default 2%, from trigger). Verified live: MCO flipped to WOULD-BLOCK at 2.07%.
+> - ✅ **B carry-forward dedup** — LIVE on DGX (commit 087be6fb). Hydrate collapses to newest per (symbol,setup,dir) + persist-prune. Verified: live alerts 148 → 19.
+> - ✅ **diag_a11 v2** (paste.rs/KoJgM) — read-only ready-to-fire snapshot: real live drift, dupe-collapse, n≥3 concentration gate.
+> - ✅ **diag_c** (paste.rs/TJBxG) — proved handoff's TGT=0.00 is RESOLVED (all 25 holds have target + OCA attached). Surfaced residual: 17/25 FROZEN marks (UPL=0).
+> - 🔜 **C2 IB-mark fallback** — BUILT + tested (pytest 6/6), PASTED, apply pending. patch_c2 paste.rs/1U9U8, test paste.rs/sVHXH, CHANGELOG note paste.rs/yb3hx. Fixes frozen marks via IB's per-position marketPrice (bypasses pusher sub cap). Env POSITION_IB_MARK_FALLBACK (default on). KILL-SWITCH NOTE: real marks → kill-switch sees true (possibly negative) UPL.
+> - ℹ️ Operator manually closed/cancelled all positions 3:55pm ET 2026-06-22 (clean slate); C2 is preventive for next session.
+> - ⏳ NEXT: apply C2 (+commit) & verify next RTH with diag_c (FROZEN→0); confirm A10 observe→block decision; Issue 3 per-style position cap; per-setup drift-distribution diag.
+
+
 > **✅ 2026-06-22 — (A10) AUTO-EXEC TRIGGER RE-VALIDATION (DRIFT) GATE — APPLIED + LIVE on DGX
 > (commit 99da78b0; CHANGELOG note 47d112f8), running in OBSERVE mode.** Closes the P0
 > stale/extended daily-setup DRIP that A8's restart/feed
