@@ -1,3 +1,22 @@
+## 2026-06-19 — v19.34.274 (A2c) — Provenance-ring FLICKER FIX (sticky grades cache)
+Operator report: scanner provenance rings "initially popup with the rings and then revert back
+to no rings". Root cause: `buildCards()` in `ScannerCardsV5.jsx` rebuilds cards every render —
+WS `alerts` carry `tqs_pillar_grades`, REST `setups` do NOT. When an alert turned over and only
+the REST payload remained for a symbol, the rebuilt card dropped the grades → `{card.tqs_pillar_grades && <ProvenanceRing/>}`
+went falsy → ring vanished. FIX (frontend-only, no backend/payload change): sticky per-symbol
+grades cache (in-memory `useRef(Map)` seeded from `localStorage`, 24h TTL). Scanner cards
+(`source === 'alert'`) that arrive WITH grades teach the cache; cards WITHOUT grades are
+backfilled from it (grades + center grade + score). Ring now persists across REST/WS payload
+turnover AND full page reloads. Closed/position cards untouched. 2 anchored idempotent edits to
+ScannerCardsV5.jsx (helpers + reconcile pass in the cards memo + debounced persist effect).
+Local verify: `yarn build` clean (no new warnings); 8/8 reconcile smoke (`__a2_reconcile.smoke.mjs`);
+patcher round-trip APPLY byte-identical to verified build, idempotent, rollback clean; paste cmp
+IDENTICAL. PATCHER: paste.rs/rHYt8 (`patch_a2c_sticky_grades_cache.py`, .a2cbak backups,
+--check/--apply/--rollback). NEXT after apply: `cd frontend && yarn build` + hard-refresh.
+DGX patcher workflow ONLY — no testing_agent. AWAITING DGX APPLY + operator live verification.
+
+
+
 ## 2026-06-18 — v390 FUNDAMENTAL PILLAR F2b — recent earnings BEAT/MISS surprise (post-earnings drift)
 The earnings sub-score only used proximity to UPCOMING earnings; it ignored the EPS/revenue
 BEAT/MISS surprise already captured in earnings_calendar. patch_v390 (paste.rs/Gn7Bg) queries the most

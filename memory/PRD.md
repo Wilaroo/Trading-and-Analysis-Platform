@@ -1,5 +1,20 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-19 — UI Track A2c PROVENANCE-RING FLICKER FIX BUILT + PASTED (DGX apply
+> pending). Fixes operator-reported "rings popup then revert to no rings". Root cause:
+> `ScannerCardsV5.buildCards()` rebuilds cards each render; WS `alerts` carry
+> `tqs_pillar_grades` but REST `setups` don't, so on alert turnover the rebuilt card dropped
+> the grades and the ring's `{card.tqs_pillar_grades && ...}` guard went falsy. FIX
+> (frontend-only): sticky per-symbol grades cache (`useRef(Map)` + localStorage, 24h TTL) —
+> scanner cards (source==='alert') that arrive WITH grades teach the cache; cards WITHOUT are
+> backfilled (grades + grade + score). Persists across REST/WS turnover AND page reloads.
+> Local: yarn build clean, 8/8 reconcile smoke, patcher round-trip IDENTICAL + idempotent +
+> rollback clean. PATCHER paste.rs/rHYt8 (patch_a2c_sticky_grades_cache.py). VERIFY next:
+> apply on DGX → `cd frontend && yarn build` → hard-refresh, confirm rings stay. NEXT after
+> A2 verified: A1b backend (card-detail returns persisted scoring_style) → A3 Why-Trace modal.
+> DGX patcher workflow ONLY — no testing_agent. English.**
+
+
 > **✅ 2026-06-19 — v399 + v399b SHIPPED, VERIFIED LIVE ON DGX, PUSHED (main @ 4c0dafe2).**
 > v399 (scheduler boot staleness-guard): `services/scheduler_catchup.py` re-runs cron jobs
 > missed while the app was closed — auto-staggered (Mongo 20s / IB 120s), HOLIDAY-AWARE
