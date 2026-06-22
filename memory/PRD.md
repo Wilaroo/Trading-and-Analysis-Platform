@@ -1,5 +1,14 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-19 — UI Track A2g: RING NUMBER+LETTER & HEADER CHIP REMOVAL — BUILT + PASTED
+> (DGX apply pending). Ring center now shows score + grade letter (58 / B); removed redundant
+> header <TqsBadge/> chip (+ import). Frontend-only. Runtime-verified (4/4 exec) + mock screenshot.
+> yarn build clean; 2-file patcher round-trip IDENTICAL + idempotent + rollback + DRIFT-safe.
+> HASH GUARDS: ProvenanceRing PRE 29ad9c2a4fa9…(A2f)/POST ef43a78596fe…; ScannerCardsV5 PRE
+> b7ff08ae52ec…(A2d)/POST 18697ef6affc…. PATCHER paste.rs/LXbv9 (patch_a2g_ring_number_letter.py).
+> VERIFY: apply → yarn build → hard-refresh. NEXT: A1b (drawer scoring_style) → A3 Why-Trace.
+> DGX patcher ONLY. English.**
+
 > **🔧 2026-06-19 — UI Track A2f HOTFIX: RING TDZ CRASH — BUILT + PASTED (DGX apply pending).
 > A2e crashed the scanner ("Cannot access 'NOM' before initialization") — center-number edit
 > read `NOM` above its `const NOM=100` (temporal dead zone). FIX: reordered declarations; same

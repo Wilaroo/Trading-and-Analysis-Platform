@@ -1,3 +1,19 @@
+## 2026-06-19 — v19.34.279 (A2g) — Ring center number+letter; remove header TQS chip
+Operator polish: (1) ring center now shows numeric TQS score WITH grade letter beneath (e.g.
+58 / B), not number-only; (2) removed the now-redundant `<TqsBadge/>` chip from the scanner card
+header (+ its import) since the ring carries score + grade. Frontend-only, presentational.
+ProvenanceRing.jsx: stacked center text (number at c-0.09·NOM font 0.34/0.26, grade letter at
+c+0.22·NOM font 0.22, both grade-colored; grade-only rows still center the letter at 0.40).
+ScannerCardsV5.jsx: dropped TqsBadge usage + import. Runtime-verified (transpile+exec 4/4) +
+HTML mock screenshot (number/letter stack reads well, header chip gone). yarn build clean.
+2-file patcher round-trip byte-identical, idempotent, rollback clean, DRIFT-safe; paste cmp
+IDENTICAL. HASH GUARDS: ProvenanceRing PRE 29ad9c2a4fa9… (A2f) / POST ef43a78596fe…;
+ScannerCardsV5 PRE b7ff08ae52ec… (committed A2d) / POST 18697ef6affc…. PATCHER: paste.rs/LXbv9
+(`patch_a2g_ring_number_letter.py`, .a2gbak). NEXT after apply: `cd frontend && yarn build` +
+hard-refresh. Repo at 60f946f (incl. operator .a2*bak gitignore cleanup). DGX patcher only.
+
+
+
 ## 2026-06-19 — v19.34.278 (A2f) — HOTFIX: ring TDZ crash ("Cannot access 'NOM'")
 A2e CRASHED the scanner panel: "SCANNER CRASHED — Cannot access 'NOM' before initialization".
 Root cause: A2e's center-number edit placed `const hasScore/centerText/centerFont` (which read

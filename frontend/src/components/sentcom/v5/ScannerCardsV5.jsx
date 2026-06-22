@@ -21,7 +21,8 @@ import PreMarketModeBanner from './PreMarketModeBanner';
 import TradeStyleChip from './TradeStyleChip';
 // v19.34.258 — TQS is now the single source of truth on the card face.
 // SetupGradeChip / SMB / edge-rank scatter folds into the drill-down drawer.
-import TqsBadge from './TqsBadge';
+// v19.34.279 — TQS badge removed from the scanner card header (the provenance
+// ring now carries score + grade). TqsBadge import dropped.
 import ScoredAsChip from './ScoredAsChip';
 import ProvenanceRing from './ProvenanceRing';
 import { openTqsDrawer } from './tqsDrawerBus';
@@ -413,16 +414,9 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
               testIdSuffix={`scanner-${card.symbol}`}
             />
           )}
-          {/* v19.34.258 — single trusted TQS score on the face; click
-              opens the consolidated drill-down drawer. Replaces the old
-              SetupGradeChip / SMB scatter. */}
-          <TqsBadge
-            symbol={card.symbol}
-            score={card.tqs_score}
-            gradeFallback={card.tqs_grade}
-            source={card.source || 'alert'}
-            testIdSuffix={`scanner-${card.symbol}`}
-          />
+          {/* v19.34.279 (UI Track A / A2g) — header TQS badge removed; the
+              provenance ring now shows the score + grade, so the chip was
+              redundant on the card face. */}
           {/* v19.34.272 (UI Track A / P1) — grading style TQS scored with
               (pattern, not liquidity). Distinct from the horizon chip above. */}
           {(card.setup_type || card.trade_style) && (
