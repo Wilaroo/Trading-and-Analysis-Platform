@@ -361,29 +361,22 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
       className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}${isNew ? ' just-arrived' : ''}`}
     >
-      {/* v19.34.276 (UI Track A / A2 polish) — provenance ring promoted to a
-          full-height left rail so the 5 pillar arcs + center grade are legible
-          at a glance (was a cramped 28px inline chip). */}
-      <div className="flex items-stretch gap-3">
-        {card.tqs_pillar_grades && (
-          <div className="shrink-0 self-stretch flex items-center" data-testid={`provenance-rail-${card.symbol}`}>
-            <div style={{ height: '100%', aspectRatio: '1 / 1', maxHeight: 88, minHeight: 40 }}>
-              <ProvenanceRing
-                symbol={card.symbol}
-                source={card.source || 'alert'}
-                pillarGrades={card.tqs_pillar_grades}
-                grade={card.tqs_grade}
-                score={card.tqs_score}
-                fill
-                className="w-full h-full"
-                testIdSuffix={`scanner-${card.symbol}`}
-              />
-            </div>
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          {/* v19.34.273 (UI Track A / A2) — provenance ring: 5 pillar arcs
+              colored by grade, TQS grade in center. Composition at a glance;
+              the TQS badge still shows the number. Click opens the drawer. */}
+          {card.tqs_pillar_grades && (
+            <ProvenanceRing
+              symbol={card.symbol}
+              source={card.source || 'alert'}
+              pillarGrades={card.tqs_pillar_grades}
+              grade={card.tqs_grade}
+              score={card.tqs_score}
+              size={28}
+              testIdSuffix={`scanner-${card.symbol}`}
+            />
+          )}
           <span
             className="v5-mono font-bold text-sm text-zinc-100 hover:text-cyan-300 hover:underline transition-colors cursor-pointer"
             data-testid={`scanner-card-symbol-${card.symbol}`}
@@ -548,8 +541,6 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
           )}
         </div>
       )}
-        </div>{/* /flex-1 content column (v19.34.276) */}
-      </div>{/* /flex items-stretch ring-rail row (v19.34.276) */}
     </div>
   );
 };

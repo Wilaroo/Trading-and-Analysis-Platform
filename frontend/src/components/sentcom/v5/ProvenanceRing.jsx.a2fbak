@@ -83,6 +83,12 @@ export default function ProvenanceRing({
   if (!hasAny) return null;
 
   const centerGrade = String(grade || (score != null ? gradeFromScore(score) : '') || '').toUpperCase();
+  // Center shows the numeric TQS score (the "TQS number") when available, so
+  // the ring is self-explanatory; the grade letter still lives on the chip.
+  // Falls back to the grade letter for rows that only carry a grade.
+  const hasScore = score != null && !Number.isNaN(Number(score));
+  const centerText = hasScore ? String(Math.round(Number(score))) : centerGrade;
+  const centerFont = centerText.length >= 3 ? NOM * 0.30 : NOM * 0.40;
   // Fixed 100×100 nominal space → ring scales cleanly via CSS (fixed `size`
   // px OR `fill` = 100% of its container).
   const NOM = 100;
@@ -93,12 +99,6 @@ export default function ProvenanceRing({
   const seg = 360 / PILLAR_ORDER.length;
   const testId = `provenance-ring${testIdSuffix ? `-${testIdSuffix}` : ''}`;
   const svgDim = fill ? '100%' : size;
-  // Center shows the numeric TQS score (the "TQS number") when available, so
-  // the ring is self-explanatory; the grade letter still lives on the chip.
-  // Falls back to the grade letter for rows that only carry a grade.
-  const hasScore = score != null && !Number.isNaN(Number(score));
-  const centerText = hasScore ? String(Math.round(Number(score))) : centerGrade;
-  const centerFont = centerText.length >= 3 ? NOM * 0.30 : NOM * 0.40;
 
   const title =
     'Provenance — ' +

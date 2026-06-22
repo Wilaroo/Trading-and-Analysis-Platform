@@ -33,16 +33,14 @@ const PILLAR_LABEL = {
 };
 
 // Grade → stroke color (mirrors TqsBadge.gradeTone families).
-// Chosen so every band is clearly distinguishable on the dark card — in
-// particular C (yellow) vs D (orange), which previously read as one color.
 const GRADE_STROKE = {
-  'A+': '#22c55e', A: '#22c55e', // green-500
-  'B+': '#38bdf8', B: '#38bdf8', // sky-400
-  'C+': '#facc15', C: '#facc15', // yellow-400 (clearly yellow)
-  D: '#f97316',                  // orange-500 (clearly orange)
-  F: '#ef4444',                  // red-500
+  'A+': '#10b981', A: '#10b981',
+  'B+': '#0ea5e9', B: '#0ea5e9',
+  'C+': '#f59e0b', C: '#f59e0b',
+  D: '#f97316',
+  F: '#f43f5e',
 };
-const MISSING = '#52525b'; // zinc-600 — visible neutral arc for an ungraded pillar
+const MISSING = '#3f3f46'; // zinc-700 — pillar with no grade
 const strokeFor = (g) => GRADE_STROKE[String(g || '').toUpperCase()] || MISSING;
 
 const polar = (cx, cy, r, deg) => {
@@ -93,12 +91,6 @@ export default function ProvenanceRing({
   const seg = 360 / PILLAR_ORDER.length;
   const testId = `provenance-ring${testIdSuffix ? `-${testIdSuffix}` : ''}`;
   const svgDim = fill ? '100%' : size;
-  // Center shows the numeric TQS score (the "TQS number") when available, so
-  // the ring is self-explanatory; the grade letter still lives on the chip.
-  // Falls back to the grade letter for rows that only carry a grade.
-  const hasScore = score != null && !Number.isNaN(Number(score));
-  const centerText = hasScore ? String(Math.round(Number(score))) : centerGrade;
-  const centerFont = centerText.length >= 3 ? NOM * 0.30 : NOM * 0.40;
 
   const title =
     'Provenance — ' +
@@ -139,19 +131,19 @@ export default function ProvenanceRing({
             />
           );
         })}
-        {/* center: numeric TQS score (falls back to grade letter) */}
-        {centerText && (
+        {/* center grade letter */}
+        {centerGrade && (
           <text
             x={c}
             y={c}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={centerFont}
+            fontSize={NOM * 0.34}
             fontWeight="700"
             fill={strokeFor(centerGrade)}
             fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
           >
-            {centerText}
+            {centerGrade}
           </text>
         )}
       </svg>
