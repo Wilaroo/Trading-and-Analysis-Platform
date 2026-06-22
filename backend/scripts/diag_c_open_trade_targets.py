@@ -138,29 +138,39 @@ def main():
         mark = _f(_first(t, "current_price", "mark_price", default=0))
         upl = _f(_first(t, "unrealized_pnl", default=0))
         lq = quotes.get(sym, 0.0)
+        # mark state: NONE (no mark), FROZEN (marked but UPL==0 → current_price
+        # pinned at entry, i.e. live quote not being applied), LIVE (UPL moving).
+        if mark <= 0:
+            mstate = "NONE"
+        elif abs(upl) < 1e-9:
+            mstate = "FROZEN"
+        else:
+            mstate = "LIVE"
         rows.append({
             "sym": sym, "setup": _first(t, "setup_type", default="?"),
             "dir": _first(t, "direction", default="?"),
             "entry": entry, "stop": stop, "tgts": tgts, "attached": _attached(t),
-            "mark": mark, "upl": upl, "lq": lq, "adopted": _is_adopted(t),
+            "mark": mark, "upl": upl, "lq": lq, "mstate": mstate, "adopted": _is_adopted(t),
             "src": str(_first(t, "synthetic_source", "entered_by", "source", default="") or ""),
         })
 
     print(f"{'SYMBOL':<7}{'SETUP':<20}{'DIR':<6}{'ENTRY':>9}{'STOP':>9}{'TARGET':>10}"
-          f"{'ATT':>4}{'MARK':>9}{'UPL':>10}{'LQ':>9}  {'PROV'}")
-    print("-" * 110)
-    for r in sorted(rows, key=lambda r: (bool(r["tgts"]), r["mark"] > 0)):
+          f"{'ATT':>4}{'MARK':>9}{'UPL':>10}{'LQ':>9}{'MST':>8}  {'PROV'}")
+    print("-" * 118)
+    for r in sorted(rows, key=lambda r: (bool(r["tgts"]), r["mstate"] == "LIVE")):
         tg = f"{r['tgts'][0]:.2f}" if r["tgts"] else "—"
         att = "Y" if r["attached"] else "-"
         prov = "ADOPTED" if r["adopted"] else "scanner"
         if r["src"]:
             prov += f"({r['src'][:14]})"
         print(f"{r['sym']:<7}{str(r['setup'])[:19]:<20}{str(r['dir'])[:5]:<6}{r['entry']:>9.2f}"
-              f"{r['stop']:>9.2f}{tg:>10}{att:>4}{r['mark']:>9.2f}{r['upl']:>10.2f}{r['lq']:>9.2f}  {prov}")
+              f"{r['stop']:>9.2f}{tg:>10}{att:>4}{r['mark']:>9.2f}{r['upl']:>10.2f}{r['lq']:>9.2f}"
+              f"{r['mstate']:>8}  {prov}")
 
     no_tgt = [r for r in rows if not r["tgts"]]
     tgt_unattached = [r for r in rows if r["tgts"] and not r["attached"]]
-    no_mark = [r for r in rows if r["mark"] <= 0]
+    no_mark = [r for r in rows if r["mstate"] == "NONE"]
+    frozen = [r for r in rows if r["mstate"] == "FROZEN"]
     no_mark_has_lq = [r for r in no_mark if r["lq"] > 0]
     no_mark_no_lq = [r for r in no_mark if r["lq"] <= 0]
     adopted = [r for r in rows if r["adopted"]]
@@ -171,7 +181,9 @@ def main():
     print(f"    ├─ adopted (no setup context):  {sum(1 for r in no_tgt if r['adopted'])}")
     print(f"    └─ scanner (derivation/attach): {sum(1 for r in no_tgt if not r['adopted'])}")
     print(f"  target set but NOT attached @IB:  {len(tgt_unattached)}")
-    print(f"  NO live mark (current_price<=0):  {len(no_mark)}")
+    print(f"  LIVE marks (tracking quote):      {sum(1 for r in rows if r['mstate'] == 'LIVE')}")
+    print(f"  FROZEN marks (pinned at entry):   {len(frozen)}  ← UPL stuck at 0; quote not applied")
+    print(f"  NO mark (current_price<=0):       {len(no_mark)}")
     print(f"    ├─ live quote EXISTS (apply gap): {len(no_mark_has_lq)}")
     print(f"    └─ no live quote (not subscribed): {len(no_mark_no_lq)}")
     print(f"  IB-adopted holds total:           {len(adopted)}")
@@ -184,23 +196,24 @@ def main():
     if no_tgt:
         if sum(1 for r in no_tgt if r["adopted"]) >= len(no_tgt) * 0.6:
             print("  • TGT=0 is mostly on ADOPTED IB orphans → fix = BACKFILL a target from")
-            print("    entry/stop + an R-ladder for adopted holds (the scanner exec path already")
-            print("    derives targets, so it's not an execution-propagation bug).")
+            print("    entry/stop + an R-ladder for adopted holds.")
         else:
-            print("  • TGT=0 on SCANNER-entered holds → the derive/attach step is being skipped")
-            print("    on the execution path for these — needs a targeted fix there.")
+            print("  • TGT=0 on SCANNER-entered holds → derive/attach step skipped on execution.")
+    else:
+        print("  ✅ TARGETS: every open hold has a target value (handoff's TGT=0 issue resolved).")
     if tgt_unattached:
-        print(f"  • {len(tgt_unattached)} hold(s) have a target value but NO OCA order at IB →")
-        print("    bracket attach gap (attach_oca_stop_target / bracket_reissue).")
-    if no_mark_has_lq:
-        print(f"  • {len(no_mark_has_lq)} hold(s) have NO mark despite a LIVE quote existing →")
-        print("    the quote isn't being applied to the trade's current_price (APPLY gap),")
-        print("    not a subscription gap.")
+        print(f"  • {len(tgt_unattached)} hold(s) have a target but NO OCA order at IB → bracket attach gap.")
+    if frozen:
+        print(f"  • {len(frozen)} hold(s) have FROZEN marks (current_price pinned at entry, live quote")
+        print("    diverges) → their pushed quote is STALE and position_manager skips the mark")
+        print("    update (staleness guard). The held names aren't being kept fresh in the pusher")
+        print("    feed. NOTE: IB-side OCA brackets are live (ATT=Y) so exits still fire server-side.")
+        print("    ACTION: re-run this diag in ~3-5 min — the throttled stale-resub drain (1/60s)")
+        print("    may heal it. If FROZEN stays high, it's a pusher-subscription pin gap (the fix).")
     if no_mark_no_lq:
-        print(f"  • {len(no_mark_no_lq)} hold(s) have NO mark AND no live quote → not subscribed")
-        print("    to the live feed (SUBSCRIPTION gap — add held symbols to the sub set).")
-    if not no_tgt and not no_mark:
-        print("  ✅ All open holds have a target and a live mark. No plumbing gap.")
+        print(f"  • {len(no_mark_no_lq)} hold(s) have NO mark AND no live quote → not subscribed.")
+    if not no_tgt and not frozen and not no_mark:
+        print("  ✅ All open holds have a target and a LIVE mark. No plumbing gap.")
 
 
 if __name__ == "__main__":
