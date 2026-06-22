@@ -27051,3 +27051,29 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   Breaking News(intraday catalyst), Bella Trade(distinct long/short), Back-Through
   Open(investigate). No sheets for squeeze(29k)/relative_strength(17k+11k)/
   daily_squeeze(10k) -> research params online.
+
+
+- 2026-06-22 A7 (SCAN-LOOP LIVENESS P0 + DMA SOFTENING P1): RCA of the dead
+  intraday scanner. Live reads proved focus_mode=live, collection_mode=INACTIVE,
+  window=afternoon/live_intraday, ib_connected=True — yet the ENHANCED scanner
+  (/api/live-scanner/status, NOT /api/scanner/status which is the idle
+  predictive_scanner red-herring) showed running=False, scan_count=0,
+  last_scan=None with 19 stale hydrated alerts. Root cause: start() awaited the
+  blocking pymongo carry-forward hydrate BEFORE setting _running / creating
+  _scan_task; under the 5s asyncio.wait_for() budget at server boot a slow
+  hydrate let wait_for cancel start() mid-hydrate -> loop task never created ->
+  scanner permanently dead while still showing the alerts the hydrate had
+  already loaded (explains active_alerts=19 + scan_count=0). FIX (patch_a7,
+  paste.rs/wQ5jm): EDIT-1 flip _running + spawn _scan_task FIRST, hydrate runs
+  after the loop is live. EDIT-2 softened the DMA directional filter (was a hard
+  binary reject of any swing/position LONG even $0.01 below EMA50 / position
+  longs below SMA200): now (1) 2% proximity buffer (DMA_LONG_BUFFER_PCT env),
+  (2) structure-aware (never reject a long while EMA50>SMA200, mirror for
+  shorts), (3) pullback-setup exemption (accumulation_entry, three_week_tight,
+  vwap_bounce, second_chance, rubber_band, backside, mean_reversion,
+  first_vwap_pullback, pullback). Span-SHA-guarded patcher: start span PRE
+  6869042d, DMA span PRE 6df9cbf3. test_a7_scanloop_dma.py = 14/14 pass
+  (start() loop survives slow-hydrate+wait_for-cancel; DMA truth-table).
+  Instant unblock (no restart): POST /api/live-scanner/start. Durable fix needs
+  patch_a7 + backend restart. NOTE: live DGX verification pending operator apply
+  (sandbox has no IB/live data).
