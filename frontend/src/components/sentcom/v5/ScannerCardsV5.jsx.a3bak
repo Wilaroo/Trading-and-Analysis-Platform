@@ -357,7 +357,7 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
     <div
       data-testid={`v5-scanner-card-${card.symbol}`}
       data-card-index={dataCardIndex}
-      onClick={() => openTqsDrawer({ symbol: card.symbol, source: card.source || 'alert', card })}
+      onClick={() => openTqsDrawer({ symbol: card.symbol, source: card.source || 'alert' })}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
       className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}${isNew ? ' just-arrived' : ''}`}

@@ -13,11 +13,10 @@
  * (v19.34.256). Mounted ONCE at the V5 root; opened via tqsDrawerBus.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, TrendingUp, TrendingDown, GitBranch } from 'lucide-react';
+import { X, TrendingUp, TrendingDown } from 'lucide-react';
 import { TQS_OPEN_EVENT } from './tqsDrawerBus';
 import TqsBadge from './TqsBadge';
 import TqsPillarPanel from './TqsPillarPanel';
-import WhyTraceModal from './WhyTraceModal';
 import { gradingStyleKey } from '../../../utils/tradeStyleMeta';
 
 const fmtPx = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : `$${Number(v).toFixed(2)}`);
@@ -63,8 +62,6 @@ const TqsDrillDownDrawer = () => {
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
-  const [card, setCard] = useState(null);
-  const [whyOpen, setWhyOpen] = useState(false);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -90,11 +87,9 @@ const TqsDrillDownDrawer = () => {
 
   useEffect(() => {
     const onOpen = (e) => {
-      const { symbol, source, card: cardObj } = e.detail || {};
+      const { symbol, source } = e.detail || {};
       if (!symbol) return;
       setMeta({ symbol, source: source || 'alert' });
-      setCard(cardObj || null);
-      setWhyOpen(false);
       setOpen(true);
       load(symbol, source || 'alert');
     };
@@ -175,17 +170,6 @@ const TqsDrillDownDrawer = () => {
             )}
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {detail && (
-              <button
-                type="button"
-                onClick={() => setWhyOpen(true)}
-                data-testid="why-trace-open"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900 text-[11px] uppercase tracking-wider text-zinc-300 hover:text-white hover:border-zinc-500 transition-colors"
-              >
-                <GitBranch className="w-3.5 h-3.5" />
-                Why-Trace
-              </button>
-            )}
             {detail && (
               <TqsBadge
                 symbol={meta.symbol}
@@ -307,13 +291,6 @@ const TqsDrillDownDrawer = () => {
           )}
         </div>
       </aside>
-
-      <WhyTraceModal
-        open={whyOpen}
-        onClose={() => setWhyOpen(false)}
-        card={card}
-        detail={detail}
-      />
     </>
   );
 };
