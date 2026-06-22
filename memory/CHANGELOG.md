@@ -1,3 +1,28 @@
+## 2026-06-22 — v19.34.281 (A2h) — Provenance Rings on EVERY live scanner alert
+The A2 Provenance Ring renders only when a scanner card carries `tqs_pillar_grades`
+(the per-pillar A–F breakdown). The A2 changelog assumed "the scanner payload already
+carries tqs_pillar_grades (asdict)" — but it was EMPTY for a subset of live alerts, so
+only SOME EVAL/POS cards showed the ring (RIOT/TNA/MCHP did; KEYS/TTMI did not).
+ROOT CAUSE: those grades are computed only by `_enrich_alert_with_tqs()`, which runs
+unconditionally on just the main RTH live-tick scan path (~L4196). Every OTHER alert
+path (bar-poll / daily-swing / re-emit) funnels through the universal emission chokepoint
+`_process_new_alert()`, which re-enriched ONLY when `tqs_score <= 0`. Alerts reaching the
+chokepoint with `tqs_score>0` (scored by a lighter step) but an EMPTY `tqs_pillar_grades`
+skipped enrichment → their WS `scanner_alerts` payload (`alert.to_dict()`) shipped no
+breakdown → frontend rendered NO ring.
+FIX (backend-only, additive, 1 chunk on services/enhanced_scanner.py): widen the chokepoint
+guard to ALSO re-enrich when the pillar breakdown is MISSING, not just when the score is
+absent — `_a2h_missing_pillars = not (alert.tqs_pillar_grades or {})`. Because
+`_process_new_alert` is the universal emission point for EVERY alert path, this guarantees
+pillar grades (hence a ring) on every live card. `_enrich_alert_with_tqs` is try/except-safe
++ idempotent; RTH alerts that already carry pillars don't match the new condition (no
+double work).
+DELIVERY: chunk patcher `scripts/patch_a2h_provenance_ring_backfill.py` (paste.rs/dNzkk),
+PRE `011b8c0e…` → POST `77956844…` (rebased against live DGX bytes after a sandbox-baseline
+drift abort — exactly the §2 drift-recovery flow; round-trip verified). Applied + committed
+`60943659`; backend restarted clean.
+VERIFY: next scan cycle — every EVAL/POS scanner card carries a Provenance Ring.
+
 ## 2026-06-19 — v19.34.280 (A1b) — card-detail returns persisted scoring_style
 The TQS drill-down drawer already reads `detail.scoring_style` to stamp the scoring lens, but
 `GET /api/tqs/card-detail/{symbol}` never returned it → drawer fell back to a setup-derived GUESS.
