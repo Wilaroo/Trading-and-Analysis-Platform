@@ -1,3 +1,18 @@
+## 2026-06-19 — v19.34.280 (A1b) — card-detail returns persisted scoring_style
+The TQS drill-down drawer already reads `detail.scoring_style` to stamp the scoring lens, but
+`GET /api/tqs/card-detail/{symbol}` never returned it → drawer fell back to a setup-derived GUESS.
+The P1 fix persists the exact pattern scoring lens as `tqs_breakdown.scoring_style` (alerts) /
+`entry_context.tqs.breakdown.scoring_style` (positions). FIX (backend-only, additive, single field
+in tqs_router.py): surface that persisted value as `detail.scoring_style` (handles both record
+shapes; empty → frontend falls back to setup-derived pattern = current behaviour). No frontend
+change. Extractor unit-tested 6/6; py_compile OK; patcher round-trip byte-identical, idempotent,
+rollback clean, DRIFT-safe; paste cmp IDENTICAL. HASH GUARDS: PRE a808dd7c97be… / POST f52dbcd3e151….
+PATCHER: paste.rs/x2lda (`patch_a1b_card_detail_scoring_style.py`, .a1bbak). NEXT after apply:
+`./start_backend.sh --force` (backend-only). Verify: open drawer for a symbol scored post-P1 →
+"scored as" stamp reflects persisted pattern lens. NEXT TASK: A3 Why-Trace modal. DGX patcher only.
+
+
+
 ## 2026-06-19 — v19.34.279 (A2g) — Ring center number+letter; remove header TQS chip
 Operator polish: (1) ring center now shows numeric TQS score WITH grade letter beneath (e.g.
 58 / B), not number-only; (2) removed the now-redundant `<TqsBadge/>` chip from the scanner card

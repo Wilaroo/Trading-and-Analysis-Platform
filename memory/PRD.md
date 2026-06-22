@@ -1,6 +1,16 @@
 # TradeCommand / SentCom — Product Requirements
 
-> **🔜 2026-06-19 — UI Track A2g: RING NUMBER+LETTER & HEADER CHIP REMOVAL — BUILT + PASTED
+> **🔜 2026-06-19 — UI Track A1b: card-detail scoring_style — BUILT + PASTED (DGX apply pending).
+> Drawer already reads detail.scoring_style but /api/tqs/card-detail never returned it (fell back
+> to setup-derived guess). FIX (backend-only, additive 1 field in tqs_router.py): surface persisted
+> pattern lens from tqs_breakdown.scoring_style (alerts) / entry_context.tqs.breakdown.scoring_style
+> (positions). No frontend change. Extractor 6/6, py_compile OK, patcher round-trip IDENTICAL +
+> idempotent + rollback + DRIFT-safe. PRE a808dd7c97be… / POST f52dbcd3e151…. PATCHER paste.rs/x2lda
+> (patch_a1b_card_detail_scoring_style.py). VERIFY: apply → ./start_backend.sh --force → open drawer
+> for a post-P1 symbol, "scored as" reflects persisted lens. NEXT: A3 Why-Trace modal. DGX patcher
+> ONLY. English.**
+
+
 > (DGX apply pending). Ring center now shows score + grade letter (58 / B); removed redundant
 > header <TqsBadge/> chip (+ import). Frontend-only. Runtime-verified (4/4 exec) + mock screenshot.
 > yarn build clean; 2-file patcher round-trip IDENTICAL + idempotent + rollback + DRIFT-safe.

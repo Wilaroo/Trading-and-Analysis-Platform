@@ -192,6 +192,16 @@ async def get_tqs_card_detail(
         "setup_type": rec.get("setup_type") or "",
         "direction": rec.get("direction") or (detail.get("position") or {}).get("direction") or "long",
         "trade_style": rec.get("trade_style") or "",
+        # v19.34.280 (UI Track A / A1b) — the EXACT pattern scoring lens TQS
+        # weighted this trade with. P1 persists it as tqs_breakdown.scoring_style
+        # (alerts); for positions it's nested under entry_context.tqs.breakdown.
+        # Lets the drawer show the precise "scored as" stamp rather than a
+        # setup-derived guess. Empty → frontend falls back to setup-derived.
+        "scoring_style": (
+            (breakdown.get("scoring_style") if isinstance(breakdown, dict) else "")
+            or (breakdown.get("breakdown") or {} if isinstance(breakdown, dict) else {}).get("scoring_style")
+            or ""
+        ),
         "breakdown": breakdown,
         # v19.34.305 — when the persisted alert predates weight-capture (or it
         # was stored empty), reconstruct the ACTUAL style-aware weights for this
