@@ -10,14 +10,14 @@ export const TQS_OPEN_EVENT = 'sentcom:open-tqs';
 
 /**
  * Open the TQS drill-down drawer for a symbol.
- * @param {{symbol: string, source?: 'alert'|'position'}} payload
+ * @param {{symbol: string, source?: 'alert'|'position', card?: object}} payload
  */
-export const openTqsDrawer = ({ symbol, source = 'alert' } = {}) => {
+export const openTqsDrawer = ({ symbol, source = 'alert', card = null } = {}) => {
   if (!symbol) return;
   try {
     window.dispatchEvent(
       new CustomEvent(TQS_OPEN_EVENT, {
-        detail: { symbol: String(symbol).toUpperCase(), source },
+        detail: { symbol: String(symbol).toUpperCase(), source, card },
       }),
     );
   } catch {
