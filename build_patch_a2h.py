@@ -13,8 +13,10 @@ import os
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REL = "backend/services/enhanced_scanner.py"
-PRISTINE = os.path.join(ROOT, REL + ".a2hbak")   # pre-A2h bytes (baseline)
-PATCHED = os.path.join(ROOT, REL)                 # current (A2h applied)
+# Rebased against the LIVE DGX bytes (sha 011b8c0e…) uploaded by the operator,
+# per AGENTS.md §0.5/§2 — the sandbox baseline drifted and must not be trusted.
+PRISTINE = "/tmp/es_dgx"           # authentic live DGX file (PRE baseline)
+PATCHED = "/tmp/es_dgx_patched"    # DGX file with the A2h chunk applied
 
 # Pull the byte-exact OLD/NEW chunk straight from the verified anchor patcher
 spec = importlib.util.spec_from_file_location(
