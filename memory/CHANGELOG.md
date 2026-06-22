@@ -1,3 +1,40 @@
+## 2026-06-22 — (TQS2 + DECOMPOSITION) — scheme-B renorm patch (dormant) + pillar/exit edge map
+Did "B then A": pillar/sub-score + exit-efficiency decomposition, then delivered the
+scheme-B aggregation patch (dormant).
+ • diag_pillar_exit_edge.py (paste.rs/uCwyY, sha 588fde38…): on sanitized bot-own
+   joined to live_alerts breakdown. PILLAR corrs all near-zero & windows DISAGREE
+   (n=70–145 noise) → no single pillar has a stable edge. SUB-SCORE signals
+   consistent across 14d+21d: context.day +0.31 (LIKELY SPURIOUS — day-of-week
+   overfit), setup.pattern −0.16 (INVERSE), context.regime −0.11..−0.14 (INVERSE),
+   relative_strength −0.07..−0.13 (mild INVERSE), fundamental.catalyst +0.15..+0.16
+   & setup.tape +0.11..+0.16 (PREDICTIVE). THEME: confirmation signals (catalyst/
+   tape/win_rate) point right; extension/strength signals (pattern rank/regime/RS)
+   mildly BACKWARDS → score rewards extension that reverts (explains thin edge).
+   EXIT EFFICIENCY refutes the "exits are the leak" hypothesis: avg MFE_R=+0.16
+   (trades barely go favorable); when they do, capture median ~1.00 (0% of ≥1R
+   runners given back). So the leak is ENTRIES not catching moves, NOT exits. The
+   FITB "R-capture 5%" was a single-card artifact. CAVEATS: MFE coverage poor
+   (103/234 @21d, 5/124 @14d — manage-loop MFE/MAE not persisting = integrity gap);
+   avg MAE_R −4.66 outlier-corrupted. n=70–145 → directional only.
+ • KEY: "observing" scheme B needs NO patch — diag_schemes_vs_outcomes recomputes it
+   faithfully from persisted breakdowns. Only making B AUTHORITATIVE needs an engine
+   change (shifts grades → trips auto-exec floors).
+ • patch_tqs2_scheme_b_renorm.py (paste.rs/N8mHF, sha 1fac87d5…): DORMANT/env-gated/
+   reversible. 1 anchored block in tqs_engine.calculate_tqs after the composite.
+   When TQS_RENORM_PRESENT=on: recompute each pillar over PRESENT sub-scores only
+   (drop verdict=="No data", renormalize remaining sub-weights; keep real-but-neutral
+   like live VIX), then composite. Grade is percentile-calibrated (auto-adapts),
+   ACTION thresholds unchanged. Default OFF = byte-identical behaviour on apply.
+   Local: round-trip IDENTICAL (PRE 2bdc9860→POST 4719bd50), patched engine compiles,
+   behavior test (drops only No-data, de-compresses up, dormant unless on) PASS.
+   APPLY PENDING. ⚠ flipping on de-compresses scores upward → more trades cross floors.
+RECOMMENDATION: apply patch_tqs2 dormant; don't flip ON yet (edge thin/directional,
+inputs weak + some inverse-signed). Bigger levers now: (1) fix INVERSE-signed inputs
+(pattern/regime/RS) — score rewards extension; (2) MFE/MAE persistence gap; (3) light
+dark feeds. Re-run diags as clean bot-own sample grows, then flip B on for an RTH A/B.
+DGX patcher/diag ONLY.
+
+
 ## 2026-06-22 — (TQS OUTCOME-VALIDATION) — score IS predictive on sanitized data; scheme A/B/C/D/E harness — READ-ONLY DIAGS
 Pivot from "how to aggregate" to "does the score predict outcomes." Found the outcome
 data model + built 4 read-only probes (all run clean on DGX):
