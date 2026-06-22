@@ -1,7 +1,8 @@
 # TradeCommand / SentCom — Product Requirements
 
-> **🔜 2026-06-22 — (A10) AUTO-EXEC TRIGGER RE-VALIDATION (DRIFT) GATE — BUILT + PASTED
-> (DGX apply pending).** Closes the P0 stale/extended daily-setup DRIP that A8's restart/feed
+> **✅ 2026-06-22 — (A10) AUTO-EXEC TRIGGER RE-VALIDATION (DRIFT) GATE — APPLIED + LIVE on DGX
+> (commit 99da78b0; CHANGELOG note 47d112f8), running in OBSERVE mode.** Closes the P0
+> stale/extended daily-setup DRIP that A8's restart/feed
 > guard couldn't stop. Settled the root cause by reading `_scan_daily_setups` +
 > `_maybe_auto_execute_daily`: NOT a stale-price replay — the daily scan REBUILDS each breakout
 > alert every cycle on fresh bars (current_price IS live), but `trigger_price` is the STABLE daily
@@ -11,9 +12,12 @@
 > intraday + A6 daily) re-fetches live quote via `_get_quote_with_ib_priority` and SKIPs when
 > abs(live-trigger)/trigger > `AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT` (default 2.0%). Policy
 > `AUTO_EXEC_TRIGGER_DRIFT_POLICY=block|observe|off`. FAIL-OPEN. Span-SHA guarded PRE a4b86c98 ->
-> POST b87b0b0f; round-trip + 7/7 logic cases green. PATCHER paste.rs/fSYav
-> (patch_a10_trigger_drift_gate.py), CHANGELOG note paste.rs/gpv9s. VERIFY next RTH: re-run
-> diag_a9_entry_provenance — late-session extended/backlogged stage_2_breakout entries collapse.
+> POST b87b0b0f (DGX whole-file 7a9389cc -> 25c418c7); round-trip + 7/7 logic cases green;
+> pytest 8/8 on DGX. PATCHER paste.rs/fSYav (patch_a10_trigger_drift_gate.py), pytest
+> paste.rs/O0npV, CHANGELOG note paste.rs/gpv9s. Backend restarted clean (health 8/8 green, IB
+> connected, pusher fresh). VERIFY next RTH: grep "A10 trigger-drift gate (OBSERVE)" to size the
+> drift distribution, then flip AUTO_EXEC_TRIGGER_DRIFT_POLICY=block + restart; re-run
+> diag_a9_entry_provenance — late-session extended/backlogged stage_2_breakout entries collapse to ~0.
 > NEXT (unchanged): Issue 2 target_price+live-mark plumbing · Issue 3 per-style position cap ·
 > Task 1 card timestamp/price transparency UI. DGX patcher ONLY. English.**
 
