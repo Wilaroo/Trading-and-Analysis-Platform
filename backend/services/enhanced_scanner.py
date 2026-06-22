@@ -7898,6 +7898,18 @@ class EnhancedBackgroundScanner:
                 {"$set": doc},
                 upsert=True,
             )
+            # 2026-06-22 (B) carry-forward persist prune — drop older same-key
+            # gameplan docs so the collection can't accumulate one doc per ~20min
+            # ranker run for the same (symbol,setup,dir). Keep the just-written newest.
+            try:
+                self.db.carry_forward_alerts.delete_many({
+                    "symbol": alert.symbol,
+                    "setup_type": alert.setup_type,
+                    "direction": getattr(alert, "direction", "long"),
+                    "id": {"$ne": alert.id},
+                })
+            except Exception as _prune_err:
+                logger.debug(f"carry-forward persist prune skipped: {_prune_err}")
             # Ensure the TTL-style cleanup index exists. Cheap: noop
             # after first call thanks to Mongo's existing-index check.
             try:
@@ -7935,6 +7947,38 @@ class EnhancedBackgroundScanner:
                     {"_id": 0},
                 )
             )
+            # 2026-06-22 (B) carry-forward HYDRATE DEDUP — collapse to newest per
+            # (symbol,setup,dir) BEFORE the hydrate loop. The ranker mints a unique
+            # cf_<sym>_<setup>_<ts> id every ~20min and _persist upserts by it, so
+            # carry_forward_alerts accumulates hundreds of dupes the loader dumped
+            # wholesale into _live_alerts (~148 cards; operator diag_a11 2026-06-22).
+            # Best-effort delete the superseded Mongo docs so the collection self-
+            # prunes on restart. The existing loop (and its A2j pillar backfill) is
+            # left untouched — it just iterates fewer docs.
+            try:
+                _cf_newest = {}
+                _cf_superseded = []
+                for _cf_d in sorted(docs, key=lambda d: str(d.get("created_at") or ""), reverse=True):
+                    _cf_k = ((_cf_d.get("symbol") or "").upper(),
+                             _cf_d.get("setup_type") or "",
+                             _cf_d.get("direction") or "long")
+                    if _cf_k in _cf_newest:
+                        if _cf_d.get("id"):
+                            _cf_superseded.append(_cf_d["id"])
+                    else:
+                        _cf_newest[_cf_k] = _cf_d
+                docs = list(_cf_newest.values())
+                if _cf_superseded:
+                    try:
+                        self.db.carry_forward_alerts.delete_many({"id": {"$in": _cf_superseded}})
+                    except Exception as _cf_prune_err:
+                        logger.debug(f"carry-forward hydrate prune skipped: {_cf_prune_err}")
+                    logger.info(
+                        f"📅 (B) carry-forward hydrate dedup: collapsed "
+                        f"{len(_cf_superseded)} dupes → {len(docs)} distinct"
+                    )
+            except Exception as _cf_dedup_err:
+                logger.debug(f"carry-forward hydrate dedup skipped: {_cf_dedup_err}")
             hydrated = 0
             backfilled = 0
             for doc in docs:
