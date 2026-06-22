@@ -1,5 +1,23 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-22 — (A10) AUTO-EXEC TRIGGER RE-VALIDATION (DRIFT) GATE — BUILT + PASTED
+> (DGX apply pending).** Closes the P0 stale/extended daily-setup DRIP that A8's restart/feed
+> guard couldn't stop. Settled the root cause by reading `_scan_daily_setups` +
+> `_maybe_auto_execute_daily`: NOT a stale-price replay — the daily scan REBUILDS each breakout
+> alert every cycle on fresh bars (current_price IS live), but `trigger_price` is the STABLE daily
+> breakout level, so the detector keeps re-firing while price stays beyond it and `_auto_execute_alert`
+> enters at an ever-more-EXTENDED live price; the old `created_at` is a dedup/upsert labeling
+> artifact (why an age gate was wrong). FIX: gate in `_auto_execute_alert` (universal chokepoint for
+> intraday + A6 daily) re-fetches live quote via `_get_quote_with_ib_priority` and SKIPs when
+> abs(live-trigger)/trigger > `AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT` (default 2.0%). Policy
+> `AUTO_EXEC_TRIGGER_DRIFT_POLICY=block|observe|off`. FAIL-OPEN. Span-SHA guarded PRE a4b86c98 ->
+> POST b87b0b0f; round-trip + 7/7 logic cases green. PATCHER paste.rs/fSYav
+> (patch_a10_trigger_drift_gate.py), CHANGELOG note paste.rs/gpv9s. VERIFY next RTH: re-run
+> diag_a9_entry_provenance — late-session extended/backlogged stage_2_breakout entries collapse.
+> NEXT (unchanged): Issue 2 target_price+live-mark plumbing · Issue 3 per-style position cap ·
+> Task 1 card timestamp/price transparency UI. DGX patcher ONLY. English.**
+
+
 > **✅ 2026-06-22 — UI Track A3 + A4 SHIPPED, LIVE, COMMITTED (A4 @ e3a3e555).**
 > A3 (Why-Trace modal): 7 plain-language stages (scan→setup→grade→gate→size→manage→exit) opened
 > from the TQS drawer header; operator-confirmed live on RTX. patcher paste.rs/44gvE.
