@@ -1,3 +1,38 @@
+## 2026-06-22 — (TQS OUTCOME-VALIDATION) — score IS predictive on sanitized data; scheme A/B/C/D/E harness — READ-ONLY DIAGS
+Pivot from "how to aggregate" to "does the score predict outcomes." Found the outcome
+data model + built 4 read-only probes (all run clean on DGX):
+ • OUTCOME DATA MODEL (discovered): closed `bot_trades` carry realized result
+   (fill/exit/stop/realized_pnl) + a `tqs_score` snapshot (65.5%) BUT tqs_breakdown
+   is NOT persisted (0% — BotTrade has no breakdown field; integrity gap). `trade_
+   outcomes` (genuine-only, actual_r, keyed bot_trade_id) + `alert_outcomes` (every
+   close, r_multiple + genuine + r_risk_unreliable, keyed trade_id) carry hygiene R.
+ • diag_tqs_schemes.py (paste.rs/UqM2I): recompute composite under 5 schemes from
+   persisted breakdown. Live (--all --days2 n=1001) INTEGRITY MAE=0.00 (sub-weights
+   exactly mirror live). A stdev 4.2 / 5.6% out-of-band (crushed); B renorm 5.5/10%;
+   C signed≈A (control proven); D signed+gain8 8.5/24.5% (only one using the scale);
+   E veto-caps fire hard on cold exec tape. (--days5/10 MAE warnings = pre-rework
+   alerts, false alarm.)
+ • diag_outcomes_discover.py (paste.rs/cojKG): ALL-TIME pool (n=1648) looked
+   ANTI-predictive (corr −0.10, high tercile WORST) — but under-sanitized.
+ • diag_outcomes_sanitized.py (paste.rs/x2wj9): FULL sanitize (bot-own [drop
+   is_adopted ~46%], genuine, reliable-R, winsor ±3, last 14d) REVERSES it:
+   n=124 corr +0.076, win% 36.6→41.5→52.4 monotonic, mean ≈break-even (−0.01R);
+   10d n=91 corr +0.120, high 54.8%/+0.10R. +adopted halves corr to +0.044 & turns
+   mean −0.12R → CONFIRMS adopted trades were the poison. VERDICT: score is mildly
+   PREDICTIVE on clean recent data (thin edge) → aggregation work justified AND
+   lighting dark feeds is the bigger lever.
+ • diag_schemes_vs_outcomes.py (paste.rs/h1Ca5, sha a26a8e85…): CAPSTONE — joins
+   sanitized bot-own trades → live_alerts breakdown, recomputes A–E, ranks each by
+   high-low tercile win% spread + corr(scheme,R). Tells us if any scheme beats A's
+   +0.08, or if aggregation is a wash (→ fix inputs). selftest + tercile sanity pass.
+SEQUENCING DECISION (operator Q): don't lock a scheme on today's half-dark data;
+use the harness to measure as feeds come online. Data-integrity = build priority;
+outcome harness = the instrument. NEXT: run diag_schemes_vs_outcomes --days 14/21;
+then per-pillar→R decomposition + MFE/MAE exit-efficiency (R-capture ~5% smell —
+exits may be the dominant P&L leak). Open integrity fix: persist tqs_breakdown on
+bot_trades. DGX patcher/diag ONLY.
+
+
 ## 2026-06-22 — (TQS-AUDIT + TQS1) — TQS data-honesty audit; AI-model absent→neutral fix — DELIVERED (apply pending)
 Operator mandate: "make sure all TQS scoring metrics get the right data and produce
 an HONEST TQS score on every trade." Built TWO read-only audits FIRST (diag→confirm→
