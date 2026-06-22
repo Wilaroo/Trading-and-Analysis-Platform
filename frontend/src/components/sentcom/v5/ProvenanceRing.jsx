@@ -98,7 +98,7 @@ export default function ProvenanceRing({
   // Falls back to the grade letter for rows that only carry a grade.
   const hasScore = score != null && !Number.isNaN(Number(score));
   const centerText = hasScore ? String(Math.round(Number(score))) : centerGrade;
-  const centerFont = centerText.length >= 3 ? NOM * 0.30 : NOM * 0.40;
+  const centerFont = centerText.length >= 3 ? NOM * 0.26 : NOM * 0.34;
 
   const title =
     'Provenance — ' +
@@ -139,20 +139,53 @@ export default function ProvenanceRing({
             />
           );
         })}
-        {/* center: numeric TQS score (falls back to grade letter) */}
-        {centerText && (
-          <text
-            x={c}
-            y={c}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fontSize={centerFont}
-            fontWeight="700"
-            fill={strokeFor(centerGrade)}
-            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-          >
-            {centerText}
-          </text>
+        {/* center: numeric TQS score with the grade letter beneath it (when
+            both are known); grade-only rows show just the letter, centered. */}
+        {hasScore ? (
+          <>
+            <text
+              x={c}
+              y={c - NOM * 0.09}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={centerFont}
+              fontWeight="700"
+              fill={strokeFor(centerGrade)}
+              fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+            >
+              {centerText}
+            </text>
+            {centerGrade && (
+              <text
+                x={c}
+                y={c + NOM * 0.22}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={NOM * 0.22}
+                fontWeight="700"
+                fill={strokeFor(centerGrade)}
+                opacity="0.9"
+                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+              >
+                {centerGrade}
+              </text>
+            )}
+          </>
+        ) : (
+          centerText && (
+            <text
+              x={c}
+              y={c}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={NOM * 0.40}
+              fontWeight="700"
+              fill={strokeFor(centerGrade)}
+              fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+            >
+              {centerText}
+            </text>
+          )
         )}
       </svg>
     </button>
