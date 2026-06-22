@@ -7831,12 +7831,31 @@ class EnhancedBackgroundScanner:
                 )
             )
             hydrated = 0
+            backfilled = 0
             for doc in docs:
                 try:
                     alert = self._inflate_live_alert_from_mongo(doc)
                     if alert and alert.id not in self._live_alerts:
                         self._live_alerts[alert.id] = alert
                         hydrated += 1
+                        # v19.34.283 (A2j) — carry-forwards persisted before the
+                        # alert object carried a pillar breakdown (or before A2h)
+                        # restore WITHOUT tqs_pillar_grades, so the Provenance Ring
+                        # never renders for the morning gameplan watchlist (every
+                        # cf_* card was ringless). Backfill the 5-pillar breakdown on
+                        # hydration when missing, then re-persist so future restarts
+                        # restore it directly (self-healing, one-time per alert).
+                        if not (getattr(alert, "tqs_pillar_grades", None) or {}):
+                            try:
+                                await self._enrich_alert_with_tqs(alert)
+                                if getattr(alert, "tqs_pillar_grades", None):
+                                    self._persist_carry_forward_alert(alert)
+                                    backfilled += 1
+                            except Exception as _bf_err:
+                                logger.debug(
+                                    f"A2j pillar backfill skipped for "
+                                    f"{getattr(alert, 'id', '?')}: {_bf_err}"
+                                )
                 except Exception as e:
                     logger.debug(
                         f"Skipped hydrating carry-forward "
@@ -7846,7 +7865,8 @@ class EnhancedBackgroundScanner:
                 logger.info(
                     f"📅 v19.34.6 carry-forward hydrate: restored "
                     f"{hydrated} non-expired gameplan alerts from Mongo "
-                    f"(survived backend restart)"
+                    f"(survived backend restart); A2j pillar-backfilled "
+                    f"{backfilled}"
                 )
             return hydrated
         except Exception as e:
