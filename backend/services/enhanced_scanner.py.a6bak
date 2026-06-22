@@ -7386,32 +7386,6 @@ class EnhancedBackgroundScanner:
                 merged.append(s)
         return merged
 
-    async def _maybe_auto_execute_daily(self, alert):
-        """v19.34.287b — auto-execute longer-horizon (swing / multi_day / position)
-        setups produced by _scan_daily_setups. Tape confirmation is an INTRADAY
-        microstructure gate and does NOT apply to these holds (operator 2026-06-22);
-        horizon is separated by scan path, so the intraday tape requirement in
-        _scan_symbol is left untouched. Mirrors the intraday EV quality gate
-        (priority HIGH/CRITICAL + _passes_ev_quality_gate) MINUS tape + intraday-stale.
-        The bot's _evaluate_opportunity (confidence gate + max_open_positions +
-        sizing) stays the FINAL authority — this only lets the alert REACH it.
-        Runs in the same scan tick the alert was detected (bars include today's live
-        bar), so eligibility is evaluated on realtime data. Never raises."""
-        try:
-            if not self._auto_execute_enabled:
-                return
-            eligible = (
-                getattr(alert, "priority", None) is not None
-                and alert.priority.value in (
-                    AlertPriority.CRITICAL.value, AlertPriority.HIGH.value)
-                and self._passes_ev_quality_gate(alert)
-            )
-            alert.auto_execute_eligible = eligible
-            if eligible:
-                await self._auto_execute_alert(alert)
-        except Exception:
-            pass
-
     async def _scan_daily_setups(self):
         """Scan for swing and position setups.
         
@@ -7532,7 +7506,6 @@ class EnhancedBackgroundScanner:
                             if alert:
                                 await self._process_new_alert(alert)
                                 alerts_found += 1
-                                await self._maybe_auto_execute_daily(alert)
                         except Exception:
                             pass
 
@@ -7549,7 +7522,6 @@ class EnhancedBackgroundScanner:
                                 if alert:
                                     await self._process_new_alert(alert)
                                     alerts_found += 1
-                                    await self._maybe_auto_execute_daily(alert)
                             except Exception as det_err:
                                 logger.debug(f"v19.34.95 detector {setup_name} on {symbol} failed: {det_err}")
                     except Exception as imp_err:
