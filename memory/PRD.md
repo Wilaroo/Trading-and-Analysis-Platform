@@ -1,5 +1,23 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-22 SESSION ROLLUP (TQS HONESTY AUDIT).** Patcher-only (paste.rs, anchored/SHA-guarded).
+> - ✅ **TQS data-honesty audit** — diag_tqs.py (paste.rs/DANPT) + diag_tqs_b.py (paste.rs/kudA2),
+>   both read-only, run clean on DGX. Classifies all 28 sub-scores OK/ABSENT/PROXY/DEFAULT.
+>   Composite is crushed (40.9–65.5, p50 50.1, sd 4.22) — too many sub-scores pinned at neutral.
+> - 🔴 **AI-model = fabricated 35 penalty** on ~100% of book (timeseries model gives 0 usable
+>   forecasts → LiveAlert defaults non-None → "weakly disagrees" branch). FIX #1 BUILT+DELIVERED:
+>   patch_tqs1_ai_honest_encoding.py (paste.rs/L7QJy) — absent AI → honest neutral 50; real
+>   forecasts unchanged. APPLY PENDING. Verify: diag_tqs.py --hours 1 → ai_model off 35.
+> - ✅ **VIX is HONEST** (98.7% real readings; 85 = correct calm-VIX score). No fix — earlier flag overturned.
+> - 🟡 **earnings 100% absent** = coverage gap (319 obscure tickers, liquid universe uncovered;
+>   is_reported never set → v390 drift dead). Data task, deprioritised.
+> - 🟡 **RSI=100** + **R-capture=5%** degenerate-data smells (from live FITB card; FITB math verified
+>   end-to-end ✓). NEXT: RSI clamp/min-bars guard, R-capture probe, tilt [0,100] clamp.
+> - 🔵 BIGGER OPEN THREAD: timeseries AI model yields 0 usable forecasts for the live universe
+>   ("models that generalize" mandate) — separate investigation.
+> - ⏳ Carried: apply patch_c2 + verify FROZEN marks→0 next RTH (operator ack'd applying; awaiting confirm).
+
+
 > **🧭 2026-06-22 SESSION ROLLUP (newest first).** Patcher-only delivery (paste.rs, span-SHA guarded).
 > - ✅ **A10 trigger-drift gate** — LIVE on DGX (commit 99da78b0), block mode. Stops stale/extended auto-exec entries (skip when live price drifts > AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT, default 2%, from trigger). Verified live: MCO flipped to WOULD-BLOCK at 2.07%.
 > - ✅ **B carry-forward dedup** — LIVE on DGX (commit 087be6fb). Hydrate collapses to newest per (symbol,setup,dir) + persist-prune. Verified: live alerts 148 → 19.

@@ -1,3 +1,46 @@
+## 2026-06-22 — (TQS-AUDIT + TQS1) — TQS data-honesty audit; AI-model absent→neutral fix — DELIVERED (apply pending)
+Operator mandate: "make sure all TQS scoring metrics get the right data and produce
+an HONEST TQS score on every trade." Built TWO read-only audits FIRST (diag→confirm→
+patch discipline) — both run clean on the live DGX:
+ • diag_tqs.py (paste.rs/DANPT, sha 265a122c…): per-sub-score coverage/honesty audit
+   of live_alerts.tqs_breakdown. Classifies each of the 28 sub-scores OK / ABSENT
+   (honest "No data"→50) / PROXY (stand-in) / DEFAULT (a dark upstream feed MASKED by
+   a hard-coded default that scores normal). Selftest 11/11. Live (48h, 1005 alerts):
+   composite crushed 40.9–65.5 p50 50.1 sd 4.22 (the "dishonest compression").
+ • diag_tqs_b.py (paste.rs/kudA2, sha 1e2cfae2…): dark-feed confirmation probe.
+LIVE FINDINGS (1011 alerts):
+ - 🔴 context.ai_model PINNED at 35 ("weakly disagrees") for 990/1011, stdev 0.
+   CONFIRMED root cause: timeseries model returns NO usable forecast for the live
+   universe → 100% of alerts carry LiveAlert dataclass DEFAULTS (ai_prediction="",
+   ai_confidence=0.0, ai_agrees_with_direction=False — all NON-None) → the Context
+   pillar falls through to the PENALISING "weakly disagrees→35" branch instead of the
+   honest neutral 50. Absence scored as a penalty on every trade.
+ - ✅ context.vix is HONEST (probe overturned the diag's flag): 977/990 (98.7%) carry
+   a REAL vix 16.5–17.5; 85 is the correct score for a calm VIX. NO FIX.
+ - 🟡 fundamental.earnings 100% absent is a COVERAGE gap, NOT a query bug: earnings_
+   calendar has 319 OBSCURE tickers (ANGO/AMFC/…) that don't overlap the liquid traded
+   universe (ISO query works — finds 177 upcoming); is_reported never set → v390 post-
+   earnings drift is dead. (data task, deprioritised.)
+ - 🟡 NEW degenerate-data smells from operator's live FITB card (math verified end-to-
+   end, internally consistent): technical.rsi = 100 ("overbought→25") — degenerate RSI
+   (ties to PRD's pending RSI clamp/min-bars guard); execution.exit_tendency R-capture
+   = 5% ("exits early→40") — suspicious r_capture_percent (probe TBD).
+ - 🟢 execution.tilt can go NEGATIVE (min −35): the 70−(consec−2)*15 line lacks a
+   [0,100] clamp, dragging the Execution pillar (p50 28.5).
+FIX #1 (patch_tqs1_ai_honest_encoding.py, paste.rs/L7QJy, sha 4f2b6c6f…): 1 anchored
+block in enhanced_scanner._enrich_alert_with_tqs — coerce a "no signal" to None (mirror
+the v214 win_rate/EV idiom) so absent AI → honest neutral 50; REAL forecasts (non-empty
+dir + >0 conf) pass through UNCHANGED. Anchor count==1, aborts on drift w/ grep hint,
+idempotent (marker v19.34.392), .bak.tqs1, py_compile-gated, --check/--apply/--rollback.
+Local round-trip IDENTICAL (PRE 4045078f→POST 69bb0514); logic test 4/4 (absent→50,
+real ++→90, --→20, flat→45). SAFETY: scoring-input only; no order/close/bracket/kill
+path. VERIFY after apply+restart: diag_tqs.py --hours 1 → context.ai_model moves OFF the
+pinned 35 (absent→50). BIGGER OPEN THREAD (mandate "models that generalize"): the
+timeseries model yields 0 usable forecasts for 100% of alerts — separate investigation.
+NEXT: RSI clamp/min-bars guard; R-capture probe; tilt [0,100] clamp; absent-input weight
+redistribution (the honest de-compression of the crushed composite). DGX patcher ONLY.
+
+
 ## 2026-06-22 — (C2) — IB-mark fallback for frozen open-trade marks (UPL/L7/kill-switch) — READY (apply pending)
 diag_c (paste.rs/TJBxG) proved the handoff's TGT=0.00 issue is RESOLVED — all 25
 holds carry a target + OCA attached (ATT=Y), all scanner bot_fired, none adopted.
