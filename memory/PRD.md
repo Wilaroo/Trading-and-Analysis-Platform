@@ -1390,3 +1390,27 @@ Live whole-file SHA after v363: 0d9b24b150296d2bf252da31b2c3da9fe44bce47439d2ef2
 - Carried P1/P2 backlog unchanged: adrp_20d warm-fill, TQS<->Confidence gate
   unify, trend_continuation conversion gap, regime-fit abstention L5, thesis-
   invalidation exits L7, server.py monolith breakup, Atlas password rotation.
+
+## 2026-06-22 — A8 + open follow-ups (post-scanner-resurrection)
+- A8 SHIPPED (patch_a8, paste.rs/hsKB7): auto-exec RESTART/FEED GUARD in
+  _auto_execute_alert (single chokepoint for intraday ~4212 + A6 daily ~7421).
+  Warm-up holds auto-exec first AUTO_EXEC_WARMUP_SCANS cycles after (re)start +
+  requires is_pusher_connected(). Fixes the 2026-06-22 flush-on-restart where
+  ~14 stage_2_breakout backlog alerts (created 14:00-14:30Z) fired in one
+  17:54-18:03Z burst on the A6 restart. test 8/8. Rejected age-gate (created_at
+  pinned via dedup/upsert = unreliable). Pending operator apply+restart+commit.
+- diag_a9_entry_provenance.py (paste.rs/U3k64) + diag_a8_position_freshness.py
+  (paste.rs/7mfpN) created — read-only position audits.
+- OPEN FOLLOW-UPS (operator: "investigate all"):
+  P1  target_price plumbing alert->bot_trade (ALL 25 open positions have stops
+      but NO target; R:R unmeasurable) + live-mark for position-tier holds
+      (16 names entry==mark, UPL 0, not in live-sub set) -> unblocks L7
+      thesis-invalidation exits.
+  P1/P2  per-style position cap (16/25 were stage_2_breakout = concentration).
+  P1  CARD TRANSPARENCY (operator UI ask): show Time of Alert (created_at),
+      Time of Refreshed alert (last_updated), Time of Entry (executed_at),
+      Time of Exit (closed_at), and Entry Price clearly on BOTH scanner cards
+      and open-position cards (frontend patcher).
+  watch: DXCM -5.5% (weakest open hold, still above stop).
+- Also still open from prior: A6 fresh-quote gate now subsumed by A8; scan-loop
+  watchdog (offered, not built); TQS<->Confidence gate unify; adrp_20d warm-fill.

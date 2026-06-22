@@ -2025,7 +2025,37 @@ class EnhancedBackgroundScanner:
         # Check eligibility
         if not alert.auto_execute_eligible:
             return
-        
+
+        # 2026-06-22 A8 RESTART/FEED GUARD — a (re)start must never FLUSH a
+        # backlog of eligible setups into execution before live data + scan
+        # state are re-established. Operator-traced 2026-06-22 (diag_a9): ~14
+        # stage_2_breakout positions opened in one 17:54-18:03Z burst the
+        # instant the A6-enabled scanner relaunched, pusher still cold. Both
+        # the intraday and A6 daily callers funnel through here, so one guard
+        # covers both. Fail-open: a parse/import error never blocks a signal.
+        try:
+            _warm = int(os.environ.get("AUTO_EXEC_WARMUP_SCANS", "5"))
+        except (TypeError, ValueError):
+            _warm = 5
+        if _warm > 0 and getattr(self, "_scan_count", 0) < _warm:
+            logger.info(
+                f"🪫 A8 warm-up: HOLD auto-exec {alert.symbol} {alert.setup_type} "
+                f"— scan #{getattr(self, '_scan_count', 0)} < warm-up {_warm} "
+                f"(post-restart guard; arms after the feed/universe warm up)"
+            )
+            return
+        if os.environ.get("AUTO_EXEC_REQUIRE_FEED", "1") not in ("0", "false", "False"):
+            try:
+                import routers.ib as _ibmod
+                if not _ibmod.is_pusher_connected():
+                    logger.info(
+                        f"📴 A8 feed guard: HOLD auto-exec {alert.symbol} "
+                        f"{alert.setup_type} — IB pusher not connected (no live data)"
+                    )
+                    return
+            except Exception as _feed_err:
+                logger.debug(f"A8 feed guard skip: {_feed_err}")
+
         try:
             logger.info(f"🤖 Auto-executing alert: {alert.headline}")
             
