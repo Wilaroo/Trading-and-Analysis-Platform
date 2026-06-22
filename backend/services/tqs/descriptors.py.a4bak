@@ -15,13 +15,10 @@ the engine — this is a presentation layer only.
 from typing import Optional, Dict
 
 
-def verdict_for(score: Optional[float], absent: bool = False, proxy: bool = False) -> str:
-    """Score band → plain verdict. `absent=True` overrides to 'No data';
-    `proxy=True` marks a data-derived estimate (e.g. EV from R:R) as 'Est. (R:R)'."""
+def verdict_for(score: Optional[float], absent: bool = False) -> str:
+    """Score band → plain verdict. `absent=True` overrides to 'No data'."""
     if absent:
         return "No data"
-    if proxy:
-        return "Est. (R:R)"
     s = float(score or 0)
     if s >= 85:
         return "Strong"
@@ -35,11 +32,11 @@ def verdict_for(score: Optional[float], absent: bool = False, proxy: bool = Fals
 
 
 def disp(label: str, score: Optional[float], reading: str,
-         absent: bool = False, proxy: bool = False) -> Dict[str, str]:
+         absent: bool = False) -> Dict[str, str]:
     """Build one sub-score display block."""
     return {
         "label": label,
-        "verdict": verdict_for(score, absent, proxy),
+        "verdict": verdict_for(score, absent),
         "reading": reading,
     }
 

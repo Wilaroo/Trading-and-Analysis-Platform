@@ -103,7 +103,7 @@ class SetupQualityScore:
             "pattern": disp("Pattern", self.pattern_score, pat_read),
             "win_rate": disp("Win Rate", self.win_rate_score, wr_read),
             "expected_value": disp("Expected Value", self.ev_score, ev_read,
-                                   proxy=c.get("ev_is_proxy")),
+                                   absent=c.get("ev_is_proxy")),
             "tape": disp("Tape", self.tape_score, tape_read, absent=(tr == 0 and not self.tape_confirmation)),
             "smb": disp("SMB", self.smb_score, smb_read),
         }

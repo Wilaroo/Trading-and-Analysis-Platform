@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Data Diagnostics"])
 
 NO_DATA = "No data"
-PROXY = "Est. (R:R)"
 PILLARS = ["setup", "technical", "fundamental", "context", "execution"]
 
 # job key -> catalog row.  scheduler: 'trading'|'eod'  ;  src: 'task_log'|'eod_log'
@@ -241,8 +240,8 @@ async def tqs_coverage(days: int = Query(7, ge=1, le=90),
     if limit:
         cur = cur.limit(limit)
 
-    comp = defaultdict(lambda: defaultdict(lambda: {"label": "", "total": 0, "no_data": 0, "proxy": 0}))
-    pillar_tot = defaultdict(lambda: {"t": 0, "nd": 0, "px": 0})
+    comp = defaultdict(lambda: defaultdict(lambda: {"label": "", "total": 0, "no_data": 0}))
+    pillar_tot = defaultdict(lambda: {"t": 0, "nd": 0})
     n_alerts = n_bd = n_disp = 0
     sample = None
 
@@ -268,19 +267,16 @@ async def tqs_coverage(days: int = Query(7, ge=1, le=90),
                 rec["label"] = blk.get("label", ckey)
                 rec["total"] += 1
                 nd = (blk.get("verdict") == NO_DATA)
-                px = (blk.get("verdict") == PROXY)
                 rec["no_data"] += 1 if nd else 0
-                rec["proxy"] += 1 if px else 0
                 pillar_tot[p]["t"] += 1
                 pillar_tot[p]["nd"] += 1 if nd else 0
-                pillar_tot[p]["px"] += 1 if px else 0
         if had:
             n_disp += 1
             if sample is None:
                 sample = doc
 
     pillars = []
-    g_t = g_nd = g_px = 0
+    g_t = g_nd = 0
     for p in PILLARS:
         recs = comp.get(p)
         if not recs:
@@ -288,20 +284,17 @@ async def tqs_coverage(days: int = Query(7, ge=1, le=90),
         pt = pillar_tot[p]
         g_t += pt["t"]
         g_nd += pt["nd"]
-        g_px += pt["px"]
         components = []
         for ckey, rec in sorted(recs.items()):
             tot = rec["total"]
             components.append({
                 "key": ckey, "label": rec["label"], "samples": tot,
-                "real_pct": round(100.0 * (tot - rec["no_data"] - rec["proxy"]) / tot, 1) if tot else 0,
-                "proxy_pct": round(100.0 * rec["proxy"] / tot, 1) if tot else 0,
+                "real_pct": round(100.0 * (tot - rec["no_data"]) / tot, 1) if tot else 0,
                 "no_data_pct": round(100.0 * rec["no_data"] / tot, 1) if tot else 0,
             })
         pillars.append({
             "pillar": p,
-            "coverage_pct": round(100.0 * (1 - (pt["nd"] + pt["px"]) / pt["t"]), 1) if pt["t"] else 0,
-            "proxy_pct": round(100.0 * pt["px"] / pt["t"], 1) if pt["t"] else 0,
+            "coverage_pct": round(100.0 * (1 - pt["nd"] / pt["t"]), 1) if pt["t"] else 0,
             "components": components,
         })
 
@@ -325,9 +318,8 @@ async def tqs_coverage(days: int = Query(7, ge=1, le=90),
         "with_breakdown": n_bd,
         "with_display": n_disp,
         "legacy_no_display": n_bd - n_disp,
-        "overall_coverage_pct": round(100.0 * (1 - (g_nd + g_px) / g_t), 1) if g_t else 0,
-        "real_subscores": g_t - g_nd - g_px,
-        "proxy_subscores": g_px,
+        "overall_coverage_pct": round(100.0 * (1 - g_nd / g_t), 1) if g_t else 0,
+        "real_subscores": g_t - g_nd,
         "total_subscores": g_t,
         "pillars": pillars,
         "sample": sample_out,

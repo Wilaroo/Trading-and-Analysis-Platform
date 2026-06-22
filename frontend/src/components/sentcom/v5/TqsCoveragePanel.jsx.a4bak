@@ -55,7 +55,7 @@ const TqsCoveragePanel = () => {
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-bold text-zinc-200 uppercase tracking-wider">TQS Data Coverage</span>
-          <span className="text-[13px] text-zinc-500">real · est (R:R) · no-data</span>
+          <span className="text-[13px] text-zinc-500">real vs "No data" default</span>
         </div>
         <div className="flex items-center gap-2">
           {[7, 30, 90].map((d) => (
@@ -85,7 +85,6 @@ const TqsCoveragePanel = () => {
             </div>
             <div className="text-[13px] text-zinc-500">
               {data.real_subscores}/{data.total_subscores} sub-scores real ·{' '}
-              {data.proxy_subscores ? (<><span className="text-sky-400">{data.proxy_subscores} est</span> ·{' '}</>) : null}
               <span className="text-zinc-400">{data.with_display}</span> alerts w/ descriptors ·{' '}
               <span className="text-zinc-600">{data.legacy_no_display} legacy</span> ·{' '}
               window {data.window_days}d
@@ -109,9 +108,6 @@ const TqsCoveragePanel = () => {
                       <Gauge pct={c.real_pct} width="w-28" />
                       <span className={`v5-mono w-12 text-right ${txtCls[tone(c.real_pct)]}`}>{c.real_pct}%</span>
                       <span className="v5-mono text-zinc-600 w-24 text-right">{c.samples} samples</span>
-                      {c.proxy_pct > 0 && (
-                        <span className="v5-mono text-sky-400" title="Estimated from R:R — no live expectancy yet">{c.proxy_pct}% est</span>
-                      )}
                       {c.no_data_pct > 0 && (
                         <span className="v5-mono text-zinc-500">{c.no_data_pct}% no-data</span>
                       )}
@@ -123,7 +119,7 @@ const TqsCoveragePanel = () => {
           </div>
 
           <div className="text-[12px] text-zinc-600 mt-3">
-            real% = measured data; est% = data-derived estimate (e.g. EV from R:R, verdict "Est. (R:R)"); no-data% = absent.
+            real% = data-backed sub-scores; no-data% = scored from absent data (descriptor verdict "No data").
             🟢 ≥80 · 🟡 ≥50 · 🔴 &lt;50. Computed over alerts carrying v391 descriptor blocks.
           </div>
         </>
