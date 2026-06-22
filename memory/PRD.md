@@ -1370,3 +1370,23 @@ Live whole-file SHA after v363: 0d9b24b150296d2bf252da31b2c3da9fe44bce47439d2ef2
 - P1: big_dog/puppy_dog doctrine rewrite (mid-day 11:00-13:30 window + above-PDH + consolidation-base stop + trail).
 - P1: P-WIRE Phase 2 eval; multi-bar-size shadow logging; live-detector monitoring (diag_live_setup_fires.py).
 - P2: GET /api/scanner/setup-ev-audit endpoint + V5 tile (visualize v353-v363 verdicts); oca-finalize-health tile; server.py monolith breakup.
+
+
+## 2026-06-22 — A7 status update (P0 scanner-liveness RESOLVED)
+- P0 DEAD SCANNER: ROOT-CAUSED + fixed. enhanced_scanner.start() awaited the
+  blocking carry-forward hydrate before _running=True/_scan_task spawn; the 5s
+  asyncio.wait_for() boot budget cancelled start() mid-hydrate -> loop never
+  launched (running=False, scan_count=0, 19 stale hydrated alerts).
+- LIVE FIX CONFIRMED by operator: POST /api/live-scanner/start -> running=True,
+  scan_count climbing (0->2 in 60s), last_scan fresh, symbols_scanned_last=422.
+- DURABLE FIX delivered: patch_a7 (paste.rs/wQ5jm) reorders start() + softens the
+  DMA directional filter (2% buffer / EMA50>SMA200 structure / pullback-setup
+  exemption; DMA_LONG_BUFFER_PCT env). 14/14 local checks pass. Pending operator
+  apply + backend restart for durability + DMA activation.
+- NOTE: /api/scanner/status reflects the IDLE predictive_scanner (red herring);
+  the REAL enhanced scanner state is /api/live-scanner/status.
+- OPEN OFFER: optional scan-loop watchdog (auto-restart if _running flips False
+  during RTH) for self-healing.
+- Carried P1/P2 backlog unchanged: adrp_20d warm-fill, TQS<->Confidence gate
+  unify, trend_continuation conversion gap, regime-fit abstention L5, thesis-
+  invalidation exits L7, server.py monolith breakup, Atlas password rotation.
