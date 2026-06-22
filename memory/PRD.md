@@ -1,5 +1,18 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-19 — UI Track A2d: PROVENANCE RING LEGIBILITY — BUILT + PASTED (DGX apply
+> pending). Operator: rings show but too small ("full height of the scanner card"). FIX
+> (frontend-only, presentational): ProvenanceRing.jsx → scalable (100×100 nominal viewBox +
+> `fill` mode); ScannerCardsV5.jsx card → 2-col flex (full-height ring rail capped ~88px +
+> flex-1 content column). ~3x bigger, legible (verified via HTML mock screenshot). yarn build
+> clean; patcher round-trip IDENTICAL (both files) + idempotent + rollback clean + DRIFT-safe.
+> HASH GUARDS: ProvenanceRing PRE 3c3e8f98c107…/POST 87871429d9c8…; ScannerCardsV5 PRE
+> 605bb2993cfe… (== committed DGX A2c)/POST b7ff08ae52ec…. PATCHER paste.rs/hZIuh
+> (patch_a2d_ring_fullheight.py, 2 files). VERIFY: apply → `cd frontend && yarn build` →
+> hard-refresh, rings fill card height. NEXT after verify: A1b (drawer scoring_style) → A3
+> Why-Trace. DGX patcher workflow ONLY. English.**
+
+
 > **🔜 2026-06-19 — UI Track A2b: PROVENANCE RING ON OPEN POSITIONS — BUILT + PASTED (DGX
 > apply pending). Operator hard-refreshed in PRE-MARKET after A2c and saw no rings — because
 > only OPEN POSITIONS render pre-open (no live scanner alerts), and `/api/sentcom/positions`

@@ -1,3 +1,21 @@
+## 2026-06-19 — v19.34.276 (A2d) — Provenance ring legibility (full-height left rail)
+Operator: rings render but "hardly see the detail… should be the full height of the scanner card".
+The ring was a cramped 28px inline chip. FIX (frontend-only, presentational): (1) refactored
+`ProvenanceRing.jsx` to a fixed 100×100 nominal viewBox + a `fill` prop so the SVG scales cleanly
+to any rendered size (arcs/stroke/center-letter all proportional); (2) restructured the scanner
+card in `ScannerCardsV5.jsx` into a 2-column flex — a full-height left rail holding the ring
+(`height:100%; aspect-ratio:1/1; max-height 88px; min-height 40px`, vertically centered) + a
+`flex-1 min-w-0` content column for symbol/chips/mini-stage/bot-text/metrics. Ring is now ~3x
+bigger and legible. Verified via standalone HTML mock screenshot (arcs + center grade clearly
+readable). yarn build clean. Patcher round-trip APPLY byte-identical (both files), idempotent,
+rollback clean, DRIFT-safe; paste cmp IDENTICAL. HASH GUARDS: ProvenanceRing PRE 3c3e8f98c107…
+(A2 original) / POST 87871429d9c8…; ScannerCardsV5 PRE 605bb2993cfe… (A2c, == committed DGX) /
+POST b7ff08ae52ec…. PATCHER: paste.rs/hZIuh (`patch_a2d_ring_fullheight.py`, 2 files, .a2dbak
+backups, --check/--apply/--rollback). NEXT after apply: `cd frontend && yarn build` + hard-refresh.
+DGX patcher workflow ONLY. AWAITING DGX APPLY + operator live verification.
+
+
+
 ## 2026-06-19 — v19.34.275 (A2b) — Provenance ring on OPEN POSITIONS (backend serialize gap)
 Follow-up to A2c. Operator hard-refreshed in PRE-MARKET and saw NO rings: the only cards
 rendering pre-open are OPEN POSITIONS (no live scanner alerts yet), and `/api/sentcom/positions`

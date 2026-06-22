@@ -1,5 +1,5 @@
 /**
- * ProvenanceRing — v19.34.273 (UI Track A / A2)
+ * ProvenanceRing — v19.34.273 (UI Track A / A2) · v19.34.276 scalable rail
  *
  * Compact SVG "provenance ring": 5 equal arcs, one per TQS pillar
  * (setup · technical · fundamental · context · execution), each colored by
@@ -11,6 +11,11 @@
  *
  * Renders nothing when no per-pillar grades were captured (legacy rows).
  * Data source: alert/position `tqs_pillar_grades` (asdict from the backend).
+ *
+ * Sizing: pass `size` (px) for a fixed badge, OR `fill` to make the SVG fill
+ * its parent (100% × 100%) so the caller can scale it to e.g. full card
+ * height. Geometry uses a fixed 100×100 nominal coordinate space so arcs,
+ * stroke and the center letter scale proportionally at any rendered size.
  */
 import React from 'react';
 
@@ -55,7 +60,9 @@ const arcPath = (cx, cy, r, startDeg, endDeg) => {
  *   pillarGrades             : { setup, technical, fundamental, context, execution }
  *   grade                    : overall TQS grade (center letter); falls back to score
  *   score                    : overall TQS score (used if grade missing)
- *   size                     : px diameter (default 28)
+ *   size                     : px diameter (default 28) — ignored when `fill`
+ *   fill                     : when true the SVG fills its parent (100% × 100%)
+ *   className                : extra classes on the button (sizing in fill mode)
  *   testIdSuffix
  */
 export default function ProvenanceRing({
@@ -65,6 +72,8 @@ export default function ProvenanceRing({
   grade = '',
   score = null,
   size = 28,
+  fill = false,
+  className = '',
   testIdSuffix,
 }) {
   const grades = pillarGrades && typeof pillarGrades === 'object' ? pillarGrades : null;
@@ -72,12 +81,16 @@ export default function ProvenanceRing({
   if (!hasAny) return null;
 
   const centerGrade = String(grade || (score != null ? gradeFromScore(score) : '') || '').toUpperCase();
-  const sw = Math.max(2.5, size * 0.11);
-  const c = size / 2;
+  // Fixed 100×100 nominal space → ring scales cleanly via CSS (fixed `size`
+  // px OR `fill` = 100% of its container).
+  const NOM = 100;
+  const sw = NOM * 0.11;
+  const c = NOM / 2;
   const r = c - sw / 2 - 0.5;
   const gap = 9; // degrees between segments
   const seg = 360 / PILLAR_ORDER.length;
   const testId = `provenance-ring${testIdSuffix ? `-${testIdSuffix}` : ''}`;
+  const svgDim = fill ? '100%' : size;
 
   const title =
     'Provenance — ' +
@@ -95,10 +108,10 @@ export default function ProvenanceRing({
       onClick={handleClick}
       title={title}
       aria-label={title}
-      className="shrink-0 rounded-full transition-transform hover:scale-110 focus:outline-none"
-      style={{ width: size, height: size, lineHeight: 0 }}
+      className={`shrink-0 rounded-full transition-transform hover:scale-105 focus:outline-none ${className}`}
+      style={fill ? { lineHeight: 0 } : { width: size, height: size, lineHeight: 0 }}
     >
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <svg width={svgDim} height={svgDim} viewBox={`0 0 ${NOM} ${NOM}`} style={{ display: 'block' }}>
         {/* track */}
         <circle cx={c} cy={c} r={r} fill="none" stroke="#18181b" strokeWidth={sw} />
         {/* pillar arcs */}
@@ -125,7 +138,7 @@ export default function ProvenanceRing({
             y={c}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={size * 0.34}
+            fontSize={NOM * 0.34}
             fontWeight="700"
             fill={strokeFor(centerGrade)}
             fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
