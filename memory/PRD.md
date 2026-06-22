@@ -1,14 +1,19 @@
 # TradeCommand / SentCom — Product Requirements
 
-> **🔜 2026-06-19 — UI Track A2e: RING COLORS + NUMERIC CENTER — BUILT + PASTED (DGX apply
-> pending). After A2d, operator: yellow/orange indistinguishable + wanted the TQS number in the
-> ring. FIX (frontend-only, ProvenanceRing.jsx): distinct palette A green / B sky / C clear
-> yellow #facc15 / D clear orange #f97316 / F red; center = numeric TQS score (fallback grade
-> letter). Verified via HTML mock (5 distinct colors + big number). yarn build clean; patcher
-> round-trip IDENTICAL + idempotent + rollback + DRIFT-safe. PRE 87871429d9c8… (A2d) / POST
-> aa0613232748…. PATCHER paste.rs/XFsh4 (patch_a2e_ring_colors.py). VERIFY: apply → yarn build →
-> hard-refresh. NOTE: A2d+A2e applied-but-uncommitted on DGX — commit together after verify.
-> NEXT: A1b (drawer scoring_style) → A3 Why-Trace. DGX patcher ONLY. English.**
+> **🔧 2026-06-19 — UI Track A2f HOTFIX: RING TDZ CRASH — BUILT + PASTED (DGX apply pending).
+> A2e crashed the scanner ("Cannot access 'NOM' before initialization") — center-number edit
+> read `NOM` above its `const NOM=100` (temporal dead zone). FIX: reordered declarations; same
+> A2e colors + numeric center, no crash. RUNTIME-verified (transpile+exec, 4/4 render). Accepts
+> PRE broken-A2e aa0613232748… OR A2d 87871429d9c8… → POST 29ad9c2a4fa9…; round-trip both
+> baselines IDENTICAL + idempotent + rollback + DRIFT-safe. PATCHER paste.rs/XmGDc
+> (patch_a2f_ring_tdz_hotfix.py). A2e (XFsh4) SUPERSEDED. VERIFY: apply → yarn build →
+> hard-refresh, scanner renders + rings show colors/number. Commit A2d+A2f after verify.
+> LESSON: runtime-exec component logic changes, not just yarn build. NEXT: A1b → A3. English.**
+
+> **🔜 2026-06-19 — UI Track A2e: RING COLORS + NUMERIC CENTER — SUPERSEDED BY A2f (had a TDZ
+> crash). Palette + numeric-center design is correct; see A2f for the working build.**
+
+
 
 
 > pending). Operator: rings show but too small ("full height of the scanner card"). FIX

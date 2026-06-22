@@ -1,3 +1,20 @@
+## 2026-06-19 — v19.34.278 (A2f) — HOTFIX: ring TDZ crash ("Cannot access 'NOM'")
+A2e CRASHED the scanner panel: "SCANNER CRASHED — Cannot access 'NOM' before initialization".
+Root cause: A2e's center-number edit placed `const hasScore/centerText/centerFont` (which read
+`NOM`) ABOVE the `const NOM = 100` declaration → JS temporal-dead-zone ReferenceError at render →
+ScannerCardsV5 error boundary tripped. yarn build did NOT catch it (TDZ is a runtime error); the
+HTML mock used standalone JS, not the real component, so it missed it too. FIX: moved the center
+computations to AFTER the NOM/geometry block. Same A2e colors + numeric center, no crash.
+LESSON: for component-logic changes, runtime-exec the transpiled component — added
+/tmp/pr_exec_check.js (babel-transpile + execute with mock React/props): 4/4 cases render, no
+throw. yarn build clean. Hotfix accepts PRE = broken A2e aa0613232748… OR A2d 87871429d9c8… →
+POST 29ad9c2a4fa9…; round-trip from both baselines byte-identical, idempotent, rollback clean,
+DRIFT-safe; paste cmp IDENTICAL. PATCHER: paste.rs/XmGDc (`patch_a2f_ring_tdz_hotfix.py`,
+.a2fbak). NEXT after apply: `cd frontend && yarn build` + hard-refresh. NOTE: A2e patcher
+(XFsh4) is SUPERSEDED — do not reuse. Commit A2d + A2f together after verify. DGX patcher only.
+
+
+
 ## 2026-06-19 — v19.34.277 (A2e) — Provenance ring colors + numeric center
 Operator (after A2d): rings legible now but "only showing 2-3 colors, yellow and orange very
 hard to distinguish" + "TQS numbers aren't displaying" (center showed grade LETTER, not number).
