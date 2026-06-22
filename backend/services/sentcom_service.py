@@ -2387,6 +2387,10 @@ class SentComService:
                             # v19.34.258 — TQS as the single trusted UI score.
                             "tqs_score": trade.get("tqs_score", 0),
                             "tqs_grade": trade.get("tqs_grade", ""),
+                            # v19.34.275 (UI Track A / A2b) — per-pillar grades captured at
+                            # fill time so the scanner-card provenance ring renders on open
+                            # positions, not just live scanner alerts.
+                            "tqs_pillar_grades": (trade.get("entry_context") or {}).get("tqs", {}).get("pillar_grades") or {},
                             "mfe_pct": trade.get("mfe_pct", 0),
                             "mae_pct": trade.get("mae_pct", 0),
                             "ai_context": trade.get("ai_context"),
@@ -2742,6 +2746,9 @@ class SentComService:
                         # v19.34.258 — TQS as the single trusted UI score.
                         "tqs_score": (enrich_trade or {}).get("tqs_score", 0),
                         "tqs_grade": (enrich_trade or {}).get("tqs_grade", ""),
+                        # v19.34.275 (UI Track A / A2b) — per-pillar grades for the
+                        # provenance ring on lazy-reconciled / IB-orphan positions.
+                        "tqs_pillar_grades": ((enrich_trade or {}).get("entry_context") or {}).get("tqs", {}).get("pillar_grades") or {},
                         "risk_amount": (enrich_trade or {}).get("risk_amount", 0),
                         "risk_reward_ratio": (enrich_trade or {}).get("risk_reward_ratio", 0),
                         "potential_reward": (enrich_trade or {}).get("potential_reward", 0),

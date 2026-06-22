@@ -1,5 +1,19 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🔜 2026-06-19 — UI Track A2b: PROVENANCE RING ON OPEN POSITIONS — BUILT + PASTED (DGX
+> apply pending). Operator hard-refreshed in PRE-MARKET after A2c and saw no rings — because
+> only OPEN POSITIONS render pre-open (no live scanner alerts), and `/api/sentcom/positions`
+> never serialized the per-pillar TQS grades (they ARE captured at fill time in
+> `entry_context.tqs.pillar_grades`). FIX (backend-only, additive): emit `tqs_pillar_grades`
+> on both position serializers in `sentcom_service.py` from `entry_context.tqs.pillar_grades`;
+> the V5 position card already reads `p.tqs_pillar_grades` (A2 edit #4) so NO frontend change.
+> CAVEAT: positions opened before fill-time pillar capture have empty grades → ring hidden.
+> Local: py_compile OK, patcher round-trip IDENTICAL + idempotent + rollback clean + DRIFT-safe;
+> PRE f7d2cd93e499… (repo HEAD 1721aa9) / POST 0ef6e9f6add4…. PATCHER paste.rs/DmlSF
+> (patch_a2b_position_pillar_grades.py). VERIFY: apply → `./start_backend.sh --force` → rings
+> appear on open positions that carry fill-time pillar grades. DGX patcher workflow ONLY. English.**
+
+
 > **🔜 2026-06-19 — UI Track A2c PROVENANCE-RING FLICKER FIX BUILT + PASTED (DGX apply
 > pending). Fixes operator-reported "rings popup then revert to no rings". Root cause:
 > `ScannerCardsV5.buildCards()` rebuilds cards each render; WS `alerts` carry

@@ -1,3 +1,23 @@
+## 2026-06-19 — v19.34.275 (A2b) — Provenance ring on OPEN POSITIONS (backend serialize gap)
+Follow-up to A2c. Operator hard-refreshed in PRE-MARKET and saw NO rings: the only cards
+rendering pre-open are OPEN POSITIONS (no live scanner alerts yet), and `/api/sentcom/positions`
+never serialized the per-pillar TQS grades — even though they're captured at fill time in
+`entry_context.tqs.pillar_grades` (opportunity_evaluator.py ~3011/3022). Position cards therefore
+showed a TQS badge (e.g. "TQS 58 B") but no ring, and never had one. FIX (backend-only, additive
+read-only field): emit `tqs_pillar_grades` on BOTH position serializers in `sentcom_service.py`
+(open-position branch ~2388 + lazy-reconciled/IB-orphan branch ~2743), sourced from
+`entry_context.tqs.pillar_grades`. The V5 ScannerCardsV5 position branch already reads
+`p.tqs_pillar_grades` (A2 edit #4), so no frontend change needed. Rings now render on open
+positions immediately (incl. pre-market). CAVEAT: positions opened before fill-time pillar
+capture have empty pillar_grades → ring gracefully hidden (ProvenanceRing returns null). Local
+verify: py_compile OK; patcher round-trip APPLY byte-identical, idempotent, rollback clean,
+DRIFT-safe; paste cmp IDENTICAL. PRE f7d2cd93e499… (repo HEAD 1721aa9, == live DGX) / POST
+0ef6e9f6add4…. PATCHER: paste.rs/DmlSF (`patch_a2b_position_pillar_grades.py`, .a2bbak backup,
+--check/--apply/--rollback). NEXT after apply: `./start_backend.sh --force` (backend-only).
+DGX patcher workflow ONLY — no testing_agent. AWAITING DGX APPLY + operator live verification.
+
+
+
 ## 2026-06-19 — v19.34.274 (A2c) — Provenance-ring FLICKER FIX (sticky grades cache)
 Operator report: scanner provenance rings "initially popup with the rings and then revert back
 to no rings". Root cause: `buildCards()` in `ScannerCardsV5.jsx` rebuilds cards every render —
