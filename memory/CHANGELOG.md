@@ -1,3 +1,55 @@
+## 2026-06-22 — v19.34.286 (A4) — Honest EV verdict "Est. (R:R)" + 3-way coverage — SHIPPED, COMMITTED (e3a3e555), LIVE
+Track A continuation. Operator goal: "audit the TQS gaps + plain-language descriptors". The
+Setup pillar's Expected-Value sub-score read "No data" for ~43% of scored alerts (live
+/api/tqs/coverage EV real ≈58%). Built TWO read-only scoping diags FIRST (good — both killed
+the assumed fix):
+ • diag_a4_ev_coverage.py (paste.rs/AHzZu): DISPROVED the canonicalization hypothesis — only
+   2 non-canonical strategy_stats keys, 0% of the unstamped gap recoverable by switching
+   _stamp_strategy_metrics to canonicalize(). Live (5d, 3857 scored alerts): 61.1% EV stamped,
+   38.9% unstamped → 44.9% NO_STATS_ROW, 43.3% GENUINE_ZERO_EV, 11.7% COLD_START.
+ • diag_a4b_ev_sample_sizes.py (paste.rs/inrep): scoped Option B (lower the n_all>=5 EV gate in
+   pnl_compute.recompute_strategy_stats_for_setup L518 `ev = avg_rr if n_all>=5 else 0.0`).
+   Verdict: B is a TRAP — the only material slice (THR>=2 recovers 578 +EV) is 544 alerts on a
+   SINGLE setup `trend_continuation` with n_R=2, mean +1.28R → stamping a strong +EV onto ~14%
+   of the book from 2 trades (exactly the v299/v305 anti-fabrication class). Safe THR>=3 recovers
+   only 30 alerts. Rejected B.
+FIX (Option A — honest observability, ZERO scoring-math change): the R:R proxy IS data-derived,
+so labeling it "No data" overstated the gap. Gave it the distinct descriptor verdict
+"Est. (R:R)" and reported it as a 3rd coverage state. real_pct / coverage_pct UNCHANGED (proxy
+was already excluded from 'real'); only the "No data" bucket splits into proxy + truly-absent.
+ • descriptors.py: verdict_for()/disp() gain a `proxy` flag → "Est. (R:R)".
+ • setup_quality.py _display: EV block passes proxy=c.get("ev_is_proxy") (was absent=).
+ • routers/data_diagnostics.py /api/tqs/coverage: counts PROXY verdict separately; response gains
+   per-component `proxy_pct`, per-pillar `proxy_pct`, global `proxy_subscores`.
+ • TqsCoveragePanel.jsx: 3-way render (real · est · no-data) sky-blue "X% est" + legend.
+DELIVERY: anchored-chunk patcher patch_a4_ev_proxy_verdict.py (paste.rs/uZplq, 12.3KB), 4 files /
+15 chunks, whole-file PRE/POST SHA256 guards, TWO-PASS (validate-all-then-apply, proven no
+partial write on drift in first OR last file), .a4bak backups, --check, idempotent, paste cmp
+IDENTICAL. PRE→POST: descriptors 365fb732→b9308d46 · setup_quality dfc16585→9026c9ac ·
+data_diagnostics bee27de6→df383f6e · TqsCoveragePanel 066f7d7a→574f23cc. Built against LIVE DGX
+bytes (operator uploaded paste.rs/3IYrG). Applied + committed e3a3e555 + pushed; backend restarted
+clean (health 7g/1y/0r, yellow = pusher fresh-boot no-data, benign); yarn build clean.
+VERIFY: code path proven (proxy→'Est. (R:R)', real→'Favorable'). LIVE coverage is FORWARD-LOOKING —
+reads persisted tqs_breakdown, so the 5d window stays "no-data" until pre-patch alerts roll off and
+post-restart alerts (verdict 'Est. (R:R)') accrue. Re-check /api/tqs/coverage next RTH: EV est% rises.
+SIDE OBSERVATION (not fixed): trend_continuation fired 544 alerts/5d but has only 2 graded outcomes
+— an alert→closed-trade conversion/grading gap worth a separate look.
+
+## 2026-06-22 — v19.34.285 (A3) — Why-Trace modal (plain-language 7-stage trade trace) — SHIPPED, LIVE (operator-confirmed)
+Track A UI. New WhyTraceModal.jsx renders a trade's life as 7 sequential plain-language stages —
+scan → setup → grade → gate → size → manage → exit — each with DONE / NOW / NEXT / STOOD-DOWN status
++ a one-line human explanation, built from the card object (now passed through tqsDrawerBus) merged
+with the card-detail payload the drawer already fetched (no extra request). Opened from a "Why-Trace"
+button in the TQS drill-down drawer header; Esc / backdrop / ✕ to close. 1 new file + 3 whole-file
+edits (tqsDrawerBus.js bus carries `card`; ScannerCardsV5.jsx passes card on click; TqsDrillDownDrawer.jsx
+adds the button + modal). gzip+b64 whole-file patcher (paste.rs/44gvE) with PRE/POST SHA256, two-pass,
+.a3bak backups; all 4 files Babel-transpile clean; round-trip + drift(exit4)/conflict(exit3) guards
+proven; paste cmp IDENTICAL. PRE→POST: tqsDrawerBus 18487ff8→43161f18 · ScannerCardsV5 18697ef6→e1285974
+· TqsDrillDownDrawer 4a3423ca→d1857d43 · new WhyTraceModal 2516dab6. Operator applied + yarn build +
+confirmed live on RTX (screenshot). OBSERVED data nuance (NOT a modal bug): open positions whose
+card/detail lack target_price show "target —" in stages 6/7 — separate data-plumbing gap to log.
+
+
 ## 2026-06-22 — v19.34.282-283 (A2i + A2j) — Provenance Rings on EVAL & carry-forward cards
 Follow-on to A2h. After A2h populated alert objects at the `_process_new_alert`
 chokepoint, EVAL scanner cards were still ringless. Two more gaps, both fixed:

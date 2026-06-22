@@ -1,5 +1,26 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **✅ 2026-06-22 — UI Track A3 + A4 SHIPPED, LIVE, COMMITTED (A4 @ e3a3e555).**
+> A3 (Why-Trace modal): 7 plain-language stages (scan→setup→grade→gate→size→manage→exit) opened
+> from the TQS drawer header; operator-confirmed live on RTX. patcher paste.rs/44gvE.
+> A4 (honest EV verdict): two read-only diags (paste.rs/AHzZu, paste.rs/inrep) PROVED the
+> Setup-pillar EV "43% no-data" is GENUINE (not a canonicalization or stamping bug) — 44.9%
+> NO_STATS_ROW + 43.3% genuine-zero-EV + 11.7% cold-start; the only coverage-moving lever
+> (lower the n_all>=5 EV gate) was rejected as fabrication (544/578 of the gain is ONE setup,
+> trend_continuation, n=2, +1.28R). Shipped the honest fix instead: the R:R proxy now reads
+> verdict "Est. (R:R)" (descriptors.py/setup_quality.py) and /api/tqs/coverage reports it as a
+> 3rd state (proxy_pct per component/pillar + proxy_subscores global; real_pct/coverage_pct
+> UNCHANGED); TqsCoveragePanel.jsx 3-way render. patcher paste.rs/uZplq, 4 files/15 anchored
+> chunks, PRE/POST SHA256, two-pass. Coverage is FORWARD-LOOKING (reads persisted breakdowns) →
+> EV est% rises as post-restart alerts accrue; re-check /api/tqs/coverage next RTH.
+> NEXT P1 (pick one): adrp_20d collector warm-fill · TQS↔Confidence-Gate unification (one
+> decision authority + verdict). DEFER: Entry-Tendency plumbing (only ~2% trade_outcomes carry
+> real entry_slippage — do NOT schedule run_daily_analysis; resurrects v391 false-positive).
+> OPEN side-thread: trend_continuation 544 alerts/5d but only 2 graded outcomes (alert→closed
+> conversion/grading gap). Open positions can show "target —" in Why-Trace when card/detail lack
+> target_price (data-plumbing, not a modal bug). DGX patcher workflow ONLY. English.**
+
+
 > **🔜 2026-06-19 — UI Track A1b: card-detail scoring_style — BUILT + PASTED (DGX apply pending).
 > Drawer already reads detail.scoring_style but /api/tqs/card-detail never returned it (fell back
 > to setup-derived guess). FIX (backend-only, additive 1 field in tqs_router.py): surface persisted
