@@ -2056,6 +2056,43 @@ class EnhancedBackgroundScanner:
             except Exception as _feed_err:
                 logger.debug(f"A8 feed guard skip: {_feed_err}")
 
+        # 2026-06-22 A10 TRIGGER RE-VALIDATION GATE — never enter a setup whose
+        # LIVE price has drifted too far from the alert's ORIGINAL trigger.
+        # WHY (operator-traced 2026-06-22, diag_a9 + code read): _scan_daily_setups
+        # rebuilds daily-breakout alerts every cycle on fresh bars (current_price
+        # IS live), but trigger_price is the STABLE daily breakout level — so a
+        # setup keeps re-firing and auto-executing at an ever-more-EXTENDED price
+        # long after the clean break (the "stale drip" A8's restart guard could
+        # not stop; the old created_at is a dedup-upsert labeling artifact, not a
+        # price replay). Re-fetch the live quote and SKIP when the drift exceeds
+        # AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT. Universal: the intraday AND A6 daily
+        # callers funnel through here. FAIL-OPEN: no trigger / no live quote / any
+        # error never blocks a valid signal. Env-reversible.
+        try:
+            _drift_policy = os.environ.get("AUTO_EXEC_TRIGGER_DRIFT_POLICY", "block").lower()
+            _trig = float(getattr(alert, "trigger_price", 0.0) or 0.0)
+            if _drift_policy != "off" and _trig > 0:
+                _q = await self._get_quote_with_ib_priority(alert.symbol)
+                _live = float((_q or {}).get("price", 0.0) or 0.0)
+                if _live > 0:
+                    try:
+                        _max_drift = float(os.environ.get("AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT", "2.0"))
+                    except (TypeError, ValueError):
+                        _max_drift = 2.0
+                    _drift = abs(_live - _trig) / _trig * 100.0
+                    if _max_drift > 0 and _drift > _max_drift:
+                        logger.info(
+                            f"\U0001f6ab A10 trigger-drift gate "
+                            f"({'BLOCK' if _drift_policy == 'block' else 'OBSERVE'}): "
+                            f"{alert.symbol} {alert.setup_type} \u2014 live {_live:.2f} drifted "
+                            f"{_drift:.2f}% from trigger {_trig:.2f} "
+                            f"(max {_max_drift:.2f}%); skipping stale/extended entry"
+                        )
+                        if _drift_policy == "block":
+                            return
+        except Exception as _drift_err:
+            logger.debug(f"A10 trigger-drift gate skip: {_drift_err}")
+
         try:
             logger.info(f"🤖 Auto-executing alert: {alert.headline}")
             
