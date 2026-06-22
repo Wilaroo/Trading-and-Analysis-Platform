@@ -1,6 +1,16 @@
 # TradeCommand / SentCom — Product Requirements
 
-> **🔜 2026-06-19 — UI Track A2d: PROVENANCE RING LEGIBILITY — BUILT + PASTED (DGX apply
+> **🔜 2026-06-19 — UI Track A2e: RING COLORS + NUMERIC CENTER — BUILT + PASTED (DGX apply
+> pending). After A2d, operator: yellow/orange indistinguishable + wanted the TQS number in the
+> ring. FIX (frontend-only, ProvenanceRing.jsx): distinct palette A green / B sky / C clear
+> yellow #facc15 / D clear orange #f97316 / F red; center = numeric TQS score (fallback grade
+> letter). Verified via HTML mock (5 distinct colors + big number). yarn build clean; patcher
+> round-trip IDENTICAL + idempotent + rollback + DRIFT-safe. PRE 87871429d9c8… (A2d) / POST
+> aa0613232748…. PATCHER paste.rs/XFsh4 (patch_a2e_ring_colors.py). VERIFY: apply → yarn build →
+> hard-refresh. NOTE: A2d+A2e applied-but-uncommitted on DGX — commit together after verify.
+> NEXT: A1b (drawer scoring_style) → A3 Why-Trace. DGX patcher ONLY. English.**
+
+
 > pending). Operator: rings show but too small ("full height of the scanner card"). FIX
 > (frontend-only, presentational): ProvenanceRing.jsx → scalable (100×100 nominal viewBox +
 > `fill` mode); ScannerCardsV5.jsx card → 2-col flex (full-height ring rail capped ~88px +

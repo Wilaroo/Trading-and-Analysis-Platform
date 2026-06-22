@@ -1,3 +1,19 @@
+## 2026-06-19 — v19.34.277 (A2e) — Provenance ring colors + numeric center
+Operator (after A2d): rings legible now but "only showing 2-3 colors, yellow and orange very
+hard to distinguish" + "TQS numbers aren't displaying" (center showed grade LETTER, not number).
+Root cause: palette had C=amber #f59e0b and D=orange #f97316 (near-identical). FIX (frontend-only,
+ProvenanceRing.jsx, presentational): distinct per-grade palette — A #22c55e green / B #38bdf8
+sky-blue / C #facc15 clear yellow / D #f97316 clear orange / F #ef4444 red; ungraded pillar
+#52525b (visible zinc-600). Center now renders numeric TQS score (round, falls back to grade
+letter), font bumped to NOM*0.40 (2-digit) / 0.30 (3-digit). Verified via HTML mock screenshot:
+5 distinct colors + big center number (58/56/57). yarn build clean. Patcher round-trip APPLY
+byte-identical, idempotent, rollback clean, DRIFT-safe; paste cmp IDENTICAL. HASH GUARDS: PRE
+87871429d9c8… (A2d) / POST aa0613232748…. PATCHER: paste.rs/XFsh4 (`patch_a2e_ring_colors.py`,
+.a2ebak backup). NEXT after apply: `cd frontend && yarn build` + hard-refresh. NOTE: A2d + A2e
+are applied-but-uncommitted on DGX (commit them together after live verify). DGX patcher only.
+
+
+
 ## 2026-06-19 — v19.34.276 (A2d) — Provenance ring legibility (full-height left rail)
 Operator: rings render but "hardly see the detail… should be the full height of the scanner card".
 The ring was a cramped 28px inline chip. FIX (frontend-only, presentational): (1) refactored

@@ -33,14 +33,16 @@ const PILLAR_LABEL = {
 };
 
 // Grade → stroke color (mirrors TqsBadge.gradeTone families).
+// Chosen so every band is clearly distinguishable on the dark card — in
+// particular C (yellow) vs D (orange), which previously read as one color.
 const GRADE_STROKE = {
-  'A+': '#10b981', A: '#10b981',
-  'B+': '#0ea5e9', B: '#0ea5e9',
-  'C+': '#f59e0b', C: '#f59e0b',
-  D: '#f97316',
-  F: '#f43f5e',
+  'A+': '#22c55e', A: '#22c55e', // green-500
+  'B+': '#38bdf8', B: '#38bdf8', // sky-400
+  'C+': '#facc15', C: '#facc15', // yellow-400 (clearly yellow)
+  D: '#f97316',                  // orange-500 (clearly orange)
+  F: '#ef4444',                  // red-500
 };
-const MISSING = '#3f3f46'; // zinc-700 — pillar with no grade
+const MISSING = '#52525b'; // zinc-600 — visible neutral arc for an ungraded pillar
 const strokeFor = (g) => GRADE_STROKE[String(g || '').toUpperCase()] || MISSING;
 
 const polar = (cx, cy, r, deg) => {
@@ -81,6 +83,12 @@ export default function ProvenanceRing({
   if (!hasAny) return null;
 
   const centerGrade = String(grade || (score != null ? gradeFromScore(score) : '') || '').toUpperCase();
+  // Center shows the numeric TQS score (the "TQS number") when available, so
+  // the ring is self-explanatory; the grade letter still lives on the chip.
+  // Falls back to the grade letter for rows that only carry a grade.
+  const hasScore = score != null && !Number.isNaN(Number(score));
+  const centerText = hasScore ? String(Math.round(Number(score))) : centerGrade;
+  const centerFont = centerText.length >= 3 ? NOM * 0.30 : NOM * 0.40;
   // Fixed 100×100 nominal space → ring scales cleanly via CSS (fixed `size`
   // px OR `fill` = 100% of its container).
   const NOM = 100;
@@ -131,19 +139,19 @@ export default function ProvenanceRing({
             />
           );
         })}
-        {/* center grade letter */}
-        {centerGrade && (
+        {/* center: numeric TQS score (falls back to grade letter) */}
+        {centerText && (
           <text
             x={c}
             y={c}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={NOM * 0.34}
+            fontSize={centerFont}
             fontWeight="700"
             fill={strokeFor(centerGrade)}
             fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
           >
-            {centerGrade}
+            {centerText}
           </text>
         )}
       </svg>
