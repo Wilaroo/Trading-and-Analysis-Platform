@@ -9335,17 +9335,7 @@ class EnhancedBackgroundScanner:
         # tqs_score>0 → skipped (no double work). Gated by PREMARKET_TQS_ENABLED
         # (default on). _enrich_alert_with_tqs is fully try/except internally, so
         # thin premarket data degrades to neutral pillars rather than failing.
-        # v19.34.x (UI Track A / A2h) — also re-enrich when the per-pillar
-        # breakdown is MISSING, not just when the score is absent. Alerts that
-        # reach this universal chokepoint via a non-RTH-live-tick path (bar-poll
-        # / daily-swing / re-emit) can carry tqs_score>0 yet an EMPTY
-        # tqs_pillar_grades, which makes their WS payload ship no breakdown and
-        # the frontend render NO Provenance Ring (only SOME cards got rings).
-        # Backfilling pillars here guarantees a ring on EVERY live card.
-        # _enrich_alert_with_tqs is try/except-safe + idempotent; RTH alerts
-        # that already carry pillars do not match this condition (no double work).
-        _a2h_missing_pillars = not (getattr(alert, 'tqs_pillar_grades', None) or {})
-        if ((getattr(alert, 'tqs_score', 0) or 0) <= 0 or _a2h_missing_pillars) and \
+        if (getattr(alert, 'tqs_score', 0) or 0) <= 0 and \
            os.environ.get("PREMARKET_TQS_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off"):
             await self._enrich_alert_with_tqs(alert)
 
