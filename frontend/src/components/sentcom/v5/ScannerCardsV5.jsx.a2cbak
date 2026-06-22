@@ -598,47 +598,6 @@ const groupCardsBySetup = (cards) => {
   });
 };
 
-// v19.34.274 (UI Track A / A2 bugfix) — sticky per-symbol TQS pillar-grades
-// cache. REST `setups` lack `tqs_pillar_grades`; WS `alerts` carry them. When
-// an alert turned over and only the REST payload remained, the rebuilt card
-// dropped the grades and the provenance ring flashed away. Cache grades per
-// symbol (memory + localStorage) and backfill any scanner card that arrives
-// without them so the ring persists across payload turnover AND page reloads.
-const GRADES_CACHE_KEY = 'v5_tqs_grades_cache_v1';
-const GRADES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — drop stale symbols
-
-const hasPillarGrades = (g) =>
-  !!g && typeof g === 'object' && Object.values(g).some(Boolean);
-
-const loadGradesCache = () => {
-  const map = new Map();
-  try {
-    const raw = localStorage.getItem(GRADES_CACHE_KEY);
-    if (!raw) return map;
-    const obj = JSON.parse(raw);
-    const now = Date.now();
-    Object.entries(obj || {}).forEach(([sym, v]) => {
-      if (v && hasPillarGrades(v.grades) && (!v.ts || now - v.ts < GRADES_CACHE_TTL_MS)) {
-        map.set(sym, v);
-      }
-    });
-  } catch (_) { /* corrupt / disabled storage — start empty */ }
-  return map;
-};
-
-const saveGradesCache = (map) => {
-  try {
-    const now = Date.now();
-    const obj = {};
-    map.forEach((v, sym) => {
-      if (v && hasPillarGrades(v.grades) && (!v.ts || now - v.ts < GRADES_CACHE_TTL_MS)) {
-        obj[sym] = v;
-      }
-    });
-    localStorage.setItem(GRADES_CACHE_KEY, JSON.stringify(obj));
-  } catch (_) { /* quota / disabled — non-fatal */ }
-};
-
 export const ScannerCardsV5 = ({
   setups,
   alerts,
@@ -650,48 +609,10 @@ export const ScannerCardsV5 = ({
   onHoverSymbol,
   onScanProgress,
 }) => {
-  // v19.34.274 — sticky grades cache (seeded from localStorage on first
-  // render so rings render instantly after a reload).
-  const gradesCacheRef = useRef(null);
-  if (gradesCacheRef.current === null) gradesCacheRef.current = loadGradesCache();
-
-  const rawCards = useMemo(
+  const cards = useMemo(
     () => buildCards({ setups, alerts, positions, messages }),
     [setups, alerts, positions, messages]
   );
-
-  // Reconcile pillar grades: learn from any scanner card that carries them,
-  // backfill any that arrived without them. Targets `source === 'alert'`
-  // (setups + alerts) — the only rows that flicker between REST/WS payloads.
-  const cards = useMemo(() => {
-    const cache = gradesCacheRef.current;
-    const now = Date.now();
-    for (const c of rawCards) {
-      if (c.source !== 'alert') continue;
-      if (hasPillarGrades(c.tqs_pillar_grades)) {
-        cache.set(c.symbol, {
-          grades: c.tqs_pillar_grades,
-          grade: c.tqs_grade ?? null,
-          score: c.tqs_score ?? null,
-          ts: now,
-        });
-      } else {
-        const cached = cache.get(c.symbol);
-        if (cached && hasPillarGrades(cached.grades)) {
-          c.tqs_pillar_grades = cached.grades;
-          if (c.tqs_grade == null) c.tqs_grade = cached.grade;
-          if (c.tqs_score == null) c.tqs_score = cached.score;
-        }
-      }
-    }
-    return rawCards;
-  }, [rawCards]);
-
-  // Persist the learned grades cache (debounced) so rings survive a reload.
-  useEffect(() => {
-    const t = setTimeout(() => saveGradesCache(gradesCacheRef.current), 800);
-    return () => clearTimeout(t);
-  }, [cards]);
 
   // v19.34.38d — "just arrived" tracker. The first time a card's
   // (symbol+stage) key shows up in the panel during this session,
