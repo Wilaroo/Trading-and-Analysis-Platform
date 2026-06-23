@@ -45,50 +45,50 @@ cost real money or required emergency patches.
 
 ## 0.5 Codebase sync protocol — keep DGX ↔ repo ↔ sandbox together
 
-> **Why this exists:** there are THREE copies of this code and they drift.
-> A 2026-06-18 audit found the Emergent sandbox was ~50 commits behind the
-> DGX (missing v336–v379) while the repo's `memory/` notes were stuck at v320
-> even though the code was at v379. Drift is the #1 silent time-sink. These
-> rules keep all three in lockstep as we grow.
+> **Why this exists:** there are THREE copies of this code and they used to
+> drift badly (a 2026-06-18 audit found the sandbox ~50 commits behind the DGX).
+> **As of 2026-06-23 the workflow CHANGED:** the Emergent sandbox is RE-LINKED to
+> GitHub via "Save to GitHub", so `/app` is now the primary BUILD copy and we sync
+> through git (branch `main-2.0`) instead of paste.rs. These rules keep all three
+> in lockstep under the new flow.
 
 **The three copies (and who is authoritative):**
 
 | Copy | Role | Authoritative for |
 |---|---|---|
-| **DGX Spark** (`~/Trading-and-Analysis-Platform`) | the LIVE running app | the running system — **single source of truth** |
-| **GitHub repo** (`Wilaroo/Trading-and-Analysis-Platform`) | durable record / history | what every agent reads to get current |
-| **Emergent sandbox** (`/app`) | build & diagnostics scratch | **NOTHING** — it DRIFTS; never trust its files as a patch baseline |
+| **Emergent sandbox** (`/app`) | where the agent BUILDS + tests | **new work, until saved** — edit here, then "Save to GitHub" |
+| **GitHub repo** (`Wilaroo/Trading-and-Analysis-Platform`, branch **`main-2.0`**) | the sync bus + durable history | the shared truth the DGX pulls from |
+| **DGX Spark** (`~/Trading-and-Analysis-Platform`) | the LIVE running app | the running system — pulls `main-2.0`, restarts via `.bat` |
+
+**THE WORKFLOW (2026-06-23+) — this is the default now:**
+1. **Agent builds in `/app`** with normal full-file edits + tooling (NOT paste.rs).
+2. **Agent → "Save to GitHub"** pushes `/app` to branch **`main-2.0`**.
+   ⚠️ Emergent pushes its own `auto-commit` history, so a Save ALWAYS lands on
+   `main-2.0` (never `main`). Don't fight it — **`main-2.0` IS our working branch**.
+3. **Operator on DGX**: `git pull origin main-2.0` (the updated `StartTrading.bat`
+   does `fetch → checkout main-2.0 → pull main-2.0` automatically) → restart.
+4. **⚠️ COMMIT-BEFORE-RESTART still applies on the DGX** — `StartTrading.bat`
+   hard-resets the tree, so any un-pulled local DGX edits are wiped.
 
 **Golden rules (NEVER violate):**
-1. **Direction is fixed.** Code flows **DGX → repo** (operator `git push` from the
-   DGX) and **repo → sandbox** (Emergent "Pull from GitHub"). **NEVER** "Save to
-   Github" from the sandbox — it would clobber live DGX work with stale code.
-2. **Commit code AND notes together, every time.** After applying a patch on the
-   DGX, the operator runs `git add -A` (so `memory/CHANGELOG.md` + `PRD.md` +
-   `ROADMAP.md` ride along with the code) → `commit` → `push`. The biggest past
-   drift was committing code but NOT the notes. **Put the commit hash in the
-   CHANGELOG entry.**
-3. **Build patchers against LIVE DGX bytes, never the sandbox.** Always run
-   `extract_region_generic.py` / `extract_func_generic.py` on the DGX and pin the
-   patcher to the returned `OLD_B64` + PRE-SHA. A sandbox-derived patch will
-   hash-mismatch (best case) or silently apply to drifted code (worst case).
-4. **Session-start sync check (do this FIRST, every session):**
-   ```bash
-   git clone --depth 1 https://github.com/Wilaroo/Trading-and-Analysis-Platform.git /tmp/repo
-   git -C /tmp/repo log --oneline -1            # repo HEAD + latest vNNN
-   grep -c "<latest version marker>" backend/services/<file>   # does sandbox have it?
-   ```
-   If the sandbox is behind → "Pull from GitHub" before doing any work. If the
-   sandbox is somehow ahead (e.g. notes written here), ship the delta to the DGX
-   and commit it — don't let the lead evaporate.
-5. **`memory/` can diverge — PREPEND, don't blind-overwrite the CHANGELOG.** The
-   append-only CHANGELOG often has same-day entries on one side the other lacks;
-   prepend the newer block (idempotent on a version anchor) instead of
-   overwriting. `PRD.md` / `ROADMAP.md` are edited-in-place → full overwrite is OK.
+1. **`main-2.0` is the synced branch.** Save to GitHub → `main-2.0`; DGX pulls
+   `main-2.0`. `main` is a frozen pre-migration reference — do NOT target it.
+2. **Build in `/app`, not via paste.rs.** Anchored-chunk paste.rs patchers are now
+   LEGACY — keep them ONLY as an emergency fallback for a live-DGX hot-fix when a
+   Save-to-GitHub round-trip isn't possible (see §2 / §7). Default = edit in `/app`.
+3. **Ship code AND `memory/` notes together.** A "Save to GitHub" carries the whole
+   tree, so update `CHANGELOG.md` / `PRD.md` / `ROADMAP.md` in the same session you
+   ship code. Date (and any version marker) goes in the CHANGELOG entry.
+4. **Session-start sanity check:** confirm `/app` matches `origin/main-2.0`
+   (shallow-clone `-b main-2.0` to `/tmp` and `cmp` a couple of hot files), and
+   that the operator has pulled the last Save before you trust a bug report.
+5. **`memory/` can diverge — PREPEND, don't blind-overwrite the CHANGELOG.** Prepend
+   the newer block (idempotent on a date/version anchor); `PRD.md` / `ROADMAP.md`
+   are edited-in-place → full overwrite is OK.
 
-**Cadence:** sync-check at session start, and commit+push from the DGX after
-*every* applied patch (not in batches) so the repo never trails the live system
-by more than one change.
+**Safety discipline is unchanged regardless of delivery mechanism:** the
+`close_trade` / `submit_with_bracket` / kill-switch rules in §0 + §6 still hold —
+"build in `/app`" does NOT mean "edit safety-critical paths in place."
 
 ---
 
@@ -117,28 +117,18 @@ removed from the critical path to eliminate train/serve data skew.
   (level 1+2 quotes, executions). The `.bat` files in `scripts/` start
   it and pull GitHub.
 
-### The deploy contract (NEVER VIOLATE)
-1. **NO Emergent "Save to Github" UI button.** `/app` (this fork) is
-   disconnected from the user's GitHub repo. Instruct the user to
-   `git add/commit/push` directly from the DGX terminal.
-2. **Patch deployment uses `paste.rs` python patchers.** Reason: the
-   DGX terminal corrupts bash heredocs / multi-line string
-   replacements, and `git apply .patch` proved drift-fragile. Current
-   convention (v322t+ era, battle-tested):
-   - Generate a **compact anchored-chunk python patcher**: each edit is
-     a base64 (old, new) chunk pair + per-file SHA256 **pre** AND
-     **post** hash guards. The patcher ABORTS before writing anything
-     on drift, supports `--check` dry-run, backs up originals, and
-     refuses to write unless the post-patch hash equals the tested
-     build. Whole-file embeds only for small NEW files.
-   - **paste.rs limits**: silently truncates ~384KB uploads and 500s
-     intermittently on ~88KB ones. Keep patchers compact (<50KB) and
-     ALWAYS round-trip verify: download the returned URL and `cmp`
-     against the local file BEFORE giving the user the link.
-   - On a hash-mismatch abort, the DGX file has drifted: ask the user
-     to upload THEIR copy (`curl --data-binary @file https://paste.rs/`),
-     adopt it as the canonical baseline, rebase the edits, re-test,
-     rebuild. Never `--force` blind.
+### The deploy contract (2026-06-23+ — Save-to-GitHub is the default)
+1. **Emergent "Save to GitHub" IS the delivery channel now.** `/app` is re-linked
+   to the repo. Build in `/app`, then Save to GitHub → branch **`main-2.0`** →
+   operator `git pull origin main-2.0` on the DGX → restart. `main` is a frozen
+   pre-migration reference; never target it. (Full rationale in §0.5.)
+2. **`paste.rs` python patchers are LEGACY / emergency-only.** Use them ONLY for a
+   surgical live-DGX hot-fix when a Save-to-GitHub round-trip isn't viable. When you
+   do, the battle-tested convention still stands: a compact anchored-chunk patcher —
+   each edit a base64 (old,new) pair + per-file SHA256 **pre** AND **post** guards;
+   ABORTS on drift; `--check` dry-run; auto-backup; round-trip verify the paste.rs
+   URL with `cmp` before handing it over; on hash-mismatch the DGX drifted → adopt
+   the operator's copy as baseline, rebase, retest. Never `--force` blind. (§7.)
 3. **Frontend changes require `cd frontend && yarn build`** before they
    appear (FastAPI serves the static build, not dev-server).
 4. **Backend restart**: `./start_backend.sh --force` (the `--force` is
@@ -627,21 +617,30 @@ bash scripts/tail_pipeline.sh --errors  # errors-only
 bash scripts/tail_pipeline.sh --trades  # fills + closes only
 ```
 
-### Build + deploy a patch (full DGX flow — v322t+ convention)
-```bash
-# On dev machine: build a hash-guarded anchored-chunk python patcher
-# (see §2 deploy contract item 2), then:
-curl -sS --data-binary @/tmp/patcher_vXXX.py https://paste.rs/   # → URL
-curl -sS -o /tmp/rt.py <URL> && cmp /tmp/rt.py /tmp/patcher_vXXX.py  # MUST verify
+### Ship a change (2026-06-23+ — default: Save to GitHub → main-2.0)
+```text
+# In Emergent (agent):
+#   1. Edit files in /app, test (pytest / curl / screenshot).
+#   2. Update memory/CHANGELOG.md (+ PRD/ROADMAP if needed).
+#   3. Click "Save to GitHub"  → lands on branch main-2.0 (auto-commit history).
 
 # On DGX (operator):
+git pull origin main-2.0        # StartTrading.bat does this automatically now
+./start_backend.sh --force      # or just run StartTrading.bat (it pulls + restarts)
+# Frontend changes: cd frontend && yarn build  (FastAPI serves the static build)
+```
+
+### LEGACY fallback — paste.rs hot-patch (emergency only)
+```bash
+# Only when a Save-to-GitHub round-trip isn't viable (surgical live-DGX fix).
+curl -sS --data-binary @/tmp/patcher_vXXX.py https://paste.rs/        # → URL
+curl -sS -o /tmp/rt.py <URL> && cmp /tmp/rt.py /tmp/patcher_vXXX.py    # MUST verify
+# On DGX:
 curl -sS -o /tmp/patcher_vXXX.py https://paste.rs/<id>
-python3 /tmp/patcher_vXXX.py --check    # dry-run: hash + anchor guards
-python3 /tmp/patcher_vXXX.py            # apply (auto-backup)
-.venv/bin/python -m pytest <suite> -q   # verify
+python3 /tmp/patcher_vXXX.py --check && python3 /tmp/patcher_vXXX.py   # dry-run, apply
 # ⚠️ COMMIT BEFORE ANY RESTART (StartTrading.bat git-wipes uncommitted code):
-git add backend/ && git commit -m "vXXX: ..." && git push origin main
-./start_backend.sh --force              # or next StartTrading.bat boot
+git add -A && git commit -m "vXXX: ..." && git push origin main-2.0
+./start_backend.sh --force
 ```
 
 ### Run the test suite
@@ -692,6 +691,9 @@ cd /app/backend && python -m pytest tests/ -q
 
 ## 10. Active version & known-good state
 
+- **⚙️ Workflow (2026-06-23):** sandbox re-linked to GitHub; sync branch is
+  **`main-2.0`** (Save to GitHub → `main-2.0` → DGX `git pull origin main-2.0`).
+  paste.rs patchers are legacy/emergency-only. See §0.5.
 - **Current version**: v19.34.310 (2026-06-08, "IB-Gateway boot hard-block probe (A) + fundamental absent->neutral-50 (B) + SMB timeframe-aware checklist & smb_5var_score persistence (C)")
 - **Last green test run**: 94/94 across v19.34.69 -> v19.34.73; + 11/11 across v19.34.308 -> v19.34.310 (test_v308_ib_boot_probe, test_v309_fundamental_neutral, test_v310_smb_timeframe)
 - **Known issues**: see ROADMAP.md "Next session" section
@@ -762,9 +764,9 @@ Bad questions (don't ask these — go look first):
    so the next agent can grep for the change.
 4. **Update §6.5** if you added/changed a journey, or **§10** version
    pointer + **CHANGELOG.md** entry.
-5. **Generate the patch** (`git diff > /tmp/v19_34_XX.patch`), upload
-   to `paste.rs`, hand the operator the one-liner. NEVER use Emergent's
-   "Save to Github" button.
+5. **Ship via "Save to GitHub" → `main-2.0`** (the default since 2026-06-23),
+   then tell the operator to `git pull origin main-2.0` + restart. paste.rs
+   patchers are legacy/emergency-only now (§2, §7).
 
 ### 🔒 Hard rules (will-bite-you-if-violated)
 - ❌ **Don't modify `close_trade`, `submit_with_bracket`, or the
@@ -797,7 +799,7 @@ trading day. Re-running is idempotent (kills + relaunches windows).
 | Step | What it does | Side | Failure mode |
 |---|---|---|---|
 | **1. Spark connectivity** | `ping -n 1 -w 2000 192.168.50.2` | Windows | Aborts if Spark not reachable on 10 GbE LAN (192.168.50.0/24). |
-| **2. Git pull** | `git pull origin main` on Windows, then `ssh spark "git checkout -- . && git stash drop && git pull origin main"` on Spark. The hard checkout discards any local crud the agent left on the DGX. | Both | Warns if SSH keys not set; user types password. |
+| **2. Git pull** | `git pull origin main-2.0` on Windows, then `ssh spark "git checkout -- . && git stash drop && git fetch origin && git checkout main-2.0 && git pull origin main-2.0"` on Spark. The hard checkout discards any local crud the agent left on the DGX. | Both | Warns if SSH keys not set; user types password. |
 | **2.5 Spark stop** | `bash scripts/spark_stop.sh` over SSH — kills any lingering uvicorn/yarn/mongo procs from the prior session. | Spark | Quiet (silent-fail if nothing running). |
 | **3. Spark start** | `bash scripts/spark_start.sh` over SSH — re-launches `start_backend.sh --force`, mongo container, frontend (`yarn start` or static `serve build`), Ollama daemon, GPU workers. Then a Windows-side `curl /api/health` loop polls up to 20s for "backend is ready". | Spark | If `/api/health` never returns 200, the `.bat` continues with a `[WARN]` — operator must SSH in to debug. |
 | **4. IB Gateway login** | If `ibgateway.exe` not running, start it; auto-type `IB_USERNAME` / `IB_PASSWORD` (paper: `paperesw100000`) via `WScript.SendKeys`. Then poll port `4002` (paper) or `4001` (live) up to 40s. Dismisses the IBKR "warning" popups. | Windows | Manual login required if VBS auto-type races the splash screen. |
@@ -838,15 +840,14 @@ Pusher RPC `192.168.50.1:8765` is how the DGX tells Windows "I need a
 new symbol subscribed" or "kill subscription for SYM" — used by
 `ib_pusher_rpc.py` and the stale-quote watchdog (pending v19.34.74+).
 
-### `/app` vs operator's GitHub — drift risk
-This sandbox (`/app`) is **disconnected from the user's private
-GitHub** (no `git remote` configured here, repo private). The contract
-is: **`/app` and the DGX repo are kept in sync via `paste.rs` patches**;
-GitHub is the operator's responsibility (`git push` from the DGX after
-they `git apply` a patch). If the sandbox is older than DGX (operator
-hot-fixed live), an unsuspecting agent could overwrite their fix.
-**Mitigation**: when starting a session, ask the operator to paste the
-output of `git log --oneline -5` on the DGX before generating patches.
+### `/app` ↔ GitHub ↔ DGX — the sync bus (2026-06-23+)
+`/app` is **re-linked to GitHub** via "Save to GitHub". The sync bus is branch
+**`main-2.0`**: agent builds in `/app` → Save to GitHub (`main-2.0`) → operator
+`git pull origin main-2.0` on the DGX → restart (the updated `StartTrading.bat`
+step 2 below now fetches/checkouts/pulls `main-2.0`). `main` is a frozen
+pre-migration reference. **Mitigation against drift**: at session start, confirm
+`/app` == `origin/main-2.0` and that the operator has pulled the most recent Save
+before trusting a bug report. (See §0.5.)
 
 ---
 
