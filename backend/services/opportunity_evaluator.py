@@ -898,6 +898,8 @@ class OpportunityEvaluator:
                         stop_price=alert.get('stop_price', 0),
                         regime_engine=bot._market_regime_engine,
                         alert_id=alert.get('id') or alert.get('alert_id'),
+                        pillar_scores=(alert.get('tqs_pillar_scores')
+                                       or alert.get('_post_gate_tqs_pillars')),
                     )
 
                     gate_decision = confidence_gate_result.get("decision", "GO")

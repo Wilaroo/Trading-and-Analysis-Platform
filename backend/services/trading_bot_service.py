@@ -1672,6 +1672,21 @@ class TradingBotService:
         # count when the evaluator already pinpointed a specific reason.
         # Reset to False at the top of each evaluation iteration.
         self._last_evaluator_rejection_recorded = True
+        # C-ii (2026-06-23): persist a BOUNDED daily rejection COUNT at the
+        # deduped first-hit so the horizon funnel can measure how often
+        # capacity/gate rejections bite (record_rejection was in-memory only).
+        try:
+            if getattr(self, "_db", None) is not None:
+                from services.horizon_funnel import horizon_of
+                _today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                _hz = horizon_of(setup_type)
+                self._db["rejection_daily_counts"].update_one(
+                    {"date": _today, "reason_code": reason_code, "horizon": _hz},
+                    {"$inc": {"count": 1}},
+                    upsert=True,
+                )
+        except Exception:
+            pass
         narrative = self._compose_rejection_narrative(
             symbol=symbol, setup_type=setup_type, direction=direction,
             reason_code=reason_code, ctx=ctx,

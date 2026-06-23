@@ -471,6 +471,7 @@ class ConfidenceGate:
         stop_price: float = 0,
         regime_engine=None,
         alert_id: str = None,
+        pillar_scores: dict = None,
     ) -> Dict[str, Any]:
         """
         Core evaluation: Should SentCom take this trade?
@@ -1135,6 +1136,7 @@ class ConfidenceGate:
             "setup_type": setup_type,
             "direction": direction,
             "quality_score": quality_score,
+            "pillar_scores": pillar_scores if isinstance(pillar_scores, dict) else None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

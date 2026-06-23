@@ -380,6 +380,34 @@ async def get_horizon_funnel_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/mfe-mae/report")
+async def get_mfe_mae_report(days: int = Query(30)):
+    """MFE/MAE study (read-only) — bad ENTRIES vs bad EXITS, by horizon.
+
+    Per horizon: avg MFE_R / MAE_R vs realized R, % of losers that reached +1R
+    (went green then reversed), winner-capture, and a verdict
+    (entry_problem | exit_giveback | mixed | ok).
+    """
+    from services.mfe_mae_study import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days)
+    return {"success": True, "report": report}
+
+
+@router.get("/tqs-integrity/report")
+async def get_tqs_integrity_report(days: int = Query(30)):
+    """TQS integrity audit (read-only) — is the quality score PREDICTIVE?
+
+    Grade separation (alert_outcomes by trade_grade -> realized R, monotonicity),
+    score discrimination (quality_score distribution / SD), and pillar coverage
+    (real vs neutral-default, once the gate logs pillar_scores).
+    """
+    from services.tqs_integrity import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days)
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")
