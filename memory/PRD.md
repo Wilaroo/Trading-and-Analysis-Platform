@@ -1,5 +1,18 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 SESSION (TQS3 — persistence + inverse re-verify).** Patcher-only (paste.rs).
+> - ✅ Committed prior TQS1+TQS2 (commit 5ad1a5b2; TQS_RENORM_PRESENT dormant).
+> - ✅ RE-VERIFIED the 3 "inverse" inputs (diag P5jFM): premise OVERTURNED — only **setup.pattern**
+>   weakly inverse (−0.08/−0.13); **context.regime** DEGENERATE (zero-variance, dead weight);
+>   **relative_strength** now **POSITIVE** (+0.30/+0.35 — v254 already fixed it) → RS/regime
+>   inversions DROPPED. Bonus: **setup.win_rate** strongly anti-predictive (−0.62/−0.19) — own probe pending.
+> - ✅ **patch_v393_tqs_breakdown_persist** (commit 0d70c023) LIVE — `bot_trades` now persists
+>   top-level `tqs_breakdown` (was 0%). Forward-looking. MFE/MAE confirmed NOT a gap (v240 floor + manage-loop).
+> - ⚠ VERSION NUMBERING: v392/v393 reuse existing bare-track numbers; latest is v399b → use **v400+** for new work.
+> - ⏳ NEXT: accrue post-v393 closes → re-run diag P5jFM at full coverage → decide pattern fix
+>   (likely DOWN-WEIGHT static SMB ranking, NOT invert) + probe the setup.win_rate anti-signal.
+
+
 > **🧭 2026-06-22 SESSION ROLLUP (TQS HONESTY AUDIT).** Patcher-only (paste.rs, anchored/SHA-guarded).
 > - ✅ **TQS data-honesty audit** — diag_tqs.py (paste.rs/DANPT) + diag_tqs_b.py (paste.rs/kudA2),
 >   both read-only, run clean on DGX. Classifies all 28 sub-scores OK/ABSENT/PROXY/DEFAULT.

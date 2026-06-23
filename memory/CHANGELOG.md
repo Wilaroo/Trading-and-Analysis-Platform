@@ -1,3 +1,36 @@
+## 2026-06-23 — (TQS3) tqs_breakdown persistence + inverse-input RE-VERIFY (premise overturned)
+Continuation of the TQS honesty audit. Patcher-only (paste.rs, SHA-guarded). FORK session.
+ • COMMITTED last session's applied-but-uncommitted patches: TQS1 (honest AI encoding) +
+   TQS2 (scheme-B renorm, dormant/env-gated TQS_RENORM_PRESENT) → commit 5ad1a5b2
+   (msg "v19.34.392"). ⚠ number reuses bare-track v392 — see NUMBERING note.
+ • RE-VERIFY of the 3 "inverse-signed" inputs BEFORE any scoring edit
+   (diag_tqs_inverse_verify.py; v1 paste.rs/v5vaT, upgraded v2 paste.rs/P5jFM): sanitized
+   bot-own closed trades × tqs_breakdown, windows 14d+21d, n=49/73, join-coverage 187/473.
+   VERDICT — handoff's "invert all 3" premise OVERTURNED:
+     - setup.pattern              ✅ weakly INVERSE (corr −0.079/−0.127) — real but weak, muddy terciles
+     - context.regime             ⚠ DEGENERATE (corr n/a — near-zero variance; dead weight, NOT inverse)
+     - context.relative_strength  ❌ now POSITIVE (+0.349/+0.300) — v254 tanh rework already fixed it;
+                                  inverting would DESTROY a working signal → DROPPED
+   Bonus: setup.win_rate corr −0.62/−0.19 (strongest anti-signal — stamped historical WR is
+   anti-predictive) → flagged for its own probe. setup.tape +0.12/+0.19 (predictive ✓). catalyst≈0 (dark).
+ • patch_v393_tqs_breakdown_persist.py (paste.rs/mdFPR) — APPLIED + LIVE (commit 0d70c023,
+   msg "v19.34.393"). 1 anchored read-through in BotTrade.to_dict surfacing tqs_breakdown from
+   entry_context.tqs.breakdown onto the persisted bot_trades doc (was 0% top-level coverage; the
+   correlation join previously had to reach pruned live_alerts, capping the sample). Additive /
+   fail-open / reversible (--rollback). PRE a141edb6 → POST e083dd2c (byte-identical to tested
+   build), idempotent, py_compile-gated. FORWARD-LOOKING: only trades closing after the restart
+   carry top-level tqs_breakdown; older closes stay join-only. ⚠ number reuses bare-track v393.
+ • SCOPE NOTE: MFE/MAE is NOT a gap — manage-loop tracks mfe_r/mae_r (position_manager.py 900-919)
+   + _backfill_excursion_floor at close (pnl_compute.py, v19.34.240) + persisted via to_dict. The
+   upgraded diag (P5jFM) now reports MFE/MAE coverage + a direct-vs-joined breakdown-source split.
+ • NUMBERING: latest bare-track version is v399b → NEW work should be v400+. The v392/v393 tags
+   above reuse existing bare-track numbers (literal grep doesn't collide — "v19.34.39X" vs "v39X" —
+   but the number is shared). Use v400+ going forward.
+ • NEXT: as post-v393 closes accrue, re-run diag (P5jFM) → re-measure pattern/regime/win_rate at
+   FULL coverage (direct bot_trades.tqs_breakdown) before deciding any scoring change. Likely
+   pattern fix = DOWN-WEIGHT/neutralize the static SMB ranking (not invert) + probe win_rate.
+
+
 ## 2026-06-22 — (TQS2 + DECOMPOSITION) — scheme-B renorm patch (dormant) + pillar/exit edge map
 Did "B then A": pillar/sub-score + exit-efficiency decomposition, then delivered the
 scheme-B aggregation patch (dormant).

@@ -13,10 +13,11 @@ It RE-RUNS the diag_pillar_exit_edge finding on a FRESH sanitized sample:
      diag_v321b_sanitized_edge.py: provenance, learning_only, simulated,
      admin_close, legacy_orphan, hygiene_artifact, never_filled,
      no_exit_price, no_risk, sub_10s_hold, absurd_r).
-  2. Join each survivor to its scoring-time `live_alerts.tqs_breakdown`
-     (bot_trades.alert_id == live_alerts.id; falls back to the `alerts`
-     collection). bot_trades does NOT persist tqs_breakdown (integrity gap),
-     so the alert collection is the only place the per-sub-score values live.
+  2. Join each survivor to its scoring-time tqs_breakdown. PREFERS the
+     v19.34.393 (TQS3) top-level `bot_trades.tqs_breakdown` (persisted on every
+     close from that build on); falls back to the live_alerts/alerts join
+     (bot_trades.alert_id == id) for trades closed BEFORE v393. Each window
+     reports the direct-vs-joined source split + MFE/MAE (mfe_r/mae_r) coverage.
   3. For each sub-score, compute Pearson corr(sub_score, realized_R) and a
      low/mid/high TERCILE win% + avgR spread. R = pnl÷risk_amount, winsorized
      to ±3 (|R|>10 already dropped by the sanitizer).
@@ -264,27 +265,40 @@ def _analyze_window(core_all, classify_close, bd_index, days, min_n):
     start = (now - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     rows = []  # (R, breakdown)
-    joined = 0
+    src_direct = 0   # v393: read straight off bot_trades.tqs_breakdown
+    src_joined = 0   # legacy: recovered via live_alerts/alerts join
     have_bd = 0
+    in_window = 0
+    mfe_cov = 0
+    mae_cov = 0
     for t in core_all:
         et = _to_et(t.get("closed_at") or t.get("created_at"))
         if not (et and et >= start):
             continue
+        in_window += 1
+        if float(t.get("mfe_r") or 0) != 0:
+            mfe_cov += 1
+        if float(t.get("mae_r") or 0) != 0:
+            mae_cov += 1
         r = _r_multiple(t)
         if r is None:
             continue
+        bd_direct = t.get("tqs_breakdown") if isinstance(t.get("tqs_breakdown"), dict) else None
         aid = t.get("alert_id")
-        bd = bd_index.get(aid) if aid else None
-        if bd is not None:
-            joined += 1
-            if bd:
-                have_bd += 1
-                rows.append((_winsor(r), bd))
+        bd = bd_direct or (bd_index.get(aid) if aid else None)
+        if bd:
+            have_bd += 1
+            if bd_direct:
+                src_direct += 1
+            else:
+                src_joined += 1
+            rows.append((_winsor(r), bd))
 
     print("\n" + "=" * 86)
     print(f"WINDOW: trailing {days}d (since {start.strftime('%Y-%m-%d')} ET)   "
-          f"in-window sanitized={sum(1 for t in core_all if (lambda e: e and e>=start)(_to_et(t.get('closed_at') or t.get('created_at'))))}"
-          f"  alert-joined={joined}  with-breakdown={have_bd}")
+          f"in-window sanitized={in_window}  with-breakdown={have_bd} "
+          f"(direct={src_direct} joined={src_joined})")
+    print(f"  MFE/MAE coverage: mfe_r!=0 {mfe_cov}/{in_window}  mae_r!=0 {mae_cov}/{in_window}")
     print("=" * 86)
     if have_bd < 3:
         print("  ⚠ too few breakdown-joined trades to correlate — INSUFFICIENT")
@@ -378,7 +392,8 @@ def main():
          "exit_price": 1, "shares": 1, "risk_amount": 1, "net_pnl": 1,
          "realized_pnl": 1, "pnl": 1, "hold_seconds": 1, "executed_at": 1,
          "closed_at": 1, "created_at": 1, "setup_type": 1, "direction": 1,
-         "stop_price": 1, "target_prices": 1}))
+         "stop_price": 1, "target_prices": 1,
+         "tqs_breakdown": 1, "mfe_r": 1, "mae_r": 1}))
 
     excl = Counter()
     core_all = []          # all sanitized survivors (any era)
