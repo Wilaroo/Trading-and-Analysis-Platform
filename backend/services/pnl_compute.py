@@ -45,6 +45,7 @@ USAGE:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -62,8 +63,23 @@ _AO_DB = None
 def _get_outcomes_collection():
     """Lazy-init the alert_outcomes collection handle. Returns None
     when MongoDB is unreachable / not configured so callers can skip
-    cleanly."""
+    cleanly.
+
+    v19.34.396 — prefer the app's SHARED, proven-healthy DB handle (the
+    same client that already writes bot_trades) over a private lazy
+    client. The private client was a single point of SILENT failure:
+    once its first connect timed out (1.5s) or its cached handle went
+    stale, every subsequent close wrote NOTHING for days while logging
+    only at DEBUG (the 2026-06-05 → 06-23 alert_outcomes outage)."""
     global _AO_CLIENT, _AO_DB
+    if _AO_DB is None:
+        try:
+            from database import get_database
+            shared = get_database()
+            if shared is not None:
+                _AO_DB = shared
+        except Exception as e:
+            logger.debug("[pnl_compute] shared db handle unavailable: %s", e)
     if _AO_DB is not None:
         return _AO_DB["alert_outcomes"]
     import os
@@ -72,11 +88,14 @@ def _get_outcomes_collection():
         return None
     try:
         from pymongo import MongoClient
-        _AO_CLIENT = MongoClient(mongo_url, serverSelectionTimeoutMS=1500)
+        _AO_CLIENT = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
         _AO_DB = _AO_CLIENT[os.environ.get("DB_NAME", "tradecommand")]
         return _AO_DB["alert_outcomes"]
     except Exception as e:
-        logger.debug("[pnl_compute] alert_outcomes mongo init failed: %s", e)
+        logger.warning(
+            "[pnl_compute] alert_outcomes mongo init FAILED — outcomes will "
+            "NOT persist until this recovers: %s", e,
+        )
         return None
 
 
@@ -134,6 +153,7 @@ def _record_alert_outcome_bestEffort(
     intentionally schema-COMPATIBLE with `enhanced_scanner.record_alert_outcome`
     so consumers (setup-grading, learning loop, /diagnostic/setup-winrate-
     breakdown) can read both without branching."""
+    global _AO_DB, _AO_CLIENT
     coll = _get_outcomes_collection()
     if coll is None:
         return
@@ -160,6 +180,10 @@ def _record_alert_outcome_bestEffort(
                     pps = exit_price - entry
                 else:
                     pps = entry - exit_price
+                # v19.34.396 — restore the single-leg R assignment that a prior
+                # refactor dropped (left r_multiple pinned at 0.0 for every
+                # single-exit close → TQS grade separation read all-zero R).
+                r_multiple = round(pps / risk_per_share, 4)
     except Exception:
         pass
 
@@ -303,7 +327,15 @@ def _record_alert_outcome_bestEffort(
             upsert=True,
         )
     except Exception as e:
-        logger.debug("[pnl_compute] alert_outcomes upsert failed: %s", e)
+        # v19.34.396 — a write failure here previously logged at DEBUG and
+        # left the cached _AO_DB in place, so a single stale/dead handle
+        # silently dropped EVERY subsequent outcome (18-day outage). Warn +
+        # drop the cached handle so the next close re-resolves a fresh one.
+        logger.warning(
+            "[pnl_compute] alert_outcomes upsert FAILED (self-healing handle): %s", e,
+        )
+        _AO_DB = None
+        _AO_CLIENT = None
 
     # ── v19.34.216 — LIVE EV HOOK ─────────────────────────────────────────
     # Keep `strategy_stats` (the TQS Setup-pillar EV / real-win-rate feed)

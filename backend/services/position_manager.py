@@ -4403,6 +4403,26 @@ class PositionManager:
 
             await bot._notify_trade_update(trade, "closed")
             await bot._save_trade(trade)
+            # v19.34.396 — operator-panel full close previously skipped the
+            # outcome writer (only close_trade / v162-EOD wrote it), so manual
+            # operator closes never reached alert_outcomes / strategy_stats /
+            # the MFE-MAE excursion floor. Mirror close_trade's terminal write.
+            try:
+                from services.pnl_compute import _record_alert_outcome_bestEffort
+                _record_alert_outcome_bestEffort(
+                    trade, reason,
+                    {"realized_pnl": float(getattr(trade, "realized_pnl", 0) or 0),
+                     "net_pnl":      float(getattr(trade, "net_pnl", 0) or 0),
+                     "shares":       int(filled_qty or 0)},
+                    float(getattr(trade, "exit_price", 0) or 0),
+                    "operator_close_custom_v19_34_396",
+                )
+            except Exception as _ao_err:
+                logger.debug(f"[v396] close_trade_custom alert_outcomes write skipped: {_ao_err}")
+            try:
+                self._record_learning_outcome(bot, trade, reason)
+            except Exception:
+                pass
             try:
                 await bot._log_trade_to_journal(trade, "exit")
             except Exception as e:

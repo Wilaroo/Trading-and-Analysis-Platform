@@ -103,6 +103,11 @@ class _TradeView:
         self.shares = bt.get("shares")
         self.trade_grade = bt.get("trade_grade")
         self.smb_grade = bt.get("smb_grade")
+        # v19.34.396 — carry existing excursion so the floor backfill only
+        # fills mfe_r/mae_r when the manage loop left them 0 (never clobbers a
+        # real tracked peak with the thinner realized-exit floor).
+        self.mfe_r = _f(bt.get("mfe_r")) or 0.0
+        self.mae_r = _f(bt.get("mae_r")) or 0.0
         self.entered_by = bt.get("entered_by", "")
         self.closed_at = bt.get("closed_at")
         self.executed_at = bt.get("executed_at")
