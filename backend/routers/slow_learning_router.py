@@ -366,6 +366,20 @@ async def get_strategy_autonomy_report():
     return {"success": True, "report": report}
 
 
+@router.get("/horizon-funnel/report")
+async def get_horizon_funnel_report(days: int = Query(30)):
+    """Per-horizon funnel diagnostic (read-only) — why fast trades are crowded out.
+
+    evaluated (gate) -> approved (GO+REDUCE) -> taken (bot_trades) -> realized R,
+    grouped by horizon class (scalp/intraday/swing/position), with a per-horizon
+    CHOKE heuristic (under_emitted | gate_veto | capacity | healthy).
+    """
+    from services.horizon_funnel import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days)
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")

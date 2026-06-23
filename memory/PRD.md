@@ -1,5 +1,14 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 — HORIZON-FUNNEL DIAGNOSTIC delivered (scalp/intraday under-firing).** Read-only:
+> `GET /api/slow-learning/horizon-funnel/report?days=` builds evaluated(gate)→approved(GO+REDUCE)→taken
+> (bot_trades)→realized-R per horizon class (scalp/intraday/swing/position) with a CHOKE label
+> (under_emitted | gate_veto | capacity | healthy). Tested (test_horizon_funnel.py). NEXT: run on DGX after
+> an RTH window; the choke label routes the fix — gate_veto→TQS anchor/horizon-aware gate (ties to the next
+> TQS-integrity task); capacity→MFE/MAE study + raise the 25-position cap. Read the report before changing thresholds.
+
+
+
 > **🧭 2026-06-23 (P5 FINISHED) — partial-TRIM (soft) + full-CLOSE (hard) thesis-invalidation exits.**
 > New `PositionManager.trim_position()` (reuses scale-out broker path + exact bookkeeping, keeps a runner) +
 > bot-side internal-stop tighten (never crosses price). Routing: hard_regime_flip→close, regime_hostile_cell→

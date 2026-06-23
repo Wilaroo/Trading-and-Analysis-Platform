@@ -20,12 +20,12 @@ What REMAINS is the TQS *scoring itself*: reliability + integrity audit.
   validate against `bot_trades` realized R (reuse clean_r). Likely a shadow/observe rollout per discipline.
 
 ### 🟠 P1 — Why is the bot under-firing SCALP / INTRADAY vs LONGER-HORIZON trades?
-Diagnose the funnel for short-horizon setups end-to-end: scanner emission → dedup/liquidity gates →
-opportunity_evaluator → Confidence Gate → sizing/bracket. Count alerts vs fills per horizon class
-(scalp / intraday / swing / position). Suspects: horizon-agnostic gates favoring longer holds, ADRP/
-liquidity thresholds, bracket geometry, per-setup suppression, or the 25-position cap crowding out fast
-turnover. Output: a horizon-distribution diag (emitted vs taken vs realized-R by horizon) to locate the
-choke point before changing any thresholds.
+✅ DIAGNOSTIC DELIVERED 2026-06-23 — `services/horizon_funnel.py` +
+`GET /api/slow-learning/horizon-funnel/report?days=`. Per-horizon funnel (evaluated→approved→taken→
+realized-R) with a CHOKE heuristic (under_emitted | gate_veto | capacity | healthy). NEXT: run it on the
+DGX after an RTH window and act on the choke label — under_emitted ⇒ scanner/ADRP/liquidity thresholds;
+gate_veto ⇒ TQS anchor + horizon-aware gate thresholds (ties to TQS-integrity); capacity ⇒ MFE/MAE +
+raise the 25-position cap. (The actual fix is data-driven — read the report first.)
 
 ### 🟠 P1 — MFE/MAE study → time-decay (long-horizon) and/or RAISE the position cap (currently 25)
 - Compute MFE_R / MAE_R per trade by horizon class (reuse the mfe_r/mae_r tracking in position_manager).

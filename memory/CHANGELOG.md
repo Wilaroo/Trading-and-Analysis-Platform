@@ -1,3 +1,22 @@
+## 2026-06-23 — HORIZON-FUNNEL DIAGNOSTIC (scalp/intraday under-firing) — read-only tool DELIVERED
+Answers "why are fast trades crowded out?" by building a per-horizon funnel from durable logs.
+ • NEW `services/horizon_funnel.py` + `GET /api/slow-learning/horizon-funnel/report?days=`.
+ • Funnel per horizon class (scalp / intraday / swing / position, via SSOT trade-style classifier
+   `style_of` rolled up): evaluated (confidence_gate_log) → approved (GO+REDUCE) → taken (bot_trades) →
+   realized clean-R (win%/avg/median). Plus eval_share / taken_share and a fast-vs-slow headline.
+ • Per-horizon CHOKE heuristic: under_emitted (tiny eval share ⇒ scanner not producing) / gate_veto (low
+   approve-rate ⇒ Confidence Gate SKIPs them) / capacity (approved ≫ taken ⇒ 25-position cap / sizing /
+   exposure crowding out) / healthy. Read-only; no behavior change.
+ • TESTED (`tests/test_horizon_funnel.py`): scalp approve_rate 0.2 → gate_veto; intraday 3 taken vs 20
+   approved → capacity; position → healthy; headline names both fast-trade chokes. Endpoint 200 (preview
+   shows zeros — no real gate-log/trade data in window; real data lives on DGX).
+ • INTERPRET ON DGX: hit the endpoint after an RTH window. The choke label tells the fix lane:
+   under_emitted → scanner/ADRP/liquidity thresholds for fast setups; gate_veto → the TQS/gate anchor
+   (ties to the TQS-integrity work) and/or horizon-aware gate thresholds; capacity → MFE/MAE study +
+   raise max_open_positions (25) / per-cycle overshoot guard.
+
+
+
 ## 2026-06-23 — P5 FINISHED: partial-TRIM (soft) + full-CLOSE (hard) thesis-invalidation exits — TESTED
 Completes the "close/**trim**" spec. Still DORMANT by default (THESIS_INVALIDATION_MODE=observe).
  • NEW `PositionManager.trim_position(trade, fraction, bot, reason)` — ad-hoc partial trim via the SAME
