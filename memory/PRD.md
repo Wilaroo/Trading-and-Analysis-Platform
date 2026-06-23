@@ -1,5 +1,16 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (cont.) — v400 TQS4 setup dials + fundamentals probe.** Patcher-only.
+> - ✅ Probe OVERTURNED win_rate: DEGENERATE (raw WR ~0.55 everywhere → score ~62), NOT anti-predictive;
+>   the −0.62 was a 1-outlier artifact. Real weight already only 0.15 (v305). No fix → logged as a
+>   learning-stats data thread (win-rate not differentiating setups).
+> - ✅ patch_v400 (commit 7db16cb1) LIVE — env dials `TQS_SETUP_PATTERN_SHRINK` + `TQS_SETUP_WR_SHRINK`,
+>   both default 1.0/off. pattern is the real lever (75-90 bucket loses every window; opening_drive=85 →
+>   0% win). A/B with `=0.5`/`=0.0` when ready.
+> - ⏳ FUNDAMENTALS: diag_fundamentals_feed (paste.rs/p3phF) built to root-cause dark catalyst/earnings —
+>   prime suspect = Date-vs-ISO-string query mismatch on news_articles/earnings_calendar. Awaiting DGX run.
+
+
 > **🧭 2026-06-23 SESSION (TQS3 — persistence + inverse re-verify).** Patcher-only (paste.rs).
 > - ✅ Committed prior TQS1+TQS2 (commit 5ad1a5b2; TQS_RENORM_PRESENT dormant).
 > - ✅ RE-VERIFIED the 3 "inverse" inputs (diag P5jFM): premise OVERTURNED — only **setup.pattern**

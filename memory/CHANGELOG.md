@@ -1,3 +1,26 @@
+## 2026-06-23 (cont.) — (TQS4 / v400) setup pattern+win_rate shrink dials (dormant) + win_rate FALSE-ALARM + fundamentals probe
+ • diag_setup_pillar_probe.py (paste.rs/AW5n9, read-only) ran on DGX (14/21/30d, direct+joined breakdown):
+     - setup.win_rate is DEGENERATE, NOT anti-predictive: raw historical WR pinned ~0.55 for ~95% of the
+       book (score stuck ~62, distinct≈1-2). The −0.62 @14d was a 1-outlier artifact (one score-47 trade
+       +2.91R); decays to −0.19/−0.16 @21/30d. Its REAL weight is 0.15 (v305 rebalance — the "25%" comment
+       is stale), already de-emphasized. → the learning-loop win-rate isn't differentiating setups
+       (a DATA/learning-stats thread, not a scoring bug).
+     - setup.pattern is the real (weak, STABLE) lever: the 75-90 score bucket LOSES every window (0% win,
+       avgR −0.34..−0.36); opening_drive=85 → 0% win/−0.41R while low-scored fashionably_late(51) &
+       vwap_continuation(54) WIN. Static SMB tier ranking mildly anti-predictive (−0.08/−0.13/−0.14).
+ • patch_v400_setup_subscore_shrink.py (paste.rs/MdYzL) — APPLIED + LIVE (commit 7db16cb1). 1 anchored
+   insert in setup_quality.calculate_score (before the weighted-total) adding TWO env dials, BOTH default
+   1.0 = byte-identical no-op (DORMANT): TQS_SETUP_PATTERN_SHRINK + TQS_SETUP_WR_SHRINK → s→50+(s-50)*k,
+   clamped [0,100]. PRE 9026c9ac→POST 24fc9dcf (byte-identical to tested build), idempotent, py_compile-
+   gated, dial math tested (default/garbage=no-op, 0.5/0.0 shrink correct). A/B live: export
+   TQS_SETUP_PATTERN_SHRINK=0.5 (or 0.0); restart; observe. ⚠ tag v400 = bare track (latest was v399b).
+ • diag_fundamentals_feed.py (paste.rs/p3phF, read-only) — built to root-cause the DARK catalyst/earnings
+   pillar (fundamental = 15% of TQS): §1 fundamental sub-score distribution from persisted breakdowns,
+   §2 news_articles + earnings_calendar health (date FIELD-TYPE + recent-window counts), §3 reproduces the
+   EXACT code queries for top traded symbols (news 72h / earnings <=14d / reported 10d) → distinguishes
+   query/field-format mismatch (Date-vs-ISO-string) vs stale collector vs coverage gap. AWAITING DGX run.
+
+
 ## 2026-06-23 — (TQS3) tqs_breakdown persistence + inverse-input RE-VERIFY (premise overturned)
 Continuation of the TQS honesty audit. Patcher-only (paste.rs, SHA-guarded). FORK session.
  • COMMITTED last session's applied-but-uncommitted patches: TQS1 (honest AI encoding) +
