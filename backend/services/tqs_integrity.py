@@ -181,6 +181,84 @@ def _grade_by_horizon(db, cutoff):
     return {"horizons": horizons, "inverted_horizons": inverted}
 
 
+def _clean_r(pnl, risk):
+    try:
+        ra = float(risk)
+        if ra > 0:
+            return max(-10.0, min(10.0, float(pnl) / ra))
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _pearson(pairs):
+    n = len(pairs)
+    if n < 5:
+        return None
+    mx = sum(p[0] for p in pairs) / n
+    my = sum(p[1] for p in pairs) / n
+    cov = sum((x - mx) * (y - my) for x, y in pairs)
+    vx = sum((x - mx) ** 2 for x, y in pairs)
+    vy = sum((y - my) ** 2 for x, y in pairs)
+    if vx <= 0 or vy <= 0:
+        return None
+    return round(cov / (vx * vy) ** 0.5, 3)
+
+
+PILLARS = ["setup", "technical", "fundamental", "context", "execution"]
+
+
+def _pillar_predictiveness(db, cutoff):
+    """Per (horizon × pillar): does a HIGHER pillar score correspond to a HIGHER
+    realized R? Reads pillar scores already stamped on each trade at entry
+    (entry_context.tqs.pillar_scores) joined to that trade's realized R — so an
+    ANTI-predictive pillar (corr < 0: high score → low R) on an inverted horizon
+    is the smoking gun (e.g. which pillar makes A-grade scalps the worst cell)."""
+    from services.horizon_funnel import horizon_of
+    buckets = {}
+    proj = {"setup_type": 1, "realized_pnl": 1, "risk_amount": 1, "closed_at": 1,
+            "timestamp": 1, "created_at": 1, "entry_context": 1}
+    for t in db["bot_trades"].find({"status": "closed"}, proj):
+        ts = t.get("closed_at") or t.get("timestamp") or t.get("created_at")
+        if ts and str(ts) < cutoff:
+            continue
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if r is None:
+            continue
+        ec = t.get("entry_context") if isinstance(t.get("entry_context"), dict) else {}
+        tqs = ec.get("tqs") if isinstance(ec.get("tqs"), dict) else {}
+        ps = tqs.get("pillar_scores") if isinstance(tqs.get("pillar_scores"), dict) else {}
+        if not ps:
+            continue
+        buckets.setdefault(horizon_of(t.get("setup_type")), []).append((ps, r))
+
+    horizons = []
+    for h, rows in sorted(buckets.items()):
+        pill = []
+        for p in PILLARS:
+            pairs = [(float(ps[p]), r) for ps, r in rows
+                     if isinstance(ps.get(p), (int, float))]
+            corr = _pearson(pairs)
+            avg_hi = avg_lo = None
+            if len(pairs) >= 6:
+                srt = sorted(pairs, key=lambda x: x[0])
+                mid = len(srt) // 2
+                lo = [r for _, r in srt[:mid]]
+                hi = [r for _, r in srt[mid:]]
+                avg_lo = round(sum(lo) / len(lo), 3)
+                avg_hi = round(sum(hi) / len(hi), 3)
+            pill.append({
+                "pillar": p, "n": len(pairs), "corr_with_r": corr,
+                "avg_r_top_half": avg_hi, "avg_r_bottom_half": avg_lo,
+                "anti_predictive": corr is not None and corr < -0.05,
+            })
+        horizons.append({"horizon": h, "n": len(rows), "pillars": pill})
+    has = any(hz["n"] for hz in horizons)
+    return {"horizons": horizons,
+            "note": ("from entry_context.tqs.pillar_scores" if has
+                     else "no entry_context.tqs.pillar_scores found on closed trades")}
+
+
 def generate_report(db, days: int = 30) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -193,6 +271,7 @@ def generate_report(db, days: int = 30) -> dict:
     out["score_discrimination"] = _score_discrimination(db, cutoff)
     out["pillar_coverage"] = _pillar_coverage(db, cutoff)
     out["grade_by_horizon"] = _grade_by_horizon(db, cutoff)
+    out["pillar_predictiveness"] = _pillar_predictiveness(db, cutoff)
     gs, sd = out["grade_separation"], out["score_discrimination"]
     bits = []
     if gs.get("verdict") == "weak_or_inverted":
