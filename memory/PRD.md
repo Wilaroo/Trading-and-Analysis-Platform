@@ -1,5 +1,22 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (P3 SEAM-3) — TQS ↔ Confidence-Gate UNIFICATION via SHADOW-ARM HARNESS — WIRED + E2E-TESTED.**
+> First build on the NEW direct-edit + Save-to-GitHub (`main-2.0`) workflow (paste.rs retired).
+> - ✅ Pure logic (`unified_verdict.py` A1=`unified_1a2a` TQS-anchored single-multiplier, A2=`gate_off` TQS-only,
+>   `champion`=live stacked dual-gate) verified: over-veto case (grade-B + gate SKIP) → champion KILLS (0.0),
+>   unified REDUCES (0.42, not killed), gate_off GOES (0.7). Kills the 68% over-veto + the double-discount.
+> - ✅ Wired (`shadow_arms.py` recorder → existing `shadow_signals` engine, tier="shadow", NOTHING to IB):
+>   `ShadowSignal`+`record_signal` extended (arm/tier/alert_id/arm_decision/size_mult/status); injected at the
+>   Confidence-Gate decision site in `opportunity_evaluator.py` BEFORE the SKIP return; new
+>   `GET /api/slow-learning/shadow/arm-report` (per-arm win% + raw & **size-weighted R**); `generate_report`
+>   excludes arm rows; `ShadowVsRealTile.jsx` gains an additive arm-compare strip. Toggle `SHADOW_ARMS_ENABLED`.
+> - ✅ TESTED: py_compile + logic smoke + endpoints 200 (preview) + FULL e2e (`tests/test_p3_shadow_arms_e2e.py`
+>   PASS, self-cleaning). LIVE alert→arm path is DGX-only (IB Unavailable in preview) → verified structurally.
+> - ⏳ NEXT: Save-to-GitHub `main-2.0` → pull on DGX → accrue arms over RTH → read `/shadow/arm-report`; if
+>   `unified_1a2a` weighted-R beats `champion`, promote to live authority. Then P4 regime-fit abstention arm.
+
+
+
 > **🧭 2026-06-23 (cont.) — v400 TQS4 setup dials + fundamentals probe.** Patcher-only.
 > - ✅ Probe OVERTURNED win_rate: DEGENERATE (raw WR ~0.55 everywhere → score ~62), NOT anti-predictive;
 >   the −0.62 was a 1-outlier artifact. Real weight already only 0.15 (v305). No fix → logged as a

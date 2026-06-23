@@ -325,6 +325,19 @@ async def get_shadow_report(days: int = Query(30)):
     return {"success": True, "report": report.to_dict()}
 
 
+@router.get("/shadow/arm-report")
+async def get_shadow_arm_report(days: int = Query(30)):
+    """Champion vs challenger ARM comparison (P3 Seam-3).
+
+    A/B the unified verdict (unified_1a2a) and the gate-off (gate_off) arms
+    against the live dual-gate (champion) using the existing shadow engine —
+    win-rate, decision split, raw + size-weighted R per arm.
+    """
+    service = get_shadow_mode_service()
+    report = await service.generate_arm_report(days)
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")

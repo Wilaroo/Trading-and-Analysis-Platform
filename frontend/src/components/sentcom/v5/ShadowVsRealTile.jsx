@@ -22,10 +22,20 @@
  * 2026-04-30 (operator P1): wired into the V5 sidebar tile column.
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { Eye, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Eye, Activity, TrendingUp, TrendingDown, Minus, GitBranch } from 'lucide-react';
 import api from '../../../utils/api';
 
 const POLL_INTERVAL_MS = 60_000;
+
+// P3 Seam-3 — arm display order + palette. champion = live dual-gate
+// (baseline), unified_1a2a = the proposed single-authority verdict,
+// gate_off = TQS-only control.
+const ARM_META = {
+  champion: { label: 'CHAMP', cls: 'text-amber-300', dot: 'text-amber-400' },
+  unified_1a2a: { label: 'UNIFIED', cls: 'text-sky-300', dot: 'text-sky-400' },
+  gate_off: { label: 'GATE-OFF', cls: 'text-violet-300', dot: 'text-violet-400' },
+};
+const ARM_ORDER = ['champion', 'unified_1a2a', 'gate_off'];
 
 const _fmtPct = (v) => {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';
@@ -43,6 +53,7 @@ const _fmtCount = (v) => {
 export const ShadowVsRealTile = () => {
   const [shadow, setShadow] = useState(null);
   const [real, setReal] = useState(null);
+  const [arms, setArms] = useState(null);
   const [error, setError] = useState(null);
   const timerRef = useRef(null);
 
@@ -50,10 +61,11 @@ export const ShadowVsRealTile = () => {
     let cancelled = false;
 
     const load = async () => {
-      // Two independent fetches — partial data still renders.
-      const [shadowRes, realRes] = await Promise.allSettled([
+      // Three independent fetches — partial data still renders.
+      const [shadowRes, realRes, armRes] = await Promise.allSettled([
         api.get('/api/ai-modules/shadow/stats'),
         api.get('/api/trading-bot/stats/performance'),
+        api.get('/api/slow-learning/shadow/arm-report?days=30'),
       ]);
 
       if (cancelled) return;
@@ -70,6 +82,11 @@ export const ShadowVsRealTile = () => {
         setReal(realRes.value.data.stats || {});
       } else if (!nextErr) {
         nextErr = 'real_unavailable';
+      }
+
+      // Arm comparison is additive — its absence never sets the tile error.
+      if (armRes.status === 'fulfilled' && armRes.value?.data?.success) {
+        setArms(armRes.value.data.report || null);
       }
 
       setError(nextErr);
@@ -134,7 +151,13 @@ export const ShadowVsRealTile = () => {
     }
   }
 
+  // P3 Seam-3 — arm-comparison row (additive; renders only when arm data exists).
+  const armRows = (arms?.arms || [])
+    .filter((a) => a && a.signals > 0)
+    .sort((a, b) => ARM_ORDER.indexOf(a.arm) - ARM_ORDER.indexOf(b.arm));
+
   return (
+    <>
     <div
       data-testid="shadow-vs-real-tile"
       className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/40 border-t border-zinc-900 text-[14px] text-zinc-300 whitespace-nowrap overflow-hidden"
@@ -205,6 +228,42 @@ export const ShadowVsRealTile = () => {
         )}
       </span>
     </div>
+    {armRows.length > 0 && (
+      <div
+        data-testid="shadow-arm-compare"
+        className="flex items-center gap-2 px-2 py-0.5 bg-zinc-950/40 border-t border-zinc-900/60 text-[13px] text-zinc-300 whitespace-nowrap overflow-hidden"
+        title="P3 shadow arms — champion (live dual-gate) vs unified_1a2a (single authority) vs gate_off (TQS-only). Win% over resolved · size-weighted R."
+      >
+        <GitBranch className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+        <span className="text-zinc-400 font-semibold uppercase tracking-wide text-[12px]">
+          Arms
+        </span>
+        {armRows.map((a) => {
+          const meta = ARM_META[a.arm] || { label: (a.arm || '?').toUpperCase(), cls: 'text-zinc-300', dot: 'text-zinc-400' };
+          const wr = a.win_rate === null || a.win_rate === undefined ? '—' : `${Number(a.win_rate).toFixed(0)}%`;
+          const wr8 = a.resolved > 0 ? wr : '—';
+          const rW = a.weighted_r === null || a.weighted_r === undefined ? '—' : `${a.weighted_r >= 0 ? '+' : ''}${Number(a.weighted_r).toFixed(1)}R`;
+          return (
+            <span
+              key={a.arm}
+              data-testid={`shadow-arm-${a.arm}`}
+              className={`flex items-center gap-1 ${meta.cls}`}
+            >
+              <span className={`text-[10px] ${meta.dot}`}>●</span>
+              <span className="text-[12px] uppercase tracking-wide">{meta.label}</span>
+              <span className="font-mono font-bold">{wr8}</span>
+              <span className={`font-mono text-[12px] ${a.weighted_r >= 0 ? 'text-emerald-400/80' : 'text-rose-400/80'}`}>
+                {rW}
+              </span>
+              <span className="text-zinc-600 text-[11px]">
+                ({_fmtCount(a.resolved)}/{_fmtCount(a.signals)})
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    )}
+    </>
   );
 };
 

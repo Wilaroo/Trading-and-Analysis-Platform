@@ -1,3 +1,44 @@
+## 2026-06-23 — P3 SEAM-3: TQS ↔ Confidence-Gate UNIFICATION via SHADOW-ARM HARNESS — WIRED + E2E-TESTED (preview)
+First task built under the NEW direct-edit + Save-to-GitHub (`main-2.0`) workflow (no more paste.rs patchers).
+Collapses the dual-gate ambiguity (TQS quality vs Confidence-Gate conviction — each with its own SKIP +
+its own size multiplier that STACK → double-discount; diag showed 68% over-veto) into a single verdict
+authority, A/B-tested through the EXISTING `shadow_signals` engine before it ever touches IB.
+
+ • PURE LOGIC (already coded last session, verified correct):
+   - `services/unified_verdict.py` — Arm **A1 `unified_1a2a`**: TQS-anchored (quality leads, AI conviction
+     MODULATES) + single grade-base multiplier (kills the 2nd continuous gate multiplier). gate GO → full
+     grade size; gate non-GO/absent → ONE reduce step (×0.6), NOT killed, unless hard veto / grade F /
+     both-weak (D+non-GO) → SKIP. Arm **A2 `gate_off`**: TQS-only (gate ignored). `champion_verdict`:
+     summarises the LIVE dual-gate (grade_mult × conf_mult — the stacked reality) as the baseline arm.
+   - `services/shadow_arms.py` — `record_shadow_arms()`: per evaluated alert, records the 3 arms into
+     `shadow_signals` tagged {tier:"shadow", arm, alert_id, arm_decision, size_mult}; derives 2R geometry
+     when the alert carries no target so the scorer can mark won/lost. Best-effort, fully guarded (NEVER
+     raises into the decision path), env-toggle `SHADOW_ARMS_ENABLED` (default on). NOTHING sent to IB.
+ • WIRING (this session, 4 files):
+   - `shadow_mode_service.py`: `ShadowSignal` gains `arm/tier/alert_id/arm_decision/size_mult`; `record_signal`
+     accepts them + explicit `status`; new index (tier,arm,created_at); new `generate_arm_report(days)` groups
+     arm rows → per-arm signals/go/reduce/skip/pending/resolved, win-rate, **raw total_r AND size-weighted_r
+     (would_have_r × size_mult)** — the weighted-R is what exposes champion's double-discount vs the unified
+     single multiplier. `generate_report` now EXCLUDES tier="shadow" arm rows (own report, no distortion).
+   - `opportunity_evaluator.py`: injected `record_shadow_arms(...)` at the Confidence-Gate decision site,
+     BEFORE the SKIP early-return (so the harness captures the gate's vetoes too). Guarded try/except.
+   - `slow_learning_router.py`: `GET /api/slow-learning/shadow/arm-report?days=` → champion vs unified_1a2a
+     vs gate_off comparison.
+   - `ShadowVsRealTile.jsx`: additive 2nd strip (`shadow-arm-compare`) showing CHAMP / UNIFIED / GATE-OFF
+     win% + size-weighted R + (resolved/signals); renders only when arm data exists; existing S-vs-R strip
+     untouched.
+ • TESTED: py_compile clean (all 5 files); unified_verdict logic smoke (over-veto case B/SKIP → champion
+   kills@0.0, unified REDUCE@0.42, gate_off GO@0.7); `/shadow/arm-report` + `/shadow/report` 200 via preview;
+   FULL e2e `backend/tests/test_p3_shadow_arms_e2e.py` PASS (writes 3 arms → fields persist → 2R target 104.0
+   derived → report scores gate_off WON: raw 2.0R vs weighted 1.4R; self-cleans). Frontend transpiles + loads.
+ • LIVE PATH NOTE: the actual alert→arm-record path runs only on the DGX (IB Gateway is DGX-only; "Unavailable"
+   in this preview pod) — verified structurally + via direct e2e write/read, not via a live scan cycle here.
+ • NEXT: pull `main-2.0` on DGX → let arms accrue over RTH → read `/shadow/arm-report` to size the real
+   over-veto cost → if unified_1a2a's weighted-R beats champion, promote it to the live authority. Then
+   P4 regime-fit abstention as a NEW challenger arm.
+
+
+
 ## 2026-06-23 — adrp_20d collector WARM-FILL (scalp ADRP fast-path) — SHIPPED, LIVE, COMMITTED (1fb6b959)
 P1 backlog item (v368 deferred this as the "fast-path"). The scalp/intraday ADRP gate
 (`enhanced_scanner._get_adrp_for_gate`) reads `symbol_adv_cache.adrp_20d` FIRST, then falls back to

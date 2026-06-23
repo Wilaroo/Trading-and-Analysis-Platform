@@ -916,6 +916,30 @@ class OpportunityEvaluator:
                         "trading_mode": gate_mode,
                     })
 
+                    # ── P3 Seam-3: SHADOW-ARM HARNESS ───────────────────
+                    # Record the live dual-gate decision (champion) + the
+                    # two challenger arms (unified_1a2a, gate_off) into the
+                    # EXISTING shadow_signals engine BEFORE the SKIP early-
+                    # return, so the harness also captures the gate's vetoes
+                    # (the whole point: measure the 68% over-veto). Best-
+                    # effort, fully guarded — NEVER raises into the live
+                    # decision path, NEVER touches IB. Toggle: SHADOW_ARMS_ENABLED.
+                    try:
+                        from services.shadow_arms import record_shadow_arms
+                        await record_shadow_arms(
+                            bot, alert,
+                            grade=(alert.get('tqs_grade') or alert.get('trade_grade')),
+                            tqs_score=(alert.get('tqs_score') or alert.get('score')),
+                            gate_result=confidence_gate_result,
+                            champion_decision=gate_decision,
+                            champion_conf_mult=confidence_multiplier,
+                            current_price=current_price,
+                            direction=direction_str,
+                            regime=(alert.get('market_regime') or ''),
+                        )
+                    except Exception:
+                        pass
+
                     if gate_decision == "SKIP":
                         print(f"   🧠 [CONFIDENCE GATE] SKIP ({gate_confidence}% conf) — {reasoning_summary}")
                         bot.record_rejection(

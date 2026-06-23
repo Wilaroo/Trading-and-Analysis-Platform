@@ -56,6 +56,16 @@ class ShadowSignal:
     filter_id: str = ""  # ID of filter being tested
     notes: str = ""
     created_at: str = ""
+
+    # Shadow-arm harness (P3, Seam-3) — champion/challenger A/B tagging.
+    # Lets the EXISTING shadow engine score counterfactual decision-logic
+    # arms ("champion" = live dual-gate, "unified_1a2a", "gate_off") on the
+    # same footing. tier="shadow" distinguishes arm rows from plain signals.
+    arm: str = ""           # champion | unified_1a2a | gate_off
+    tier: str = ""          # "shadow" for arm rows
+    alert_id: str = ""      # the live alert this arm mirrors
+    arm_decision: str = ""  # GO | REDUCE | SKIP this arm would have taken
+    size_mult: float = 0.0  # position-size multiplier this arm would use
     
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -161,6 +171,8 @@ class ShadowModeService:
             # Create indexes
             self._shadow_signals_col.create_index([("filter_id", 1), ("status", 1)])
             self._shadow_signals_col.create_index([("symbol", 1), ("signal_time", -1)])
+            # P3 Seam-3: fast arm-report grouping (champion/challenger A/B)
+            self._shadow_signals_col.create_index([("tier", 1), ("arm", 1), ("created_at", -1)])
             
     def set_alpaca_service(self, alpaca_service):
         """Set Alpaca service for price updates (legacy — superseded
@@ -207,7 +219,13 @@ class ShadowModeService:
         tqs_score: float = 0,
         market_regime: str = "",
         confirmations: List[str] = None,
-        notes: str = ""
+        notes: str = "",
+        arm: str = "",
+        tier: str = "",
+        alert_id: str = "",
+        arm_decision: str = "",
+        size_mult: float = 0.0,
+        status: str = "pending",
     ) -> ShadowSignal:
         """Record a shadow (paper) trading signal"""
         signal = ShadowSignal(
@@ -224,6 +242,12 @@ class ShadowModeService:
             confirmations=confirmations or [],
             filter_id=filter_id or "",
             notes=notes,
+            status=status,
+            arm=arm,
+            tier=tier,
+            alert_id=alert_id,
+            arm_decision=arm_decision,
+            size_mult=size_mult,
             created_at=datetime.now(timezone.utc).isoformat()
         )
         
@@ -468,9 +492,11 @@ class ShadowModeService:
             
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
-        # Get signals in period
+        # Get signals in period (exclude P3 arm rows — they have their own
+        # report via generate_arm_report; mixing would distort these aggregates)
         signals = list(self._shadow_signals_col.find({
-            "created_at": {"$gte": cutoff.isoformat()}
+            "created_at": {"$gte": cutoff.isoformat()},
+            "tier": {"$ne": "shadow"},
         }))
         
         report.total_signals = len(signals)
@@ -508,6 +534,65 @@ class ShadowModeService:
                         report.filters_to_review.append(f.get("name"))
                         
         return report
+        
+    async def generate_arm_report(self, days: int = 30) -> Dict[str, Any]:
+        """Compare champion/challenger decision-logic ARMS (P3 Seam-3).
+
+        Groups arm-tagged shadow signals (tier == "shadow") by `arm` and
+        scores each on the same footing so the operator can A/B the unified
+        verdict against the live dual-gate before flipping it live.
+
+        Per-arm: signal counts (go/reduce/skip/pending/resolved), win-rate,
+        raw total-R AND size-weighted R (would_have_r * size_mult) — the
+        latter exposes the champion's double-discount vs the unified single
+        multiplier.
+        """
+        out = {
+            "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "report_period_days": days,
+            "arms": [],
+            "total_arm_signals": 0,
+        }
+        if self._shadow_signals_col is None:
+            return out
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        signals = list(self._shadow_signals_col.find({
+            "tier": "shadow",
+            "created_at": {"$gte": cutoff},
+        }))
+        out["total_arm_signals"] = len(signals)
+
+        by_arm: Dict[str, List] = {}
+        for s in signals:
+            by_arm.setdefault(s.get("arm") or "unknown", []).append(s)
+
+        for arm, rows in sorted(by_arm.items()):
+            resolved = [s for s in rows if s.get("status") in ("won", "lost")]
+            n_res = len(resolved)
+            wins = sum(1 for s in resolved if s.get("status") == "won")
+            total_r = sum(float(s.get("would_have_r") or 0) for s in resolved)
+            weighted_r = sum(
+                float(s.get("would_have_r") or 0) * float(s.get("size_mult") or 0)
+                for s in resolved
+            )
+            out["arms"].append({
+                "arm": arm,
+                "signals": len(rows),
+                "go": sum(1 for s in rows if s.get("arm_decision") == "GO"),
+                "reduce": sum(1 for s in rows if s.get("arm_decision") == "REDUCE"),
+                "skip": sum(1 for s in rows if s.get("arm_decision") == "SKIP"),
+                "pending": sum(1 for s in rows if s.get("status") == "pending"),
+                "expired": sum(1 for s in rows if s.get("status") == "expired"),
+                "resolved": n_res,
+                "wins": wins,
+                "losses": n_res - wins,
+                "win_rate": round(wins / n_res * 100.0, 1) if n_res else None,
+                "total_r": round(total_r, 2),
+                "weighted_r": round(weighted_r, 2),
+                "avg_r": round(total_r / n_res, 3) if n_res else None,
+            })
+        return out
         
     async def get_filter(self, filter_id: str) -> Optional[ShadowFilter]:
         """Get a specific filter"""
