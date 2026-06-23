@@ -27357,3 +27357,16 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
      (default 2) consecutive zero-both-dir reads before closing; streak resets at
      loop top on any non-zero IB read. Stops transient post-fill 0-snapshots from
      orphaning live positions. PRE 6752423e / POST f23a1fa8.
+
+- 2026-06-23 (cont.) AUDIT DIAG + CARD TRANSPARENCY UI
+  * diag_stale_policy_audit.py — tails backend logs, counts [v402 stale-policy]
+    no-timestamp hits (per gate) + [v402b OCA debounce] deferrals + context
+    stale drops. Lets operator keep block on with evidence and tune the streak.
+  * patch_v404_card_time_transparency.py — BUILT, paste.rs/ijlvE. FRONTEND
+    (needs `cd frontend && yarn build` after apply). Adds lifecycle timestamps
+    to V5 cards: OpenPositionsV5 expanded row gets a 4-cell Alert/Entry/
+    Refreshed/Exit time grid (ET clock + relative age); ScannerCardsV5 gets a
+    compact "alert HH:MM:SS ET · N ago · refreshed N ago" line (alert_ts/
+    entry_ts/refreshed_ts carried onto cards). Additive, reversible, per-file
+    multi-edit; POST_SHA == babel-validated build. Both files babel-validated
+    in sandbox (apply + idempotent + rollback byte-identical).
