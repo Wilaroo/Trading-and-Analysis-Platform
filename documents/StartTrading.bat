@@ -38,7 +38,10 @@ pushd "%SCRIPT_DIR%.."
 
 :: Check if this is a git repo
 if exist ".git" (
-    git pull origin main 2>nul
+    :: Emergent-synced branch is main-2.0 (see workflow notes)
+    git fetch origin 2>nul
+    git checkout main-2.0 2>nul
+    git pull origin main-2.0 2>nul
     if %errorlevel%==0 (
         echo       Code updated successfully!
     ) else (
