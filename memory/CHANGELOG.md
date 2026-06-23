@@ -1,3 +1,28 @@
+## 2026-06-23 — adrp_20d collector WARM-FILL (scalp ADRP fast-path) — SHIPPED, LIVE, COMMITTED (1fb6b959)
+P1 backlog item (v368 deferred this as the "fast-path"). The scalp/intraday ADRP gate
+(`enhanced_scanner._get_adrp_for_gate`) reads `symbol_adv_cache.adrp_20d` FIRST, then falls back to
+an on-the-fly 20-bar `ib_historical_data` compute. But NOTHING ever wrote `adrp_20d` → fast-path was
+permanently dark, and the fallback (no pre-listing/mistagged-bar filter) silently returned 0
+("unmeasured") for liquid names under live scan load → erroneous scalp rejections.
+ • FIX (patch_adrp_20d_warmfill.py, paste.rs/81B0J — 1 file, additive, reversible): `rebuild_adv_from_ib_data`
+   already iterates the cleaned 20-bar cohort (highs/lows/closes) for atr_pct; now also computes
+   `adrp_20d = mean((high-low)/close)*100` from that SAME pollution-filtered cohort (E1) and persists it
+   in the symbol_adv_cache upsert (E2). Pollution-clean → authoritative; the gate's fast-path lights up
+   on the next rebuild. PRE e44ee544 (== v369 POST, sandbox==DGX) → POST 12d3d0c6; both anchors unique;
+   --check/--apply/--rollback + py_compile gate; local round-trip byte-identical; paste SHA-match.
+ • APPLIED + committed 1fb6b959 + pushed; backend restarted clean (health 7g/1y/0r); rebuild ran for
+   9,413 symbols (intraday 1250 / swing 889 / investment 522 / skip 6752).
+ • VERIFIED LIVE (diag_adrp_warmfill.py, paste.rs/HJEdw, read-only): adrp_20d coverage 0% → 97.5%
+   (9179/9413). ADRP dist over 800 scalp-relevant names: p10 1.81 / p50 3.29 / p90 7.46; 667 eligible,
+   133 correctly < 2.0% floor. KEY: trade_drops last-24h had 2,130 scalp_adrp FAIL-CLOSED ("unmeasured")
+   rejections across 165 liquid symbols (XBI/KO/WFC/NVDA/PLTR…), ALL 165 with clean daily bars → the
+   live on-the-fly fallback was broken for them; the warm-fill rescues all 2,130. 0 measured-below-floor.
+ • RESIDUAL (minor, low-pri): the on-the-fly fallback still returns 0 under live load for the ~2.5%
+   of names without cache coverage / on cache-miss — now rarely hit (97.5% cached, nightly rebuild).
+ • NEXT: P1-B — unify TQS ↔ Confidence Gate (one decision authority + verdict).
+
+
+
 ## 2026-06-23 (cont.) — (TQS4 / v400) setup pattern+win_rate shrink dials (dormant) + win_rate FALSE-ALARM + fundamentals probe
  • diag_setup_pillar_probe.py (paste.rs/AW5n9, read-only) ran on DGX (14/21/30d, direct+joined breakdown):
      - setup.win_rate is DEGENERATE, NOT anti-predictive: raw historical WR pinned ~0.55 for ~95% of the
