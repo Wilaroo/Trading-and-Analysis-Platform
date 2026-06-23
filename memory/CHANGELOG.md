@@ -27311,3 +27311,49 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   Instant unblock (no restart): POST /api/live-scanner/start. Durable fix needs
   patch_a7 + backend restart. NOTE: live DGX verification pending operator apply
   (sandbox has no IB/live data).
+
+- 2026-06-23 OPEN-BOOK FORENSICS + EARNINGS DARK-FEED + STALE/ORPHAN FIXES
+  (paste.rs patchers, operator-applied on DGX). Investigated the 21-trade open
+  book ("Reconciled Orphan" + REJECT-verdict shorts) and the earnings dark feed.
+
+  DIAGS (read-only, all run by operator):
+   * diag_open_trades_provenance.py — joins bot_trades<->order_queue<->
+     ib_executions<->live_alerts. Result: 21 BOT_TRACKED + 4 ADOPTED. The 13
+     "LAG>stale-thr" flags were FALSE POSITIVES (measured live_alerts.created_at
+     = first-seen dedup label; the real gate keys on triggered_at, re-stamped
+     each scan cycle — daily/carry-forward fires are A10-revalidated, not stale).
+   * diag_silent_fill_forensic.py — proved the 4 "adopted" shorts (CRDO/FOXA/KR/
+     LULU) are BOT-PATH (entered_by=bot_fired), NOT external. order_queue is
+     TTL-pruned so its absence is not signal; bot_trades 'entered_by' is.
+   * diag_oca_close_transient_vs_reentry.py — reconstructs running net IB
+     position from the fill tape across each oca_closed_externally mark. FOXA/KR/
+     LULU = TRANSIENT_SNAPSHOT_GAP (closed 30-60s after a fresh fill while the
+     short was fully held, zero cover fills). CRDO/DXCM/GIS/MU = legit exits.
+   * diag_earnings_universe.py — IB client-12 fundamentals lit (float/SI/instit/
+     DTC/margin); earnings_calendar ACTUALS never stored (is_reported/eps_result/
+     eps_surprise_pct 0/335); traded-universe overlap 15/814 (2%); Finnhub
+     date-range is free-tier sampled (259 mkt rows, 12 overlap).
+
+  PATCHERS (SHA-guarded, round-trip self-tested, reversible):
+   * purge_garbage_trades.py — sanitizer-backed reversible purge of pre-cutoff
+     garbage bot_trades (archive->delete, --rollback). Dry-run: 353 genuine KEPT
+     (== sanitized list, hard assert), 13,092 garbage (6632 sim + 5400 rejected
+     + 507 vetoed non-closed intents + 553 closed broken-path). APPLIED? operator
+     to run --confirm.
+   * patch_v401_earnings_universe_actuals.py — APPLIED. Rewrote
+     refresh_earnings_calendar: live-traded universe (recent live_alerts tqs>0 +
+     open positions, EARNINGS_UNIVERSE_CAP=400) instead of
+     symbol_fundamentals_cache[:300]; stores upcoming + most-recent REPORTED row
+     with actuals; retains reported rows EARNINGS_REPORTED_RETAIN_DAYS=14, prunes
+     only stale unreported. No scheduler change (boot catch-up already re-fires).
+     PRE a549b8be / POST c780e2e6. (re-verify: overlap+actuals after boot refresh)
+   * patch_v402_stale_alert_fail_closed.py — APPLIED. Both staleness gates
+     (opportunity_evaluator 30s TTL + trade_execution per-timeframe) now
+     fail-CLOSED on missing/unparseable timestamp. Env STALE_ALERT_POLICY=
+     block|observe|off, DEFAULT block. eval PRE 0dc997f3/POST ad1b2c07;
+     exec PRE 5a349f9d/POST 7a685d08.
+   * patch_v403_oca_close_debounce.py — BUILT, paste.rs/DHph3, operator to apply.
+     Debounces the v19.31 externally-closed sweep: require OCA_CLOSE_ZERO_STREAK
+     (default 2) consecutive zero-both-dir reads before closing; streak resets at
+     loop top on any non-zero IB read. Stops transient post-fill 0-snapshots from
+     orphaning live positions. PRE 6752423e / POST f23a1fa8.
