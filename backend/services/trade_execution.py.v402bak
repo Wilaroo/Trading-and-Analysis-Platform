@@ -1419,44 +1419,22 @@ class TradeExecution:
         }
         max_age_seconds = stale_thresholds.get(trade.timeframe, 600)  # Default 10 min
 
-        # v402 — fail-CLOSED staleness. Pre-fix a missing created_at (falsy
-        # `if trade.created_at:`) OR an unparseable one (except: log+continue)
-        # both fell through and EXECUTED. STALE_ALERT_POLICY = block|observe|off.
-        import os as _os_stale
-        _stale_policy = _os_stale.environ.get("STALE_ALERT_POLICY", "block").strip().lower()
-        _ts_ok = False
-        age = None
         if trade.created_at:
             try:
                 created = datetime.fromisoformat(trade.created_at.replace('Z', '+00:00'))
                 age = (datetime.now(timezone.utc) - created).total_seconds()
-                _ts_ok = True
+                if age > max_age_seconds:
+                    logger.info(f"Stale alert: {trade.symbol} {trade.setup_type} is {age:.0f}s old (max {max_age_seconds}s for {trade.timeframe})")
+                    trade.status = TradeStatus.REJECTED
+                    trade.notes = (trade.notes or "") + f" [EXPIRED: {age:.0f}s old]"
+                    del bot._pending_trades[trade_id]
+                    await bot._notify_trade_update(trade, "expired")
+                    return False
             except Exception as e:
                 logger.warning(
-                    "Could not parse alert timestamp (%s): %s",
+                    "Could not check alert age (%s): %s",
                     type(e).__name__, e, exc_info=True,
                 )
-        _reject = False
-        _why = ""
-        if _ts_ok and age is not None and age > max_age_seconds:
-            _reject = True
-            _why = f"{age:.0f}s old (max {max_age_seconds}s for {trade.timeframe})"
-        elif not _ts_ok and _stale_policy in ("block", "observe"):
-            logger.warning(
-                "\U0001f552 [v402 stale-policy=%s] %s %s has NO usable timestamp "
-                "\u2014 treating as STALE.",
-                _stale_policy, trade.symbol, trade.setup_type,
-            )
-            if _stale_policy == "block":
-                _reject = True
-                _why = "no usable timestamp (fail-closed)"
-        if _reject:
-            logger.info(f"Stale alert: {trade.symbol} {trade.setup_type} {_why}")
-            trade.status = TradeStatus.REJECTED
-            trade.notes = (trade.notes or "") + f" [EXPIRED: {_why}]"
-            del bot._pending_trades[trade_id]
-            await bot._notify_trade_update(trade, "expired")
-            return False
 
         # === PRICE RECALCULATION ===
         # Get current market price and recalculate position

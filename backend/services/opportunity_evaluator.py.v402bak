@@ -503,19 +503,6 @@ class OpportunityEvaluator:
                                 ).timestamp()
                             except (TypeError, ValueError):
                                 _triggered_unix = None
-                    # v402 — fail-CLOSED on missing/unparseable alert timestamp.
-                    # Pre-fix this branch was skipped when no timestamp existed
-                    # (fail-OPEN). STALE_ALERT_POLICY = block|observe|off.
-                    _stale_policy = _os_ttl.environ.get(
-                        "STALE_ALERT_POLICY", "block").strip().lower()
-                    if _triggered_unix is None and _stale_policy in ("block", "observe"):
-                        logger.warning(
-                            "\U0001f552 [v402 stale-policy=%s] %s %s has NO usable "
-                            "alert timestamp \u2014 treating as STALE.",
-                            _stale_policy, symbol, setup_type,
-                        )
-                        if _stale_policy == "block":
-                            _triggered_unix = _time_ttl.time() - (_ttl_secs + 1.0)
                     if _triggered_unix is not None:
                         try:
                             _age = _time_ttl.time() - float(_triggered_unix)

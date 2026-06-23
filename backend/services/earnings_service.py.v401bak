@@ -177,121 +177,63 @@ class EarningsService:
         self, db=None, days_ahead: int = 21,
         fallback_symbols: Optional[List[str]] = None,
     ) -> int:
-        """v401 — persist earnings into ``earnings_calendar`` over the bot's
-        LIVE-TRADED universe (recent live_alerts + open positions), NOT the
-        stale ``symbol_fundamentals_cache[:300]``. Stores BOTH the upcoming
-        estimate row AND the most-recent REPORTED row (is_reported / eps_result
-        / eps_surprise_pct) so the v390 post-earnings-drift sub-score lights.
-        Reported rows are retained ~EARNINGS_REPORTED_RETAIN_DAYS (default 14);
-        stale unreported estimates are pruned 2 days after their date.
-
-        The market-wide Finnhub date-range call is free-tier sampled (~259
-        names, ~2%% overlap with what we trade) so it cannot anchor a 15%%-
-        weighted pillar — per-symbol lookups over OUR universe is the only
-        viable path (throttled for the free tier)."""
+        """v19.34.203 — persist upcoming earnings into the ``earnings_calendar``
+        collection the TQS fundamental pillar reads. Approach (a): one
+        market-wide date-range call; falls back to (b) per-symbol over the
+        active universe (symbol_fundamentals_cache), throttled for free tier.
+        Upserts by (symbol, date), prunes rows older than 2 days."""
         if db is None:
             db = _earnings_db()
         if db is None:
             return 0
 
-        # ── build the live-traded / scanner universe (capped) ──
-        try:
-            cap = int(os.environ.get("EARNINGS_UNIVERSE_CAP", "400"))
-        except Exception:
-            cap = 400
-        traded, open_syms = [], []
-        try:
-            since = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%d")
-            traded = list(db["live_alerts"].distinct(
-                "symbol", {"created_at": {"$gte": since}, "tqs_score": {"$gt": 0}}))
-            open_syms = [t.get("symbol") for t in db["bot_trades"].find(
-                {"status": {"$nin": ["closed", "cancelled", "rejected"]}},
-                {"symbol": 1, "_id": 0})]
-        except Exception as e:
-            logger.debug("earnings universe build failed: %s", e)
-        seen, universe = set(), []
-        for s in list(open_syms) + sorted(traded) + list(fallback_symbols or []):
-            su = str(s or "").upper().strip()
-            if su and su not in seen:
-                seen.add(su)
-                universe.append(su)
-        if not universe:
-            universe = [
+        docs: List[Dict] = []
+        rows = await self.get_upcoming_earnings(days_ahead)
+        if rows:
+            for e in rows:
+                doc = _normalize_earnings_row(e)
+                if doc:
+                    docs.append(doc)
+        else:
+            syms = fallback_symbols or [
                 d["symbol"] for d in
                 db["symbol_fundamentals_cache"].find({}, {"symbol": 1, "_id": 0})
                 if d.get("symbol")
             ]
-        universe = universe[:cap]
+            for sym in syms[:300]:
+                try:
+                    cal = await self.get_earnings_calendar(sym)
+                    ne = cal.get("next_earnings") if cal.get("available") else None
+                    if ne and ne.get("date"):
+                        doc = _normalize_earnings_row({**ne, "symbol": sym})
+                        if doc:
+                            docs.append(doc)
+                except Exception:
+                    pass
+                await asyncio.sleep(1.1)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         written = 0
-        for sym in universe:
+        for doc in docs:
+            doc["fetched_at"] = now_iso
             try:
-                cal = await self.get_earnings_calendar(sym)
-                if not cal.get("available"):
-                    await asyncio.sleep(1.1)
-                    continue
-                pending = []
-                ne = cal.get("next_earnings")
-                if ne and ne.get("date"):
-                    pending.append((ne, False))
-                le = cal.get("last_earnings")
-                if le and le.get("date"):
-                    pending.append((le, True))
-                for srow, is_rep in pending:
-                    d = str(srow.get("date") or "").strip()
-                    if len(d) < 10:
-                        continue
-                    doc = {
-                        "symbol": sym,
-                        "date": f"{d[:10]}T12:00:00+00:00",
-                        "date_only": d[:10],
-                        "hour": srow.get("hour"),
-                        "eps_estimate": srow.get("eps_estimate"),
-                        "revenue_estimate": srow.get("revenue_estimate"),
-                        "quarter": srow.get("quarter"),
-                        "year": srow.get("year"),
-                        "is_reported": bool(is_rep or srow.get("is_reported")),
-                        "eps_actual": srow.get("eps_actual"),
-                        "eps_result": srow.get("eps_result"),
-                        "eps_surprise": srow.get("eps_surprise"),
-                        "eps_surprise_pct": srow.get("eps_surprise_pct"),
-                        "revenue_actual": srow.get("revenue_actual"),
-                        "revenue_result": srow.get("revenue_result"),
-                        "source": "finnhub",
-                        "fetched_at": now_iso,
-                    }
-                    try:
-                        db["earnings_calendar"].update_one(
-                            {"symbol": sym, "date": doc["date"]},
-                            {"$set": doc}, upsert=True,
-                        )
-                        written += 1
-                    except Exception as e:
-                        logger.debug("earnings upsert %s failed: %s", sym, e)
+                db["earnings_calendar"].update_one(
+                    {"symbol": doc["symbol"], "date": doc["date"]},
+                    {"$set": doc}, upsert=True,
+                )
+                written += 1
             except Exception as e:
-                logger.debug("earnings refresh %s failed: %s", sym, e)
-            await asyncio.sleep(1.1)
+                logger.debug("earnings_calendar upsert failed for %s: %s",
+                             doc.get("symbol"), e)
 
-        # ── retention: keep REPORTED rows for the drift lookback window;
-        #    drop only stale UNREPORTED estimates 2d after their date. ──
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         try:
-            retain_days = int(os.environ.get("EARNINGS_REPORTED_RETAIN_DAYS", "14"))
-        except Exception:
-            retain_days = 14
-        unrep_cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        rep_cutoff = (datetime.now(timezone.utc) - timedelta(days=retain_days)).isoformat()
-        try:
-            db["earnings_calendar"].delete_many(
-                {"date": {"$lt": unrep_cutoff}, "is_reported": {"$ne": True}})
-            db["earnings_calendar"].delete_many(
-                {"date": {"$lt": rep_cutoff}, "is_reported": True})
+            db["earnings_calendar"].delete_many({"date": {"$lt": cutoff}})
             db["earnings_calendar"].create_index("symbol", background=True)
         except Exception:
             pass
-        logger.info("[earnings] v401 refresh wrote %d rows over %d traded "
-                    "symbols (reported retained %dd)", written, len(universe),
-                    retain_days)
+        logger.info("[earnings] earnings_calendar refresh wrote %d rows "
+                    "(%s)", written, "date-range" if rows else "per-symbol")
         return written
     
     async def get_earnings_metrics(self, symbol: str) -> Dict:
