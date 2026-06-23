@@ -1,5 +1,26 @@
 # Backlog / Future Ideas
 
+## ⭐ UNIFIED + TUNABLE SHADOW-TRACKING UI (saved 2026-06-23 — operator request, "C" from P5)
+One consolidated, operator-tunable cockpit surface for ALL shadow/observe instrumentation, instead of
+today's scattered tiles + raw JSON endpoints. Build LATER (after enough P3/P4/P5 data accrues).
+- **Consolidate these feeds into one panel:**
+  - P3/P4 shadow ARMS — `GET /api/slow-learning/shadow/arm-report` (champion / unified_1a2a / gate_off /
+    regime_fit): win% + raw & size-weighted R + GO/REDUCE/SKIP split.
+  - P5 thesis-invalidation — `GET /api/slow-learning/thesis-invalidation/report` (regime_hostile_cell +
+    hard_regime_flip): would-have-exited-R vs held-R delta, helped/hurt counts.
+  - Existing shadow_signals + shadow_filters (Phase-6) + P-WIRE regime shadows (regime_shadows[]).
+  - Live Shadow-vs-Real win-rate tile (already in ShadowVsRealTile.jsx).
+- **Tunable knobs exposed in the UI (read live, write to env/flags):** REDUCE_STEP, REGIME_REDUCE_MULT,
+  T6 hard_r/soft_r/min_eff_n, regime suppression mode (shadow|active), THESIS_INVALIDATION_MODE
+  (off|observe|active), SHADOW_ARMS_ENABLED.
+- **Promote-to-live controls:** one-click "promote arm" (flip the live decision authority to the winning
+  arm) + "activate regime suppression" + "activate thesis-invalidation exits" — each gated behind a
+  confirm + a probation/capital-ramp window (bounded autonomy, never auto-flips).
+- Design per /app/design_guidelines (Control-Room dark glass, cyan/amber/rose; NO purple). Ties to the
+  V6 Track-B cockpit (S4 STAND-DOWN abstention state, S5 thesis-invalidation tag, S6 Strategy Autonomy).
+
+
+
 ## Setup-EV-Audit live dashboard (saved 2026-06-18)
 Add `GET /api/scanner/setup-ev-audit` + a small V5 tile that surfaces, per setup:
 verdict (preserve / long-only / rewrite / suppressed), last-audited EV (winsorAvg R + win%),

@@ -1,3 +1,37 @@
+## 2026-06-23 — P5: THESIS-INVALIDATION EXITS (regime-flip) — OBSERVE-FIRST DETECTOR — WIRED + E2E-TESTED (preview)
+ARC-3 P5 ("close/trim when the *reason* dies; shadow/backtest triggers vs mechanical-only first"). Phase-1
+ships an OBSERVE-only detector — it LOGS would-be thesis-invalidation exits on open positions and NEVER
+closes anything. `active` close/trim wiring deliberately deferred until the operator reviews observe data.
+
+ • NEW `services/thesis_invalidation.py` (self-contained, best-effort, never raises into the manage loop):
+   `observe_open_positions(bot)` scans open positions each manage cycle for a dying *reason*:
+     - regime_hostile_cell — (canon setup × dir × CURRENT regime band) now hostile per the SAME T6
+       `setup_regime_expectancy` table P4/regime_fit use (decide_suppression → SKIP) AND entry band was
+       NOT hostile (genuine flip, not hostile-from-entry).
+     - hard_regime_flip — band flipped to the opposite extreme against the position (long BULL>60→BEAR<=45;
+       short BEAR→BULL).
+   Records `{trade_id, symbol, setup, direction, trigger_type, reason, entry_band, current_band,
+   unrealized_r_at_signal, mode, acted:false, ...}` into new `thesis_invalidation_signals`. Regime fetched
+   ONCE per cycle (engine-cached); table loaded once; dedup via ONE bulk query (one signal per
+   trade×trigger). `generate_report(db,days)` joins closed trades → compares exit-at-signal R vs held R
+   (avg_r_delta > 0 ⇒ exiting on invalidation beat holding), split by trigger + helped/hurt counts.
+ • HOOK: sibling call appended to `_update_open_positions` in `trading_bot_service.py` (the giant
+   `update_open_positions` left untouched). Flag `THESIS_INVALIDATION_MODE = off|observe|active`
+   (default observe; `active` logs a "not implemented in phase-1" warning + still only records).
+ • ENDPOINT: `GET /api/slow-learning/thesis-invalidation/report?days=`.
+ • TESTED: py_compile clean; FULL e2e (`tests/test_p5_thesis_invalidation.py`) PASS — long entered in BULL,
+   now hostile in BEAR → BOTH triggers fire @ −0.5R; dedup holds (2nd pass 0 new); report scores exit −0.5R
+   vs held −2.0R → avg_r_delta +1.5 (helped); self-cleans. Endpoint HTTP 200 (preview, observe). No live
+   close path touched. Live position→signal cycle is DGX-only (verified structurally + e2e).
+ • DEFERRED (no clean infra today): negative-catalyst mid-trade (no live catalyst feed — only entry
+   catalyst_tag stored); setup-premise-broken (bespoke per setup, false-positive prone).
+ • SAVED IDEA "C": unified + tunable Shadow-Tracking UI (arms + thesis-invalidation + shadow_signals +
+   P-WIRE + promote-to-live knobs) → memory/BACKLOG_ideas.md (build after data accrues).
+ • NEXT: after a session, read /thesis-invalidation/report; if avg_r_delta is solidly +, design phase-2
+   ACTIVE trim/close (with hysteresis). Else P6 autonomous strategy on/off by regime.
+
+
+
 ## 2026-06-23 — P4: REGIME-FIT ABSTENTION AT L5 — 4th SHADOW ARM (regime_fit) — WIRED + E2E-TESTED (preview)
 ARC-2 P4 (ARCHITECTURE_REVIEW: "Regime-Fit Abstention at decision · L1→L5 · stops trading into hostile/OOD
 regimes; shadow-first"). Built as a 4th challenger arm in the P3 harness so the abstention hypothesis is

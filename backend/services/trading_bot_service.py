@@ -5510,6 +5510,14 @@ class TradingBotService:
     async def _update_open_positions(self):
         """Update open positions — delegated to PositionManager module."""
         await self._position_manager.update_open_positions(self)
+        # P5 (ARC-3) — thesis-invalidation OBSERVE scan. Best-effort, never
+        # raises, NEVER closes a position in phase-1 (logs would-be exits only).
+        # Toggle: THESIS_INVALIDATION_MODE (off | observe | active; default observe).
+        try:
+            from services.thesis_invalidation import observe_open_positions
+            await observe_open_positions(self)
+        except Exception:
+            pass
 
     async def _check_eod_close(self):
         """EOD auto-close — delegated to PositionManager module."""

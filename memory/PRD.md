@@ -1,5 +1,23 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (P5) — THESIS-INVALIDATION EXITS — OBSERVE-FIRST detector (regime-flip) — WIRED + E2E-TESTED.**
+> ARC-3 P5, shadow/observe-first; **NEVER closes a position in phase-1** (logs would-be exits only).
+> - ✅ New `services/thesis_invalidation.py`: per manage-cycle scan of open positions for a dying reason —
+>   `regime_hostile_cell` (setup×dir×CURRENT band now hostile per the SAME T6 table P4 uses, AND not hostile
+>   at entry = genuine flip) + `hard_regime_flip` (band flips opposite, long BULL→BEAR / short BEAR→BULL).
+>   Records to `thesis_invalidation_signals` (deduped 1/trade×trigger). `generate_report` joins closed trades
+>   → exit-at-signal R vs held R (avg_r_delta>0 ⇒ exiting beat holding), by trigger + helped/hurt.
+> - ✅ Hook: sibling call in `_update_open_positions` (giant `update_open_positions` untouched). Flag
+>   `THESIS_INVALIDATION_MODE=off|observe|active` (default observe; active deferred). Endpoint
+>   `GET /api/slow-learning/thesis-invalidation/report`.
+> - ✅ TESTED: e2e PASS (BULL-entry long now hostile in BEAR → both triggers @ −0.5R; dedup holds; report
+>   exit −0.5 vs held −2.0 = +1.5 helped; self-cleans); endpoint 200. Deferred: negative-catalyst (no live
+>   feed), setup-premise-broken (bespoke). Saved idea "C" (unified tunable shadow-tracking UI) to BACKLOG_ideas.
+> - ⏳ NEXT: Save-to-GitHub `main-2.0` → DGX pull. After a session read /thesis-invalidation/report; if
+>   avg_r_delta solidly +, design phase-2 ACTIVE trim/close (hysteresis). Else P6 (autonomous strategy on/off).
+
+
+
 > **🧭 2026-06-23 (P4) — REGIME-FIT ABSTENTION AT L5 — 4th shadow arm `regime_fit` — WIRED + E2E-TESTED.**
 > ARC-2 P4 done as a challenger arm (shadow-first; zero live risk). Reuses the Confidence Gate's existing
 > `regime_suppression` (T6 data-driven per-setup×regime expectancy: SKIP if weighted-mean-R ≤ −0.50 n≥25,

@@ -338,6 +338,20 @@ async def get_shadow_arm_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/thesis-invalidation/report")
+async def get_thesis_invalidation_report(days: int = Query(30)):
+    """Thesis-Invalidation Exit shadow report (P5, OBSERVE-first).
+
+    Compares 'exit at invalidation' (unrealized R when the regime-reason died)
+    vs 'held to close' (realized R) for closed trades that fired a signal.
+    avg_r_delta > 0 means exiting on invalidation would have beaten holding.
+    """
+    from services.thesis_invalidation import generate_report
+    from database import get_database
+    report = await generate_report(get_database(), days)
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")
