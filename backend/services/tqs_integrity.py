@@ -239,6 +239,9 @@ def _pillar_predictiveness(db, cutoff):
             pairs = [(float(ps[p]), r) for ps, r in rows
                      if isinstance(ps.get(p), (int, float))]
             corr = _pearson(pairs)
+            xs = [x for x, _ in pairs]
+            score_mean = round(mean(xs), 1) if xs else None
+            score_sd = round(pstdev(xs), 1) if len(xs) >= 2 else None
             avg_hi = avg_lo = None
             if len(pairs) >= 6:
                 srt = sorted(pairs, key=lambda x: x[0])
@@ -248,8 +251,11 @@ def _pillar_predictiveness(db, cutoff):
                 avg_lo = round(sum(lo) / len(lo), 3)
                 avg_hi = round(sum(hi) / len(hi), 3)
             pill.append({
-                "pillar": p, "n": len(pairs), "corr_with_r": corr,
+                "pillar": p, "n": len(pairs),
+                "score_mean": score_mean, "score_sd": score_sd,
+                "corr_with_r": corr,
                 "avg_r_top_half": avg_hi, "avg_r_bottom_half": avg_lo,
+                "flat_or_defaulted": score_sd is not None and score_sd < 4.0,
                 "anti_predictive": corr is not None and corr < -0.05,
             })
         horizons.append({"horizon": h, "n": len(rows), "pillars": pill})
