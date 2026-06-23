@@ -22,8 +22,12 @@ PURE FUNCTIONS — no I/O, no side effects. Safe to call in the hot scan path.
 
 GRADE_MULT = {"A": 1.0, "B": 0.7, "C": 0.3, "D": 0.1, "F": 0.0}
 REDUCE_STEP = 0.6
+# Position multiplier on a SOFT regime suppression — mirrors
+# regime_expectancy_calibrator.REDUCE_MULT and
+# confidence_gate.REGIME_SUPPRESSION_REDUCE_MULT (kept in sync).
+REGIME_REDUCE_MULT = 0.4
 GO, REDUCE, SKIP = "GO", "REDUCE", "SKIP"
-ARMS = ("champion", "unified_1a2a", "gate_off")
+ARMS = ("champion", "unified_1a2a", "gate_off", "regime_fit")
 
 
 def _norm_grade(grade):
@@ -105,3 +109,44 @@ def champion_verdict(champion_decision, *, grade=None, tqs_score=None, conf_mult
     sm = 0.0 if d == SKIP else round(GRADE_MULT[g] * cm, 3)
     return {"decision": d, "size_mult": sm, "grade": g,
             "reasons": [f"live dual-gate -> {d}"]}
+
+
+def resolve_regime_fit(grade, gate_result=None, *, tqs_score=None, hard_veto=False,
+                       regime_suppression=None):
+    """Arm A3 — the unified verdict (A1) + DIRECTIVE regime-fit abstention (P4).
+
+    Layers the T6 data-driven per-(setup x direction x regime-band) expectancy
+    verdict ON TOP of the unified verdict so we can measure, in shadow, whether
+    standing down in statistically-hostile regimes improves the book:
+
+      regime_suppression.action == SKIP   -> ABSTAIN (stand down, size 0)
+                                             [hostile cell: weighted_mean_R <= hard_r]
+      regime_suppression.action == REDUCE -> size down x REGIME_REDUCE_MULT,
+                                             GO downgraded to REDUCE
+                                             [soft-hostile: weighted_mean_R <= soft_r]
+      NONE / absent / insufficient data   -> the unified verdict, UNCHANGED.
+
+    `regime_suppression` is the dict the Confidence Gate already attaches to its
+    result (`gate_result["regime_suppression"]`). PURE — no I/O.
+    """
+    v = resolve_unified_verdict(grade, gate_result, tqs_score=tqs_score, hard_veto=hard_veto)
+    action, reason = "", ""
+    if isinstance(regime_suppression, dict):
+        action = str(regime_suppression.get("action") or "").upper()
+        reason = str(regime_suppression.get("reason") or "")
+
+    # Already killed upstream, or no actionable regime signal -> pass through.
+    if v["decision"] == SKIP or action not in (SKIP, REDUCE):
+        if action == "NONE" and reason:
+            v["reasons"].append("regime-fit: regime cell OK (no abstention)")
+        return v
+
+    if action == SKIP:
+        v["decision"] = SKIP
+        v["size_mult"] = 0.0
+        v["reasons"].append(f"regime-fit ABSTAIN — hostile regime ({reason})")
+    else:  # REDUCE
+        v["decision"] = REDUCE
+        v["size_mult"] = round(v["size_mult"] * REGIME_REDUCE_MULT, 3)
+        v["reasons"].append(f"regime-fit size-down x{REGIME_REDUCE_MULT} — soft-hostile ({reason})")
+    return v

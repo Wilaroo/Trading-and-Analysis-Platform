@@ -38,18 +38,25 @@ async def main():
     await record_shadow_arms(
         bot=None, alert=alert,
         grade="B", tqs_score=70,
-        gate_result={"decision": "SKIP"},      # gate vetoes
+        # gate vetoes AND the regime cell is HOSTILE (P4 abstention case)
+        gate_result={"decision": "SKIP",
+                     "regime_suppression": {"action": "SKIP",
+                                            "reason": "weighted_mean_R -0.62 <= -0.5 (n=40)"}},
         champion_decision="SKIP", champion_conf_mult=1.0,
-        current_price=100.0, direction="long", regime="bull",
+        current_price=100.0, direction="long", regime="bear",
     )
 
     rows = list(col.find({"alert_id": TEST_ALERT_ID}))
     arms = {r["arm"]: r for r in rows}
-    assert set(arms) == {"champion", "unified_1a2a", "gate_off"}, arms.keys()
+    assert set(arms) == {"champion", "unified_1a2a", "gate_off", "regime_fit"}, arms.keys()
     assert arms["champion"]["arm_decision"] == "SKIP"
     assert arms["champion"]["status"] == "skipped"
     assert arms["unified_1a2a"]["arm_decision"] == "REDUCE"   # quality-led, not killed
     assert arms["gate_off"]["arm_decision"] == "GO"           # TQS-only -> full
+    # P4: unified would REDUCE, but the hostile regime cell forces ABSTAIN (SKIP)
+    assert arms["regime_fit"]["arm_decision"] == "SKIP", arms["regime_fit"]
+    assert arms["regime_fit"]["status"] == "skipped"
+    assert arms["regime_fit"]["size_mult"] == 0.0
     assert arms["unified_1a2a"]["tier"] == "shadow"
     assert arms["gate_off"]["target_price"] == 104.0          # derived 2R geometry
     assert arms["gate_off"]["size_mult"] == 0.7               # grade B

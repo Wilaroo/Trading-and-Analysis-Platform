@@ -1,5 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (P4) — REGIME-FIT ABSTENTION AT L5 — 4th shadow arm `regime_fit` — WIRED + E2E-TESTED.**
+> ARC-2 P4 done as a challenger arm (shadow-first; zero live risk). Reuses the Confidence Gate's existing
+> `regime_suppression` (T6 data-driven per-setup×regime expectancy: SKIP if weighted-mean-R ≤ −0.50 n≥25,
+> REDUCE if ≤ −0.12) which is computed live but only enforced in mode="active" (today shadow).
+> - ✅ Pure `resolve_regime_fit()` = unified verdict (A1) + overlay: hostile cell → **ABSTAIN** (SKIP, size 0);
+>   soft-hostile → size-down ×0.4 + GO→REDUCE; NONE/absent → unified unchanged. `ARMS` now 4 (champion /
+>   unified_1a2a / gate_off / **regime_fit**). Wired into `shadow_arms.py` (passes `gate_result.regime_suppression`),
+>   arm-report auto-includes it, `ShadowVsRealTile.jsx` shows teal "R-FIT".
+> - ✅ TESTED: 5-case logic smoke + extended e2e PASS (regime_fit ABSTAINS on a hostile cell where unified
+>   only REDUCES, self-cleans); `/shadow/arm-report` 200; frontend transpiles. Live alert→arm cycle is DGX-only.
+> - ⏳ DELIVERY: Save-to-GitHub `main-2.0` → DGX pull. After a session, read `/shadow/arm-report`: if `regime_fit`
+>   beats champion/unified on win-rate / weighted-R, promote (flip T6 active + adopt unified). NEXT: P5 thesis-
+>   invalidation exits.
+
+
+
 > **🧭 2026-06-23 (P3 SEAM-3) — TQS ↔ Confidence-Gate UNIFICATION via SHADOW-ARM HARNESS — WIRED + E2E-TESTED.**
 > First build on the NEW direct-edit + Save-to-GitHub (`main-2.0`) workflow (paste.rs retired).
 > - ✅ Pure logic (`unified_verdict.py` A1=`unified_1a2a` TQS-anchored single-multiplier, A2=`gate_off` TQS-only,

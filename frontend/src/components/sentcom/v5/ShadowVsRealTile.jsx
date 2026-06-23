@@ -34,8 +34,9 @@ const ARM_META = {
   champion: { label: 'CHAMP', cls: 'text-amber-300', dot: 'text-amber-400' },
   unified_1a2a: { label: 'UNIFIED', cls: 'text-sky-300', dot: 'text-sky-400' },
   gate_off: { label: 'GATE-OFF', cls: 'text-violet-300', dot: 'text-violet-400' },
+  regime_fit: { label: 'R-FIT', cls: 'text-teal-300', dot: 'text-teal-400' },
 };
-const ARM_ORDER = ['champion', 'unified_1a2a', 'gate_off'];
+const ARM_ORDER = ['champion', 'unified_1a2a', 'gate_off', 'regime_fit'];
 
 const _fmtPct = (v) => {
   if (v === null || v === undefined || Number.isNaN(v)) return '—';

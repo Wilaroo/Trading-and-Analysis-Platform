@@ -1,3 +1,31 @@
+## 2026-06-23 — P4: REGIME-FIT ABSTENTION AT L5 — 4th SHADOW ARM (regime_fit) — WIRED + E2E-TESTED (preview)
+ARC-2 P4 (ARCHITECTURE_REVIEW: "Regime-Fit Abstention at decision · L1→L5 · stops trading into hostile/OOD
+regimes; shadow-first"). Built as a 4th challenger arm in the P3 harness so the abstention hypothesis is
+measured before it ever touches the live path.
+
+ • SIGNAL (already computed, reused): the Confidence Gate attaches `regime_suppression` to its result —
+   the T6 data-driven per-(setup × direction × regime-band) expectancy verdict from `setup_regime_expectancy`
+   (`decide_suppression`): action SKIP when weighted_mean_R ≤ −0.50 (n≥25), REDUCE when ≤ −0.12, else NONE.
+   Live it only ENFORCES in mode="active" (currently shadow/observe) — so the arm tests "what if it were
+   directive on top of the unified verdict".
+ • LOGIC (`unified_verdict.py` new pure `resolve_regime_fit()`): unified verdict (A1) + overlay —
+   action SKIP → **ABSTAIN** (force SKIP, size 0, "stand down: hostile regime"); action REDUCE → size-down
+   ×REGIME_REDUCE_MULT (0.4, mirrors calibrator/gate) + GO→REDUCE; NONE/absent → unified UNCHANGED. Never
+   promotes; if unified already SKIPs, stays SKIP. `ARMS` now 4-tuple incl. "regime_fit".
+ • WIRING: `shadow_arms.py` records the 4th arm, passing `gate_result["regime_suppression"]`. arm-report
+   auto-groups it (no API change). `ShadowVsRealTile.jsx` ARM_META/ARM_ORDER gain `regime_fit` (teal "R-FIT").
+ • TESTED: py_compile clean; 5-case logic smoke (hostile→SKIP over a GO; soft→REDUCE@0.4; NONE→passthrough
+   GO@1.0; already-SKIP stays SKIP; no-regime == unified); FULL e2e (`tests/test_p3_shadow_arms_e2e.py`
+   extended) PASS — 4 arms written, regime_fit ABSTAINS on a hostile cell where unified only REDUCES,
+   self-cleans; `/shadow/arm-report` HTTP 200 (preview); frontend transpiles. No live alert→arm cycle here
+   (IB is DGX-only) — verified structurally + via direct e2e.
+ • DELIVERY: build → Save-to-GitHub `main-2.0` → DGX pulls (launcher now force-tracks main-2.0). Verify on
+   DGX after a session: `/shadow/arm-report` shows `regime_fit` with more SKIPs than champion/unified in
+   hostile bands; if its win-rate / weighted-R beats them, promote (flip T6 to active + adopt unified).
+ • NEXT (ARC-3): P5 thesis-invalidation exits (regime flip / negative catalyst / broken premise mid-trade).
+
+
+
 ## 2026-06-23 — P3 SEAM-3: TQS ↔ Confidence-Gate UNIFICATION via SHADOW-ARM HARNESS — WIRED + E2E-TESTED (preview)
 First task built under the NEW direct-edit + Save-to-GitHub (`main-2.0`) workflow (no more paste.rs patchers).
 Collapses the dual-gate ambiguity (TQS quality vs Confidence-Gate conviction — each with its own SKIP +

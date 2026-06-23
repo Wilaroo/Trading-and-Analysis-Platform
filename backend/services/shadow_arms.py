@@ -17,7 +17,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from services.unified_verdict import (
-    resolve_unified_verdict, resolve_tqs_only, champion_verdict,
+    resolve_unified_verdict, resolve_tqs_only, champion_verdict, resolve_regime_fit,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,9 @@ async def record_shadow_arms(
                 champion_decision, grade=grade, tqs_score=score, conf_mult=champion_conf_mult),
             "unified_1a2a": resolve_unified_verdict(grade, gate_result, tqs_score=score),
             "gate_off": resolve_tqs_only(grade, tqs_score=score),
+            "regime_fit": resolve_regime_fit(
+                grade, gate_result, tqs_score=score,
+                regime_suppression=(gate_result or {}).get("regime_suppression")),
         }
 
         for arm, v in verdicts.items():
