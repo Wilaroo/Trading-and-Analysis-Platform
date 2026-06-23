@@ -14,14 +14,17 @@ premise-broken are DEFERRED until a live catalyst feed exists):
     the position (long: entry BULL>60 -> now BEAR<=45; short: BEAR -> BULL).
 
 MODE = off | observe | active  (THESIS_INVALIDATION_MODE, default "observe").
-- observe (default): records would-be exits, NEVER closes. Pure data collection.
+- observe (default): records would-be exits, NEVER closes/trims. Pure data collection.
 - active: after a trigger PERSISTS for THESIS_INVALIDATION_HYSTERESIS_SECONDS
-  (default 180s, whipsaw guard), closes the position via the bot's canonical
-  close_trade() path. Only trigger types in THESIS_INVALIDATION_ACT_TRIGGERS
-  (default "hard_regime_flip" — the unambiguous one) may act; capped at
-  THESIS_INVALIDATION_MAX_ACTIONS_PER_CYCLE (default 5). Default is observe, so
-  active stays DORMANT until the operator reviews the observe report and opts in.
-This NEVER raises into the manage loop. Deduped: one signal per (trade, trigger).
+  (default 180s, whipsaw guard) and is still firing, ACTS by severity:
+    HARD (hard_regime_flip) -> full close via close_trade().
+    SOFT (regime_hostile_cell) -> partial TRIM (THESIS_INVALIDATION_TRIM_PCT,
+      default 0.5) + tighten the runner's internal stop, leaving it a chance to
+      recover. Natural escalation: a later hard flip then closes the runner.
+  Only trigger types in THESIS_INVALIDATION_ACT_TRIGGERS (default both) may act;
+  capped at THESIS_INVALIDATION_MAX_ACTIONS_PER_CYCLE (default 5). Default MODE is
+  observe, so everything stays DORMANT until the operator reviews the report.
+This NEVER raises into the manage loop. Deduped: one action per (trade, trigger).
 """
 import os
 import logging
@@ -45,9 +48,25 @@ def _hysteresis_seconds() -> int:
 
 
 def _act_triggers() -> set:
-    """Which trigger types may ACT in active mode (default: hard_regime_flip only)."""
-    raw = os.environ.get("THESIS_INVALIDATION_ACT_TRIGGERS", "hard_regime_flip")
+    """Which trigger types may ACT in active mode. Default = both (MODE gates everything)."""
+    raw = os.environ.get("THESIS_INVALIDATION_ACT_TRIGGERS", "hard_regime_flip,regime_hostile_cell")
     return {s.strip() for s in str(raw).split(",") if s.strip()}
+
+
+# Severity -> action. HARD = full close; SOFT = partial trim + tighten the runner's
+# internal stop (gives the position a chance to recover instead of all-or-nothing).
+TRIGGER_SEVERITY = {"hard_regime_flip": "hard", "regime_hostile_cell": "soft"}
+
+
+def _action_for(ttype) -> str:
+    return "trim" if TRIGGER_SEVERITY.get(ttype, "hard") == "soft" else "close"
+
+
+def _trim_fraction() -> float:
+    try:
+        return min(0.95, max(0.05, float(os.environ.get("THESIS_INVALIDATION_TRIM_PCT", "0.5"))))
+    except (TypeError, ValueError):
+        return 0.5
 
 
 def _max_actions() -> int:
@@ -79,6 +98,23 @@ async def _act_close(bot, tid, ttype) -> bool:
         return bool(ok)
     except Exception as e:
         logger.warning("[thesis-invalidation] active close FAILED trade=%s: %s", tid, e)
+        return False
+
+
+async def _act_trim(bot, trade, ttype) -> bool:
+    """ACTIVE-mode SOFT exit — partial trim + tighten the runner's internal stop."""
+    try:
+        pm = getattr(bot, "_position_manager", None)
+        if pm is None or not hasattr(pm, "trim_position"):
+            return False
+        res = await pm.trim_position(trade, _trim_fraction(), bot,
+                                     reason=f"thesis_invalidation:{ttype}")
+        logger.warning("[thesis-invalidation] ACTIVE trim fired: %s trade=%s res=%s",
+                       ttype, getattr(trade, "id", "?"), res)
+        return bool(res.get("success"))
+    except Exception as e:
+        logger.warning("[thesis-invalidation] active trim FAILED trade=%s: %s",
+                       getattr(trade, "id", "?"), e)
         return False
 
 
@@ -242,16 +278,20 @@ async def observe_open_positions(bot) -> dict:
 
                     # Already recorded — consider ACTING (active mode only). The
                     # trigger must still be firing (we are here) AND have persisted
-                    # >= hysteresis since first-seen.
+                    # >= hysteresis since first-seen. HARD -> close; SOFT -> trim.
                     if (m == "active" and not prior.get("acted")
                             and ttype in act_triggers and acted < max_actions
                             and prior.get("_id") is not None
                             and _age_seconds(prior.get("created_at")) >= hysteresis):
-                        if await _act_close(bot, tid, ttype):
+                        action = _action_for(ttype)
+                        ok = (await _act_trim(bot, t, ttype) if action == "trim"
+                              else await _act_close(bot, tid, ttype))
+                        if ok:
                             col.update_one(
                                 {"_id": prior["_id"]},
                                 {"$set": {
                                     "acted": True,
+                                    "action": action,
                                     "acted_at": datetime.now(timezone.utc).isoformat(),
                                     "close_reason": f"thesis_invalidation:{ttype}",
                                 }},

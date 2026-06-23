@@ -3297,6 +3297,105 @@ class PositionManager:
                 'target_idx': target_idx,
             }
 
+    async def trim_position(self, trade: 'BotTrade', fraction: float,
+                            bot: 'TradingBotService', reason: str = "") -> Dict:
+        """Ad-hoc partial trim of an OPEN position (P5 thesis-invalidation soft exit).
+
+        Sells `fraction` of remaining shares via the SAME broker partial-exit path
+        as scale-out, mirroring its local bookkeeping (remaining_shares, realized_pnl,
+        commission, partial_exits record) so there is no position drift. Leaves >=1
+        share as a runner. Optionally tightens the bot-side internal ratchet stop
+        (trailing_stop_config.current_stop) toward price — never across it — so the
+        runner's risk is reduced without amending the IB order. Best-effort.
+        """
+        from services.trading_bot_service import TradeDirection
+
+        try:
+            remaining = int(getattr(trade, "remaining_shares", 0) or 0)
+            if remaining <= 1 or fraction <= 0:
+                return {"success": False, "skipped": "too_few_shares", "shares_trimmed": 0}
+            shares_to_trim = max(1, int(remaining * float(fraction)))
+            shares_to_trim = min(shares_to_trim, remaining - 1)  # keep a runner
+            if shares_to_trim <= 0:
+                return {"success": False, "skipped": "no_trim_shares", "shares_trimmed": 0}
+
+            exit_result = await self.execute_partial_exit(
+                trade, shares_to_trim, trade.current_price, -1, bot)
+            if not exit_result.get("success"):
+                return {"success": False, "error": exit_result.get("error"), "shares_trimmed": 0}
+
+            fill_price = exit_result.get("fill_price", trade.current_price)
+            is_long = trade.direction == TradeDirection.LONG
+            partial_pnl = ((fill_price - trade.fill_price) if is_long
+                           else (trade.fill_price - fill_price)) * shares_to_trim
+
+            # Mirror scale-out bookkeeping exactly (no drift).
+            trade.remaining_shares -= shares_to_trim
+            trade.realized_pnl += partial_pnl
+            try:
+                bot._apply_commission(trade, shares_to_trim)
+            except Exception:
+                pass
+            try:
+                trade.scale_out_config.setdefault('partial_exits', []).append({
+                    'target_idx': 'thesis_trim',
+                    'reason': reason,
+                    'shares_sold': shares_to_trim,
+                    'fill_price': fill_price,
+                    'pnl': partial_pnl,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception:
+                pass
+
+            new_stop = self._tighten_internal_stop(trade, is_long)
+
+            logger.warning(
+                f"[thesis-trim] {trade.symbol} trimmed {shares_to_trim}sh @ "
+                f"${fill_price:.2f} (P&L ${partial_pnl:+.2f}), {trade.remaining_shares}sh "
+                f"runner, stop->{new_stop} ({reason})")
+            return {"success": True, "shares_trimmed": shares_to_trim,
+                    "fill_price": fill_price, "pnl": partial_pnl,
+                    "remaining_shares": trade.remaining_shares, "new_stop": new_stop}
+        except Exception as e:
+            logger.warning(f"[thesis-trim] {getattr(trade,'symbol','?')} raised: "
+                           f"{type(e).__name__}: {e}")
+            return {"success": False, "error": f"{type(e).__name__}: {e}", "shares_trimmed": 0}
+
+    def _tighten_internal_stop(self, trade, is_long: bool):
+        """Move the bot-side ratchet stop toward price (never across it). Returns new stop or None."""
+        import os
+        if os.environ.get("THESIS_INVALIDATION_TRIM_TIGHTEN", "true").strip().lower() not in ("1", "true", "yes"):
+            return None
+        try:
+            frac = float(os.environ.get("THESIS_INVALIDATION_TRIM_TIGHTEN_FRAC", "0.5"))
+            buf = float(os.environ.get("THESIS_INVALIDATION_TRIM_TIGHTEN_BUFFER_PCT", "0.003"))
+            cfg = getattr(trade, "trailing_stop_config", None)
+            if not isinstance(cfg, dict):
+                return None
+            cur_stop = cfg.get("current_stop") or trade.stop_price
+            px = float(trade.current_price or 0)
+            if not px or cur_stop is None:
+                return None
+            cur_stop = float(cur_stop)
+            if is_long:
+                target = cur_stop + frac * (px - cur_stop)
+                target = min(target, px * (1 - buf))   # keep buffer below price
+                if target <= cur_stop:                  # only tighten, never loosen
+                    return None
+            else:
+                target = cur_stop - frac * (cur_stop - px)
+                target = max(target, px * (1 + buf))
+                if target >= cur_stop:
+                    return None
+            new_stop = round(target, 2)
+            cfg["current_stop"] = new_stop
+            cfg.setdefault("mode", "thesis_tightened")
+            return new_stop
+        except Exception:
+            return None
+
+
     async def _clamp_shares_to_ib_position(
         self,
         trade,

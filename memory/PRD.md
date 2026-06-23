@@ -1,5 +1,17 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (P5 FINISHED) — partial-TRIM (soft) + full-CLOSE (hard) thesis-invalidation exits.**
+> New `PositionManager.trim_position()` (reuses scale-out broker path + exact bookkeeping, keeps a runner) +
+> bot-side internal-stop tighten (never crosses price). Routing: hard_regime_flip→close, regime_hostile_cell→
+> trim+tighten; natural escalation (soft trims, later hard flip closes the runner). Still DORMANT
+> (THESIS_INVALIDATION_MODE=observe). Knobs: THESIS_INVALIDATION_TRIM_PCT/_TRIM_TIGHTEN(_FRAC/_BUFFER_PCT).
+> Tested: test_p5c (trim bookkeeping+stop), test_p5b (close/trim routing), P5 observe regression green; backend 200.
+> NEXT-UP QUEUE (operator, see ROADMAP top): (1) 🔴 TQS scoring reliability/integrity — close the ORIGINAL
+> problem statement; (2) 🟠 scalp/intraday under-firing diagnostic; (3) 🟠 MFE/MAE study → time-decay for
+> long-horizon trades and/or raise max_open_positions (currently 25, gated by SAFETY_MAX_POSITIONS).
+
+
+
 > **🧭 2026-06-23 (P5-PHASE-2 + P6) — built AHEAD, both DORMANT/observe by default (zero live change).**
 > - ✅ **P5-Phase-2 — ACTIVE thesis-invalidation close** (thesis_invalidation.py): `active` mode closes via the
 >   bot's `close_trade(reason="thesis_invalidation:<trigger>")` ONLY after the trigger persists ≥

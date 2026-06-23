@@ -1,3 +1,22 @@
+## 2026-06-23 — P5 FINISHED: partial-TRIM (soft) + full-CLOSE (hard) thesis-invalidation exits — TESTED
+Completes the "close/**trim**" spec. Still DORMANT by default (THESIS_INVALIDATION_MODE=observe).
+ • NEW `PositionManager.trim_position(trade, fraction, bot, reason)` — ad-hoc partial trim via the SAME
+   broker partial-exit path as scale-out, mirroring its bookkeeping exactly (remaining_shares, realized_pnl,
+   commission, partial_exits record) ⇒ NO position drift; always keeps ≥1-share runner. Plus
+   `_tighten_internal_stop()` ratchets the bot-side `trailing_stop_config.current_stop` toward price (never
+   across it, only tightens) — reduces runner risk WITHOUT amending the IB order. Knobs:
+   THESIS_INVALIDATION_TRIM_PCT (0.5), _TRIM_TIGHTEN (true), _TRIM_TIGHTEN_FRAC (0.5), _BUFFER_PCT (0.003).
+ • thesis_invalidation.py: severity routing — HARD (hard_regime_flip) → full close; SOFT (regime_hostile_cell)
+   → trim + tighten. Natural escalation: soft trims, a later hard flip closes the runner. Default
+   THESIS_INVALIDATION_ACT_TRIGGERS now BOTH (MODE=observe still gates everything dormant).
+ • TESTED: test_p5c_trim_bookkeeping (50/100 trim, +300 R booked, stop 98→102 capped, 1-share runner-guard);
+   test_p5b_active_close (soft→trim, hard→close, both post-hysteresis, acted=2, action recorded); P5 observe
+   regression green. Backend healthy (status 200, no position_manager errors).
+ • Queued next (operator, see ROADMAP top): TQS scoring reliability/integrity (original problem statement);
+   scalp/intraday under-firing diag; MFE/MAE study → time-decay long-horizon and/or raise the 25 position cap.
+
+
+
 ## 2026-06-23 — P5-PHASE-2 (ACTIVE thesis-invalidation close, DORMANT) + P6 (strategy autonomy read-model) — WIRED + E2E
 Built ahead while operator pulls P5-phase-1. BOTH default to dormant/observe — zero live behavior change until
 the operator reviews data and flips the flag.

@@ -28,11 +28,16 @@ class _FakeRegime:
 class _FakePM:
     def __init__(self):
         self.closed = []
+        self.trimmed = []
 
     async def close_trade(self, tid, bot, reason=""):
         self.closed.append((tid, reason))
         bot._open_trades.pop(tid, None)
         return True
+
+    async def trim_position(self, trade, fraction, bot, reason=""):
+        self.trimmed.append((getattr(trade, "id", "?"), fraction, reason))
+        return {"success": True, "shares_trimmed": int(trade.remaining_shares * fraction)}
 
 
 class _FakeTrade:
@@ -48,6 +53,7 @@ class _FakeTrade:
         self.current_price = 99.0
         self.risk_amount = 200.0
         self.unrealized_pnl = -100.0
+        self.remaining_shares = 100
         self.entry_context = {"regime_score": 70.0}  # entered BULL
 
 
@@ -79,31 +85,31 @@ async def main():
 
     bot = _FakeBot(db)
 
-    # Pass 1 — records, but must NOT close (hysteresis not elapsed).
+    # Pass 1 — records both triggers, but must NOT act (hysteresis not elapsed).
     r1 = await observe_open_positions(bot)
     assert r1["acted"] == 0, r1
-    assert bot._position_manager.closed == [], "must not close on first sight"
+    assert bot._position_manager.closed == [] and bot._position_manager.trimmed == []
     assert TRADE_ID in bot._open_trades
 
-    # Age ONLY the hard_regime_flip signal past hysteresis.
-    col.update_one(
-        {"trade_id": TRADE_ID, "trigger_type": "hard_regime_flip"},
-        {"$set": {"created_at": "2020-01-01T00:00:00+00:00"}},
-    )
+    # Age BOTH signals past hysteresis.
+    col.update_many({"trade_id": TRADE_ID},
+                    {"$set": {"created_at": "2020-01-01T00:00:00+00:00"}})
 
-    # Pass 2 — now acts on hard_regime_flip; closes via close_trade.
+    # Pass 2 — acts: SOFT (regime_hostile_cell) -> trim; HARD (hard_regime_flip) -> close.
     r2 = await observe_open_positions(bot)
-    print("PASS2:", r2, "closed:", bot._position_manager.closed)
-    assert r2["acted"] == 1, r2
+    print("PASS2:", r2, "closed:", bot._position_manager.closed,
+          "trimmed:", bot._position_manager.trimmed)
+    assert r2["acted"] == 2, r2
     assert any(reason == "thesis_invalidation:hard_regime_flip"
                for _, reason in bot._position_manager.closed), bot._position_manager.closed
-    assert TRADE_ID not in bot._open_trades  # PM removed it
+    assert any(reason == "thesis_invalidation:regime_hostile_cell"
+               for _, _, reason in bot._position_manager.trimmed), bot._position_manager.trimmed
 
-    acted_sig = col.find_one({"trade_id": TRADE_ID, "trigger_type": "hard_regime_flip"})
-    assert acted_sig.get("acted") is True and acted_sig.get("close_reason"), acted_sig
-    hostile_sig = col.find_one({"trade_id": TRADE_ID, "trigger_type": "regime_hostile_cell"})
-    assert hostile_sig and not hostile_sig.get("acted"), "hostile-cell must NOT act by default"
-    print("ACTIVE-CLOSE + HYSTERESIS + ACT-TRIGGER-FILTER OK")
+    hard_sig = col.find_one({"trade_id": TRADE_ID, "trigger_type": "hard_regime_flip"})
+    soft_sig = col.find_one({"trade_id": TRADE_ID, "trigger_type": "regime_hostile_cell"})
+    assert hard_sig.get("acted") is True and hard_sig.get("action") == "close", hard_sig
+    assert soft_sig.get("acted") is True and soft_sig.get("action") == "trim", soft_sig
+    print("ACTIVE close/trim ROUTING + HYSTERESIS OK")
 
     # cleanup
     col.delete_many({"trade_id": TRADE_ID})

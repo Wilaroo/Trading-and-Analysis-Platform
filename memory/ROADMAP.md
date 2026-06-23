@@ -4,6 +4,41 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## 🔥 2026-06-23 — NEXT-UP QUEUE (operator-requested, post-P5/P6)
+Tackle in this order after the current shadow-stack (P3–P6) is delivered to DGX.
+
+### 🔴 P0/P1 — TQS scoring RELIABILITY & INTEGRITY (close out the ORIGINAL problem statement)
+The TQS↔Confidence-Gate *ambiguity* is handled (P3 unified verdict / P4 regime_fit, shadow-tested).
+What REMAINS is the TQS *scoring itself*: reliability + integrity audit.
+- Known smell (from prior diag): too many TQS sub-scores pin at the neutral default (compressed
+  distribution, p50 ≈ 50, low SD) ⇒ grades don't separate winners from losers ⇒ the gate inherits a
+  weak anchor. Audit each pillar's input availability + fail-closed/neutral fallbacks.
+- Deliverables: (1) per-pillar coverage + distribution diag (how often each pillar is real vs defaulted);
+  (2) fix fail-closed→neutral defaults that flatten the score; (3) recalibrate grade thresholds against
+  realized R (does grade A actually out-R grade C?); (4) wire a "TQS integrity" report endpoint.
+- Hooks: TQS computation site + pillar inputs (find via `tqs`/`trade_grade`/`pillar` in scanner/evaluator);
+  validate against `bot_trades` realized R (reuse clean_r). Likely a shadow/observe rollout per discipline.
+
+### 🟠 P1 — Why is the bot under-firing SCALP / INTRADAY vs LONGER-HORIZON trades?
+Diagnose the funnel for short-horizon setups end-to-end: scanner emission → dedup/liquidity gates →
+opportunity_evaluator → Confidence Gate → sizing/bracket. Count alerts vs fills per horizon class
+(scalp / intraday / swing / position). Suspects: horizon-agnostic gates favoring longer holds, ADRP/
+liquidity thresholds, bracket geometry, per-setup suppression, or the 25-position cap crowding out fast
+turnover. Output: a horizon-distribution diag (emitted vs taken vs realized-R by horizon) to locate the
+choke point before changing any thresholds.
+
+### 🟠 P1 — MFE/MAE study → time-decay (long-horizon) and/or RAISE the position cap (currently 25)
+- Compute MFE_R / MAE_R per trade by horizon class (reuse the mfe_r/mae_r tracking in position_manager).
+  Questions: do long-horizon trades give back large MFE (⇒ add a TIME-DECAY exit: tighten/scale as
+  thesis-time elapses without progress)? Are scalps being starved purely by the concurrency cap?
+- Cap: `BotConfig.max_open_positions = 25` (backend/services/trading_bot_service.py:629) — operator
+  default; LIVE value loaded from Mongo `bot_state`, hard-capped by kill-switch `SAFETY_MAX_POSITIONS`
+  (SafetyConfig.from_env, ~line 4595). Raising it means bumping bot_state AND SAFETY_MAX_POSITIONS, plus
+  re-checking the per-cycle alert overshoot guard (~line 4631) and margin headroom. Validate with the
+  MFE/MAE + horizon diag FIRST (don't raise blind).
+
+
+
 ## 🎨 2026-06-19 — UI redesign direction LOCKED + build kickoff (Track B+ glass)
 - **Design locked:** "Track B+" glass cockpit = Track B skeleton (5px heartbeat
   bar, 22px risk rail, Regime Weather header + time scrubber, **Why-Trace funnel
