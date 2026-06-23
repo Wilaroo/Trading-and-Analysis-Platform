@@ -9772,11 +9772,21 @@ class EnhancedBackgroundScanner:
             
             # Calculate TQS with all available context
             # GAP 2 FIX: Pass AI model alignment data so Context Quality pillar can score it
-            ai_dir = getattr(alert, 'ai_prediction', None)
-            ai_conf = getattr(alert, 'ai_confidence', None)
-            if ai_conf is not None:
-                ai_conf = ai_conf / 100.0  # Convert 0-100 to 0.0-1.0
+            # v19.34.392 (TQS honesty) — an ABSENT AI signal must read as
+            # NEUTRAL, not as a fabricated "weakly disagrees" PENALTY. The
+            # LiveAlert dataclass defaults (ai_prediction="", ai_confidence=0.0,
+            # ai_agrees_with_direction=False) are all NON-None, so without this
+            # coercion the Context pillar scored ai_model=35 for ~100% of the
+            # book (diag_tqs: 990/1011 pinned at 35, stdev 0). Mirror the v214
+            # win_rate/EV idiom below: coerce "no signal" to None so the pillar
+            # falls back to its honest neutral 50. Real forecasts pass through
+            # unchanged (non-empty direction + >0 confidence).
+            ai_dir = getattr(alert, 'ai_prediction', None) or None
+            _ai_conf_raw = getattr(alert, 'ai_confidence', None)
+            ai_conf = (_ai_conf_raw / 100.0) if _ai_conf_raw else None  # 0/None -> None
             ai_agrees = getattr(alert, 'ai_agrees_with_direction', None)
+            if not ai_dir or ai_conf is None:
+                ai_agrees = None
             
             tqs_result = await tqs_engine.calculate_tqs(
                 symbol=alert.symbol,
