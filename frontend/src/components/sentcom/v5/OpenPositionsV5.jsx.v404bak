@@ -83,40 +83,6 @@ const formatPx = (v) => {
   return Number(v).toFixed(2);
 };
 
-// v404 (2026-06-23) — operator transparency: lifecycle timestamps
-// (alert -> entry -> refreshed -> exit) on each position so backlogged /
-// stale flushes are visible at a glance. ET wall-clock + relative age.
-const fmtET = (ts) => {
-  if (!ts) return null;
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false });
-};
-const relAge = (ts) => {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  const s = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
-};
-const TimeCell = ({ label, ts, tone }) => {
-  const clock = fmtET(ts);
-  const age = relAge(ts);
-  return (
-    <div data-testid={`time-cell-${String(label).toLowerCase()}`}>
-      <div className="text-[13px] uppercase tracking-wider text-zinc-600">{label}</div>
-      <div className={tone || 'text-zinc-300'}>
-        {clock
-          ? <>{clock}<span className="text-zinc-600"> ET</span>{age ? <span className="text-zinc-600"> · {age}</span> : null}</>
-          : '—'}
-      </div>
-    </div>
-  );
-};
-
 // 2026-05-01 v19.23.1 — humanize known multi-word setup/style names so
 // the tier chip reads cleanly (operator review: "TRADE 2 HOLD long" was
 // verbose). Maps strict identifier → tighter display label. Unknown
@@ -562,17 +528,6 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
                 {targets.length > 0 ? formatPx(targets[0]) : '—'}
               </div>
             </div>
-          </div>
-
-          {/* v404 — lifecycle timestamps (alert -> entry -> refreshed -> exit) */}
-          <div
-            className="grid grid-cols-4 gap-1 v5-mono text-[12px]"
-            data-testid={`open-position-times-${position.symbol}`}
-          >
-            <TimeCell label="Alert" ts={position.alert_time || position.triggered_at || position.created_at} />
-            <TimeCell label="Entry" ts={position.entry_time || position.executed_at || position.opened_at} />
-            <TimeCell label="Refreshed" ts={position.last_update || position.updated_at} tone="text-cyan-300" />
-            <TimeCell label="Exit" ts={position.exit_time || position.closed_at} tone="text-zinc-400" />
           </div>
 
           {/* Risk / shares row */}

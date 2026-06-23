@@ -343,8 +343,26 @@ class TQSEngine:
         if not trade_style:
             trade_style = self._infer_trade_style(setup_type)
         
-        # Get weights for this trade style
-        weights = self._get_weights_for_style(trade_style)
+        # P1 (2026-06) TQS_STYLE_FROM_PATTERN: the WEIGHTING lens follows the
+        # pattern's intrinsic style (SSOT setup_taxonomy.style_of), NOT the
+        # liquidity-inflated stamped trade_style. Liquidity stays a feasibility/
+        # size concern (brackets/TIF), never a silent relabel of the score lens.
+        # Watch/diagnostic triggers (approaching_*, carry_forward_watch) return
+        # style_of=unknown -> the guard below leaves their stamp untouched.
+        import os as _os
+        _scoring_style = trade_style
+        if _os.environ.get("TQS_STYLE_FROM_PATTERN", "true").strip().lower() not in ("false", "0", "no", "off"):
+            try:
+                from services.setup_taxonomy import style_of as _style_of
+                _ps = (_style_of(setup_type) or "").strip().lower()
+                if _ps and _ps != "unknown" and _ps in self.STYLE_WEIGHTS:
+                    _scoring_style = _ps
+            except Exception as _se:
+                logger.warning("[tqs-p1] style_of(%s) failed: %s", setup_type, _se)
+        trade_style = _scoring_style
+
+        # Get weights for this (pattern-intrinsic) trade style
+        weights = self._get_weights_for_style(_scoring_style)
         
         try:
             # Calculate all 5 pillar scores (could parallelize these)
@@ -410,6 +428,63 @@ class TQSEngine:
                 result.context_score.score * weights["context"] +
                 result.execution_score.score * weights["execution"]
             )
+
+            # v19.34.393 (TQS scheme-B) — PRESENT-ONLY RENORMALIZATION (dormant).
+            # Best outcome-separator on sanitized bot-own trades (corr +0.13 vs
+            # the plain average's +0.03). Recompute each pillar over PRESENT
+            # sub-scores only (drop genuinely-absent "No data" inputs, renormalize
+            # remaining sub-weights) so phantom neutral-50s stop crushing the
+            # composite. Real-but-neutral readings (live VIX, neutral RSI) are
+            # KEPT. ONLY active when env TQS_RENORM_PRESENT=on; fully reversible.
+            import os as _os
+            if _os.environ.get("TQS_RENORM_PRESENT", "off").strip().lower() == "on":
+                try:
+                    _SUBW = {
+                        "setup": {"pattern": .20, "win_rate": .15, "expected_value": .30, "tape": .20, "smb": .15},
+                        "technical": {"trend": .25, "rsi": .20, "levels": .20, "volatility": .15, "volume": .20},
+                        "fundamental": {"catalyst": .25, "short_interest": .20, "float": .15, "institutional": .10, "earnings": .10, "financial": .20},
+                        "context": {"regime": .22, "relative_strength": .20, "time": .18, "sector": .15, "vix": .12, "ai_model": .10, "day": .03},
+                        "execution": {"history": .25, "tilt": .30, "entry_tendency": .15, "exit_tendency": .15, "streak": .15},
+                    }
+
+                    def _renorm_pillar(_pobj, _w):
+                        _pd = _pobj.to_dict()
+                        _comps = _pd.get("components") or {}
+                        _disp = _pd.get("display") or {}
+                        _num = _den = 0.0
+                        for _s, _wi in _w.items():
+                            if _s not in _comps:
+                                continue
+                            _vd = str((_disp.get(_s) or {}).get("verdict", "")).strip().lower()
+                            if _vd == "no data":
+                                continue  # drop genuinely-absent
+                            try:
+                                _c = float(_comps[_s])
+                            except (TypeError, ValueError):
+                                continue
+                            _num += _wi * _c
+                            _den += _wi
+                        return (_num / _den) if _den > 0 else None
+
+                    _pmap = {
+                        "setup": result.setup_score, "technical": result.technical_score,
+                        "fundamental": result.fundamental_score, "context": result.context_score,
+                        "execution": result.execution_score,
+                    }
+                    _new = 0.0
+                    for _pn, _po in _pmap.items():
+                        _ps = _renorm_pillar(_po, _SUBW[_pn])
+                        if _ps is None:
+                            _ps = _po.score
+                        else:
+                            _po.score = round(_ps, 2)  # reflect in persisted breakdown
+                        _new += _ps * weights[_pn]
+                    result.score_baseline_avg = round(result.score, 2)
+                    result.score = round(_new, 2)
+                    logger.info("[tqs-renorm v393 ON] %s %s avg=%.1f -> renorm=%.1f",
+                                symbol, setup_type, result.score_baseline_avg, result.score)
+                except Exception as _rn_e:
+                    logger.warning("[tqs-renorm v393] failed, kept baseline avg: %s", _rn_e)
             
             # Store trade style and weights used for transparency
             result.trade_style = trade_style

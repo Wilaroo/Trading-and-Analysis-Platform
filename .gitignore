@@ -3550,3 +3550,17 @@ scripts/watch_*.sh
 *.bak
 *.bak.*
 v*_backup_*/
+*.bak_v399
+patch_v399.py
+diag_v399_schedule_audit.py
+*.bak_v399
+patch_v*.py
+diag_v*.py
+diag_*.py
+*.p1bak
+
+*.a1bak
+*.p1bak
+*.bak.v*
+*.a2bak
+*.a2*bak

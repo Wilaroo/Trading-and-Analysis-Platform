@@ -1091,20 +1091,6 @@ class BotTrade:
             self.executed_at or self.created_at,
             self.closed_at,
         )
-        # v19.34.393 (TQS3) — surface the scoring-time TQS pillar breakdown on
-        # the persisted doc so CLOSED trades RETAIN it. Pre-fix it lived only in
-        # entry_context.tqs.breakdown, so bot_trades had 0% top-level coverage and
-        # the TQS entry-vs-exit correlation join had to reach into live_alerts
-        # (which rotates), capping the sample. Additive, fail-open, reversible
-        # read-through; every close path persists via save_trade -> to_dict.
-        try:
-            _ec = self.entry_context if isinstance(self.entry_context, dict) else {}
-            _ec_tqs = _ec.get("tqs") if isinstance(_ec.get("tqs"), dict) else {}
-            _tqs_bd = _ec_tqs.get("breakdown")
-            if _tqs_bd:
-                d['tqs_breakdown'] = _tqs_bd
-        except Exception:
-            pass
         return d
 
 

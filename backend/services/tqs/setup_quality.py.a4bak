@@ -103,7 +103,7 @@ class SetupQualityScore:
             "pattern": disp("Pattern", self.pattern_score, pat_read),
             "win_rate": disp("Win Rate", self.win_rate_score, wr_read),
             "expected_value": disp("Expected Value", self.ev_score, ev_read,
-                                   proxy=c.get("ev_is_proxy")),
+                                   absent=c.get("ev_is_proxy")),
             "tape": disp("Tape", self.tape_score, tape_read, absent=(tr == 0 and not self.tape_confirmation)),
             "smb": disp("SMB", self.smb_score, smb_read),
         }
@@ -397,34 +397,6 @@ class SetupQualityService:
             "tape_raw": tape_score,
             "smb_5var": smb_5var_score,
         }
-
-        # v400 (TQS4) — env-gated neutralization of two flagged setup sub-scores,
-        # proven by diag_setup_pillar_probe (read-only, 14/21/30d windows):
-        #   pattern : the 75-90 score bucket LOSES every window (0% win, avgR
-        #             -0.34..-0.36; opening_drive=85 -> 0% win) while low-scored
-        #             setups (fashionably_late 51, vwap_continuation 54) win. The
-        #             static SMB tier ranking is mildly ANTI-predictive (-0.08..-0.14).
-        #   win_rate: DEGENERATE — raw historical WR pinned ~0.55 for ~95% of the
-        #             book (score stuck ~62); ~no signal (the -0.62 14d blip was a
-        #             1-outlier artifact). Dial provided for completeness/A-B.
-        # Each shrinks toward neutral 50: s -> 50 + (s-50)*k. Default k=1.0 = byte-
-        # identical no-op (DORMANT). Tunable + reversible via env; A/B live like TQS2.
-        import os as _os
-        def _shrink_k(_key):
-            try:
-                return float(_os.environ.get(_key, "1.0"))
-            except (TypeError, ValueError):
-                return 1.0
-        _pat_k = _shrink_k("TQS_SETUP_PATTERN_SHRINK")
-        if _pat_k != 1.0:
-            _pat_old = result.pattern_score
-            result.pattern_score = max(0.0, min(100.0, 50.0 + (result.pattern_score - 50.0) * _pat_k))
-            result.factors.append(f"Pattern ranking shrunk {_pat_old:.0f}->{result.pattern_score:.0f} (TQS_SETUP_PATTERN_SHRINK={_pat_k:.2f})")
-        _wr_k = _shrink_k("TQS_SETUP_WR_SHRINK")
-        if _wr_k != 1.0:
-            _wr_old = result.win_rate_score
-            result.win_rate_score = max(0.0, min(100.0, 50.0 + (result.win_rate_score - 50.0) * _wr_k))
-            result.factors.append(f"Win-rate score shrunk {_wr_old:.0f}->{result.win_rate_score:.0f} (TQS_SETUP_WR_SHRINK={_wr_k:.2f})")
 
         # Calculate weighted total
         # v19.34.305 — rebalance sub-weights so realized EXPECTANCY (EV) carries

@@ -2025,74 +2025,7 @@ class EnhancedBackgroundScanner:
         # Check eligibility
         if not alert.auto_execute_eligible:
             return
-
-        # 2026-06-22 A8 RESTART/FEED GUARD — a (re)start must never FLUSH a
-        # backlog of eligible setups into execution before live data + scan
-        # state are re-established. Operator-traced 2026-06-22 (diag_a9): ~14
-        # stage_2_breakout positions opened in one 17:54-18:03Z burst the
-        # instant the A6-enabled scanner relaunched, pusher still cold. Both
-        # the intraday and A6 daily callers funnel through here, so one guard
-        # covers both. Fail-open: a parse/import error never blocks a signal.
-        try:
-            _warm = int(os.environ.get("AUTO_EXEC_WARMUP_SCANS", "5"))
-        except (TypeError, ValueError):
-            _warm = 5
-        if _warm > 0 and getattr(self, "_scan_count", 0) < _warm:
-            logger.info(
-                f"🪫 A8 warm-up: HOLD auto-exec {alert.symbol} {alert.setup_type} "
-                f"— scan #{getattr(self, '_scan_count', 0)} < warm-up {_warm} "
-                f"(post-restart guard; arms after the feed/universe warm up)"
-            )
-            return
-        if os.environ.get("AUTO_EXEC_REQUIRE_FEED", "1") not in ("0", "false", "False"):
-            try:
-                import routers.ib as _ibmod
-                if not _ibmod.is_pusher_connected():
-                    logger.info(
-                        f"📴 A8 feed guard: HOLD auto-exec {alert.symbol} "
-                        f"{alert.setup_type} — IB pusher not connected (no live data)"
-                    )
-                    return
-            except Exception as _feed_err:
-                logger.debug(f"A8 feed guard skip: {_feed_err}")
-
-        # 2026-06-22 A10 TRIGGER RE-VALIDATION GATE — never enter a setup whose
-        # LIVE price has drifted too far from the alert's ORIGINAL trigger.
-        # WHY (operator-traced 2026-06-22, diag_a9 + code read): _scan_daily_setups
-        # rebuilds daily-breakout alerts every cycle on fresh bars (current_price
-        # IS live), but trigger_price is the STABLE daily breakout level — so a
-        # setup keeps re-firing and auto-executing at an ever-more-EXTENDED price
-        # long after the clean break (the "stale drip" A8's restart guard could
-        # not stop; the old created_at is a dedup-upsert labeling artifact, not a
-        # price replay). Re-fetch the live quote and SKIP when the drift exceeds
-        # AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT. Universal: the intraday AND A6 daily
-        # callers funnel through here. FAIL-OPEN: no trigger / no live quote / any
-        # error never blocks a valid signal. Env-reversible.
-        try:
-            _drift_policy = os.environ.get("AUTO_EXEC_TRIGGER_DRIFT_POLICY", "block").lower()
-            _trig = float(getattr(alert, "trigger_price", 0.0) or 0.0)
-            if _drift_policy != "off" and _trig > 0:
-                _q = await self._get_quote_with_ib_priority(alert.symbol)
-                _live = float((_q or {}).get("price", 0.0) or 0.0)
-                if _live > 0:
-                    try:
-                        _max_drift = float(os.environ.get("AUTO_EXEC_MAX_TRIGGER_DRIFT_PCT", "2.0"))
-                    except (TypeError, ValueError):
-                        _max_drift = 2.0
-                    _drift = abs(_live - _trig) / _trig * 100.0
-                    if _max_drift > 0 and _drift > _max_drift:
-                        logger.info(
-                            f"\U0001f6ab A10 trigger-drift gate "
-                            f"({'BLOCK' if _drift_policy == 'block' else 'OBSERVE'}): "
-                            f"{alert.symbol} {alert.setup_type} \u2014 live {_live:.2f} drifted "
-                            f"{_drift:.2f}% from trigger {_trig:.2f} "
-                            f"(max {_max_drift:.2f}%); skipping stale/extended entry"
-                        )
-                        if _drift_policy == "block":
-                            return
-        except Exception as _drift_err:
-            logger.debug(f"A10 trigger-drift gate skip: {_drift_err}")
-
+        
         try:
             logger.info(f"🤖 Auto-executing alert: {alert.headline}")
             
@@ -3087,28 +3020,18 @@ class EnhancedBackgroundScanner:
             logger.warning("Enhanced scanner already running")
             return
 
-        # 2026-06-22 A7 SCAN-LOOP LIVENESS FIX — flip _running and SPAWN the
-        # scan-loop task FIRST, *before* the carry-forward hydrate. Previously
-        # start() awaited the (blocking pymongo) hydrate before setting
-        # _running / creating _scan_task. At server boot start() is wrapped in
-        # `asyncio.wait_for(..., timeout=5.0)`; a slow hydrate (Atlas latency /
-        # cold cache) let wait_for cancel start() mid-hydrate, so _running was
-        # never set and the loop task never created — the scanner stayed
-        # permanently dead (running=False, scan_count=0) while still showing
-        # the alerts the hydrate had already loaded. Creating the loop task
-        # first makes the loop independent of (and immune to) the hydrate.
-        self._running = True
-        self._scan_task = asyncio.create_task(self._scan_loop())
-        logger.info(f"🚀 Enhanced scanner started - {len(self._watchlist)} symbols, {len(self._enabled_setups)} strategies")
-
-        # 2026-05-05 v19.34.6 — Re-hydrate carry-forward gameplan alerts from
-        # Mongo so the morning operator workflow has yesterday's after-hours
-        # plan in `_live_alerts`. Now runs AFTER the loop is live; if it is
-        # slow or cancelled the scan loop keeps running unaffected.
+        # 2026-05-05 v19.34.6 — Re-hydrate carry-forward gameplan alerts
+        # from Mongo BEFORE the loop spins up so the morning operator
+        # workflow has yesterday's after-hours plan in `_live_alerts`
+        # immediately. No-op on cold DB / no carry-forwards.
         try:
             await self._hydrate_carry_forward_alerts_from_mongo()
         except Exception as _hydrate_err:
             logger.debug(f"v19.34.6 carry-forward hydrate skipped: {_hydrate_err}")
+
+        self._running = True
+        self._scan_task = asyncio.create_task(self._scan_loop())
+        logger.info(f"🚀 Enhanced scanner started - {len(self._watchlist)} symbols, {len(self._enabled_setups)} strategies")
     
     async def stop(self):
         """Stop the background scanner"""
@@ -7463,32 +7386,6 @@ class EnhancedBackgroundScanner:
                 merged.append(s)
         return merged
 
-    async def _maybe_auto_execute_daily(self, alert):
-        """v19.34.287b — auto-execute longer-horizon (swing / multi_day / position)
-        setups produced by _scan_daily_setups. Tape confirmation is an INTRADAY
-        microstructure gate and does NOT apply to these holds (operator 2026-06-22);
-        horizon is separated by scan path, so the intraday tape requirement in
-        _scan_symbol is left untouched. Mirrors the intraday EV quality gate
-        (priority HIGH/CRITICAL + _passes_ev_quality_gate) MINUS tape + intraday-stale.
-        The bot's _evaluate_opportunity (confidence gate + max_open_positions +
-        sizing) stays the FINAL authority — this only lets the alert REACH it.
-        Runs in the same scan tick the alert was detected (bars include today's live
-        bar), so eligibility is evaluated on realtime data. Never raises."""
-        try:
-            if not self._auto_execute_enabled:
-                return
-            eligible = (
-                getattr(alert, "priority", None) is not None
-                and alert.priority.value in (
-                    AlertPriority.CRITICAL.value, AlertPriority.HIGH.value)
-                and self._passes_ev_quality_gate(alert)
-            )
-            alert.auto_execute_eligible = eligible
-            if eligible:
-                await self._auto_execute_alert(alert)
-        except Exception:
-            pass
-
     async def _scan_daily_setups(self):
         """Scan for swing and position setups.
         
@@ -7609,7 +7506,6 @@ class EnhancedBackgroundScanner:
                             if alert:
                                 await self._process_new_alert(alert)
                                 alerts_found += 1
-                                await self._maybe_auto_execute_daily(alert)
                         except Exception:
                             pass
 
@@ -7626,7 +7522,6 @@ class EnhancedBackgroundScanner:
                                 if alert:
                                     await self._process_new_alert(alert)
                                     alerts_found += 1
-                                    await self._maybe_auto_execute_daily(alert)
                             except Exception as det_err:
                                 logger.debug(f"v19.34.95 detector {setup_name} on {symbol} failed: {det_err}")
                     except Exception as imp_err:
@@ -7898,18 +7793,6 @@ class EnhancedBackgroundScanner:
                 {"$set": doc},
                 upsert=True,
             )
-            # 2026-06-22 (B) carry-forward persist prune — drop older same-key
-            # gameplan docs so the collection can't accumulate one doc per ~20min
-            # ranker run for the same (symbol,setup,dir). Keep the just-written newest.
-            try:
-                self.db.carry_forward_alerts.delete_many({
-                    "symbol": alert.symbol,
-                    "setup_type": alert.setup_type,
-                    "direction": getattr(alert, "direction", "long"),
-                    "id": {"$ne": alert.id},
-                })
-            except Exception as _prune_err:
-                logger.debug(f"carry-forward persist prune skipped: {_prune_err}")
             # Ensure the TTL-style cleanup index exists. Cheap: noop
             # after first call thanks to Mongo's existing-index check.
             try:
@@ -7947,38 +7830,6 @@ class EnhancedBackgroundScanner:
                     {"_id": 0},
                 )
             )
-            # 2026-06-22 (B) carry-forward HYDRATE DEDUP — collapse to newest per
-            # (symbol,setup,dir) BEFORE the hydrate loop. The ranker mints a unique
-            # cf_<sym>_<setup>_<ts> id every ~20min and _persist upserts by it, so
-            # carry_forward_alerts accumulates hundreds of dupes the loader dumped
-            # wholesale into _live_alerts (~148 cards; operator diag_a11 2026-06-22).
-            # Best-effort delete the superseded Mongo docs so the collection self-
-            # prunes on restart. The existing loop (and its A2j pillar backfill) is
-            # left untouched — it just iterates fewer docs.
-            try:
-                _cf_newest = {}
-                _cf_superseded = []
-                for _cf_d in sorted(docs, key=lambda d: str(d.get("created_at") or ""), reverse=True):
-                    _cf_k = ((_cf_d.get("symbol") or "").upper(),
-                             _cf_d.get("setup_type") or "",
-                             _cf_d.get("direction") or "long")
-                    if _cf_k in _cf_newest:
-                        if _cf_d.get("id"):
-                            _cf_superseded.append(_cf_d["id"])
-                    else:
-                        _cf_newest[_cf_k] = _cf_d
-                docs = list(_cf_newest.values())
-                if _cf_superseded:
-                    try:
-                        self.db.carry_forward_alerts.delete_many({"id": {"$in": _cf_superseded}})
-                    except Exception as _cf_prune_err:
-                        logger.debug(f"carry-forward hydrate prune skipped: {_cf_prune_err}")
-                    logger.info(
-                        f"📅 (B) carry-forward hydrate dedup: collapsed "
-                        f"{len(_cf_superseded)} dupes → {len(docs)} distinct"
-                    )
-            except Exception as _cf_dedup_err:
-                logger.debug(f"carry-forward hydrate dedup skipped: {_cf_dedup_err}")
             hydrated = 0
             backfilled = 0
             for doc in docs:
@@ -9301,95 +9152,61 @@ class EnhancedBackgroundScanner:
         except Exception as e:
             logger.debug(f"Could not populate SMB fields: {e}")
         
-        # === DMA DIRECTIONAL FILTER (2026-06-22 A7 SOFTENED) ===
-        # Longer-horizon holds (swing / multi-day / position) prefer trend
-        # alignment, but the original gate HARD-rejected any long whose last
-        # price sat even $0.01 below EMA50 (and position longs below SMA200),
-        # killing textbook buy-the-dip / basing entries in healthy uptrends.
-        # Softened on three axes:
-        #   1. PROXIMITY BUFFER — only reject when price is MORE than
-        #      DMA_LONG_BUFFER_PCT below the MA (default 2%).
-        #   2. STRUCTURE-AWARE — never reject a LONG while the daily structure
-        #      is constructive (EMA50 > SMA200 = pullback within an uptrend,
-        #      not a falling knife). Mirror for shorts (EMA50 < SMA200).
-        #   3. PULLBACK-SETUP EXEMPTION — setups whose entry thesis IS a
-        #      pullback/reclaim to the MA are never gated by that same MA.
+        # === DMA DIRECTIONAL FILTER ===
+        # Swing trades: require alignment with EMA50
+        # Investment trades: require alignment with SMA200
         try:
             trade_style = alert.trade_style or "intraday"
             direction = getattr(alert, 'direction_bias', 'long')
-
+            
             if trade_style in ("swing", "multi_day", "position"):
-                try:
-                    _dma_buf = float(os.environ.get("DMA_LONG_BUFFER_PCT", "2.0")) / 100.0
-                except (TypeError, ValueError):
-                    _dma_buf = 0.02
-                _dma_pullback_exempt = {
-                    "accumulation_entry", "three_week_tight", "vwap_bounce",
-                    "second_chance", "rubber_band", "backside", "mean_reversion",
-                    "first_vwap_pullback", "pullback",
-                }
-                _setup_exempt = alert.setup_type in _dma_pullback_exempt
-
                 snapshot = await self.technical_service.get_technical_snapshot(alert.symbol)
                 if snapshot and hasattr(snapshot, 'ema_50') and snapshot.ema_50 > 0:
                     price = snapshot.last or alert.trigger_price
-                    _sma200 = getattr(snapshot, 'sma_200', 0) or 0
-                    _struct_up = _sma200 > 0 and snapshot.ema_50 > _sma200
-                    _struct_dn = _sma200 > 0 and snapshot.ema_50 < _sma200
-                    _long_floor = snapshot.ema_50 * (1.0 - _dma_buf)
-                    _short_ceil = snapshot.ema_50 * (1.0 + _dma_buf)
-                    _bufpct = _dma_buf * 100.0
-                    if (direction == "long" and price < _long_floor
-                            and not _struct_up and not _setup_exempt):
-                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG swing — price ${price:.2f} >{_bufpct:.1f}% below EMA50 ${snapshot.ema_50:.2f} (no uptrend structure)"
+                    if direction == "long" and price < snapshot.ema_50:
+                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG swing — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}"
                         logger.info(msg)
                         await self._emit_scanner_thought(
                             symbol=alert.symbol, kind="reject",
-                            text=f"🚫 LONG {alert.setup_type} skipped — ${price:.2f} >{_bufpct:.1f}% below EMA50 ${snapshot.ema_50:.2f}",
+                            text=f"🚫 LONG {alert.setup_type} skipped — price ${price:.2f} below EMA50 ${snapshot.ema_50:.2f}",
                             setup_type=alert.setup_type, direction="long",
                             filter="dma_ema50_long_swing",
                             price=price, ema_50=snapshot.ema_50,
                         )
                         return
-                    elif (direction == "short" and price > _short_ceil
-                            and not _struct_dn and not _setup_exempt):
-                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT swing — price ${price:.2f} >{_bufpct:.1f}% above EMA50 ${snapshot.ema_50:.2f} (no downtrend structure)"
+                    elif direction == "short" and price > snapshot.ema_50:
+                        msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT swing — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}"
                         logger.info(msg)
                         await self._emit_scanner_thought(
                             symbol=alert.symbol, kind="reject",
-                            text=f"🚫 SHORT {alert.setup_type} skipped — ${price:.2f} >{_bufpct:.1f}% above EMA50 ${snapshot.ema_50:.2f}",
+                            text=f"🚫 SHORT {alert.setup_type} skipped — price ${price:.2f} above EMA50 ${snapshot.ema_50:.2f}",
                             setup_type=alert.setup_type, direction="short",
                             filter="dma_ema50_short_swing",
                             price=price, ema_50=snapshot.ema_50,
                         )
                         return
-
-                # Position/investment: SMA200 gate (same buffer + exemption).
+                
+                # Investment: also check SMA200
                 if trade_style == "position":
                     if snapshot and hasattr(snapshot, 'sma_200') and snapshot.sma_200 > 0:
                         price = snapshot.last or alert.trigger_price
-                        _bufpct = _dma_buf * 100.0
-                        _p_floor = snapshot.sma_200 * (1.0 - _dma_buf)
-                        _p_ceil = snapshot.sma_200 * (1.0 + _dma_buf)
-                        if (direction == "long" and price < _p_floor
-                                and not _setup_exempt):
-                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG investment — price ${price:.2f} >{_bufpct:.1f}% below SMA200 ${snapshot.sma_200:.2f}"
+                        if direction == "long" and price < snapshot.sma_200:
+                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} LONG investment — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}"
                             logger.info(msg)
                             await self._emit_scanner_thought(
                                 symbol=alert.symbol, kind="reject",
-                                text=f"🚫 LONG investment skipped — ${price:.2f} >{_bufpct:.1f}% below SMA200 ${snapshot.sma_200:.2f}",
+                                text=f"🚫 LONG investment skipped — price ${price:.2f} below SMA200 ${snapshot.sma_200:.2f}",
                                 setup_type=alert.setup_type, direction="long",
                                 filter="dma_sma200_long_investment",
                                 price=price, sma_200=snapshot.sma_200,
                             )
                             return
-                        elif (direction == "short" and price > _p_ceil
-                                and not _setup_exempt):
-                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT investment — price ${price:.2f} >{_bufpct:.1f}% above SMA200 ${snapshot.sma_200:.2f}"
+                        elif direction == "short" and price > snapshot.sma_200:
+                            msg = f"DMA Filter: Skipping {alert.symbol} {alert.setup_type} SHORT investment — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}"
                             logger.info(msg)
                             await self._emit_scanner_thought(
                                 symbol=alert.symbol, kind="reject",
-                                text=f"🚫 SHORT investment skipped — ${price:.2f} >{_bufpct:.1f}% above SMA200 ${snapshot.sma_200:.2f}",
+                                text=f"🚫 SHORT investment skipped — price ${price:.2f} above SMA200 ${snapshot.sma_200:.2f}",
                                 setup_type=alert.setup_type, direction="short",
                                 filter="dma_sma200_short_investment",
                                 price=price, sma_200=snapshot.sma_200,
@@ -9772,21 +9589,11 @@ class EnhancedBackgroundScanner:
             
             # Calculate TQS with all available context
             # GAP 2 FIX: Pass AI model alignment data so Context Quality pillar can score it
-            # v19.34.392 (TQS honesty) — an ABSENT AI signal must read as
-            # NEUTRAL, not as a fabricated "weakly disagrees" PENALTY. The
-            # LiveAlert dataclass defaults (ai_prediction="", ai_confidence=0.0,
-            # ai_agrees_with_direction=False) are all NON-None, so without this
-            # coercion the Context pillar scored ai_model=35 for ~100% of the
-            # book (diag_tqs: 990/1011 pinned at 35, stdev 0). Mirror the v214
-            # win_rate/EV idiom below: coerce "no signal" to None so the pillar
-            # falls back to its honest neutral 50. Real forecasts pass through
-            # unchanged (non-empty direction + >0 confidence).
-            ai_dir = getattr(alert, 'ai_prediction', None) or None
-            _ai_conf_raw = getattr(alert, 'ai_confidence', None)
-            ai_conf = (_ai_conf_raw / 100.0) if _ai_conf_raw else None  # 0/None -> None
+            ai_dir = getattr(alert, 'ai_prediction', None)
+            ai_conf = getattr(alert, 'ai_confidence', None)
+            if ai_conf is not None:
+                ai_conf = ai_conf / 100.0  # Convert 0-100 to 0.0-1.0
             ai_agrees = getattr(alert, 'ai_agrees_with_direction', None)
-            if not ai_dir or ai_conf is None:
-                ai_agrees = None
             
             tqs_result = await tqs_engine.calculate_tqs(
                 symbol=alert.symbol,

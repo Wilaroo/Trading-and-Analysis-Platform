@@ -1,98 +1,137 @@
 {
-  "project_name": "SentCom / TradeCommand",
-  "theme": "dark",
-  "archetype": "Control Room Data-Dense (Swiss & High-Contrast adapted for Dark Mode)",
+  "project_name": "SentCom AI Trading Bot Dashboard",
+  "theme_and_archetype": {
+    "domain": "Hybrid Fullstack - Realtime AI Trading Dashboard",
+    "theme": "DARK",
+    "archetype": "Archetype 4 (Swiss & High-Contrast) adapted for 'Control Room' density",
+    "reasoning": "High-frequency trading and algorithmic bot monitoring require immense data density without cognitive overload. Dark mode prevents eye strain during extended monitor time. Swiss typography rules ensure alignment and readability. The design strips away unnecessary decoration (no heavy gradients or shadows) in favor of 1px borders, rigid grids, and color-coded status indicators (Bloomberg Terminal meets modern Fintech)."
+  },
   "typography": {
-    "headings": "Chivo",
-    "body": "IBM Plex Sans",
-    "data_mono": "JetBrains Mono",
-    "hierarchy": {
-      "h1": "text-4xl tracking-tight font-black",
-      "h2": "text-2xl tracking-tight font-bold",
-      "h3": "text-xl tracking-tight font-semibold",
-      "body": "text-sm leading-relaxed",
-      "data": "text-sm font-mono tracking-tight",
-      "labels": "text-xs uppercase tracking-[0.2em]"
+    "headings": "Inter (Weights: 600, 700) - Tight tracking for space efficiency.",
+    "body": "IBM Plex Sans (Weights: 400, 500) - Excellent legibility at 10px-12px sizes.",
+    "mono_data": "JetBrains Mono (Weights: 400, 500) - MANDATORY for all tickers, PnL numbers, confidence scores, and latencies. Ensures perfect vertical alignment of tabular data.",
+    "hierarchy_rules": {
+      "h1_panel": "text-sm font-bold uppercase tracking-widest text-zinc-400",
+      "h2_sub": "text-xs font-semibold text-zinc-300",
+      "body_base": "text-xs text-zinc-300",
+      "body_small": "text-[10px] text-zinc-500",
+      "data_large": "text-lg font-mono font-bold",
+      "data_standard": "text-xs font-mono"
     }
   },
   "colors": {
-    "background": "#151c24",
-    "surface_glass": "rgba(255, 255, 255, 0.03)",
-    "surface_solid": "#1c2530",
-    "border": "rgba(255, 255, 255, 0.1)",
-    "semantic": {
-      "normal": "#06b6d4", 
-      "elevated": "#f59e0b",
-      "critical": "#f43f5e"
+    "background": {
+      "base": "#09090b",
+      "panel": "#18181b",
+      "panel_hover": "#27272a",
+      "overlay": "rgba(0, 0, 0, 0.8)"
     },
     "text": {
-      "primary": "#f8fafc",
-      "secondary": "#94a3b8",
-      "muted": "#64748b"
+      "primary": "#f4f4f5",
+      "secondary": "#a1a1aa",
+      "muted": "#71717a",
+      "inverse": "#000000"
+    },
+    "border": {
+      "default": "#27272a",
+      "focus": "#52525b"
+    },
+    "semantic": {
+      "profit": "#22c55e",
+      "loss": "#ef4444",
+      "info": "#3b82f6",
+      "warning": "#eab308",
+      "highlight": "#a855f7"
+    },
+    "pipeline_stages": {
+      "scan": "#8b5cf6",
+      "evaluate": "#3b82f6",
+      "order": "#eab308",
+      "manage": "#22c55e",
+      "close": "#64748b"
     }
   },
-  "surfaces_and_materials": {
-    "glassmorphism": "bg-white/5 backdrop-blur-[24px] border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.12)]",
-    "ambient_halo": "relative after:absolute after:inset-0 after:bg-cyan-500/10 after:blur-[40px] after:-z-10",
-    "animated_border": "mask-image shimmering gradient line using framer-motion or CSS background-clip"
+  "spacing_and_density": {
+    "philosophy": "Zero wasted pixels. Maximum data per square inch.",
+    "paddings": "Panel containers use p-2 or p-3 (never p-6). Inner elements use p-1.",
+    "gaps": "gap-1 or gap-2 for lists. gap-3 or gap-4 for major panel separations.",
+    "borders": "Rely on 1px solid borders (border-zinc-800) instead of shadows or large padding for separation.",
+    "radii": "rounded-sm (2px) or rounded-md (4px) max. Sharp corners feel more technical and precise."
   },
-  "layout": {
-    "spacing_scale": "dense (p-2, p-4, p-6)",
-    "grid_mode": "Control Room Grid (grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4)",
-    "v6_layout_structure": {
-      "top_edge": "5px fixed Heartbeat Pulse Bar",
-      "left_edge": "22px fixed Risk-Meter Rail",
-      "header": "Regime Weather & Time Scrubber Strip",
-      "main_center": "Mission Control + Trace Funnel",
-      "right_sidebar": "Position Health, Safety Activity, Setup Grade consoles",
-      "drawer": "right-side fixed ⌘K AI chat (NIA)"
+  "mockups_and_layouts": [
+    {
+      "option": "1",
+      "name": "Pipeline-HUD + Follow-Symbol",
+      "description": "A persistent top-bar HUD tracks the macro 5-stage funnel. Below is a 3-column layout. Clicking any ticker globally filters all panels to that specific symbol.",
+      "zones": {
+        "Top Strip (10%)": "Persistent Pipeline HUD. 5 blocks: [SCAN: 47 Hits] -> [EVAL: 8 Gates] -> [ORDER: 3 Sent] -> [MANAGE: 2 Open] -> [CLOSE: 4 (+2.1R)]. Plus Bot Health (Latency, Model Status).",
+        "Left Column (20%)": "Market Scanner & Alerts. Extremely dense list of tickers with micro sparklines and 1-line text explaining the trigger.",
+        "Middle Column (50%)": "Dynamic Focus Area. If no symbol selected: Shows Morning Briefing. If symbol selected: Shows deep-dive for that ticker (13-layer Confidence Gate radar chart, Live Model Pred, Order Status).",
+        "Right Column (30%)": "Stream of Consciousness & Open Positions. Auto-scrolling feed of bot thoughts (top half). Dense table of Open Positions with inline reasoning (bottom half)."
+      }
+    },
+    {
+      "option": "2",
+      "name": "Unified Trade Lifecycle Matrix",
+      "description": "A massive, dense data grid akin to an institutional options chain. Everything is visible at a glance without tab switching.",
+      "zones": {
+        "Top Strip (5%)": "Global PnL, Strategy Phase (SIM/PAPER/LIVE), Active Ticker Count.",
+        "Main View (95%)": "Data Table. Rows = Tickers. Columns = Pipeline Stages. Col 1: Ticker/Setup. Col 2: Scanner Rationale (text snippet). Col 3: Eval 13-layer Gate (horizontal segmented bar graph). Col 4: Order Status (Pending/Filled). Col 5: Position Size/PnL/Bot Manage Rationale. Col 6: Autopsy. Sorting by stage allows seeing bottlenecks instantly."
+      }
+    },
+    {
+      "option": "3",
+      "name": "Decision Timeline Stream",
+      "description": "Chronological, event-driven architecture. Treats the bot like a highly communicative employee sending Slack updates, augmented by sidecar data panels.",
+      "zones": {
+        "Left Sidebar (25%)": "Morning Briefing & Setup Coverage. Static panels showing overnight news, active catalysts, and regime detection.",
+        "Center Feed (50%)": "The 'Brain Stream'. A timeline feed of distinct cards. E.g. A card says 'AAPL: Discovered -> Evaluated (Score 82) -> Executed'. Each card expands in place to reveal the 13-layer gate score and exact CNN/FinBERT reasoning.",
+        "Right Sidebar (25%)": "Active Management. Only shows positions currently open or pending. Mini-charts with inline text: 'Holding NVDA: CNN-LSTM predicts 15m momentum up'."
+      }
     }
+  ],
+  "morning_briefing_design": {
+    "layout": "Bento Grid ('Control Room' style)",
+    "sections": [
+      { "name": "Overnight/Macro Regime", "col_span": "col-span-12", "content": "1-sentence AI summary of global market state + Regime indicator (e.g., 'High Volatility Trend')." },
+      { "name": "News & Catalysts", "col_span": "col-span-6", "content": "Dense list of up/downgrades, earnings drops. Uses FinBERT sentiment scores (Green/Red text) inline." },
+      { "name": "In-Play Tickers", "col_span": "col-span-6", "content": "List of tickers with a 'WHY' pill next to each (e.g., 'TSLA [Unusual Options Vol]', 'AMD [Sympathy Setup]')." },
+      { "name": "Game Plan A / B", "col_span": "col-span-12", "content": "Two distinct colored panels. Plan A (Green border): 'If SPY > 510, target Tech scalps'. Plan B (Amber border): 'If SPY rejects 510, load inverse ETFs'. Bulleted specific triggers." }
+    ]
   },
-  "motion_and_interactions": {
-    "hover": "translate-y-[-2px] shadow-lg border-cyan-500/50 transition-all duration-200",
-    "pulse": "Heartbeat bar uses subtle opacity/scale pulses based on state (cyan/amber/rose)",
-    "data_stream": "Number tickers and subtle flash on data update (green/red blink)"
+  "inline_explanations_design": {
+    "problem": "Raw data without context causes cognitive load.",
+    "solution": "The 'Subtitle / Meta-Text' Pattern.",
+    "implementation": [
+      "No separate tooltip popups (they require hovering and hide data).",
+      "Every data row has a primary metric (e.g., AAPL Long $150.23) and directly underneath it, a smaller text-[10px] text-zinc-500 line explaining the WHY.",
+      "Example Position Row: Line 1: [NVDA] [+3.2%] [Size: 100]. Line 2: 'Holding: CNN visual identifies bull flag continuation. TFT trailing stop updated to $885.'",
+      "Example Scanner Alert: Line 1: [AMD] [Setup: Volatility Breakout]. Line 2: 'Trigger: Unusual options volume + AI Consensus 88%. Map to SIM.'",
+      "Use text truncation (truncate) only if strictly necessary, but prefer text wrapping in fixed-width columns to ensure the 'Why' is always readable."
+    ]
   },
-  "components": {
-    "provenance_ring": "Decision Donut chart showing pillar breakdown + weights. Mini-arcs on scanner rows.",
-    "why_trace_pipeline": "Horizontal or vertical connected node funnel (Regime -> In-Play -> Setup -> Style -> TQS -> Verdict).",
-    "strategy_autonomy_console": "Matrix table/grid of strategies vs regime, with toggle states and edge-decay meters.",
-    "thesis_invalidation_tag": "Rose or Amber tinted badge with struck-through text or skull/crossbones for dead trades.",
-    "heartbeat_pulse_bar": "Fixed 5px top border div with framer-motion glowing pulse."
+  "refactor_plan": {
+    "current_state": "SentCom.jsx is 3,614 lines, monolithic, mixing state and UI.",
+    "strategy": "Feature-Sliced Design (FSD) mapped to the 5 stages.",
+    "new_structure": [
+      "src/features/PipelineHUD/ (The top macro-stats strip)",
+      "src/features/MarketScanner/ (Alerts, triggers, setup coverage)",
+      "src/features/Evaluator/ (Stream of Consciousness, 13-layer Confidence Gate viz, Revalidation)",
+      "src/features/Execution/ (IB bracket logic, latency health, QuickTrade)",
+      "src/features/PositionManager/ (Active holdings, real-time PnL, inline hold/sell rationale)",
+      "src/features/TradeJournal/ (Autopsy, Closed trades, Performance charts)",
+      "src/features/MorningBriefing/ (Pre-market prep, news, plan A/B)",
+      "src/pages/Dashboard/ (The master layout component that orchestrates the features above using a React Context or Zustand store for global 'follow-symbol' state)"
+    ]
   },
-  "instructions_to_main_agent": {
-    "overall_goal": "Build a trust-and-explainability-first UI for SentCom/TradeCommand. Strictly avoid purple/AI-slop. Use dark glassmorphism (rgba(21,28,36) base, 24px blur).",
-    "track_A_v5_incremental": {
-      "description": "Enhance existing v5 tabs (Command Center, Mission Control, etc.) without a full rewrite.",
-      "tasks": [
-        "Add a 'Trade Trace' modal or expandable row in Mission Control to show the 6-step WHY TRACE.",
-        "Integrate 'Regime Weather' badge in the Command Center header.",
-        "Add 'Strategy Autonomy' tab/panel to Settings or Mission Control.",
-        "Update the Verdict block to show the unified TQS+ML score.",
-        "Use Provenance Ring (donut chart) for the TQS pillar breakdown in Trade Journal and Verdict blocks."
-      ]
-    },
-    "track_B_v6_redesign": {
-      "description": "Total single-page cockpit redesign realizing the V6 vision. The 'Why-Trace' is the hero element.",
-      "tasks": [
-        "Implement a strict layout: Top 5px Heartbeat Pulse Bar (cyan/amber/rose).",
-        "Implement Left 22px Risk-Meter Rail (daily-loss-%).",
-        "Implement a top 'Day-Narrative Strip' with a Time Scrubber.",
-        "Center layout: A unified 'Why-Trace' visual pipeline funnel showing the 6 seams.",
-        "Right sidebar: Position Health Console, Safety Activity Stream, Setup Grade Board.",
-        "Implement right-side ⌘K AI chat drawer (NIA) with glassmorphism + ambient-halo.",
-        "Every row in the scanner must have a Provenance Ring mini-arc for instant decision transparency."
-      ]
-    },
-    "six_seams_implementation": [
-      "1. Style/Liquidity Lens: Setup Grade Board must show the active lens (e.g., 'Scalp Lens') and dynamic weights.",
-      "2. Unified TQS+ML: Single 'Decision Authority' metric combining 0-100 score + High/Med/Low confidence gate into one verdict.",
-      "3. Unified WHY TRACE: Render a 6-node flow diagram or breadcrumb (Regime -> In-Play -> Setup -> Style -> TQS -> Verdict -> Exit).",
-      "4. Regime-fit Abstention: Show 'STAND DOWN' state clearly when regime is hostile (dimmed UI with amber/rose warning).",
-      "5. Thesis-invalidation: In the exit reason field, highlight if closed due to 'Regime Flipped' or 'Premise Broke'.",
-      "6. Autonomy Console: Grid showing 'Strategy Family' | 'Current Edge Decay' | 'Regime Fit' | 'Status (Enabled/Disabled)'."
-    ],
-    "testing_requirements": "All interactive elements, decision nodes, and metrics MUST include `data-testid` attributes (e.g., data-testid='why-trace-node-regime', data-testid='provenance-ring-verdict', data-testid='heartbeat-pulse-bar').",
-    "tech_stack": "React, TailwindCSS, framer-motion, lucide-react, shadcn/ui components (customized for dark glassmorphism). Javascript (.js) only."
+  "testing_requirements": {
+    "mandatory_attribute": "data-testid",
+    "rule": "ALL interactive and key informational elements MUST include a data-testid attribute.",
+    "examples": [
+      "data-testid='ticker-select-aapl'",
+      "data-testid='pipeline-hud-scan-count'",
+      "data-testid='morning-briefing-plan-a'",
+      "data-testid='confidence-gate-score'"
+    ]
   }
 }

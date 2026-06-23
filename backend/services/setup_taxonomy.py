@@ -340,7 +340,11 @@ def style_of(raw) -> str:
         from services.trade_style_classifier import style_bucket_for_setup
     except Exception:  # pragma: no cover - import path fallback
         from backend.services.trade_style_classifier import style_bucket_for_setup
-    return style_bucket_for_setup(canonicalize(raw))
+    # P1 (2026-06): pass the RAW setup so trade_style_classifier._setup_lookup
+    # honors explicit horizon entries (e.g. breakdown_confirmed->multi_day)
+    # BEFORE canonicalize() strips the suffix; canonicalize stays the
+    # fall-through inside _setup_lookup. Fixes the SSOT over-collapse.
+    return style_bucket_for_setup(raw)
 
 
 # Full known-setup roster (for diagnostics / coverage checks). Union of all

@@ -231,15 +231,6 @@ class PositionManager:
                         opp = "short" if _dir == "long" else "long"
                         ib_qty_my_dir = ib_pos_map.get((_sym_u, _dir), 0)
                         ib_qty_opp_dir = ib_pos_map.get((_sym_u, opp), 0)
-                        # v402b -- reset OCA zero-share debounce streak the
-                        # moment IB reports ANY shares (either side), so a
-                        # one-tick transient 0-snapshot can never accumulate.
-                        if not (ib_qty_my_dir == 0 and ib_qty_opp_dir == 0):
-                            if getattr(_trade, "_oca_zero_streak", 0):
-                                try:
-                                    _trade._oca_zero_streak = 0
-                                except Exception:
-                                    pass
                         if ib_qty_my_dir == 0 and ib_qty_opp_dir > 0:
                             # IB has the opposite direction — bot's row
                             # is wrong-direction phantom (today's SOFI
@@ -356,34 +347,6 @@ class PositionManager:
                                 except Exception:
                                     age_ok_e = True
                             if age_ok_e:
-                                # -- v402b (2026-06-23) OCA close DEBOUNCE --
-                                # diag_oca_close_transient_vs_reentry.py proved
-                                # FOXA/KR/LULU were marked oca_closed_externally
-                                # 30-60s after a FRESH fill while the fill tape
-                                # showed the position fully held (zero cover
-                                # fills) -- a transient IB 0-share snapshot.
-                                # Require N CONSECUTIVE zero-both-dir reads
-                                # before closing. OCA_CLOSE_ZERO_STREAK default
-                                # 2 (set 1 to disable). Streak resets at loop top.
-                                import os as _os_deb
-                                try:
-                                    _need_zero = int(_os_deb.environ.get(
-                                        "OCA_CLOSE_ZERO_STREAK", "2"))
-                                except (TypeError, ValueError):
-                                    _need_zero = 2
-                                _zero_streak = int(
-                                    getattr(_trade, "_oca_zero_streak", 0) or 0) + 1
-                                try:
-                                    _trade._oca_zero_streak = _zero_streak
-                                except Exception:
-                                    pass
-                                if _zero_streak < max(1, _need_zero):
-                                    logger.info(
-                                        "[v402b OCA debounce] %s zero-share "
-                                        "read %d/%d -- deferring external-close "
-                                        "(transient snapshot guard).",
-                                        _trade.symbol, _zero_streak, _need_zero)
-                                    continue
                                 # v19.31.12 — claim IB realizedPNL onto
                                 # the bot's record before marking closed.
                                 # Pre-fix: trade.realized_pnl stayed at $0

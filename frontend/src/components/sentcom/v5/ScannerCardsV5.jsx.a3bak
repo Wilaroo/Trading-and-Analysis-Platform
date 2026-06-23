@@ -182,8 +182,6 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
         p_win: a.p_win,
         sharpe: a.sharpe,
       },
-      alert_ts: a.triggered_at || a.created_at || a.timestamp,
-      refreshed_ts: a.refreshed_at || a.last_refreshed || a.updated_at || a.timestamp,
       timestamp: a.timestamp || a.created_at,
     };
     if (!existing || STAGE_ORDER.indexOf(card.stage) >= STAGE_ORDER.indexOf(existing.stage) || blocked) {
@@ -282,9 +280,6 @@ const buildCards = ({ setups, alerts, positions, messages }) => {
         r: agg.r_sum,
         pnl: agg.u_sum,
       },
-      alert_ts: p.alert_time || p.triggered_at || p.created_at,
-      entry_ts: p.entry_time || p.executed_at || p.opened_at,
-      refreshed_ts: p.last_update || p.updated_at,
       timestamp: p.opened_at || p.entry_time,
     });
   });
@@ -339,16 +334,6 @@ const relativeAge = (ts) => {
   } catch { return ''; }
 };
 
-// v404 (2026-06-23) — ET wall-clock for the card time strip (alert /
-// entry timestamps). Returns null on bad/missing input so callers fall
-// back gracefully.
-const fmtClockET = (ts) => {
-  if (!ts) return null;
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false });
-};
-
 
 const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, onHoverSymbol, dataCardIndex }) => {
   const chipClass = STAGE_CLASS[card.stage] || STAGE_CLASS.scan;
@@ -372,7 +357,7 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
     <div
       data-testid={`v5-scanner-card-${card.symbol}`}
       data-card-index={dataCardIndex}
-      onClick={() => openTqsDrawer({ symbol: card.symbol, source: card.source || 'alert', card })}
+      onClick={() => openTqsDrawer({ symbol: card.symbol, source: card.source || 'alert' })}
       onMouseEnter={onHoverSymbol ? () => onHoverSymbol(card.symbol) : undefined}
       onMouseLeave={onHoverSymbol ? () => onHoverSymbol(null) : undefined}
       className={`v5-scanner-card${active ? ' active' : ''}${previewed ? ' previewed' : ''}${isHoverCross ? ' v5-card-hover-cross' : ''}${card.is_countertrend ? ' v5-card-counter-trend' : ''}${isNew ? ' just-arrived' : ''}`}
@@ -493,23 +478,6 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
         </div>
       )}
 
-      {/* v404 — alert / entry / refreshed timestamps for backlog visibility */}
-      {(card.alert_ts || card.refreshed_ts || card.entry_ts) && (
-        <div
-          className="flex items-center gap-3 mt-1 text-[12px] v5-mono text-zinc-500"
-          data-testid={`scanner-card-times-${card.symbol}`}
-        >
-          {card.alert_ts && fmtClockET(card.alert_ts) && (
-            <span><span className="text-zinc-600">alert</span> {fmtClockET(card.alert_ts)} ET{relativeAge(card.alert_ts) ? ` · ${relativeAge(card.alert_ts)}` : ''}</span>
-          )}
-          {card.entry_ts && fmtClockET(card.entry_ts) && (
-            <span><span className="text-zinc-600">entry</span> {fmtClockET(card.entry_ts)} ET</span>
-          )}
-          {card.refreshed_ts && relativeAge(card.refreshed_ts) && (
-            <span className="text-cyan-400/70"><span className="text-zinc-600">refreshed</span> {relativeAge(card.refreshed_ts)} ago</span>
-          )}
-        </div>
-      )}
       {/* v19.34.29 — Live scanner-thoughts strip per card. Auto-fetches
           the last 5 reject / skip / trigger thoughts for this symbol
           from /api/sentcom/stream/history. Same component the V5 Open
