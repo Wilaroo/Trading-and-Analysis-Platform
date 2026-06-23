@@ -160,38 +160,67 @@ def main():
                   f"close={str(t.get('close_reason') or '')[:18]}")
 
         # ---- verdict reconstruction ----
+        # order_queue is TTL-pruned, so the PRIMARY bot-path signal is the
+        # bot_trades tape (entered_by) + the ib_executions order_id sequence,
+        # NOT order_queue presence.
         oq_order_ids = {o.get("order_id") for o in oq if o.get("order_id")}
         fill_order_ids = {e.get("order_id") for e in fills if e.get("order_id")}
         cancelled_oq = [o for o in oq if str(o.get("status") or "").lower() in CANCEL_STATES]
         shared_ids = oq_order_ids & fill_order_ids
 
+        bot_path = any(str(t.get("entered_by") or "").lower() in {"bot_fired", "bot"}
+                       for t in bts)
+        broker_rejected = [t for t in bts if "broker_reject" in str(t.get("close_reason") or "").lower()]
+        oca_closed = [t for t in bts
+                      if str(t.get("status")) == "closed"
+                      and "oca_closed_extern" in str(t.get("close_reason") or "").lower()]
+        adopted = [t for t in bts
+                   if str(t.get("status")) == "open"
+                   and ((t.get("entry_context") or {}).get("reconciled")
+                        or str(t.get("entered_by") or "").startswith("reconciled"))]
+
         if not fills:
             v = "NO_FILL_FOUND"
-        elif cancelled_oq and (shared_ids or fills):
-            # a bot order was cancelled/rejected AND something filled
+        elif oca_closed and adopted:
+            v = "OCA_CLOSED_THEN_READOPTED (bot-path)"
+        elif cancelled_oq and shared_ids:
             v = "CANCELLED_BUT_FILLED (NWSA-class)"
-        elif oq and fills:
+        elif bot_path and adopted:
+            v = "BOT_PATH_THEN_READOPTED"
+        elif bot_path and fills:
             v = "BOT_FILLED_THEN_LOST"
-        elif fills and not oq:
+        elif fills and not bot_path:
             v = "EXTERNAL_OR_PRIOR_SESSION"
         else:
             v = "REVIEW"
         verdicts[sym] = v
         print(f"  ⮕ VERDICT: {v}")
+        notes = []
+        if broker_rejected:
+            notes.append(f"{len(broker_rejected)} broker_rejected attempt(s) earlier today")
+        if oca_closed:
+            notes.append(f"{len(oca_closed)} oca_closed_externally close(s) right before adoption")
         if shared_ids:
-            print(f"     shared order_id(s) on BOTH bot-queue and fill tape: {sorted(shared_ids)}")
+            notes.append(f"order_id(s) on BOTH queue+fill: {sorted(shared_ids)}")
+        if notes:
+            print("     " + " | ".join(notes))
 
     print("\n" + "=" * 100)
     print("VERDICT SUMMARY")
     for s, v in verdicts.items():
         print(f"   {s:<8} {v}")
     print("\nREAD:")
-    print("  CANCELLED_BUT_FILLED → the bot's cancel/reject lost the race to an IB fill; it is now in a")
-    print("                         position it tried to abort. Root fix = pre-submit guard / confirm the")
-    print("                         cancel actually killed the order before releasing the symbol.")
+    print("  OCA_CLOSED_THEN_READOPTED → bot-path: a bot_fired trade was marked closed via the")
+    print("                         oca_closed_externally sweep while the IB position stayed OPEN, then")
+    print("                         the reconciler re-adopted the live position as an 'external' orphan")
+    print("                         with a synthetic 2%% stop + a misleading 'I did NOT open this' warning.")
+    print("                         Root fix = don't mark closed while IB still holds the size, and/or")
+    print("                         re-link the adoption to the just-closed bot_trade instead of synthesizing.")
+    print("  CANCELLED_BUT_FILLED → the bot's cancel/reject lost the race to an IB fill (NWSA-class).")
     print("  BOT_FILLED_THEN_LOST → normal bot fill, tracking wiped by restart → re-adopted as orphan.")
-    print("                         Root fix = restore_open_trades must rehydrate it before reconcile runs.")
-    print("  EXTERNAL_OR_PRIOR    → no bot intent → genuinely external / prior-session; adoption is correct.")
+    print("  EXTERNAL_OR_PRIOR    → NO bot_trade references the symbol → genuinely external / prior-session.")
+    print("  (order_queue is TTL-pruned, so its absence does NOT mean the bot didn't trade the symbol —")
+    print("   the bot_trades 'entered_by' tape is the authoritative bot-path signal.)")
     print("=" * 100)
 
 
