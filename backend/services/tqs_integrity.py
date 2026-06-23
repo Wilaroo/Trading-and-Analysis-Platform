@@ -134,6 +134,53 @@ def _pillar_coverage(db, cutoff):
                      if n_docs == 0 else "")}
 
 
+def _grade_by_horizon(db, cutoff):
+    """Per-(grade × horizon) realized-R — localises WHERE the grade ranks R and
+    where it INVERTS. (Aggregate grade-separation can hide a horizon that works
+    cleanly under one that is inverted — e.g. intraday monotonic vs scalp where
+    grade A is the worst cell.)"""
+    from services.horizon_funnel import horizon_of
+    cell = {}
+    for d in db["alert_outcomes"].find(
+            {"closed_at": {"$gte": cutoff}},
+            {"trade_grade": 1, "r_multiple": 1, "setup_type": 1}):
+        g = str(d.get("trade_grade") or "").strip().upper()[:1]
+        if g not in GRADES:
+            continue
+        rm = d.get("r_multiple")
+        if rm is None:
+            continue
+        try:
+            rm = float(rm)
+        except (TypeError, ValueError):
+            continue
+        cell.setdefault(horizon_of(d.get("setup_type")), {}).setdefault(g, []).append(rm)
+
+    horizons = []
+    inverted = []
+    for h, grades in sorted(cell.items()):
+        rows, avgs = [], {}
+        for g in GRADES:
+            v = grades.get(g, [])
+            if v:
+                avgs[g] = round(mean(v), 3)
+            rows.append({
+                "grade": g, "n": len(v),
+                "win_rate": round(sum(1 for x in v if x > 0) / len(v) * 100, 1) if v else None,
+                "avg_r": round(mean(v), 3) if v else None,
+            })
+        present = [g for g in GRADES if g in avgs]
+        mono = (all(avgs[present[i]] >= avgs[present[i + 1]] for i in range(len(present) - 1))
+                if len(present) >= 2 else None)
+        # inverted = best grade present underperforms the worst grade present
+        inv = len(present) >= 2 and avgs[present[0]] < avgs[present[-1]]
+        if inv and h != "unknown":
+            inverted.append(h)
+        horizons.append({"horizon": h, "by_grade": rows,
+                         "monotonic": mono, "inverted": inv})
+    return {"horizons": horizons, "inverted_horizons": inverted}
+
+
 def generate_report(db, days: int = 30) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -145,10 +192,14 @@ def generate_report(db, days: int = 30) -> dict:
     out["grade_separation"] = _grade_separation(db, cutoff)
     out["score_discrimination"] = _score_discrimination(db, cutoff)
     out["pillar_coverage"] = _pillar_coverage(db, cutoff)
+    out["grade_by_horizon"] = _grade_by_horizon(db, cutoff)
     gs, sd = out["grade_separation"], out["score_discrimination"]
     bits = []
     if gs.get("verdict") == "weak_or_inverted":
         bits.append("TQS grades do NOT rank realized R (not predictive)")
+    inv = out["grade_by_horizon"].get("inverted_horizons") or []
+    if inv:
+        bits.append("grade INVERTED on: " + ", ".join(inv))
     if sd.get("verdict") == "compressed":
         bits.append(f"quality_score compressed (SD {sd.get('sd')})")
     out["headline"] = "; ".join(bits) if bits else "TQS separation/spread look reasonable"
