@@ -352,6 +352,20 @@ async def get_thesis_invalidation_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/strategy-autonomy/report")
+async def get_strategy_autonomy_report():
+    """Autonomous strategy on/off recommendations for the CURRENT regime (P6).
+
+    OBSERVE-first read-model: per strategy family, ENABLE / WATCH / DISABLE /
+    UNKNOWN based on its live edge x the current regime band (T6 expectancy +
+    30d/90d term-structure). Does NOT change live behavior — recommendation only.
+    """
+    from services.strategy_autonomy import generate_report
+    from database import get_database
+    report = generate_report(get_database())
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")

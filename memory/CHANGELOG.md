@@ -1,3 +1,37 @@
+## 2026-06-23 — P5-PHASE-2 (ACTIVE thesis-invalidation close, DORMANT) + P6 (strategy autonomy read-model) — WIRED + E2E
+Built ahead while operator pulls P5-phase-1. BOTH default to dormant/observe — zero live behavior change until
+the operator reviews data and flips the flag.
+
+P5 PHASE-2 — ACTIVE thesis-invalidation close (services/thesis_invalidation.py extended):
+ • `active` mode now CLOSES a position via the bot's canonical `PositionManager.close_trade(tid, bot,
+   reason="thesis_invalidation:<trigger>")` — only AFTER the trigger persists ≥
+   THESIS_INVALIDATION_HYSTERESIS_SECONDS (default 180s, whipsaw guard) since first-seen AND is still firing.
+ • Bounded: only trigger types in THESIS_INVALIDATION_ACT_TRIGGERS (default "hard_regime_flip" — the
+   unambiguous one; regime_hostile_cell stays observe unless added) may act; capped at
+   THESIS_INVALIDATION_MAX_ACTIONS_PER_CYCLE (default 5). Default MODE=observe ⇒ active stays DORMANT.
+ • TESTED (`tests/test_p5b_active_close.py`): no close on first sight; after aging past hysteresis closes
+   hard_regime_flip (acted=1, marks acted+close_reason); regime_hostile_cell does NOT act (filtered). P5
+   observe regression still green.
+
+P6 — Autonomous Strategy On/Off by Regime (NEW services/strategy_autonomy.py, OBSERVE-first read-model):
+ • Compute-on-read recommendations per strategy family (canonical setup) for the CURRENT regime band:
+   DISABLE (current-band cell hostile, weighted_mean_R ≤ hard_r, eff_n ≥ min_eff_n) / WATCH (soft-hostile OR
+   edge-decay: diag.r_30d ≤ STRATEGY_AUTONOMY_DECAY_R and r_90d−r_30d ≥ STRATEGY_AUTONOMY_DECAY_GAP, n_30d≥10)
+   / ENABLE / UNKNOWN. Reuses the SAME T6 setup_regime_expectancy table (cells[`{canon}|{band}`] + 30/90d
+   term-structure) + latest market_regime_state.composite_score. Surfaces operator's static DISABLED_SETUPS.
+ • PURE read-model — zero live-loop cost, NO behavior change. Active enforcement (feed recs into the bot's
+   DISABLED_SETUPS gate) DEFERRED behind STRATEGY_AUTONOMY_MODE (default observe) until a probation window.
+ • Endpoint `GET /api/slow-learning/strategy-autonomy/report`. TESTED (`tests/test_p6_strategy_autonomy.py`):
+   BEAR band → hostile=DISABLE, healthy=ENABLE, decaying=WATCH, DISABLE sorts first.
+ • Preview verified: 200; reads live regime (NEUT46-60) + real DISABLED_SETUPS (vwap_fade_short); recs empty
+   only because the preview expectancy table has 0 cells (no trade history) — confirmed NOT a band-label bug.
+
+NEXT: after RTH data accrues on DGX, read /thesis-invalidation/report (avg_r_delta per trigger) and
+/strategy-autonomy/report; if a trigger/strategy is solidly +, flip its flag (THESIS_INVALIDATION_MODE=active
+and/or wire STRATEGY_AUTONOMY_MODE active enforcement). Then build the unified tunable Shadow-Tracking UI (idea C).
+
+
+
 ## 2026-06-23 — P5: THESIS-INVALIDATION EXITS (regime-flip) — OBSERVE-FIRST DETECTOR — WIRED + E2E-TESTED (preview)
 ARC-3 P5 ("close/trim when the *reason* dies; shadow/backtest triggers vs mechanical-only first"). Phase-1
 ships an OBSERVE-only detector — it LOGS would-be thesis-invalidation exits on open positions and NEVER

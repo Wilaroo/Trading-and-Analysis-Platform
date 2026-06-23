@@ -1,5 +1,22 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-23 (P5-PHASE-2 + P6) — built AHEAD, both DORMANT/observe by default (zero live change).**
+> - ✅ **P5-Phase-2 — ACTIVE thesis-invalidation close** (thesis_invalidation.py): `active` mode closes via the
+>   bot's `close_trade(reason="thesis_invalidation:<trigger>")` ONLY after the trigger persists ≥
+>   THESIS_INVALIDATION_HYSTERESIS_SECONDS (default 180s) and is still firing; bounded to
+>   THESIS_INVALIDATION_ACT_TRIGGERS (default hard_regime_flip) + MAX_ACTIONS_PER_CYCLE (5). Default observe ⇒
+>   dormant. Tested (test_p5b_active_close.py): no first-sight close; acts post-hysteresis; hostile-cell filtered.
+> - ✅ **P6 — Strategy Autonomy read-model** (NEW strategy_autonomy.py): compute-on-read ENABLE/WATCH/DISABLE/
+>   UNKNOWN per strategy family for the CURRENT regime band, from the SAME T6 expectancy table (+30/90d
+>   term-structure) + latest market_regime_state; surfaces static DISABLED_SETUPS. PURE read-model, no behavior
+>   change; active enforcement DEFERRED (STRATEGY_AUTONOMY_MODE default observe). Endpoint
+>   `GET /api/slow-learning/strategy-autonomy/report`. Tested (test_p6_strategy_autonomy.py) + preview 200.
+> - ⏳ NEXT: Save-to-GitHub `main-2.0` → DGX pull. After RTH, read both reports; flip a flag only where the data
+>   is solidly +. Then build the unified tunable Shadow-Tracking UI (idea C). Backlog: P5 trim (partial) variant,
+>   P6 active enforcement + probation-window measurement, live catalyst feed (negative-catalyst invalidation).
+
+
+
 > **🧭 2026-06-23 (P5) — THESIS-INVALIDATION EXITS — OBSERVE-FIRST detector (regime-flip) — WIRED + E2E-TESTED.**
 > ARC-3 P5, shadow/observe-first; **NEVER closes a position in phase-1** (logs would-be exits only).
 > - ✅ New `services/thesis_invalidation.py`: per manage-cycle scan of open positions for a dying reason —

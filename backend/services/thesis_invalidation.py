@@ -14,10 +14,14 @@ premise-broken are DEFERRED until a live catalyst feed exists):
     the position (long: entry BULL>60 -> now BEAR<=45; short: BEAR -> BULL).
 
 MODE = off | observe | active  (THESIS_INVALIDATION_MODE, default "observe").
-Phase-1 ships OBSERVE ONLY — `active` close/trim wiring is intentionally NOT
-implemented yet (it logs a warning if set, but still only records). This NEVER
-raises into the manage loop and NEVER closes a position. Deduped: one open
-signal per (trade_id, trigger_type).
+- observe (default): records would-be exits, NEVER closes. Pure data collection.
+- active: after a trigger PERSISTS for THESIS_INVALIDATION_HYSTERESIS_SECONDS
+  (default 180s, whipsaw guard), closes the position via the bot's canonical
+  close_trade() path. Only trigger types in THESIS_INVALIDATION_ACT_TRIGGERS
+  (default "hard_regime_flip" — the unambiguous one) may act; capped at
+  THESIS_INVALIDATION_MAX_ACTIONS_PER_CYCLE (default 5). Default is observe, so
+  active stays DORMANT until the operator reviews the observe report and opts in.
+This NEVER raises into the manage loop. Deduped: one signal per (trade, trigger).
 """
 import os
 import logging
@@ -30,6 +34,52 @@ COLLECTION = "thesis_invalidation_signals"
 
 def mode() -> str:
     return os.environ.get("THESIS_INVALIDATION_MODE", "observe").strip().lower()
+
+
+def _hysteresis_seconds() -> int:
+    """A trigger must KEEP firing this long after first-seen before ACTIVE acts."""
+    try:
+        return max(0, int(float(os.environ.get("THESIS_INVALIDATION_HYSTERESIS_SECONDS", "180"))))
+    except (TypeError, ValueError):
+        return 180
+
+
+def _act_triggers() -> set:
+    """Which trigger types may ACT in active mode (default: hard_regime_flip only)."""
+    raw = os.environ.get("THESIS_INVALIDATION_ACT_TRIGGERS", "hard_regime_flip")
+    return {s.strip() for s in str(raw).split(",") if s.strip()}
+
+
+def _max_actions() -> int:
+    try:
+        return max(1, int(float(os.environ.get("THESIS_INVALIDATION_MAX_ACTIONS_PER_CYCLE", "5"))))
+    except (TypeError, ValueError):
+        return 5
+
+
+def _age_seconds(iso) -> float:
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds()
+    except Exception:
+        return 0.0
+
+
+async def _act_close(bot, tid, ttype) -> bool:
+    """ACTIVE-mode live close — reuses the bot's canonical single-trade close path."""
+    try:
+        pm = getattr(bot, "_position_manager", None)
+        if pm is None or not hasattr(pm, "close_trade"):
+            return False
+        ok = await pm.close_trade(tid, bot, reason=f"thesis_invalidation:{ttype}")
+        logger.warning("[thesis-invalidation] ACTIVE close fired: %s trade=%s ok=%s",
+                       ttype, tid, ok)
+        return bool(ok)
+    except Exception as e:
+        logger.warning("[thesis-invalidation] active close FAILED trade=%s: %s", tid, e)
+        return False
 
 
 def _dir(trade) -> str:
@@ -114,16 +164,19 @@ async def observe_open_positions(bot) -> dict:
         from services.setup_taxonomy import canonicalize
         col = db[COLLECTION]
 
-        # Dedup in ONE query: which (trade_id, trigger_type) already logged?
+        # Dedup + hysteresis state in ONE query: existing signal docs for the
+        # currently-open trades, keyed by (trade_id, trigger_type).
         open_ids = [getattr(t, "id", "") for t in open_trades if getattr(t, "id", "")]
-        existing = set()
+        existing = {}
         if open_ids:
-            for d in col.find(
-                {"trade_id": {"$in": open_ids}}, {"trade_id": 1, "trigger_type": 1}
-            ):
-                existing.add((d.get("trade_id"), d.get("trigger_type")))
+            for d in col.find({"trade_id": {"$in": open_ids}}):
+                existing[(d.get("trade_id"), d.get("trigger_type"))] = d
 
+        act_triggers = _act_triggers()
+        hysteresis = _hysteresis_seconds()
+        max_actions = _max_actions()
         new = 0
+        acted = 0
         for t in open_trades:
             try:
                 setup = getattr(t, "setup_type", "") or ""
@@ -158,40 +211,58 @@ async def observe_open_positions(bot) -> dict:
 
                 tid = getattr(t, "id", "") or ""
                 for ttype, reason in triggers:
-                    if (tid, ttype) in existing:
+                    key = (tid, ttype)
+                    prior = existing.get(key)
+
+                    if prior is None:
+                        # First sight — record an OBSERVE signal. Never acts on
+                        # first sight (hysteresis: trigger must persist).
+                        col.insert_one({
+                            "trade_id": tid,
+                            "alert_id": getattr(t, "alert_id", "") or "",
+                            "symbol": getattr(t, "symbol", "") or "",
+                            "setup_type": setup,
+                            "canonical_setup": canon,
+                            "direction": direction,
+                            "trigger_type": ttype,
+                            "reason": reason,
+                            "entry_band": entry_band,
+                            "current_band": cur_band,
+                            "entry_regime_score": ec.get("regime_score"),
+                            "current_regime_score": cur_score,
+                            "unrealized_r_at_signal": _unrealized_r(t),
+                            "unrealized_pnl_at_signal": float(getattr(t, "unrealized_pnl", 0) or 0),
+                            "mode": m,
+                            "acted": False,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                        })
+                        existing[key] = {"acted": False}
+                        new += 1
                         continue
-                    col.insert_one({
-                        "trade_id": tid,
-                        "alert_id": getattr(t, "alert_id", "") or "",
-                        "symbol": getattr(t, "symbol", "") or "",
-                        "setup_type": setup,
-                        "canonical_setup": canon,
-                        "direction": direction,
-                        "trigger_type": ttype,
-                        "reason": reason,
-                        "entry_band": entry_band,
-                        "current_band": cur_band,
-                        "entry_regime_score": ec.get("regime_score"),
-                        "current_regime_score": cur_score,
-                        "unrealized_r_at_signal": _unrealized_r(t),
-                        "unrealized_pnl_at_signal": float(getattr(t, "unrealized_pnl", 0) or 0),
-                        "mode": m,
-                        "acted": False,  # phase-1 OBSERVE: never closes a position
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                    })
-                    existing.add((tid, ttype))
-                    new += 1
-                    if m == "active":
-                        logger.warning(
-                            "[thesis-invalidation] ACTIVE mode set but live close is "
-                            "NOT implemented in phase-1 (observe). Logged only: %s %s",
-                            getattr(t, "symbol", "?"), ttype,
-                        )
+
+                    # Already recorded — consider ACTING (active mode only). The
+                    # trigger must still be firing (we are here) AND have persisted
+                    # >= hysteresis since first-seen.
+                    if (m == "active" and not prior.get("acted")
+                            and ttype in act_triggers and acted < max_actions
+                            and prior.get("_id") is not None
+                            and _age_seconds(prior.get("created_at")) >= hysteresis):
+                        if await _act_close(bot, tid, ttype):
+                            col.update_one(
+                                {"_id": prior["_id"]},
+                                {"$set": {
+                                    "acted": True,
+                                    "acted_at": datetime.now(timezone.utc).isoformat(),
+                                    "close_reason": f"thesis_invalidation:{ttype}",
+                                }},
+                            )
+                            prior["acted"] = True
+                            acted += 1
             except Exception as e:
                 logger.debug("thesis-invalidation per-trade skip (%s): %s",
                              type(e).__name__, e)
 
-        return {"mode": m, "new_signals": new,
+        return {"mode": m, "new_signals": new, "acted": acted,
                 "open_positions": len(open_trades), "current_band": cur_band}
     except Exception as e:
         logger.debug("thesis-invalidation observe skipped (%s): %s", type(e).__name__, e)
