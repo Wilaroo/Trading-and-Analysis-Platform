@@ -34,6 +34,8 @@ class _FakeTrade:
         self.target_prices = [kw["tp_price"]] if kw.get("tp_price") else []
         self.shares = kw["shares"]
         self.trade_grade = kw.get("trade_grade")
+        self.tqs_grade = kw.get("tqs_grade")
+        self.unified_grade = kw.get("unified_grade")
         self.smb_grade = kw.get("smb_grade", "")
         self.entered_by = "bot"
         self.closed_at = NOW
@@ -56,7 +58,7 @@ def main():
     # ---- A: direct writer ----
     t = _FakeTrade(id="t-A", symbol="AAA", setup_type="stage_2_breakout",
                    fill_price=100.0, stop_price=95.0, tp_price=110.0,
-                   shares=10, trade_grade="B")
+                   shares=10, trade_grade="B", tqs_grade="A")
     pnl_compute._record_alert_outcome_bestEffort(
         t, "stop_loss",
         {"realized_pnl": -20.0, "net_pnl": -21.0, "shares": 10},
@@ -64,7 +66,7 @@ def main():
     row = db["alert_outcomes"].find_one({"trade_id": "t-A"})
     assert row is not None, "writer did not persist a row"
     assert row["outcome"] == "lost", row
-    assert row["trade_grade"] == "B", row
+    assert row["trade_grade"] == "A", ("canonical tqs_grade not preferred", row["trade_grade"])
     assert isinstance(row.get("r_multiple"), (int, float)), row
     assert abs(row["r_multiple"] - (-0.4)) < 1e-6, ("r_multiple wrong", row["r_multiple"])
     assert "mae_r_floor" in row and "mfe_r_floor" in row, row
@@ -77,19 +79,22 @@ def main():
          "direction": "long", "status": "closed", "fill_price": 50.0,
          "stop_price": 48.0, "target_prices": [56.0], "shares": 5,
          "realized_pnl": -10.0, "net_pnl": -10.0, "mfe_r": 0.0, "mae_r": 0.0,
-         "close_reason": "stop_loss", "closed_at": NOW, "trade_grade": "C"},
+         "close_reason": "stop_loss", "closed_at": NOW, "tqs_grade": "C"},
         # closed, has a REAL tracked peak (mfe_r=1.5) -> must NOT be overwritten
         {"id": "bt-real", "symbol": "REA", "setup_type": "daily_breakout",
          "direction": "long", "status": "closed", "fill_price": 50.0,
          "stop_price": 48.0, "target_prices": [56.0], "shares": 5,
          "realized_pnl": 12.0, "net_pnl": 12.0, "mfe_r": 1.5, "mae_r": -0.3,
-         "close_reason": "eod_auto_close", "closed_at": NOW, "trade_grade": "A"},
+         "close_reason": "eod_auto_close", "closed_at": NOW, "tqs_grade": "A"},
     ])
 
     rep = learning_reconciler.reconcile(db, days=None, commit=True, verbose=False)
     print("B reconcile report:", {k: rep[k] for k in ("closed_scanned", "ao_written")})
     assert db["alert_outcomes"].count_documents({"trade_id": "bt-zero"}) == 1, "zero-trade ao missing"
     assert db["alert_outcomes"].count_documents({"trade_id": "bt-real"}) == 1, "real-trade ao missing"
+    # backfill must carry the canonical tqs_grade (legacy trade_grade is empty)
+    assert db["alert_outcomes"].find_one({"trade_id": "bt-zero"})["trade_grade"] == "C", "backfill lost tqs_grade"
+    assert db["alert_outcomes"].find_one({"trade_id": "bt-real"})["trade_grade"] == "A", "backfill lost tqs_grade"
 
     zero = db["bot_trades"].find_one({"id": "bt-zero"})
     real = db["bot_trades"].find_one({"id": "bt-real"})

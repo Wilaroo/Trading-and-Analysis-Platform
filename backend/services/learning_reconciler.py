@@ -103,6 +103,10 @@ class _TradeView:
         self.shares = bt.get("shares")
         self.trade_grade = bt.get("trade_grade")
         self.smb_grade = bt.get("smb_grade")
+        # v19.34.396 — carry the canonical grade so the writer's tqs_grade-first
+        # priority resolves on backfilled closes too (legacy fields are empty).
+        self.tqs_grade = bt.get("tqs_grade")
+        self.unified_grade = bt.get("unified_grade")
         # v19.34.396 — carry existing excursion so the floor backfill only
         # fills mfe_r/mae_r when the manage loop left them 0 (never clobbers a
         # real tracked peak with the thinner realized-exit floor).

@@ -297,8 +297,14 @@ def _record_alert_outcome_bestEffort(
         # on `trade.smb_grade`. Result: ~180 `alert_outcomes` docs had
         # `trade_grade=None`, breaking `setup_retro.py`'s A/B/C bucket
         # analysis. Fall back to `smb_grade` when `trade_grade` is unset.
+        # v19.34.396 — read the CANONICAL grade FIRST. The system migrated to
+        # tqs_grade / unified_grade; smb_grade/trade_grade are legacy audit-only
+        # and are now EMPTY on bot-fired trades, so outcomes were being stored
+        # ungraded (broke TQS grade-separation). Fall back to legacy for old objs.
         "trade_grade": (
-            getattr(trade, "trade_grade", None)
+            getattr(trade, "tqs_grade", None)
+            or getattr(trade, "unified_grade", None)
+            or getattr(trade, "trade_grade", None)
             or getattr(trade, "smb_grade", None)
         ),
         "entry_price": getattr(trade, "fill_price", None),
