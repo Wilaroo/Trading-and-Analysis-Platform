@@ -623,6 +623,24 @@ class IBHistoricalCollector:
                         atr = sum(true_ranges) / len(true_ranges)
                         atr_pct = atr / latest_close
                 
+                # adrp_20d warm-fill (fast-path) — Average Daily Range % over
+                # the cleaned 20-bar cohort: mean((high-low)/close)*100. Powers
+                # the scalp/intraday ADRP gate fast-path (enhanced_scanner.
+                # _get_adrp_for_gate reads symbol_adv_cache.adrp_20d before its
+                # on-the-fly ib_historical_data fallback). Reuses the SAME
+                # pre-listing-filtered cohort as atr_pct above, so it is
+                # pollution-clean (unlike the fallback) and authoritative.
+                adrp_20d = 0.0
+                _adrp_rngs = []
+                for _i in range(min(len(highs), len(lows), len(closes), 20)):
+                    _h = highs[_i] or 0
+                    _l = lows[_i] or 0
+                    _c = closes[_i] or 0
+                    if _h > 0 and _l > 0 and _c > 0:
+                        _adrp_rngs.append((_h - _l) / _c)
+                if _adrp_rngs:
+                    adrp_20d = 100.0 * sum(_adrp_rngs) / len(_adrp_rngs)
+
                 # Determine tier
                 tier = self.get_symbol_tier(avg_vol, avg_dollar_volume, atr_pct, symbol=symbol)
                 tier_counts[tier] = tier_counts.get(tier, 0) + 1
@@ -644,6 +662,7 @@ class IBHistoricalCollector:
                         "avg_volume": avg_vol,
                         "avg_dollar_volume": round(avg_dollar_volume, 2),
                         "atr_pct": round(atr_pct, 6),
+                        "adrp_20d": round(adrp_20d, 4),
                         "latest_close": round(latest_close, 2),
                         "tier": tier,
                         "source": "ib_historical_recalc",
