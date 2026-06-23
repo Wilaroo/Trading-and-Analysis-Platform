@@ -64,9 +64,14 @@ echo.
 echo [2/8] Pulling latest code...
 pushd "%REPO_DIR%"
 if exist ".git" (
-    git pull origin main 2>nul
+    :: Emergent-synced branch is main-2.0. fetch + force-checkout + hard-reset
+    :: lands EXACTLY on origin/main-2.0 every time — no merge, so the recurring
+    :: .gitignore / memory/ROADMAP.md merge conflicts can never happen here.
+    git fetch origin 2>nul
+    git checkout -f -B main-2.0 origin/main-2.0 2>nul
+    git reset --hard origin/main-2.0 2>nul
     if %errorlevel%==0 (
-        echo        Windows code updated!
+        echo        Windows code updated ^(main-2.0^)!
     ) else (
         echo        Using local code (Windows)
     )
@@ -74,7 +79,7 @@ if exist ".git" (
 popd
 
 echo        Pulling latest code on Spark...
-ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git checkout -- . 2>/dev/null; git stash drop 2>/dev/null; git pull origin main; exit" 2>nul
+ssh -n %SPARK_USER%@%SPARK_IP% "cd %SPARK_REPO% && git fetch origin && git checkout -f -B main-2.0 origin/main-2.0 && git reset --hard origin/main-2.0; exit" 2>nul
 if %errorlevel%==0 (
     echo        Spark code updated!
 ) else (
