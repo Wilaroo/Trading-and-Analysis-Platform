@@ -96,6 +96,11 @@ table (the spine P6 already reads).
   - **[TODO] operator runs the report on the DGX** (n≈808 real entries) to read
     REAL OOS lift vs the champion gate (which was −0.029 / inverted). Beat it → wire
     the live shadow arm (needs live alerts; market-open work).
+  - **[RESULT 2026-06-24] MFE_R target FAILED** (n=885): OOS spearman −0.129 (more
+    inverted than champion). MFE_R chases fat-tail lotteries (daily_breakout 15.8%
+    win, pre_market 17.7% win → top decile lowest win rate). Added `target=win`
+    (P profitable) + `clip` winsorization. DO NOT ship a score on MFE_R alone.
+    NEXT: sweep target=win / realized_r clip=3 / mfe_r clip=2 → pick what beats champion.
 - **P4′ — REGIME-CONDITIONAL EDGE + SHRINKAGE.** Widen to the full archetype
   cell; empirical-Bayes pooling; per-cell CI; rolling per-archetype grade.
   Optionally retrain the ML gate on the clean window.

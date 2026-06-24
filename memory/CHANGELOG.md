@@ -1,3 +1,20 @@
+## 2026-06-24 — P3′ REAL-DATA RESULT: MFE_R target FAILS (chases lottery) → added win/clip targets
+Ran entry-edge-score/report on DGX (n_used=885 real entries, target=mfe_r). VERDICT: v1-on-MFE
+does NOT beat champion — OOS spearman pred-vs-realized = −0.129 (champion was −0.029, so MORE
+inverted). Decile table: deciles 1-9 flat/inverted (−0.11..−0.30 realized R, non-monotonic); ONLY
+decile 10 positive (+0.147) and it has the LOWEST win rate (16.9%) = fat-tail moonshots. Strongest
+factors = daily_breakout (+0.73, 15.8% win) and pre_market (+0.52, 17.7% win) — both lotteries.
+ROOT CAUSE: MFE_R rewards "how far it COULD travel" → optimizes high-variance/low-win lottery
+setups, the opposite of a RELIABLE score. Per-archetype check mixed: vwap_continuation|long +1.02,
+squeeze|long +0.17 rank well; vwap_bounce|long −1.54, backside|long −0.36, accumulation_entry|long
+−0.22 inverted. FIX shipped: `target=win` (predict P(profitable) — reliability label) + `clip`
+winsorization (cap fat tails during fit; eval R unclipped). Endpoint now
+`?target=mfe_r|realized_r|win&clip=N`. Synthetic win-target test green (top decile 80% win vs
+bottom 25%, OOS spearman 0.37). NEXT: operator runs the target sweep (win / realized_r clip=3 /
+mfe_r clip=2) on DGX to find the target that actually beats champion before any live wiring.
+LESSON for future agents: do NOT ship an edge score on MFE_R alone — it chases lotteries.
+
+
 ## 2026-06-24 — ENTRY EDGE SCORE · P3′ v1 model + OUT-OF-SAMPLE lift proof (read-only)
 Built the replacement-spine scorer. NEW `services/entry_edge_score.py`: additive,
 interpretable expected-R model = global_mean + Σ shrunk marginal deltas over the

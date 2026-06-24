@@ -153,4 +153,17 @@ if __name__ == "__main__":
     good, bad = test_score_full_triple_and_per_archetype()
     print("TRIPLE: good=%s" % good)
     print("        bad =%s" % bad)
+    # win-target smoke: P(win) signal should be recovered OOS too
+    rnd = random.Random(5)
+    docs = []
+    for _ in range(600):
+        tw = "afternoon" if rnd.random() < 0.5 else "midday"
+        win = (tw == "afternoon") == (rnd.random() < 0.75)
+        r = abs(rnd.gauss(0, 1)) if win else -abs(rnd.gauss(0, 1))
+        docs.append(_make_trade(tw, "long" if rnd.random() < 0.5 else "short", abs(r), r))
+    rep_win = ees.generate_report(FakeDB(docs), days=3650, target="win", k_folds=5, clip=2.0)
+    assert rep_win["oos_spearman_pred_vs_realized"] is not None
+    print("WIN:    target=win OOS spearman(realized)=%s  top_win%%=%s  bot_win%%=%s" % (
+        rep_win["oos_spearman_pred_vs_realized"],
+        rep_win["oos_decile_lift"][-1]["win_rate"], rep_win["oos_decile_lift"][0]["win_rate"]))
     print("ALL_OK")

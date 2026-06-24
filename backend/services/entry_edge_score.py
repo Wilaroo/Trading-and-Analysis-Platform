@@ -183,15 +183,15 @@ def score_full(model, factors, cohort_edges=None):
 
 
 def generate_report(db, days: int = 120, target: str = "mfe_r",
-                    k_folds: int = DEFAULT_K_FOLDS) -> dict:
+                    k_folds: int = DEFAULT_K_FOLDS, clip: float = 0.0) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "report_period_days": days, "target": target, "k_folds": k_folds,
-        "n_total": 0, "n_used": 0, "headline": "insufficient data",
+        "clip": clip, "n_total": 0, "n_used": 0, "headline": "insufficient data",
     }
     if db is None:
         return out
-    if target not in ("mfe_r", "realized_r"):
+    if target not in ("mfe_r", "realized_r", "win"):
         target = "mfe_r"
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -217,9 +217,16 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
         mfe = _f(t.get("mfe_r"))
         if mfe is not None and abs(mfe) > MAX_PLAUSIBLE_R:
             mfe = None
-        tval = mfe if target == "mfe_r" else realized
-        if tval is None:
-            continue
+        if target == "mfe_r":
+            tval = mfe
+            if tval is None:
+                continue
+            if clip > 0:
+                tval = max(0.0, min(clip, tval))   # MFE is favorable-only
+        elif target == "win":
+            tval = 1.0 if realized > 0 else 0.0     # reliability label (P profitable)
+        else:  # realized_r
+            tval = max(-clip, min(clip, realized)) if clip > 0 else realized
         data.append((_raw_factors(t, ec), mfe, realized, tval))
 
     n = len(data)
