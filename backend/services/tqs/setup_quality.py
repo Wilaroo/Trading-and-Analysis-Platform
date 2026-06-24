@@ -271,7 +271,10 @@ class SetupQualityService:
         elif self._learning_loop:
             try:
                 stats = await self._learning_loop.get_contextual_win_rate(setup_type=base_setup)
-                if stats.get("sample_size", 0) >= 5:
+                # v401 — lowered 5→3: now that alert_outcomes logging is restored
+                # + backfilled, let real contextual EV displace the R:R proxy with
+                # fewer samples (was starving the highest-weighted setup pillar).
+                if stats.get("sample_size", 0) >= 3:
                     win_rate = stats.get("win_rate", 0.5)
                     ev_r = stats.get("expected_value_r", 0.0)
                     has_ev_data = True

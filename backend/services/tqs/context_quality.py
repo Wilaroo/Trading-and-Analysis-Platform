@@ -235,6 +235,18 @@ class ContextQualityService:
                     etf = s
         except Exception as e:
             logger.debug(f"[context] sector tag lookup failed {sym}: {e}")
+        # v401 — fallback to the sector-tag static map (~500 liquid symbols) when
+        # symbol_adv_cache carries no tag yet (~24% of names were no-data). Sync,
+        # in-memory, no network. The deeper IB/Finnhub fill is the batch
+        # POST /api/scanner/backfill-sector-tags.
+        if etf is None:
+            try:
+                from services.sector_tag_service import get_sector_tag_service
+                tag = get_sector_tag_service().tag_symbol(sym)
+                if tag and tag in self._SECTOR_ETFS:
+                    etf = tag
+            except Exception as e:
+                logger.debug(f"[context] sector-tag fallback failed {sym}: {e}")
         self._sym_sector_cache[sym] = etf
         return etf
 
