@@ -61,3 +61,21 @@ Seal #2 — record-less `true_foreign` (−$1,897): forensic on SHLD/UAL/VRT in
 `ib_executions`/`order_queue` (where does the bot_trade record vanish?), then a
 source fix + a contextless-adopt policy (wide protective stop / flatten). Then
 pivot to **B** — system-wide entry quality (−0.306R/trade).
+
+---
+
+## Seal #2 forensic shipped (same day) — `services/orphan_lineage_probe.py`
+Read-only endpoint `GET /api/slow-learning/orphan-lineage/probe` classifies every
+closed orphan's lineage by cross-referencing the bot's UNBOUNDED trade history +
+`order_queue` + `ib_executions`:
+- `lineage_recent` — genuine bot_trade within window (relinkable; not record-less).
+- `old_lineage` — genuine bot_trade OLDER than `lineage_window_days` (240) → old
+  swing the taxonomy window missed → widen relink window (benign).
+- `order_no_trade` — `order_queue` has the symbol but NO bot_trade row → the
+  `bot_trades` write/persist gap (the real bug; fix at the write site).
+- `truly_absent` — nothing anywhere → pre-bot legacy or hard-deleted record →
+  retention investigation + contextless-adopt policy.
+Tests `tests/test_orphan_lineage_probe.py` (6) green; endpoint 200.
+RUN: `curl -s ".../orphan-lineage/probe?days=120" | python3 -m json.tool`
+→ the dominant class routes Seal #2's source fix.
+

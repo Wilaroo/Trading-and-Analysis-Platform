@@ -456,6 +456,25 @@ async def get_orphan_leak_report(days: int = Query(120), gap_min: int = Query(12
     return {"success": True, "report": report}
 
 
+@router.get("/orphan-lineage/probe")
+async def get_orphan_lineage_probe(
+    days: int = Query(120),
+    lineage_window_days: int = Query(240),
+):
+    """Orphan lineage forensic (read-only) — Seal #2 investigation.
+
+    For every closed `reconciled_orphan`, cross-references the bot's UNBOUNDED
+    trade history + `order_queue` + `ib_executions` to find WHERE the record-less
+    orphans' lineage went: lineage_recent | old_lineage | order_no_trade |
+    truly_absent. Routes the source fix for the −$1.9k record-less bucket.
+    """
+    from services.orphan_lineage_probe import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days,
+                             lineage_window_days=lineage_window_days)
+    return {"success": True, "report": report}
+
+
 @router.get("/orphan-taxonomy/report")
 async def get_orphan_taxonomy_report(
     days: int = Query(120),
