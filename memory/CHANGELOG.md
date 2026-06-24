@@ -1,3 +1,32 @@
+## 2026-06-24 — v409 P0 LIVE FIX: stale-alert TTL fail-OPEN (bot took 0 trades for ~28h) — TESTED
+Operator-reported: bot took 0 trades, SentCom showed zeros. Funnel proved the bot was healthy
+(autonomous, 8/25 positions, daily-loss NOT hit) but `confidence-gate/summary.today.evaluated=0`
+and the last gate decision was `2026-06-23T15:00:06Z` (= 06-23 11:00 ET) — gate evaluated NOTHING
+for ~28h.
+ • ROOT CAUSE: `rejection_daily_counts` was dominated by `stale_alert_ttl` (~6.9k: swing 3415,
+   position 1880, intraday 1146, scalp 426). The v402 change made the stale-TTL gate in
+   `opportunity_evaluator.py` fail-CLOSED on a MISSING alert timestamp (synthesised `now-(ttl+1)` →
+   forced reject). But the production execution paths NEVER thread `triggered_at*`:
+   `scanner_integration.submit_trade_from_scanner` (auto-exec) + the bot scan-loop build alert dicts
+   with no timestamp; only the `enhanced_alerts` dict format carries it. ⇒ 100% of execution-path
+   alerts synthesised stale and dropped BEFORE `confidence_gate.evaluate()`. v402 also silently turned
+   the long-standing `test_missing_ts_fail_open` regression test RED.
+ • FIX (one gate, env-reversible): missing/unparseable timestamp now fail-OPENs by default (logs,
+   does NOT synthesise stale). Aged-timestamp block UNCHANGED — still fires for alerts that DO carry a
+   real timestamp. Strict v402 behaviour preserved behind explicit `STALE_ALERT_BLOCK_MISSING_TS=1`
+   (default 0). `STALE_ALERT_POLICY=off` still short-circuits the missing-ts branch.
+ • TESTED `tests/test_stale_alert_ttl_v19_34_44.py`: previously-red `test_missing_ts_fail_open` green;
+   +2 new (`_even_when_policy_block`, `_block_opt_in`). Full file 12 passed.
+ • INSTANT MITIGATION on currently-deployed v402 code: `STALE_ALERT_POLICY=observe` in backend/.env +
+   `./start_backend.sh --force`. DURABLE: Save-to-GitHub `main-2.0` → DGX pull → restart (default now
+   fail-open; env override optional). VERIFY: `confidence-gate/summary.today.evaluated` climbs > 0.
+ • FOLLOW-UP (separate): (1) thread the LiveAlert's real emission time into the auto-exec + scan-loop
+   alert dicts so the TTL gate measures genuine pipeline lag (observe-first — `created_at` is a
+   dedup-upsert artifact for re-fired daily setups). (2) operator-flagged: 119 untracked IBM shares
+   held all day (orphan/tracking-gap class, ties to Seal #2). Memo: `memory/v409_stale_ttl_failopen_fix.md`.
+
+
+
 ## 2026-06-23 — HORIZON-FUNNEL DIAGNOSTIC (scalp/intraday under-firing) — read-only tool DELIVERED
 Answers "why are fast trades crowded out?" by building a per-horizon funnel from durable logs.
  • NEW `services/horizon_funnel.py` + `GET /api/slow-learning/horizon-funnel/report?days=`.
