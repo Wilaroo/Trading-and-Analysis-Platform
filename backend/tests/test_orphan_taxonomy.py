@@ -140,6 +140,20 @@ def test_exit_overfill_residual():
     assert row["samples"][0]["evidence"]["qty_ratio_orphan_over_pred"] <= 0.75
 
 
+def test_readopt_loop_full_reappearance():
+    # A full-size position closed externally then re-adopted at full qty.
+    o = _orphan("GGG", "long", -50.0, 200.0, shares=100, original_shares=100,
+                entry_time=_iso(40), close_reason="oca_closed_externally_v19_31")
+    p = _pred("GGG", "long", "oca_closed_externally_v19_31", shares=100,
+              original_shares=100, closed_at=_iso(70))
+    rep = generate_report(_DB([o, p]))
+    row = _find(rep, "readopt_loop")
+    assert row and row["n"] == 1
+    ev = row["samples"][0]["evidence"]
+    assert ev["marker"] == "external_close_full_readopt"
+    assert ev["qty_ratio_orphan_over_pred"] > 0.75
+
+
 def test_share_drift_excess_concurrent_open():
     # A concurrently-open bot trade overlaps the orphan's life → drift excess.
     o = _orphan("DDD", "long", -30.0, 200.0,
@@ -185,7 +199,7 @@ def test_population_and_verdict():
     rep = generate_report(_DB(trades))
     assert rep["population"]["n_closed_orphans"] == 2
     assert rep["population"]["total_leak_r"] < 0
-    assert "Dominant creation cause" in rep["verdict"]
+    assert "biggest $ leak" in rep["verdict"]
 
 
 def test_empty_db_safe():

@@ -57,3 +57,36 @@ curl -s "http://localhost:8001/api/slow-learning/orphan-taxonomy/report?days=120
 Operator pastes the report → I patch the dominant class's `fix_site` first
 (env-gated observe→fix, zero touch to order/close/kill-switch). Then pivot to
 the system-wide ENTRY-quality problem (−0.306R/trade) per "do A then B".
+
+---
+
+## v407.1 (same day) — first DGX run + refinement
+
+**First DGX run (120 closed orphans, −19.73R / −$5,714):** the R-ranking was
+distorted by tiny-risk residuals (`exit_overfill_residual` showed −13.9R but only
+−$229 — 19-share residuals with microscopic risk_amount inflate R). 47% of the
+DOLLARS sat in an opaque `unclassified` bucket (−$2,674). `relink_coverage` showed
+`orphan_relink_observe=0` — expected: all 8 reaped_pending orphans predate the
+v405 deploy.
+
+**By dollars (first run):** unclassified −$2,674 (47%) · true_foreign −$1,872
+(33%) · reaped_pending_filled −$603 · share_drift_excess −$336 · exit_overfill
+−$229. `share_drift_excess` was the biggest by COUNT (44, 36.7%) — the reconciler
+spawns a separate orphan while a real trade on the same symbol is open (the
+v19.34.22 db_tracked guard has a gap).
+
+**Refinement shipped:**
+- NEW class `readopt_loop` — a full-size position closed externally (OCA/phantom/
+  emergency-flatten) then RE-ADOPTED at full qty. Splits the bulk of the old
+  `unclassified` $ out into an actionable class. Detector: external-marker
+  predecessor (real trade OR prior orphan) within `readopt_window_min` (480) with
+  qty ratio >0.75.
+- `reaped_pending` window widened: separate `stale_window_min` (1440) so a
+  stale_pending predecessor beyond the 240m near-window still classifies
+  (GLD/BE/GLW/SNOW were mislabeled unclassified on run 1).
+- `taxonomy_by_usd` + `taxonomy_by_r` both returned; `tiny_risk_r_inflated` flag
+  per class so the ranking can't be misread; verdict now ranks by $.
+- `share_drift_excess` evidence tags `concurrent_dir` (same/opp).
+Tests now 9 (added readopt_loop). New endpoint params: `stale_window_min`,
+`readopt_window_min`.
+
