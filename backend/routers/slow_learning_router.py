@@ -412,6 +412,19 @@ async def get_mfe_mae_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.post("/mfe-mae/repair")
+async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):
+    """One-time repair of physically-impossible mfe_r/mae_r on closed bot_trades
+    (legacy of the pre-fix current_price<=0 bug). DRY-RUN by default — pass
+    ?apply=true to write. Resets ONLY corrupt fields (|R|>max_r) to the safe
+    realized-R bound; sane rows are never touched.
+    """
+    from services.mfe_mae_study import repair_corrupt_excursions
+    from database import get_database
+    result = repair_corrupt_excursions(get_database(), apply=apply, max_r=max_r)
+    return {"success": True, "result": result}
+
+
 @router.get("/tqs-integrity/report")
 async def get_tqs_integrity_report(days: int = Query(30)):
     """TQS integrity audit (read-only) — is the quality score PREDICTIVE?

@@ -28,8 +28,11 @@
 ## Scope / blast radius
 Writer + read-model only. No change to order submission, the reaper, the
 reconciler, close logic, or kill-switch. Historical corrupt rows are NOT
-rewritten (the fix prevents new corruption; the study excludes the old garbage).
-An optional one-time historical repair can be added if wanted.
+rewritten by the fix itself — instead an OPT-IN repair endpoint heals them:
+`POST /api/slow-learning/mfe-mae/repair?apply=false` (dry-run; `apply=true` writes).
+It resets ONLY `|R|>10` corrupt fields to the safe realized-R bound
+(`mfe_r=max(0,r)`, `mae_r=min(0,r)`); sane rows untouched. Cleans the data for
+ALL consumers (setup_grading, exit_archetype), not just the study.
 
 ## Tests
 `tests/test_mfe_mae_fix.py` (6) — excursion_floor long/short/winner/loser/bad-price,

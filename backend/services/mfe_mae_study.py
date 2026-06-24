@@ -137,3 +137,59 @@ def _summarize(label, rows):
         "verdict": _verdict(avg_mfe, frac_losers_green, giveback, winner_capture, n),
     })
     return base
+
+
+
+def repair_corrupt_excursions(db, apply: bool = False,
+                              max_r: float = MAX_PLAUSIBLE_R) -> dict:
+    """v19.34.401 — one-time repair of physically-impossible mfe_r/mae_r on closed
+    bot_trades (legacy of the pre-fix current_price<=0 bug, e.g. mae_r ~ -50R).
+
+    These corrupt rows poison ALL consumers (setup_grading, exit_archetype), not
+    just the study. We reset ONLY corrupt fields to the safe realized-R bound
+    (mfe_r=max(0,realized_r), mae_r=min(0,realized_r)) — a conservative lower
+    bound that is never worse than reality. Sane rows are NEVER touched.
+
+    DRY-RUN by default (apply=False) — returns what WOULD change. apply=True writes.
+    """
+    out = {"dry_run": not apply, "max_r": max_r, "scanned": 0,
+           "corrupt_found": 0, "repaired": 0, "skipped_no_realized": 0,
+           "samples": []}
+    if db is None:
+        return out
+    proj = {"_id": 0, "id": 1, "trade_id": 1, "symbol": 1, "realized_pnl": 1,
+            "risk_amount": 1, "mfe_r": 1, "mae_r": 1}
+    cur = db["bot_trades"].find(
+        {"status": "closed",
+         "$or": [{"mfe_r": {"$gt": max_r}}, {"mfe_r": {"$lt": -max_r}},
+                 {"mae_r": {"$gt": max_r}}, {"mae_r": {"$lt": -max_r}}]}, proj)
+    for t in cur:
+        out["scanned"] += 1
+        mfe, mae = _f(t.get("mfe_r")), _f(t.get("mae_r"))
+        bad_mfe = mfe is not None and abs(mfe) > max_r
+        bad_mae = mae is not None and abs(mae) > max_r
+        if not (bad_mfe or bad_mae):
+            continue
+        out["corrupt_found"] += 1
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if r is None:
+            out["skipped_no_realized"] += 1
+            continue
+        set_fields = {}
+        if bad_mfe:
+            set_fields["mfe_r"] = round(max(0.0, r), 3)
+        if bad_mae:
+            set_fields["mae_r"] = round(min(0.0, r), 3)
+        if len(out["samples"]) < 15:
+            out["samples"].append({
+                "symbol": t.get("symbol"),
+                "old_mfe_r": mfe, "old_mae_r": mae,
+                "new_mfe_r": set_fields.get("mfe_r"),
+                "new_mae_r": set_fields.get("mae_r")})
+        if apply and set_fields:
+            set_fields["excursion_repair"] = "v19_34_401"
+            tid = t.get("id") or t.get("trade_id")
+            db["bot_trades"].update_one(
+                {"$or": [{"id": tid}, {"trade_id": tid}]}, {"$set": set_fields})
+            out["repaired"] += 1
+    return out
