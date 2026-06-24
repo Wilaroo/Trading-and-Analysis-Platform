@@ -53,6 +53,14 @@ now green; +2 new (`test_missing_ts_fail_open_even_when_policy_block`,
 - VERIFY: `confidence-gate/summary.today.evaluated` should climb within a scan or
   two and `rejection_daily_counts` `stale_alert_ttl` should stop dominating.
 
+## VERIFIED LIVE ON DGX (2026-06-24 ~15:17 ET)
+After pull + `./start_backend.sh --force`: `grep -c "v409 stale-ttl"` = 61 fail-open passes,
+`grep -c "stale-alert-ttl] Dropping"` = 0 forced drops post-restart. Funnel `first_dead_stage`
+moved `bot_trades_created` → `ib_order_queue`. Confidence-gate decision log resumed with fresh
+06-24 entries (KMI/TPR/CNC power_trend_stack/pocket_pivot REDUCE @ 19:14-19:17Z). Live 60s
+rejection delta is now legit downstream filtering only (smart_filter_skip,
+symbol_direction_open_cap_v123, hsbg_pt_unreachable). Outage resolved.
+
 ## FOLLOW-UP (separate, not in this fix)
 1. (Enhancement) Thread the LiveAlert's real emission time into the auto-exec +
    scan-loop alert dicts so the TTL gate measures genuine pipeline lag instead of
