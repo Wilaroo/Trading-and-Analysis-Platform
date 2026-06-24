@@ -262,6 +262,21 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
     except Exception as e:  # collection may be absent
         guard["error"] = str(e)
     out["fill_race_guard_events"] = guard
+
+    # G. monthly trend — is the leak tapering (e.g. after switching to
+    # BOT_ORDER_PATH=direct) or still active? Buckets orphans by entry month.
+    months = defaultdict(lambda: {"n": 0, "leak_r": 0.0, "leak_usd": 0.0})
+    for t in orphans:
+        oe = _entry_ts(t)
+        key = oe.strftime("%Y-%m") if oe else "unknown"
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        months[key]["n"] += 1
+        months[key]["leak_r"] += r if r is not None else 0.0
+        months[key]["leak_usd"] += _fnum(t.get("realized_pnl")) or 0.0
+    out["monthly_trend"] = [
+        {"month": k, "n": v["n"], "leak_r": round(v["leak_r"], 2),
+         "leak_usd": round(v["leak_usd"], 0)}
+        for k, v in sorted(months.items())]
     return out
 
 
