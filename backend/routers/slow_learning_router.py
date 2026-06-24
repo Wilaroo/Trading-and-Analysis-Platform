@@ -481,24 +481,23 @@ async def get_entry_edge_coverage_report(days: int = Query(45)):
 async def get_entry_edge_score_report(days: int = Query(120),
                                       target: str = Query("mfe_r"),
                                       k_folds: int = Query(5),
-                                      clip: float = Query(0.0)):
-    """Entry Edge Score v1 (P3') — expected-R model + OUT-OF-SAMPLE lift proof (READ-ONLY).
+                                      clip: float = Query(0.0),
+                                      model: str = Query("marginal")):
+    """Entry Edge Score (P3′ marginal / P4′ conditional) — model + OOS lift proof (READ-ONLY).
 
-    Fits an additive, shrunk marginal-factor model (time_window, direction,
-    timeframe, priority, setup_type + binned regime_score/rsi/trigger_prob/tape)
-    on closed real-entry `bot_trades`, evaluated via K-fold CV. Returns OOS decile
-    lift, OOS Spearman vs mfe_r AND realized_R, and per-factor effects. Proves the
-    Edge Score separates winners from losers (vs the champion gate's −0.029/inverted)
-    BEFORE any live gating.
-      target = mfe_r (entry excursion) | realized_r (P&L) | win (P profitable — reliability)
-      clip   = winsorize the fit target to ±clip R (0 = off) so fat-tail lotteries
-               (e.g. daily_breakout) can't dominate a bucket mean. Evaluation R is unclipped.
+    Fits an expected-R model on closed real-entry `bot_trades`, evaluated via K-fold CV.
+    Returns OOS decile lift, OOS Spearman vs mfe_r AND realized_R, an out-of-sample
+    abstention curve, and per-factor (or per-cell) effects.
+      model  = marginal (additive shrunk factors) | conditional (P4′ hierarchical
+               archetype cells: setup×direction×time_window×market_regime, shrunk)
+      target = mfe_r | realized_r | win (P profitable — reliability)
+      clip   = winsorize the fit target to ±clip R (0 = off)
     Plan: memory/ENTRY_EDGE_SCORE_PLAN.md
     """
     from services.entry_edge_score import generate_report
     from database import get_database
     report = generate_report(get_database(), days=days, target=target,
-                             k_folds=k_folds, clip=clip)
+                             k_folds=k_folds, clip=clip, model_type=model)
     return {"success": True, "report": report}
 
 

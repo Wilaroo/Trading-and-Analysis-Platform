@@ -71,6 +71,9 @@ def _raw_factors(t, ec):
         "timeframe": s(t.get("timeframe")),
         "priority": s(ec.get("priority")),
         "setup_type": s(t.get("setup_type") or ec.get("scanner_setup_type")),
+        "market_regime": s(ec.get("market_regime")),
+        "sector_regime": s(ec.get("sector_regime")),          # Phase-0 (fills going forward)
+        "symbol_rs_regime": s(ec.get("symbol_rs_regime")),    # Phase-0 (fills going forward)
         "regime_score": _f(ec.get("regime_score")),
         "rsi": _f(_get(ec, "technicals", "rsi")),
         "trigger_probability": _f(ec.get("trigger_probability")),
@@ -182,12 +185,66 @@ def score_full(model, factors, cohort_edges=None):
     }
 
 
+# --- P4' CONDITIONAL model: hierarchical-shrinkage archetype cells ----------------
+# Each trade's edge = its full cell's mean, recursively SHRUNK toward its parent
+# cells (coarse → fine) so thin cells borrow strength. This is the conditional
+# structure the marginal model averages away. Dims use what's reliably present
+# TODAY; sector_regime / symbol_rs_regime get appended as their Phase-0 coverage fills.
+HIER_DIMS = [
+    ("direction",),
+    ("setup_type", "direction"),
+    ("setup_type", "direction", "time_window"),
+    ("setup_type", "direction", "time_window", "market_regime"),
+]
+SHRINK_K_HIER = 15.0
+
+
+def _key(f, dims):
+    return tuple(f.get(d) for d in dims)
+
+
+def fit_conditional(rows):
+    targets = [t for _, t in rows]
+    gmean = sum(targets) / len(targets) if targets else 0.0
+    levels = []
+    for dims in HIER_DIMS:
+        acc = defaultdict(lambda: [0.0, 0])
+        for f, t in rows:
+            k = _key(f, dims)
+            if None in k:
+                continue
+            acc[k][0] += t
+            acc[k][1] += 1
+        levels.append((dims, dict(acc)))
+    return {"global_mean": gmean, "levels": levels, "_hier": True}
+
+
+def score_conditional(model, factors):
+    est = model["global_mean"]
+    n_used = None
+    for dims, acc in model["levels"]:        # coarse → fine
+        k = _key(factors, dims)
+        if None in k:
+            continue
+        cell = acc.get(k)
+        if cell and cell[1] > 0:
+            cmean = cell[0] / cell[1]
+            w = cell[1] / (cell[1] + SHRINK_K_HIER)
+            est = w * cmean + (1.0 - w) * est
+            n_used = cell[1]
+    return {"edge": round(est, 4), "confidence_n": n_used, "contributions": {}}
+
+
 def generate_report(db, days: int = 120, target: str = "mfe_r",
-                    k_folds: int = DEFAULT_K_FOLDS, clip: float = 0.0) -> dict:
+                    k_folds: int = DEFAULT_K_FOLDS, clip: float = 0.0,
+                    model_type: str = "marginal") -> dict:
+    is_cond = model_type == "conditional"
+    fitfn, scorefn = (fit_conditional, score_conditional) if is_cond else (fit, score)
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "report_period_days": days, "target": target, "k_folds": k_folds,
-        "clip": clip, "n_total": 0, "n_used": 0, "headline": "insufficient data",
+        "clip": clip, "model": "conditional" if is_cond else "marginal",
+        "n_total": 0, "n_used": 0, "headline": "insufficient data",
     }
     if db is None:
         return out
@@ -247,9 +304,9 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
     for fi in range(kf):
         test = set(folds[fi])
         train = [(data[i][0], data[i][3]) for i in range(n) if i not in test]
-        model = fit(train)
+        model = fitfn(train)
         for i in folds[fi]:
-            sc = score(model, data[i][0])
+            sc = scorefn(model, data[i][0])
             oos_edge[i] = sc["edge"]
             oos_rank[i] = round(sc["edge"] - model["global_mean"], 6)
 
@@ -294,23 +351,37 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
         })
 
     # full-data model for the per-factor "why" / effect display
-    full = fit([(data[i][0], data[i][3]) for i in range(n)])
+    full = fitfn([(data[i][0], data[i][3]) for i in range(n)])
     factor_rows = []
-    for fac, buckets in full["deltas"].items():
+    if is_cond:
+        dims, acc = full["levels"][-1]   # finest cells
         cells = sorted(
-            [{"bucket": b, "n": v["n"], "delta": round(v["delta"], 4), "mean": v["mean"]}
-             for b, v in buckets.items() if v["n"] >= 12],
-            key=lambda x: x["delta"])
-        if not cells:
-            continue
+            [{"cell": "|".join(str(x) for x in k), "n": v[1], "mean": round(v[0] / v[1], 4)}
+             for k, v in acc.items() if v[1] >= 15],
+            key=lambda x: x["mean"])
         factor_rows.append({
-            "factor": fac,
-            "n_buckets": len(cells),
-            "spread": round(cells[-1]["delta"] - cells[0]["delta"], 4),
-            "best": cells[-3:][::-1],
-            "worst": cells[:3],
+            "factor": "conditional_cells",
+            "hierarchy": ["×".join(d) for d in HIER_DIMS],
+            "n_cells_ge15": len(cells),
+            "best": cells[-6:][::-1],
+            "worst": cells[:6],
         })
-    factor_rows.sort(key=lambda x: -x["spread"])
+    else:
+        for fac, buckets in full["deltas"].items():
+            cells = sorted(
+                [{"bucket": b, "n": v["n"], "delta": round(v["delta"], 4), "mean": v["mean"]}
+                 for b, v in buckets.items() if v["n"] >= 12],
+                key=lambda x: x["delta"])
+            if not cells:
+                continue
+            factor_rows.append({
+                "factor": fac,
+                "n_buckets": len(cells),
+                "spread": round(cells[-1]["delta"] - cells[0]["delta"], 4),
+                "best": cells[-3:][::-1],
+                "worst": cells[:3],
+            })
+        factor_rows.sort(key=lambda x: -x["spread"])
 
     top, bot = (deciles[-1], deciles[0]) if deciles else (None, None)
 
@@ -349,15 +420,16 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
         "per_archetype_grade_check": per_arche,
     })
     out["headline"] = (
-        "OOS (target=%s, n=%d, %d-fold): top-decile realized_R=%s vs bottom-decile=%s "
-        "(lift=%s) | spearman pred-vs-realized=%s, pred-vs-mfe=%s | strongest factor: %s" % (
-            target, n, kf,
+        "OOS [%s] (target=%s, n=%d, %d-fold): top-decile realized_R=%s vs bottom-decile=%s "
+        "(lift=%s) | spearman pred-vs-realized=%s, pred-vs-mfe=%s | %s" % (
+            out["model"], target, n, kf,
             top["avg_realized_r"] if top else None,
             bot["avg_realized_r"] if bot else None,
             round((top["avg_realized_r"] - bot["avg_realized_r"]), 4)
             if (top and bot and top["avg_realized_r"] is not None and bot["avg_realized_r"] is not None) else None,
             sp_real, sp_mfe,
-            factor_rows[0]["factor"] if factor_rows else None,
+            ("cells≥15=%s" % factor_rows[0].get("n_cells_ge15")) if is_cond
+            else ("strongest factor: %s" % (factor_rows[0]["factor"] if factor_rows else None)),
         )
     )
     return out

@@ -1,3 +1,19 @@
+## 2026-06-24 — P3′ ABSTENTION result + P4′ CONDITIONAL prototype shipped
+DGX abstention curve (target=realized_r, clip=3, n=885): BASELINE book avg_R=−0.150, total=−133R,
+32% win. Vetoing bottom 20% → avg_R=−0.083, total=−59R (bleed ~halved); even skipping 50% the book
+is still −27R. HONEST READ: the marginal Edge Score reliably AVOIDS the worst (bottom decile −0.5R/
+10% win) but the book has NO strongly +EV core (best decile ~breakeven) — entry engine has ~zero
+alpha this window. So: (A) use Edge Score as an ABSTENTION/veto gate now (cuts bleed ~half, shadow-
+first); (B) positive selection needs conditional structure. SHIPPED P4′ prototype: `fit_conditional`/
+`score_conditional` — hierarchical-shrinkage archetype cells (direction → setup×direction →
++time_window → +market_regime), each cell shrunk toward its parent (K=15). Endpoint param
+`&model=marginal|conditional`. Uses dims present TODAY (market_regime ~80%); sector_regime/
+symbol_rs_regime appended to _raw_factors for when Phase-0 coverage fills. Synthetic conditional-
+signal test: conditional beats marginal OOS (0.70 vs 0.55), sharper bottom decile. NEXT: operator
+compares model=marginal vs conditional on the real book — if conditioning lifts OOS spearman/abstention
+materially, that's the +EV path; if not, it proves we NEED the Phase-0 sector/symbol dims (now accruing).
+
+
 ## 2026-06-24 — P3′ TARGET SWEEP (DGX n=885): win & realized_r-clip3 WIN (~+0.18 OOS) → pivot to ABSTENTION
 Target sweep on real data: `win` OOS spearman pred-vs-realized=**+0.182** (top decile 54% win vs
 bottom 9%); `realized_r&clip=3`=**+0.178** (top +0.01R/49% vs bottom −0.53R/10%); `mfe_r&clip=2`=
