@@ -19,13 +19,22 @@ n16, -9.52R!), backside (-7.26R), squeeze (-6.78R), rs_leader_break (-4.22R).
    spearman(TQS,MFE_R)=-0.033. Grade ladder scrambled (B avg -0.181R worse than C+/C/D; D positive).
    61% of trades cluster in the 50-59 score band which alone bleeds -38.74R; lowest band (0-39) is
    POSITIVE. TQS composite is noise for entry quality → the Confidence-Gate is gating on noise.
- • PER-PILLAR (v-followup): pillar subscores ARE persisted at bot_trades.entry_context.tqs.pillar_scores
-   (347/509 coverage). Smoking gun in the WEIGHTS: fundamental=0.40 (!) dominates the composite while
-   technical=0.10; setup/technical/execution (the price-action pillars that should drive entry quality)
-   are only 0.40 combined. Built `generate_pillar_report` + `GET /api/slow-learning/tqs-pillar-predictiveness/report`
+ • PER-PILLAR: pillar subscores ARE persisted at bot_trades.entry_context.tqs.pillar_scores (347-348/509
+   coverage). Built `generate_pillar_report` + `GET /api/slow-learning/tqs-pillar-predictiveness/report`
    (spearman of each pillar vs MFE_R/realized_R, modal weights in force, MFE-by-score-tertile, advisory
-   MFE-signal reweight). TESTED (test file now 8 green). NEXT: run it → reweight TQS toward the
-   MFE-predictive pillars, drop/down-weight fundamental for intraday/scalp, re-grade calibration.
+   MFE-signal reweight). TESTED (test file now 8 green).
+ • PER-PILLAR RESULT (DGX, days=30, n=348): DECISIVE — ALL 5 pillars are noise vs MFE. spearman_vs_mfe:
+   setup -0.008, fundamental -0.014, context -0.018, technical -0.026, execution -0.041 (composite -0.038).
+   No tertile ladder monotonic; suggested reweight EMPTY (no pillar has positive MFE signal). Modal weights
+   in force are BALANCED (setup .25/technical .25/fundamental .15/context .20/execution .15) — so the bug is
+   NOT mis-weighting (earlier fundamental=0.40 sample was one atypical profile, not the norm). CONCLUSION:
+   TQS cannot be salvaged by reweighting; the FEATURES feeding every pillar lack entry-quality edge. Yet
+   setup-EV proves setup_TYPE/regime/direction DO differentiate (daily_breakout 0% win vs vwap_continuation
+   +EV) — so signal exists in entry-context fields the pillars don't capture.
+ • NEXT WORKSTREAM (pending operator): feature-discovery pass — spearman/MI of entry-context fields
+   (setup_type, regime, direction, time-of-day, tape_score, trigger-drift/entry-slippage, rvol, vwap-distance,
+   atr-band) vs MFE_R → build a NEW entry score around what actually predicts, not the 5-pillar TQS. Safe
+   triage regardless: hard-kill daily_breakout (0% win n16); backside time-decay exit.
 
 
 
