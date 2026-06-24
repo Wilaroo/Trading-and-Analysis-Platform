@@ -462,17 +462,19 @@ async def get_orphan_taxonomy_report(
     near_window_min: int = Query(240),
     stale_window_min: int = Query(1440),
     readopt_window_min: int = Query(480),
+    eod_window_min: int = Query(1440),
     foreign_lookback_days: int = Query(30),
 ):
     """reconciled_orphan CREATION-CAUSE taxonomy (read-only) — "stitch the cut".
 
     Classifies every closed `reconciled_orphan` by HOW it lost tracking so each
     creation path can be sealed at the source (vs band-aiding the orphan stop):
-    reaped_pending_filled | exit_overfill_residual | readopt_loop |
+    reaped_pending_filled | exit_overfill_residual | readopt_loop | eod_reopen |
     share_drift_excess | restart_orphan | true_foreign | unclassified. Each class
     reports n / leak-R / leak-USD / markers / `tiny_risk_r_inflated` / `fix_site` /
-    samples. Returns BOTH `taxonomy_by_usd` and `taxonomy_by_r` (R is distorted by
-    tiny-risk residuals), plus monthly_by_class trend + v405 relink coverage.
+    `pred_close_reason_usd` / `worst_by_usd` / samples. Returns BOTH
+    `taxonomy_by_usd` and `taxonomy_by_r` (R is distorted by tiny-risk residuals),
+    plus monthly_by_class trend + v405 relink coverage.
     """
     from services.orphan_taxonomy import generate_report
     from database import get_database
@@ -480,6 +482,7 @@ async def get_orphan_taxonomy_report(
                              near_window_min=near_window_min,
                              stale_window_min=stale_window_min,
                              readopt_window_min=readopt_window_min,
+                             eod_window_min=eod_window_min,
                              foreign_lookback_days=foreign_lookback_days)
     return {"success": True, "report": report}
 

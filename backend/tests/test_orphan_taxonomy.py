@@ -154,6 +154,30 @@ def test_readopt_loop_full_reappearance():
     assert ev["qty_ratio_orphan_over_pred"] > 0.75
 
 
+def test_readopt_loop_dir_flip():
+    # A long position closed externally; a SHORT orphan re-appears (dir flip).
+    o = _orphan("HHH", "short", -200.0, 200.0, shares=100, original_shares=100,
+                entry_time=_iso(30), close_reason="oca_closed_externally_v19_31")
+    p = _pred("HHH", "long", "oca_closed_externally_v19_31", shares=100,
+              original_shares=100, closed_at=_iso(60))
+    rep = generate_report(_DB([o, p]))
+    row = _find(rep, "readopt_loop")
+    assert row and row["n"] == 1
+    assert row["samples"][0]["evidence"]["dir_relation"] == "dir_flip"
+
+
+def test_eod_reopen():
+    # A position EOD-closed then re-adopted next session.
+    o = _orphan("III", "long", -20.0, 200.0, shares=54, original_shares=54,
+                entry_time=_iso(30), close_reason="oca_closed_externally_v19_31")
+    p = _pred("III", "long", "eod_auto_close_v162", shares=54,
+              original_shares=54, closed_at=_iso(700))
+    rep = generate_report(_DB([o, p]))
+    row = _find(rep, "eod_reopen")
+    assert row and row["n"] == 1
+    assert row["samples"][0]["evidence"]["marker"] == "eod_auto_close_predecessor"
+
+
 def test_share_drift_excess_concurrent_open():
     # A concurrently-open bot trade overlaps the orphan's life → drift excess.
     o = _orphan("DDD", "long", -30.0, 200.0,

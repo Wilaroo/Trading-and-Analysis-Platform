@@ -90,3 +90,25 @@ v19.34.22 db_tracked guard has a gap).
 Tests now 9 (added readopt_loop). New endpoint params: `stale_window_min`,
 `readopt_window_min`.
 
+## v407.2 (same day) — second DGX run + self-complete diagnostic
+
+**Second run** (after readopt+stale-window refinement): readopt_loop only caught
+12 orphans and they were net +$105 — so the re-adopt loop is NOT the money. The
+−$2,968 stayed in `unclassified` (17), and its visible samples were clipped (R-
+sorted, cap 12) hiding ~−$2,400 of large-$/low-R losers. Two gaps surfaced:
+(1) `readopt_loop` was direction-locked → missed `ARMG short −$531` re-adopted
+after an ARMG **long** closed externally (dir flip); (2) `eod_auto_close` re-adopts
+(CLS/META/BAC/GLW/SOFI/RBLX/CVX) had no class. `true_foreign` (37/−$1,930) is a
+mix of real foreign shorts (VRT −$465, ALAB −$168, FCX −$58) and harmless $0
+zero-qty phantom ghosts (GOOG/MU/BKNG/LIN).
+
+**Shipped:**
+- `readopt_loop` made DIRECTION-AGNOSTIC + `dir_relation` (same_dir/dir_flip).
+- NEW class `eod_reopen` (predecessor `eod_auto_close` within `eod_window_min`
+  1440) — EOD flatten didn't clear at IB → re-adopted. fix_site = EOD-flatten fill
+  verification + residual sweep/relink.
+- Per-class `pred_close_reason_usd` ($ by upstream cause) + `worst_by_usd`
+  (uncapped, $-sorted top-15) so the big-$ low-R losers are never clipped.
+- New param `eod_window_min`. Tests now 11 (added dir_flip + eod_reopen).
+
+

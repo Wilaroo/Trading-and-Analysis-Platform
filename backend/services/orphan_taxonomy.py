@@ -83,7 +83,12 @@ _FIX_SITE = {
     "readopt_loop": (
         "durable post-close re-adopt suppression — extend/persist the "
         "recently_closed cooldown + verify-flat-at-IB BEFORE re-adopting "
+        "(direction-agnostic: also covers dir-flip re-adopts) "
         "[position_reconciler.reconcile_orphan_positions]."),
+    "eod_reopen": (
+        "EOD-flatten fill verification — confirm the position actually flattened "
+        "at IB before marking eod_auto_close, then sweep/relink any residual that "
+        "re-appears next session [position_manager EOD close + reconciler]."),
     "share_drift_excess": (
         "share-drift reconciler — GROW the tracked slice instead of spawning a "
         "separate reconciled row [position_reconciler.reconcile_share_drift]."),
@@ -118,6 +123,7 @@ def _gap_min(later_ts, earlier_ts):
 
 def generate_report(db, days: int = 120, near_window_min: int = 240,
                     stale_window_min: int = 1440, readopt_window_min: int = 480,
+                    eod_window_min: int = 1440,
                     foreign_lookback_days: int = 30) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -125,6 +131,7 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
         "near_window_min": near_window_min,
         "stale_window_min": stale_window_min,
         "readopt_window_min": readopt_window_min,
+        "eod_window_min": eod_window_min,
         "foreign_lookback_days": foreign_lookback_days,
         "classes_legend": _FIX_SITE,
     }
@@ -231,13 +238,17 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
 
     def _readopt_predecessor(o, sym, dir_l, oe):
         """A FULL-size external/forced close just before the orphan — the same
-        position re-appearing and being re-adopted (the re-adopt loop). Searches
-        prior real trades AND prior orphans on (sym,dir)."""
+        position re-appearing and being re-adopted (the re-adopt loop).
+        DIRECTION-AGNOSTIC: a position can re-appear flipped (long closed → short
+        orphan / wrong-direction phantom), so we search BOTH directions of real
+        trades AND prior orphans on the symbol."""
         oq = _qty(o)
         oid = o.get("id")
         best = None
-        candidates = list(by_key.get((sym, dir_l), [])) + \
-            list(orphans_by_key.get((sym, dir_l), []))
+        candidates = []
+        for d in ("long", "short"):
+            candidates += list(by_key.get((sym, d), []))
+            candidates += list(orphans_by_key.get((sym, d), []))
         for c in candidates:
             if c.get("id") == oid:
                 continue
@@ -252,8 +263,35 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
             ratio = (oq / cq) if (cq > 0 and oq > 0) else None
             if ratio is not None and ratio <= 0.75:
                 continue  # residual → exit_overfill territory, not full re-adopt
+            cdir = str(c.get("direction") or "").lower()
             cand = (c, round(gap, 1), round(ratio, 2) if ratio else None,
-                    str(c.get("setup_type") or ""))
+                    str(c.get("setup_type") or ""),
+                    "dir_flip" if cdir != dir_l else "same_dir")
+            if best is None or cand[1] < best[1]:
+                best = cand
+        return best
+
+    def _eod_predecessor(o, sym, oe):
+        """An eod_auto_close on the symbol within `eod_window_min` — the bot
+        flattened at EOD but the position re-appeared and was re-adopted (the
+        EOD close didn't actually clear / didn't fill at IB). Direction-agnostic."""
+        oid = o.get("id")
+        best = None
+        candidates = []
+        for d in ("long", "short"):
+            candidates += list(by_key.get((sym, d), []))
+            candidates += list(orphans_by_key.get((sym, d), []))
+        for c in candidates:
+            if c.get("id") == oid:
+                continue
+            cr = str(c.get("close_reason") or "")
+            if "eod_auto_close" not in cr:
+                continue
+            cc = _close_ts(c)
+            gap = _gap_min(oe, cc)
+            if gap is None or not (0 <= gap <= eod_window_min):
+                continue
+            cand = (c, round(gap, 1))
             if best is None or cand[1] < best[1]:
                 best = cand
         return best
@@ -311,16 +349,25 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
                       pred_trade_id=xp[0].get("id"))
             return "exit_overfill_residual", ev
 
-        # 3) readopt_loop
+        # 3) readopt_loop (direction-agnostic; dir-flip aware)
         rp = _readopt_predecessor(o, sym, dir_l, oe)
         if rp:
             ev.update(marker="external_close_full_readopt",
                       pred_close_reason=str(rp[0].get("close_reason") or ""),
                       gap_min=rp[1], qty_ratio_orphan_over_pred=rp[2],
-                      pred_setup=rp[3], pred_trade_id=rp[0].get("id"))
+                      pred_setup=rp[3], dir_relation=rp[4],
+                      pred_trade_id=rp[0].get("id"))
             return "readopt_loop", ev
 
-        # 4) share_drift_excess
+        # 4) eod_reopen (EOD-flatten didn't clear → re-adopted)
+        ep = _eod_predecessor(o, sym, oe)
+        if ep:
+            ev.update(marker="eod_auto_close_predecessor",
+                      pred_close_reason=str(ep[0].get("close_reason") or ""),
+                      gap_min=ep[1], pred_trade_id=ep[0].get("id"))
+            return "eod_reopen", ev
+
+        # 5) share_drift_excess
         if ss == "share_drift_excess":
             ev["marker"] = "synthetic_source_share_drift"
             return "share_drift_excess", ev
@@ -331,19 +378,19 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
                       concurrent_setup=co.get("setup_type"))
             return "share_drift_excess", ev
 
-        # 5) restart_orphan
+        # 6) restart_orphan
         bn = _boot_near(sym, oe)
         if bn is not None:
             ev.update(marker="auto_reconcile_at_boot", boot_gap_min=bn)
             return "restart_orphan", ev
 
-        # 6) true_foreign
+        # 7) true_foreign
         ap = _any_predecessor(sym, dir_l, oe)
         if ap is None:
             ev["marker"] = "no_predecessor_in_lookback"
             return "true_foreign", ev
 
-        # 7) unclassified
+        # 8) unclassified
         ev.update(marker="predecessor_no_class_match",
                   pred_close_reason=str(ap.get("close_reason") or ""),
                   pred_trade_id=ap.get("id"))
@@ -352,7 +399,8 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
     # Aggregate per class.
     classes = defaultdict(lambda: {
         "n": 0, "leak_r": 0.0, "leak_usd": 0.0,
-        "n_with_r": 0, "n_losers": 0, "markers": Counter(), "samples": []})
+        "n_with_r": 0, "n_losers": 0, "markers": Counter(),
+        "rows": [], "pred_usd": defaultdict(lambda: {"n": 0, "usd": 0.0})})
     total_r = total_usd = 0.0
     n_with_r = 0
     cls_cache = {}  # trade_id -> (cls, ev), so we classify each orphan once
@@ -373,20 +421,21 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
             if r < 0:
                 c["n_losers"] += 1
         c["markers"][ev.get("marker", "?")] += 1
-        if len(c["samples"]) < 12:
-            oc = _close_ts(o)
-            c["samples"].append({
-                "symbol": o.get("symbol"), "direction": o.get("direction"),
-                "qty": _qty(o), "synthetic_source": o.get("synthetic_source"),
-                "r": round(r, 2) if r is not None else None,
-                "usd": round(usd, 0),
-                "close_reason": str(o.get("close_reason") or "")[:28],
-                "hold_min": (round(_gap_min(oc, oe := _entry_ts(o)), 1)
-                             if (_entry_ts(o) and oc) else None),
-                "entry_month": (_entry_ts(o).strftime("%Y-%m")
-                                if _entry_ts(o) else None),
-                "evidence": ev,
-            })
+        pcr = str(ev.get("pred_close_reason") or "none")
+        c["pred_usd"][pcr]["n"] += 1
+        c["pred_usd"][pcr]["usd"] += usd
+        oe = _entry_ts(o)
+        oc = _close_ts(o)
+        c["rows"].append({
+            "symbol": o.get("symbol"), "direction": o.get("direction"),
+            "qty": _qty(o), "synthetic_source": o.get("synthetic_source"),
+            "r": round(r, 2) if r is not None else None,
+            "usd": round(usd, 0),
+            "close_reason": str(o.get("close_reason") or "")[:28],
+            "hold_min": (round(_gap_min(oc, oe), 1) if (oe and oc) else None),
+            "entry_month": oe.strftime("%Y-%m") if oe else None,
+            "evidence": ev,
+        })
 
     out["population"] = {
         "n_closed_orphans": len(orphans),
@@ -415,8 +464,18 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
             "tiny_risk_r_inflated": bool(mean_abs_r > 1.5 and usd_per < 80),
             "markers": dict(c["markers"]),
             "fix_site": _FIX_SITE.get(cls, ""),
-            "samples": sorted(c["samples"],
-                              key=lambda s: (s["r"] if s["r"] is not None else 0)),
+            # Predecessor close-reason → ($,n) so the dominant upstream cause is
+            # visible without per-row inspection.
+            "pred_close_reason_usd": sorted(
+                [{"pred_close_reason": k, "n": v["n"], "usd": round(v["usd"], 0)}
+                 for k, v in c["pred_usd"].items()],
+                key=lambda x: x["usd"]),
+            # Worst losers by DOLLARS (uncapped collection, top 15) — surfaces the
+            # large-$ / low-R offenders the R-sorted samples clip.
+            "worst_by_usd": sorted(c["rows"], key=lambda s: s["usd"])[:15],
+            "samples": sorted(c["rows"],
+                              key=lambda s: (s["r"] if s["r"] is not None else 0)
+                              )[:12],
         })
     out["taxonomy_by_r"] = sorted(breakdown, key=lambda x: x["leak_r"])
     out["taxonomy_by_usd"] = sorted(
