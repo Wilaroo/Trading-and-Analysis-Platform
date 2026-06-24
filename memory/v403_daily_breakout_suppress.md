@@ -16,8 +16,9 @@ v356 VALIDATED daily_breakout +EV over a 180-day MULTI-REGIME replay (24,086 eve
 The 0/16 here is a 30-day CHOP-window result — regime-conditional failure, not a broken detector.
 
 ## Action: SUPPRESS via env (reversible, operator-controlled)
-`DISABLED_SETUPS=vwap_fade_short,daily_breakout` in backend/.env + restart. Blocks at the entry gate
-(trading_bot_service `_disabled_setups()` → reason_code "setup_disabled").
+✅ **CONFIRMED LIVE 2026-06-24** — `backend/.env:77` `DISABLED_SETUPS=vwap_fade_short,daily_breakout`,
+backend restarted, parsed blocklist verified `['daily_breakout','vwap_fade_short']`.
+Blocks at the entry gate (trading_bot_service `_disabled_setups()` → reason_code "setup_disabled").
 
 ## ⏰ RE-ENABLE CONDITION (do NOT leave disabled forever — it's +EV in trend regimes)
 Re-enable daily_breakout when EITHER:
