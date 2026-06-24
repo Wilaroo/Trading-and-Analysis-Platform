@@ -443,6 +443,22 @@ async def get_tqs_pillar_predictiveness_report(days: int = Query(30), min_n: int
     return {"success": True, "report": report}
 
 
+@router.get("/entry-feature-discovery/report")
+async def get_entry_feature_discovery_report(days: int = Query(30), min_n: int = Query(30), cat_min: int = Query(12)):
+    """Entry feature discovery (read-only) — which entry-context fields predict MFE?
+
+    Ranks every persisted entry-context field by how well it predicts realized entry
+    quality: Spearman vs MFE_R/realized_R for continuous fields, eta-squared
+    (correlation ratio) + best/worst categories for categorical fields. Feeds the
+    rebuild of the entry score from signals that actually generalise (the 5-pillar
+    TQS proved to be noise). Advisory only — no side effects.
+    """
+    from services.entry_feature_discovery import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days, min_n=min_n, cat_min=cat_min)
+    return {"success": True, "report": report}
+
+
 
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):

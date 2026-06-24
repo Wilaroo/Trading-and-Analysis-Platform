@@ -1,3 +1,21 @@
+## 2026-06-24 — ENTRY FEATURE-DISCOVERY (read-only) — what ACTUALLY predicts MFE?
+After proving all 5 TQS pillars are noise vs MFE, this finds the real signal. NEW
+`services/entry_feature_discovery.py` + `GET /api/slow-learning/entry-feature-discovery/report?days=&min_n=&cat_min=`.
+Mines every persisted entry-context field on closed bot_trades: CONTINUOUS (scanner_score,
+trigger_probability, regime_score, filter/strategy_win_rate, atr_percent, rvol, |gap_pct|, rsi,
+gate_confidence_score, gate_position_multiplier, tape_score, minutes_from_open, trigger_drift_pct
+[best-effort, coverage-reported], risk_reward_ratio) → Spearman vs MFE_R & realized_R; CATEGORICAL
+(setup_type, market_regime, direction, time_window, timeframe, priority, tape_confirmed, catalyst_tag,
+trend, vwap_relation, volume_trend, filter_action, gate_decision) → eta^2 (correlation ratio) + best/worst
+categories by avg_r. Reuses tqs_entry_quality helpers + |R|>10 corruption guard. Advisory, no side effects.
+ • TESTED `tests/test_entry_feature_discovery.py` (5): minutes-from-open, eta^2 perfect/zero separation,
+   continuous signal detection, categorical setup separation, empty-db safe. All green.
+ • NEXT: run on DGX (days=30+) → rank features; build the new entry score from the top continuous +
+   categorical predictors (setup_type/regime/direction already proven to separate via setup-EV). Replaces
+   the 5-pillar TQS as the gate's basis. Triage in parallel: kill daily_breakout (0% win), backside time-decay.
+
+
+
 ## 2026-06-24 — TQS ENTRY-QUALITY CROSS-TAB (read-only) — does TQS predict entry quality?
 Scoping the system-wide entry-quality bleed (MFE/MAE proved it: ALL horizons `entry_problem`,
 avg_mfe_r ~0.16, avg_mae_r ~-0.25, winner_capture ~0.87 → holding fine, ENTRIES bad). Setup-EV
