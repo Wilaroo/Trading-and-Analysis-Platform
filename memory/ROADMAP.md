@@ -6,6 +6,13 @@ Open priorities, deferred ideas, and backlog. Move items to
 
 ## ⏰ SCHEDULED RE-CHECKS (time-gated — do not action early)
 
+### ⏰ daily_breakout SUPPRESSED 2026-06-24 — re-enable when breakouts work again
+SUPPRESSED via `DISABLED_SETUPS` (swing bleeder: 0/16 win, -9.52R = 61% of swing bleed; fakeout→stop in
+BOTH HOLD & RISK_ON postures). It's +EV in trend regimes (v356, 180d replay) so DO NOT leave disabled
+forever. **Re-enable when:** (1) regime shifts to sustained trend/RISK_ON, OR (2) a fresh 60–90d
+diag_v356 replay shows +EV, OR (3) `GET /api/slow-learning/setup-ev/report?setup=daily_breakout&days=30`
+shows avg_r>0 on n>=15. Details: memory/v403_daily_breakout_suppress.md.
+
 ### ⏰ 2026-07-08 — TQS scalp-inversion re-audit (held for v401 data to accrue)
 Shipped 2026-06-24 (v401): Entry-Tendency live-derivation + horizon-aware tape drop + L2 fast-horizon
 bias + JIT tape-confirm (dormant) + AI-Model bar pre-warm endpoint. These feed the execution/setup
