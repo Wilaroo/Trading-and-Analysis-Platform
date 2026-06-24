@@ -278,6 +278,82 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
         {"month": k, "n": v["n"], "leak_r": round(v["leak_r"], 2),
          "leak_usd": round(v["leak_usd"], 0)}
         for k, v in sorted(months.items())]
+
+    # H. relink backtest — replay the v405 _find_reaped_pending match criteria
+    # against historical orphans so the benefit is quantifiable BEFORE enabling
+    # RECONCILE_RELINK_REAPED_PENDING=fix. An orphan is "matchable" when a
+    # stale_pending predecessor (same symbol+dir, within window, directionally-
+    # consistent stop, qty 0.5x-2x) exists. "Addressable" = matchable AND the
+    # orphan closed at a loss via an OCA/external stop (the premature stop-outs
+    # the fix targets by restoring the wider original stop).
+    bt = {"window_min": gap_min, "matchable": 0, "addressable": 0,
+          "addressable_leak_r": 0.0, "addressable_leak_usd": 0.0,
+          "avg_stop_widening_pct": None, "samples": []}
+    widenings = []
+    for t in orphans:
+        oe = _entry_ts(t)
+        oentry = _fnum(t.get("entry_price")) or _fnum(t.get("fill_price"))
+        odir = str(t.get("direction") or "").lower()
+        if oe is None or not oentry:
+            continue
+        pred = find_predecessor(t)
+        if pred is None:
+            continue
+        if not str(pred.get("close_reason") or "").startswith("stale_pending"):
+            continue
+        psp = _fnum(pred.get("stop_price"))
+        if not psp or psp <= 0:
+            continue
+        # directional consistency of the predecessor's stop vs the orphan entry
+        if odir == "long" and not (psp < oentry):
+            continue
+        if odir == "short" and not (psp > oentry):
+            continue
+        # window: predecessor reaped within `gap_min` before orphan entry
+        pc = _close_ts(pred)
+        if pc is None:
+            continue
+        gap = (oe - pc).total_seconds() / 60.0
+        if not (0 <= gap <= gap_min):
+            continue
+        # qty sanity
+        try:
+            osh = int(pred.get("original_shares") or pred.get("shares") or 0)
+            qsh = int(t.get("shares") or 0)
+            if osh > 0 and qsh > 0 and not (0.5 <= qsh / osh <= 2.0):
+                continue
+        except (TypeError, ValueError):
+            pass
+        bt["matchable"] += 1
+        # stop widening: how much wider the original stop is vs the orphan's stop
+        osp = _fnum(t.get("stop_price"))
+        widen = None
+        if osp and oentry:
+            syn_dist = abs(oentry - osp)
+            orig_dist = abs(oentry - psp)
+            if syn_dist > 0:
+                widen = round((orig_dist - syn_dist) / syn_dist * 100.0, 1)
+                widenings.append(widen)
+        reason = str(t.get("close_reason") or "")
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        is_loss_stop = (("oca_closed_externally" in reason or "external" in reason
+                         or "stop" in reason) and (r is not None and r < 0))
+        if is_loss_stop:
+            bt["addressable"] += 1
+            bt["addressable_leak_r"] += r
+            bt["addressable_leak_usd"] += _fnum(t.get("realized_pnl")) or 0.0
+            if len(bt["samples"]) < 12:
+                bt["samples"].append({
+                    "symbol": t.get("symbol"),
+                    "orphan_stop": osp, "original_stop": psp,
+                    "stop_widening_pct": widen,
+                    "orphan_r": round(r, 2), "close_reason": reason[:28],
+                })
+    bt["addressable_leak_r"] = round(bt["addressable_leak_r"], 2)
+    bt["addressable_leak_usd"] = round(bt["addressable_leak_usd"], 0)
+    if widenings:
+        bt["avg_stop_widening_pct"] = round(sum(widenings) / len(widenings), 1)
+    out["relink_backtest"] = bt
     return out
 
 
