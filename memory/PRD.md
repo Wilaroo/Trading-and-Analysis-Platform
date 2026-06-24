@@ -1,11 +1,13 @@
 # TradeCommand / SentCom — Product Requirements
 
 > **🧭 2026-06-24 (v404) — reconciled_orphan leak RCA tooling + tqs_integrity n-aware gate.**
-> - 🔴 **P0 RCA (in progress):** new read-only `backend/scripts/diag_orphan_leak_rca.py` traces the
->   `reconciled_orphan` chain (predecessor entry_context → orphan synthetic 2% stop → `oca_closed_externally`).
->   Reports population/leak-R, close-reason mix, synthetic_source split, predecessor linkage (recoverable
->   context + stop-tightening), and the re-adopt-loop core (the fixable $). Smoke-tested in preview (empty→clean).
->   **RUN ON DGX:** `PYTHONPATH=backend .venv/bin/python backend/scripts/diag_orphan_leak_rca.py --days 120`
+> - 🔴 **P0 RCA (in progress):** new read-only endpoint `GET /api/slow-learning/orphan-leak/report`
+>   (`services/orphan_leak_rca.py`) traces the `reconciled_orphan` chain (predecessor entry_context →
+>   orphan synthetic 2% stop → `oca_closed_externally`). Reports population/leak-R, close-reason mix,
+>   synthetic_source split, predecessor linkage (recoverable context + stop-tightening), and the
+>   re-adopt-loop core (the fixable $). Delivered as an ENDPOINT (not a `diag_*.py` script — those are
+>   .gitignored, can't ship via Save-to-GitHub). Unit-tested (5/5) + smoke-tested.
+>   **RUN ON DGX:** `curl -s "http://localhost:8001/api/slow-learning/orphan-leak/report?days=120&gap_min=120" | python3 -m json.tool`
 >   → result routes the fix (re-link original context+stop on re-adopt, OR refuse fresh OCA on thesis-less
 >   re-adopt). Fix will be env-gated observe→fix.
 > - ✅ **SHIPPED:** `services/tqs_integrity.py` `anti_predictive` now requires an n-aware significance gate

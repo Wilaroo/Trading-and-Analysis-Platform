@@ -426,6 +426,23 @@ async def get_tqs_integrity_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/orphan-leak/report")
+async def get_orphan_leak_report(days: int = Query(120), gap_min: int = Query(120)):
+    """reconciled_orphan execution-leak RCA (read-only) — the biggest $ leak.
+
+    For every closed `reconciled_orphan`: realized clean_R + close_reason, the
+    predecessor (most recent non-artifact trade on the same symbol/direction)
+    and whether its real entry_context/stop was recoverable, whether the orphan's
+    synthetic stop was TIGHTER, the gap pred.closed->orphan.entry, and the
+    re-adopt-loop core (pred closed externally/stop then re-adopted within
+    `gap_min`) — the portion fixable by re-linking context+stop.
+    """
+    from services.orphan_leak_rca import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days, gap_min=gap_min)
+    return {"success": True, "report": report}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")
