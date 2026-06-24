@@ -274,6 +274,25 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
                        [data[i][1] for i in range(n) if data[i][1] is not None])
     sp_real = _spearman(oos_rank, [data[i][2] for i in range(n)])
 
+    # ABSTENTION CURVE (the money metric, OUT-OF-SAMPLE): if we'd VETOED the bottom
+    # X% by predicted edge, what does the kept book look like? Quantifies how much
+    # bleed an Edge-Score abstention gate would save vs trading everything.
+    base_rs = [data[i][2] for i in range(n)]
+    base_total = sum(base_rs)
+    abstention = []
+    for cut in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5):
+        keep = order[int(cut * n):]   # `order` ascending → drop the bottom `cut`
+        if not keep:
+            continue
+        rs = [data[i][2] for i in keep]
+        abstention.append({
+            "skip_bottom_pct": int(round(cut * 100)),
+            "kept_trades": len(rs),
+            "kept_avg_realized_r": round(sum(rs) / len(rs), 4),
+            "kept_total_r": round(sum(rs), 2),
+            "kept_win_rate": round(sum(1 for x in rs if x > 0) / len(rs) * 100, 1),
+        })
+
     # full-data model for the per-factor "why" / effect display
     full = fit([(data[i][0], data[i][3]) for i in range(n)])
     factor_rows = []
@@ -320,8 +339,11 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
 
     out.update({
         "global_mean_target": round(full["global_mean"], 4),
+        "baseline_avg_realized_r": round(base_total / n, 4),
+        "baseline_total_r": round(base_total, 2),
         "oos_spearman_pred_vs_mfe": sp_mfe,
         "oos_spearman_pred_vs_realized": sp_real,
+        "abstention_curve": abstention,
         "oos_decile_lift": deciles,
         "factor_effects": factor_rows,
         "per_archetype_grade_check": per_arche,

@@ -1,3 +1,17 @@
+## 2026-06-24 — P3′ TARGET SWEEP (DGX n=885): win & realized_r-clip3 WIN (~+0.18 OOS) → pivot to ABSTENTION
+Target sweep on real data: `win` OOS spearman pred-vs-realized=**+0.182** (top decile 54% win vs
+bottom 9%); `realized_r&clip=3`=**+0.178** (top +0.01R/49% vs bottom −0.53R/10%); `mfe_r&clip=2`=
+−0.082 (still inverted — MFE confirmed dead); `realized_r` no-clip=+0.052 (clipping is essential).
+So win & clipped-realized BEAT the champion (−0.029) decisively. KEY INSIGHT: the marginal model's
+power is AVOIDANCE not selection — in this net-losing book the bottom decile is reliably awful
+(−0.5R, ~10% win) while the top is only ~breakeven. Shipped an OUT-OF-SAMPLE `abstention_curve` to
+the report (+ baseline_avg/total_r): quantifies kept-book avg_R/total_R/win% when vetoing the bottom
+X% by predicted edge. PLAN: use the Edge Score as an ABSTENTION/veto gate FIRST (skip bottom deciles
+= biggest immediate bleed reduction), positive selection awaits P4′ regime-conditional cells (needs
+the Phase-0 sector/symbol-regime data now accruing). NEXT: operator runs abstention curve on DGX to
+read real bleed saved → decide veto cutoff → wire as shadow abstention arm.
+
+
 ## 2026-06-24 — P3′ REAL-DATA RESULT: MFE_R target FAILS (chases lottery) → added win/clip targets
 Ran entry-edge-score/report on DGX (n_used=885 real entries, target=mfe_r). VERDICT: v1-on-MFE
 does NOT beat champion — OOS spearman pred-vs-realized = −0.129 (champion was −0.029, so MORE
