@@ -4847,6 +4847,13 @@ class TradingBotService:
                     'risk_reward': getattr(alert, 'risk_reward', 0) or 0,
                     'smb_grade': getattr(alert, 'trade_grade', '') or '',
                     'trade_grade': getattr(alert, 'trade_grade', '') or '',
+                    # Phase 0 (Entry Edge Score) — regime + chase dims for
+                    # entry_context (see ENTRY_EDGE_SCORE_PLAN.md). trigger_price
+                    # above is the REAL trigger on this path; mirror it as
+                    # signal_trigger_price so build_entry_context reads one key.
+                    'sector_regime': getattr(alert, 'sector_regime', '') or '',
+                    'rs_rating': getattr(alert, 'rs_rating', None),
+                    'signal_trigger_price': getattr(alert, 'trigger_price', 0.0) or 0.0,
                 }
                 
                 # 2026-05-01 v19.20 — skip watchlist-only setups silently.

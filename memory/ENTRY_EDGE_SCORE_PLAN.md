@@ -90,13 +90,26 @@ table (the spine P6 already reads).
       in `opportunity_evaluator.build_entry_context` (observe-only).
 - [x] `_classify_rs_regime` band helper (leader≥80 / strong≥60 / neutral≥41 /
       weak≥21 / laggard / unknown).
+- [x] **Boundary threading (critical):** the alert never reaches build_entry_context
+      as `LiveAlert.to_dict()` — THREE hand-built dicts drop fields. Threaded the
+      new fields through all three: `enhanced_scanner._auto_execute_alert` trade_request
+      → `scanner_integration.submit_trade_from_scanner` alert dict → and the bot
+      scan-loop `trading_bot_service._get_trade_alerts` alert_dict. Uses an
+      unambiguous `signal_trigger_price` key for the REAL breakout trigger (the
+      auto-exec path's `trigger_price` is the ENTRY price → trigger-drift was always 0).
+      build_entry_context reads `signal_trigger_price`. Verified end-to-end (stamp
+      lands; legacy/empty alerts degrade to unknown/None gracefully).
 - [x] Read-only coverage report: `services/entry_edge_coverage.py` +
       `GET /api/slow-learning/entry-edge-coverage/report?days=45`.
 - [ ] **OPERATOR VERIFY on DGX**: after a session of live fills, run the coverage
-      report. ACCEPTANCE: new fields trending up from 0; `archetype_cell.complete_pct`
-      reported. If `sector_regime`/`rs_rating` stay dark (low %), the upstream
-      stamp on the ALERT is the gap → wire a sync fallback
-      (`rs_leadership_service.get_rating_cached` / sector classifier) in build_entry_context.
+      report. ACCEPTANCE: new fields trending up from 0 (cap ~80% — the ~20%
+      `reconciled_*` artifacts have no real entry_context and are excluded from the
+      model). `sector_regime` should hit ~76%+ (classifier fallback chain);
+      `rs_rating` coverage = fraction of traded symbols with a cached RS doc
+      (depends on the RS-leadership nightly job + universe membership).
+- [ ] If `rs_rating` stays low: the cache (`rs_leadership_service.get_rating_cached`)
+      is the gap, not the stamp — check the nightly RS job ran and the symbol is in
+      the rated universe. If `sector_regime` low: check `sector_tag_service`/`sector_regime_classifier`.
 - [ ] Once coverage is healthy and enough labeled trades accrue → start **P3′**.
 
 ## 📌 KEY FILES

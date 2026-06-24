@@ -2965,7 +2965,7 @@ class OpportunityEvaluator:
             ctx["rs_rating"] = None
         ctx["symbol_rs_regime"] = self._classify_rs_regime(ctx["rs_rating"])
         try:
-            _tp = float(alert.get("trigger_price") or 0.0)
+            _tp = float(alert.get("signal_trigger_price") or 0.0)
             ctx["trigger_price"] = round(_tp, 4) if _tp > 0 else None
         except (TypeError, ValueError):
             ctx["trigger_price"] = None

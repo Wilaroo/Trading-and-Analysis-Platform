@@ -90,6 +90,13 @@ class ScannerIntegration:
                 'smb_grade': smb_grade,
                 # v19.34.294 (P2-B) — proven-outcome count for cold-start haircut
                 'proven_outcomes': proven_outcomes,
+                # Phase 0 (Entry Edge Score) — carry the regime + chase dims so
+                # build_entry_context persists them. NOTE: 'trigger_price' above
+                # is the ENTRY price (legacy entry semantics); 'signal_trigger_price'
+                # is the REAL breakout trigger level used for trigger-drift.
+                'sector_regime': trade_request.get('sector_regime'),
+                'rs_rating': trade_request.get('rs_rating'),
+                'signal_trigger_price': trade_request.get('signal_trigger_price'),
             }
 
             # Evaluate and create trade

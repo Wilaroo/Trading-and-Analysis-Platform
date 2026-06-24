@@ -2134,6 +2134,12 @@ class EnhancedBackgroundScanner:
                 "smb_grade": getattr(alert, "smb_grade", "") or "",
                 # v19.34.294 (P2-B) — proven-outcome count for cold-start haircut
                 "proven_outcomes": _proven_outcomes,
+                # Phase 0 (Entry Edge Score) — thread the regime + chase dims
+                # through the auto-exec boundary so build_entry_context can
+                # persist them (observe-only; see ENTRY_EDGE_SCORE_PLAN.md).
+                "sector_regime": getattr(alert, "sector_regime", "") or "",
+                "rs_rating": getattr(alert, "rs_rating", None),
+                "signal_trigger_price": float(getattr(alert, "trigger_price", 0.0) or 0.0),
             }
             
             # Submit to trading bot
