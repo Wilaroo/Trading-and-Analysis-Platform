@@ -622,6 +622,22 @@ async def get_orphan_taxonomy_report(
     return {"success": True, "report": report}
 
 
+@router.get("/orphan-fill-heal/report")
+async def get_orphan_fill_heal_report(days: int = Query(120)):
+    """Seal #2 — fill→bot_trade WRITE-GAP probe (READ-ONLY, trade_id-keyed).
+
+    Finds `order_queue` rows the pusher marked FILLED whose `trade_id` has NO
+    `bot_trades` row — the only unambiguous signal of the record-less write gap
+    (vs the v407 symbol-level `order_no_trade` bucket which mixed in exit/leg
+    orders). Links each gap to the `reconciled_orphan` it became (for $ impact)
+    and previews the heal. Writes NOTHING — the active heal is a later flagged step.
+    """
+    from services.orphan_fill_heal import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days)
+    return {"success": True, "report": report}
+
+
 @router.get("/orphan-leak/diagnostics")
 async def get_orphan_leak_diagnostics():
     """Read-only runtime diagnostics for the orphan-leak fix decision.
