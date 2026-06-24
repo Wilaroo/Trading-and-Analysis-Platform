@@ -383,6 +383,89 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
          "addressable_real": s["addressable_real"],
          "addressable_leak_r_real": s["addressable_leak_r_real"]}
         for w, s in ((w, _relink_stats(w)) for w in (90, 360, 1440, 2880))]
+
+    # I. leak concentration — where the -R actually lives (the re-link backtest
+    # proved the leak is NOT recoverable-stop; this finds the real concentration).
+    conc = {}
+    # winners vs losers
+    win_r = loss_r = 0.0
+    n_win = n_loss = 0
+    for t in orphans:
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if r is None:
+            continue
+        if r >= 0:
+            n_win += 1
+            win_r += r
+        else:
+            n_loss += 1
+            loss_r += r
+    conc["winners_vs_losers"] = {
+        "n_winners": n_win, "sum_win_r": round(win_r, 2),
+        "n_losers": n_loss, "sum_loss_r": round(loss_r, 2)}
+    # synthetic_source x month
+    sm = defaultdict(lambda: {"n": 0, "leak_r": 0.0})
+    for t in orphans:
+        oe = _entry_ts(t)
+        mo = oe.strftime("%Y-%m") if oe else "?"
+        src = str(t.get("synthetic_source") or "unknown")
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        sm[(src, mo)]["n"] += 1
+        sm[(src, mo)]["leak_r"] += r if r is not None else 0.0
+    conc["by_source_month"] = [
+        {"source": k[0], "month": k[1], "n": v["n"], "leak_r": round(v["leak_r"], 2)}
+        for k, v in sorted(sm.items())]
+    # hold-duration buckets (entry -> close)
+    buckets = [("<5m", 0, 5), ("5-30m", 5, 30), ("30m-2h", 30, 120),
+               ("2h-1d", 120, 1440), (">1d", 1440, 10 ** 9)]
+    hb = {b[0]: {"n": 0, "leak_r": 0.0} for b in buckets}
+    hb["unknown"] = {"n": 0, "leak_r": 0.0}
+    for t in orphans:
+        oe, oc = _entry_ts(t), _close_ts(t)
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        rr = r if r is not None else 0.0
+        if not oe or not oc:
+            hb["unknown"]["n"] += 1
+            hb["unknown"]["leak_r"] += rr
+            continue
+        mins = (oc - oe).total_seconds() / 60.0
+        for name, lo, hi in buckets:
+            if lo <= mins < hi:
+                hb[name]["n"] += 1
+                hb[name]["leak_r"] += rr
+                break
+    conc["hold_duration"] = [
+        {"bucket": k, "n": v["n"], "leak_r": round(v["leak_r"], 2)}
+        for k, v in hb.items() if v["n"] > 0]
+    # has-predecessor split
+    hp = {"with_pred": {"n": 0, "leak_r": 0.0}, "no_pred": {"n": 0, "leak_r": 0.0}}
+    for t in orphans:
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        rr = r if r is not None else 0.0
+        k = "with_pred" if find_predecessor(t) is not None else "no_pred"
+        hp[k]["n"] += 1
+        hp[k]["leak_r"] += rr
+    conc["predecessor_split"] = {
+        k: {"n": v["n"], "leak_r": round(v["leak_r"], 2)} for k, v in hp.items()}
+    # worst 15 offenders with full detail
+    scored = []
+    for t in orphans:
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if r is None:
+            continue
+        oe, oc = _entry_ts(t), _close_ts(t)
+        hold = round((oc - oe).total_seconds() / 60.0, 1) if (oe and oc) else None
+        e = _fnum(t.get("entry_price")) or _fnum(t.get("fill_price"))
+        s = _fnum(t.get("stop_price"))
+        spct = round(abs(e - s) / e * 100.0, 2) if (e and s and e > 0) else None
+        scored.append({
+            "symbol": t.get("symbol"), "r": round(r, 2),
+            "usd": round(_fnum(t.get("realized_pnl")) or 0.0, 0),
+            "entry": e, "stop": s, "stop_pct": spct, "hold_min": hold,
+            "synthetic_source": t.get("synthetic_source"),
+            "close_reason": str(t.get("close_reason") or "")[:26]})
+    conc["worst_15"] = sorted(scored, key=lambda x: x["r"])[:15]
+    out["leak_concentration"] = conc
     return out
 
 
