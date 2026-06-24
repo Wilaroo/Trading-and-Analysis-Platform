@@ -249,4 +249,17 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
         f"re-adopt-loop core = {len(readopt)} trades / {round(loop_r, 2)}R — the "
         f"portion fixable by re-linking context+stop or refusing a fresh OCA on "
         f"thesis-less re-adopts.")
+
+    # F. fill-race guard events — did the reaper's anti-orphan guards ever fire?
+    # If these are ~0 while stale_pending predecessors dominate, the guards are
+    # dead (direct-IB unavailable on a pusher-only deployment) → root cause.
+    guard = {}
+    try:
+        for ev in ("pending_fill_attributed", "reaper_skip_likely_filled",
+                   "reaper_skip_working_order"):
+            guard[ev] = db["state_integrity_events"].count_documents(
+                {"event": ev, "ts": {"$gte": cutoff}})
+    except Exception as e:  # collection may be absent
+        guard["error"] = str(e)
+    out["fill_race_guard_events"] = guard
     return out

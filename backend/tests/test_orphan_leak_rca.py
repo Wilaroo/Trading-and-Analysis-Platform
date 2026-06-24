@@ -15,14 +15,17 @@ class _FakeColl:
         # return everything and let the python logic do the work.
         return list(self._docs)
 
+    def count_documents(self, query=None):
+        return 0
+
 
 class _FakeDB:
     def __init__(self, docs):
-        self._coll = _FakeColl(docs)
+        self._bot = _FakeColl(docs)
+        self._other = _FakeColl([])
 
     def __getitem__(self, name):
-        assert name == "bot_trades"
-        return self._coll
+        return self._bot if name == "bot_trades" else self._other
 
 
 def _iso(dt):
