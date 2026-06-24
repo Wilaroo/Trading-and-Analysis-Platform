@@ -959,6 +959,85 @@ class PositionReconciler:
                 pass
         return 0.0, "unavailable"
 
+    def _find_reaped_pending(
+        self, symbol: str, direction, abs_qty: int, avg_cost: float,
+    ) -> Optional[Dict[str, Any]]:
+        """v404 — find a recently-reaped pending bot_trade that this IB orphan
+        is almost certainly the fill of, so the reconciler can inherit the bot's
+        REAL stop/target/context instead of synthetic defaults.
+
+        Dominant orphan cause (AUDIT_orphan_leak_2026-06-24): a bot pending fills
+        at IB but the fill isn't attributed (direct-IB flap), the 300s stale-
+        pending reaper marks it `stale_pending_*` AND pops it from
+        `_pending_trades`, then this reconciler adopts the live fill as a synthetic
+        orphan with a tighter 2% stop. The reaped row still lives in Mongo with the
+        bot's intended bracket — this recovers it. READ-ONLY; returns the matched
+        summary or None.
+        """
+        try:
+            window_min = int(os.environ.get("RECONCILE_RELINK_WINDOW_MIN", "90"))
+        except (TypeError, ValueError):
+            window_min = 90
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(minutes=window_min)).isoformat()
+        sym = (symbol or "").upper()
+        dir_val = getattr(direction, "value", str(direction)).lower()
+        try:
+            cur = self.db["bot_trades"].find({
+                "symbol": sym,
+                "direction": dir_val,
+                "close_reason": {"$regex": "^stale_pending"},
+                "$or": [
+                    {"reaped_at": {"$gte": cutoff}},
+                    {"closed_at": {"$gte": cutoff}},
+                    {"updated_at": {"$gte": cutoff}},
+                ],
+            }).sort("reaped_at", -1).limit(10)
+        except Exception as e:
+            logger.debug("v404 _find_reaped_pending query failed for %s: %s", sym, e)
+            return None
+        for d in cur:
+            sp = d.get("stop_price")
+            try:
+                sp = float(sp) if sp is not None else None
+            except (TypeError, ValueError):
+                sp = None
+            if not sp or sp <= 0:
+                continue
+            # Directional consistency with the live position.
+            if dir_val == "long" and not (sp < avg_cost):
+                continue
+            if dir_val == "short" and not (sp > avg_cost):
+                continue
+            # Quantity sanity: original size within 0.5x–2x of the orphan qty.
+            try:
+                osh = int(d.get("original_shares") or d.get("shares") or 0)
+            except (TypeError, ValueError):
+                osh = 0
+            if osh > 0 and abs_qty > 0:
+                ratio = abs_qty / osh
+                if ratio < 0.5 or ratio > 2.0:
+                    continue
+            t1 = None
+            tp = d.get("target_prices") or []
+            if isinstance(tp, list) and tp:
+                try:
+                    t1 = float(tp[0])
+                except (TypeError, ValueError):
+                    t1 = None
+            return {
+                "id": d.get("id"),
+                "stop_price": sp,
+                "target_1": t1,
+                "close_reason": d.get("close_reason"),
+                "shares": osh,
+                "market_regime": d.get("market_regime"),
+                "entry_context": (d.get("entry_context")
+                                  if isinstance(d.get("entry_context"), dict) else None),
+            }
+        return None
+
+
     async def _flatten_eod_window_orphan(
         self, bot, symbol, direction, abs_qty, avg_cost,
     ) -> Dict[str, Any]:
@@ -1785,13 +1864,94 @@ class PositionReconciler:
                     else:
                         smart_rr = default_rr
 
+                    # ── v404 — Re-link a recently-reaped pending's REAL bracket ──
+                    # By the time an orphan reaches here, a matching pending may
+                    # already have been reaped (popped from _pending_trades), so the
+                    # in-memory v185/v264 guards above missed it. Recover the bot's
+                    # OWN intended stop/target from the reaped Mongo row and prefer
+                    # it over synthetic defaults AND over rejection verdicts (this is
+                    # the bot's own trade, not a rejected idea). READ-ONLY lookup;
+                    # the only effect is the stop/target/context we stamp.
+                    # Env: RECONCILE_RELINK_REAPED_PENDING = observe (default; log +
+                    # forensic event only, NO behavior change) | fix (apply) | off.
+                    _relink_applied = False
+                    _relink_ctx = None
+                    _relink_regime = None
+                    try:
+                        _relink_policy = os.environ.get(
+                            "RECONCILE_RELINK_REAPED_PENDING", "observe").lower()
+                        _relink_match = (
+                            self._find_reaped_pending(sym, direction, abs_qty, avg_cost)
+                            if _relink_policy != "off" else None
+                        )
+                        if _relink_match:
+                            _pre_stop = stop_price
+                            _orig_stop = float(_relink_match["stop_price"])
+                            if _relink_policy == "fix":
+                                stop_price = _orig_stop
+                                if _relink_match.get("target_1"):
+                                    target_1 = float(_relink_match["target_1"])
+                                risk_per_share = abs(avg_cost - stop_price)
+                                reward_per_share = abs(target_1 - avg_cost)
+                                smart_rr = (reward_per_share / risk_per_share
+                                            if risk_per_share > 0 else default_rr)
+                                use_smart_stop = True
+                                _relink_applied = True
+                                _relink_ctx = _relink_match.get("entry_context")
+                                _relink_regime = _relink_match.get("market_regime")
+                            logger.warning(
+                                "🔗 [v404 RELINK %s] %s — orphan matches reaped pending "
+                                "trade_id=%s (%s): stop %.4f → %.4f%s",
+                                "fix" if _relink_applied else "observe", sym,
+                                _relink_match.get("id"), _relink_match.get("close_reason"),
+                                _pre_stop, _orig_stop,
+                                "" if _relink_applied
+                                else " (set RECONCILE_RELINK_REAPED_PENDING=fix to apply)",
+                            )
+                            report.setdefault("relinked", []).append({
+                                "symbol": sym, "policy": _relink_policy,
+                                "applied": _relink_applied,
+                                "matched_trade_id": _relink_match.get("id"),
+                                "reaped_reason": _relink_match.get("close_reason"),
+                                "synthetic_stop": round(_pre_stop, 4),
+                                "relinked_stop": round(_orig_stop, 4),
+                                "relinked_target": _relink_match.get("target_1"),
+                            })
+                            try:
+                                if getattr(self, "db", None) is not None:
+                                    self.db["state_integrity_events"].insert_one({
+                                        "event": ("orphan_relinked_reaped_pending"
+                                                  if _relink_applied
+                                                  else "orphan_relink_observe"),
+                                        "severity": "high",
+                                        "symbol": sym,
+                                        "trade_id": _relink_match.get("id"),
+                                        "synthetic_stop": round(_pre_stop, 4),
+                                        "relinked_stop": round(_orig_stop, 4),
+                                        "reaped_reason": _relink_match.get("close_reason"),
+                                        "detail": (
+                                            "Orphan re-linked to the bot's reaped pending "
+                                            "bracket (real stop/target restored)."
+                                            if _relink_applied else
+                                            "Orphan WOULD re-link to a reaped pending "
+                                            "bracket (observe mode)."
+                                        ),
+                                        "ts": datetime.now(timezone.utc).isoformat(),
+                                    })
+                            except Exception:
+                                pass
+                    except Exception as _relink_err:
+                        logger.debug("v404 relink check failed for %s: %s",
+                                     sym, _relink_err)
+
                     trade.target_prices = [target_1]
                     trade.stop_price = stop_price
                     trade.risk_amount = abs(avg_cost - stop_price) * abs_qty
                     trade.risk_reward_ratio = round(smart_rr, 2)
 
                     trade.synthetic_source = (
-                        "last_verdict" if use_smart_stop else "default_pct"
+                        "relinked_reaped_pending" if _relink_applied
+                        else ("last_verdict" if use_smart_stop else "default_pct")
                     )
                     trade.prior_verdicts = prior_verdicts
                     trade.prior_verdict_conflict = (
@@ -1918,6 +2078,24 @@ class PositionReconciler:
                             "rr": default_rr,
                         },
                     }
+                    # v404 — when re-linked, mark provenance + inherit the bot's
+                    # real regime/TQS so analytics no longer see regime=UNKNOWN.
+                    if _relink_applied:
+                        trade.entry_context["relinked_from_reaped_pending"] = True
+                        trade.entry_context["reasoning"].append(
+                            "v404: inherited the bot's real stop/target from a "
+                            "recently-reaped pending whose fill lost attribution "
+                            "(direct-IB flap)."
+                        )
+                        if _relink_regime:
+                            trade.entry_context["market_regime"] = _relink_regime
+                            try:
+                                trade.market_regime = _relink_regime
+                            except Exception:
+                                pass
+                        if isinstance(_relink_ctx, dict) and isinstance(
+                                _relink_ctx.get("tqs"), dict):
+                            trade.entry_context["tqs"] = _relink_ctx.get("tqs")
 
                     # Insert into in-memory + persist.
                     bot._open_trades[trade.id] = trade

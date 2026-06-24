@@ -256,7 +256,8 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
     guard = {}
     try:
         for ev in ("pending_fill_attributed", "reaper_skip_likely_filled",
-                   "reaper_skip_working_order"):
+                   "reaper_skip_working_order",
+                   "orphan_relink_observe", "orphan_relinked_reaped_pending"):
             guard[ev] = db["state_integrity_events"].count_documents(
                 {"event": ev, "ts": {"$gte": cutoff}})
     except Exception as e:  # collection may be absent

@@ -1,5 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
+
+> **🔧 2026-06-24 (v405) — orphan leak ROOT-CAUSE FIX (env-gated, observe default).**
+> RCA confirmed via DGX diagnostics: order path is `BOT_ORDER_PATH=direct` (clientId=11,
+> no clientId=10); direct-IB flaps 1-3×/day → a filled bot PENDING gets reaped
+> (`stale_pending_auto_reaper`) + popped from `_pending_trades` during a flap → the
+> reconciler adopts the live fill as a synthetic orphan with a TIGHTER 2% stop (58/120)
+> → OCA stop-out → -19.7R (ACTIVE: May 50/-12.19R, Jun 70/-7.54R).
+> FIX in `position_reconciler.py`: new READ-ONLY `_find_reaped_pending` + re-link in
+> `reconcile_orphan_positions` — inherit the bot's REAL stop/target/regime/TQS from the
+> reaped Mongo row instead of synthetic 2%. Env `RECONCILE_RELINK_REAPED_PENDING`
+> (observe=default, fix, off); window `RECONCILE_RELINK_WINDOW_MIN`=90. Forensic event
+> `orphan_relink_observe`/`orphan_relinked_reaped_pending`. Blast radius: ONLY the orphan
+> stop/context stamp — no order/reaper/cancel/close/kill-switch change. Tests: 18 passed.
+> Docs: `memory/v405_orphan_relink_build.md`, `memory/AUDIT_orphan_leak_2026-06-24.md`.
+> ROLLOUT: pull+restart (observe) → watch `orphan_relink_observe` count → set =fix when happy.
+
 > **🧭 2026-06-24 (v404) — reconciled_orphan leak RCA tooling + tqs_integrity n-aware gate.**
 > - 🔴 **P0 RCA (in progress):** new read-only endpoint `GET /api/slow-learning/orphan-leak/report`
 >   (`services/orphan_leak_rca.py`) traces the `reconciled_orphan` chain (predecessor entry_context →
