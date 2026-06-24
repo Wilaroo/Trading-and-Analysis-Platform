@@ -503,18 +503,34 @@ class OpportunityEvaluator:
                                 ).timestamp()
                             except (TypeError, ValueError):
                                 _triggered_unix = None
-                    # v402 — fail-CLOSED on missing/unparseable alert timestamp.
-                    # Pre-fix this branch was skipped when no timestamp existed
-                    # (fail-OPEN). STALE_ALERT_POLICY = block|observe|off.
+                    # v409 (2026-06-24) — fail-OPEN on a MISSING timestamp.
+                    # v402 flipped this branch fail-CLOSED, but the production
+                    # auto-exec dict (scanner_integration.submit_trade_from_scanner)
+                    # and the bot scan-loop NEVER thread triggered_at/_unix — only
+                    # the enhanced_alerts dict format carries it. So under v402
+                    # EVERY execution-path alert was synthesised stale and dropped
+                    # here: gate.evaluated sat at 0 for ~28h and the bot took 0
+                    # trades (operator-traced 2026-06-24 via rejection_daily_counts:
+                    # ~6.9k stale_alert_ttl rejections, last gate decision
+                    # 2026-06-23T15:00Z). A data-threading gap must NEVER be treated
+                    # as real staleness. This also restores the long-standing
+                    # `test_missing_ts_fail_open` contract that v402 silently broke.
+                    # The aged-timestamp block below still fires for any alert that
+                    # DOES carry a real timestamp. Opt back into the strict v402
+                    # synth-stale behaviour with STALE_ALERT_BLOCK_MISSING_TS=1.
                     _stale_policy = _os_ttl.environ.get(
                         "STALE_ALERT_POLICY", "block").strip().lower()
-                    if _triggered_unix is None and _stale_policy in ("block", "observe"):
+                    _block_missing_ts = _os_ttl.environ.get(
+                        "STALE_ALERT_BLOCK_MISSING_TS", "0"
+                    ).strip().lower() in ("1", "true", "yes", "on")
+                    if _triggered_unix is None and _stale_policy != "off":
                         logger.warning(
-                            "\U0001f552 [v402 stale-policy=%s] %s %s has NO usable "
-                            "alert timestamp \u2014 treating as STALE.",
-                            _stale_policy, symbol, setup_type,
+                            "\U0001f552 [v409 stale-ttl] %s %s has NO usable alert "
+                            "timestamp \u2014 fail-OPEN (set STALE_ALERT_BLOCK_MISSING_TS=1 "
+                            "to treat missing-ts as stale).",
+                            symbol, setup_type,
                         )
-                        if _stale_policy == "block":
+                        if _block_missing_ts and _stale_policy == "block":
                             _triggered_unix = _time_ttl.time() - (_ttl_secs + 1.0)
                     if _triggered_unix is not None:
                         try:

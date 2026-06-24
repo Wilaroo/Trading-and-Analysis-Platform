@@ -56,6 +56,28 @@ class TestStaleAlertTTL(_Base):
         except Exception: pass
         for c in bot.record_rejection.call_args_list:
             self.assertNotEqual(c.kwargs.get("reason_code"), "stale_alert_ttl")
+    def test_missing_ts_fail_open_even_when_policy_block(self):
+        # v409 — explicit policy=block must STILL fail-open on a missing ts
+        # unless STALE_ALERT_BLOCK_MISSING_TS=1 is set. This is the exact
+        # production regression v402 caused (gate.evaluated=0, 0 trades).
+        bot = _make_bot()
+        try:
+            self._evaluate(_alert(no_timestamp=True), bot,
+                           env={"STALE_ALERT_TTL_SECONDS": "30",
+                                "STALE_ALERT_POLICY": "block"})
+        except Exception: pass
+        for c in bot.record_rejection.call_args_list:
+            self.assertNotEqual(c.kwargs.get("reason_code"), "stale_alert_ttl")
+    def test_missing_ts_block_opt_in(self):
+        # v409 — operators can still enforce strict missing-ts blocking.
+        bot = _make_bot()
+        r = self._evaluate(_alert(no_timestamp=True), bot,
+                           env={"STALE_ALERT_TTL_SECONDS": "30",
+                                "STALE_ALERT_POLICY": "block",
+                                "STALE_ALERT_BLOCK_MISSING_TS": "1"})
+        self.assertIsNone(r)
+        self.assertEqual(bot.record_rejection.call_args.kwargs.get("reason_code"),
+                         "stale_alert_ttl")
     def test_disabled_when_zero(self):
         bot = _make_bot()
         try: self._evaluate(_alert(age_seconds=600), bot, env={"STALE_ALERT_TTL_SECONDS":"0"})
