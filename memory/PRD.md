@@ -1,6 +1,18 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-24 (v407) — orphan CREATION-CAUSE taxonomy (read-only) — "stitch the cut".**
+> v406 MFE/MAE repair APPLIED on DGX (29/29 corrupt rows healed). New read-only endpoint
+> `GET /api/slow-learning/orphan-taxonomy/report` (`services/orphan_taxonomy.py`) classifies
+> every closed `reconciled_orphan` by HOW it lost tracking — reaped_pending_filled |
+> exit_overfill_residual | share_drift_excess | restart_orphan | true_foreign | unclassified —
+> so each path is sealed in code (not band-aided on the stop). Per class: n / leak_R / leak_USD /
+> markers / **fix_site** / samples (worst-first) + monthly_by_class trend + v405 relink_coverage
+> (incl. `orphan_relink_observe` counts). Tests `test_orphan_taxonomy.py` (8) green; endpoint 200.
+> **RUN ON DGX:** `curl -s "http://localhost:8001/api/slow-learning/orphan-taxonomy/report?days=120" | python3 -m json.tool`
+> → paste back → patch dominant class's fix_site (env-gated observe→fix). Then pivot to the
+> system-wide ENTRY-quality problem (−0.306R/trade) per operator "do A then B". Doc: `memory/v407_orphan_taxonomy_build.md`.
+
 > **🔧 2026-06-24 (v406) — MFE/MAE writer fix (P1, the corrupt-data bug).** Two bugs, both reproduced:
 > (1) manage-loop MFE/MAE tracked from `current_price` with no `<=0` guard → a stale/zero quote set
 > `mae_price=0` → `mae_r≈-50R` permanently (the "-3R MAE, closed -0.06R" symptom); (2) winner_capture>1.0
