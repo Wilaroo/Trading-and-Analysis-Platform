@@ -62,6 +62,14 @@ def _is_enabled() -> bool:
     ).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _prefer_fast_horizon() -> bool:
+    """v401 — bias the scarce L2 slots toward scalp/intraday alerts, where
+    order-flow/tape actually adds edge. Reversible via L2_PREFER_FAST_HORIZON."""
+    return os.environ.get(
+        "L2_PREFER_FAST_HORIZON", "true"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class L2DynamicRouter:
     """Top-3 EVAL → pusher L2 slots dynamic router."""
 
@@ -129,9 +137,20 @@ class L2DynamicRouter:
                     continue
                 priority_val = priority_rank.get(getattr(a, "priority", None), 1)
                 tqs = float(getattr(a, "tqs_score", 0) or 0)
-                # Sort key: highest priority first, then highest TQS,
-                # then youngest alert.
-                sort_key = (priority_val, tqs, -age)
+                # v401 — bias scarce L2 slots toward fast setups (scalp/intraday)
+                # where tape/order-flow adds edge; swing/position get a slot only
+                # if no fast alert wants it. fast is the FIRST sort dimension.
+                fast = 0
+                if _prefer_fast_horizon():
+                    try:
+                        from services.horizon_funnel import horizon_of
+                        if horizon_of(getattr(a, "setup_type", "")) in ("scalp", "intraday"):
+                            fast = 1
+                    except Exception:
+                        fast = 0
+                # Sort key: fast-horizon first, then priority, then TQS, then
+                # youngest alert.
+                sort_key = (fast, priority_val, tqs, -age)
                 scored.append((sort_key, a.symbol))
 
             scored.sort(key=lambda x: x[0], reverse=True)

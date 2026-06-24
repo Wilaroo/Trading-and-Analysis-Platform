@@ -371,6 +371,7 @@ class TQSEngine:
             result.setup_score = await self._setup_service.calculate_score(
                 setup_type=setup_type,
                 symbol=symbol,
+                trade_style=_scoring_style,
                 tape_score=tape_score,
                 tape_confirmation=tape_confirmation,
                 smb_grade=smb_grade,

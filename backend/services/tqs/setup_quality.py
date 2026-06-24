@@ -90,7 +90,9 @@ class SetupQualityScore:
         else:
             ev_read = f"Expectancy {self.expected_value_r:+.2f}R"
         tr = c.get("tape_raw", 0.0)
-        if self.tape_confirmation:
+        if c.get("tape_forced_absent"):
+            tape_read = "Tape n/a for this horizon"
+        elif self.tape_confirmation:
             tape_read = "Order-flow confirms setup"
         elif tr >= 4:
             tape_read = f"Tape reading {tr:.0f}/10"
@@ -104,7 +106,8 @@ class SetupQualityScore:
             "win_rate": disp("Win Rate", self.win_rate_score, wr_read),
             "expected_value": disp("Expected Value", self.ev_score, ev_read,
                                    proxy=c.get("ev_is_proxy")),
-            "tape": disp("Tape", self.tape_score, tape_read, absent=(tr == 0 and not self.tape_confirmation)),
+            "tape": disp("Tape", self.tape_score, tape_read,
+                         absent=(c.get("tape_forced_absent") or (tr == 0 and not self.tape_confirmation))),
             "smb": disp("SMB", self.smb_score, smb_read),
         }
     
@@ -211,6 +214,7 @@ class SetupQualityService:
         self,
         setup_type: str,
         symbol: str,
+        trade_style: Optional[str] = None,
         tape_score: float = 0.0,
         tape_confirmation: bool = False,
         smb_grade: str = "B",
@@ -333,9 +337,23 @@ class SetupQualityService:
         # `else 30` punished absence as if it were a weak tape. Distinguish
         # genuinely-absent (→ neutral 50) from measured-weak (0<score<4 → keep
         # the penalty). Mirrors the v391 absent→neutral philosophy.
-        _tape_absent = (tape_score is None or tape_score <= 0) and not tape_confirmation
+        # v401 — HORIZON-AWARE TAPE: order-flow/tape only adds edge on fast
+        # setups; for swing/position it's noise AND almost always absent (no L2
+        # slot). Drop it explicitly (mark absent → renorm removes it) instead of
+        # carrying a phantom neutral 50. Env-reversible via TQS_TAPE_HORIZON_AWARE.
+        _tape_horizon_drop = (
+            _env_on("TQS_TAPE_HORIZON_AWARE", True)
+            and (trade_style or "").strip().lower() in ("swing", "position")
+        )
+        _tape_absent = _tape_horizon_drop or (
+            (tape_score is None or tape_score <= 0) and not tape_confirmation
+        )
         if _tape_absent:
             result.tape_score = 50.0
+            if _tape_horizon_drop:
+                result.factors.append(
+                    f"Tape dropped for {trade_style} horizon (order-flow not predictive)"
+                )
         else:
             normalized_tape = min(tape_score / 10.0, 1.0) * 100 if tape_score > 0 else 30
             if tape_confirmation:
@@ -395,6 +413,7 @@ class SetupQualityService:
             "ev_is_proxy": bool(_decompress_setup and not has_ev_data),
             "risk_reward": risk_reward if (risk_reward and risk_reward > 0) else 2.0,
             "tape_raw": tape_score,
+            "tape_forced_absent": _tape_horizon_drop,  # v401 horizon-aware drop
             "smb_5var": smb_5var_score,
         }
 

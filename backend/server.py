@@ -4,7 +4,7 @@ Enhanced with Yahoo Finance, TradingView, Insider Trading, COT Data
 Real-Time WebSocket Streaming
 Now with Finnhub integration (60 calls/min), Notifications, Market Context Analysis, and Trade Journal
 """
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, Set
@@ -5044,6 +5044,99 @@ def llm_test_direct():
         return {"ok": True, "response": content, "model": model}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/ai/prewarm-forecast-bars")
+async def prewarm_forecast_bars(request: Request):
+    """v401 — AI-Model coverage pre-warm.
+
+    The time-series forecast needs >=20 daily ('1 day') bars per symbol; symbols
+    below that return usable=False — the dominant cause of the TQS AI-Model
+    'no-data' gap. Find scan-universe symbols short on daily bars and backfill
+    them via the IB collector (DGX-side; needs the live IB connection).
+
+    Body (all optional): {"symbols": [...], "min_bars": 25, "duration": "6 M",
+                          "limit": 300, "dry_run": false}
+    """
+    try:
+        body = {}
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        from services.ib_historical_collector import get_ib_collector
+        collector = get_ib_collector()
+
+        min_bars = int(body.get("min_bars", 25))
+        duration = str(body.get("duration", "6 M"))
+        limit = int(body.get("limit", 300))
+        dry_run = bool(body.get("dry_run", False))
+
+        # 1) candidate universe — explicit list > active alerts > liquid universe
+        symbols = [str(s).upper() for s in (body.get("symbols") or []) if s]
+        source = "request"
+        if not symbols and background_scanner is not None:
+            try:
+                symbols = sorted({
+                    a.symbol.upper() for a in background_scanner.get_live_alerts()
+                    if getattr(a, "symbol", None)
+                })
+                source = "active_alerts"
+            except Exception:
+                symbols = []
+        if not symbols:
+            try:
+                symbols = [s.upper() for s in (await collector.get_liquid_symbols())]
+                source = "liquid_universe"
+            except Exception:
+                symbols = []
+        if not symbols:
+            return {"success": False, "error": "No candidate symbols (no list / alerts / liquid universe)."}
+        symbols = symbols[:limit]
+
+        # 2) count daily bars per candidate; find those below threshold
+        data_col = db["ib_historical_data"]
+
+        def _count_short():
+            pipeline = [
+                {"$match": {"symbol": {"$in": symbols}, "bar_size": "1 day"}},
+                {"$group": {"_id": "$symbol", "n": {"$sum": 1}}},
+            ]
+            counts = {d["_id"]: d["n"] for d in data_col.aggregate(
+                pipeline, allowDiskUse=True, maxTimeMS=30000)}
+            short = [s for s in symbols if counts.get(s, 0) < min_bars]
+            return short
+
+        short = await asyncio.to_thread(_count_short)
+
+        result = {
+            "success": True,
+            "source": source,
+            "candidates": len(symbols),
+            "below_min_bars": len(short),
+            "min_bars": min_bars,
+            "symbols_to_backfill_sample": short[:50],
+            "dry_run": dry_run,
+        }
+        if dry_run or not short:
+            result["message"] = (
+                "Dry run — nothing collected." if dry_run
+                else "All candidates already have enough daily bars."
+            )
+            return result
+
+        # 3) backfill daily bars (force_refresh so recent-but-thin symbols are
+        #    still topped up to >=20 bars).
+        job = await collector.start_collection(
+            symbols=short, bar_size="1 day", duration=duration,
+            use_defaults=False, force_refresh=True,
+        )
+        result["collection_job"] = job
+        return result
+    except Exception as e:
+        logger.error(f"[prewarm-forecast-bars] failed: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.get("/api/stream/status")

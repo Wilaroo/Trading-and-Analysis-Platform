@@ -370,6 +370,57 @@ class TradeExecution:
 
         print(f"   📤 [_execute_trade] Starting execution for {trade.symbol}")
 
+        # v401 — JIT tape confirmation for fast (scalp/intraday) entries. Reads a
+        # top-of-book snapshot via the existing pusher quote RPC (no new pusher
+        # endpoint) and stamps order-flow onto the trade. Advisory unless
+        # TAPE_JIT_GATE=on. Dormant unless TAPE_JIT_CONFIRM=on; never raises into
+        # the order flow.
+        try:
+            from services.tape_confirm_service import (
+                jit_confirm_enabled, jit_gate_enabled, get_tape_confirmation,
+            )
+            if jit_confirm_enabled():
+                from services.horizon_funnel import horizon_of
+                if horizon_of(getattr(trade, "setup_type", "")) in ("scalp", "intraday"):
+                    _dirv = getattr(trade.direction, "value", "long")
+                    _tc = get_tape_confirmation(trade.symbol, _dirv)
+                    if _tc:
+                        try:
+                            trade.tape_score = _tc["tape_score"]
+                        except Exception:
+                            pass
+                        trade.notes = (trade.notes or "") + (
+                            f" [tape {_tc['bias']} {_tc['imbalance']:+.2f} "
+                            f"{'OK' if _tc['confirms'] else 'WEAK'}]"
+                        )
+                        logger.info(
+                            f"[tape-jit] {trade.symbol} {_tc['bias']} "
+                            f"imb={_tc['imbalance']:+.2f} confirms={_tc['confirms']}"
+                        )
+                        if jit_gate_enabled() and not _tc["confirms"]:
+                            logger.warning(
+                                f"[tape-jit] GATE blocked {trade.symbol} — tape "
+                                f"{_tc['bias']} opposes {_dirv} entry"
+                            )
+                            try:
+                                trade.status = TradeStatus.REJECTED
+                            except Exception:
+                                pass
+                            try:
+                                from services.trade_drop_recorder import record_trade_drop
+                                record_trade_drop(
+                                    getattr(bot, "_db", None), gate="tape_jit_confirm",
+                                    symbol=trade.symbol, setup_type=trade.setup_type,
+                                    direction=_dirv,
+                                    reason=f"tape {_tc['bias']} imbalance {_tc['imbalance']:+.2f} opposes entry",
+                                    context={"tape": _tc},
+                                )
+                            except Exception:
+                                pass
+                            return {"executed": False, "reason": "tape_jit_gate", "tape": _tc}
+        except Exception as _tape_e:
+            logger.debug(f"[tape-jit] skipped: {_tape_e}")
+
         # === STRATEGY PHASE CHECK ===
         # This is the gate that controls which strategies execute real trades
         if bot._strategy_promotion_service:
