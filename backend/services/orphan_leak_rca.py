@@ -279,101 +279,110 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
          "leak_usd": round(v["leak_usd"], 0)}
         for k, v in sorted(months.items())]
 
-    # H. relink backtest — replay the v405 _find_reaped_pending match criteria
-    # against historical orphans so the benefit is quantifiable BEFORE enabling
-    # RECONCILE_RELINK_REAPED_PENDING=fix. Mirrors the helper: scan ALL
-    # stale_pending rows on the same symbol+dir within the window (not just the
-    # single most-recent predecessor), then apply the stop/directional/qty gates.
-    # The `funnel` shows where candidates drop off so we know what to fix.
-    funnel = {"orphans_with_stale_pending_cand": 0, "with_valid_stop": 0,
-              "directionally_ok": 0, "qty_ok": 0}
-    bt = {"window_min": gap_min, "matchable": 0, "addressable": 0,
-          "addressable_leak_r": 0.0, "addressable_leak_usd": 0.0,
-          "avg_stop_widening_pct": None, "funnel": funnel, "samples": []}
-    widenings = []
-    for t in orphans:
-        oe = _entry_ts(t)
-        oentry = _fnum(t.get("entry_price")) or _fnum(t.get("fill_price"))
-        odir = str(t.get("direction") or "").lower()
-        if oe is None or not oentry:
-            continue
-        key = ((t.get("symbol") or "").upper(), odir)
-        # all stale_pending candidates that reaped within the window before entry
-        cands = []
-        for c in by_key.get(key, []):
-            if not str(c.get("close_reason") or "").startswith("stale_pending"):
+    # H. relink backtest — replay the v405 match criteria against historical
+    # orphans so the benefit is quantifiable BEFORE enabling fix. Splits by
+    # real vs learning_only (0.1x exploration) trades and tests window
+    # sensitivity, since the reap->orphan gap is often > 90m.
+    def _is_learning(doc):
+        if doc.get("learning_only") is True:
+            return True
+        ec = doc.get("entry_context")
+        return isinstance(ec, dict) and ec.get("learning_only") is True
+
+    def _relink_stats(window_min):
+        st = {"window_min": window_min,
+              "matchable_real": 0, "matchable_learning": 0,
+              "addressable_real": 0, "addressable_learning": 0,
+              "addressable_leak_r_real": 0.0, "addressable_leak_usd_real": 0.0,
+              "addressable_leak_r_learning": 0.0,
+              "samples": []}
+        widen_acc = []
+        for t in orphans:
+            oe = _entry_ts(t)
+            oentry = _fnum(t.get("entry_price")) or _fnum(t.get("fill_price"))
+            odir = str(t.get("direction") or "").lower()
+            if oe is None or not oentry:
                 continue
-            cc = _close_ts(c)
-            if cc is None:
-                continue
-            gap = (oe - cc).total_seconds() / 60.0
-            if 0 <= gap <= gap_min:
-                cands.append(c)
-        if not cands:
-            continue
-        funnel["orphans_with_stale_pending_cand"] += 1
-        # stage 2: at least one candidate has a usable stop
-        with_stop = [c for c in cands if (_fnum(c.get("stop_price")) or 0) > 0]
-        if not with_stop:
-            continue
-        funnel["with_valid_stop"] += 1
-        # stage 3: directional consistency vs orphan entry
-        dir_ok = []
-        for c in with_stop:
-            psp = _fnum(c.get("stop_price"))
-            if odir == "long" and psp < oentry:
-                dir_ok.append(c)
-            elif odir == "short" and psp > oentry:
-                dir_ok.append(c)
-        if not dir_ok:
-            continue
-        funnel["directionally_ok"] += 1
-        # stage 4: qty sanity
-        qty_ok = []
-        qsh = 0
-        try:
-            qsh = int(t.get("shares") or 0)
-        except (TypeError, ValueError):
-            qsh = 0
-        for c in dir_ok:
+            key = ((t.get("symbol") or "").upper(), odir)
             try:
-                osh = int(c.get("original_shares") or c.get("shares") or 0)
+                qsh = int(t.get("shares") or 0)
             except (TypeError, ValueError):
-                osh = 0
-            if osh <= 0 or qsh <= 0 or (0.5 <= qsh / osh <= 2.0):
-                qty_ok.append(c)
-        if not qty_ok:
-            continue
-        funnel["qty_ok"] += 1
-        bt["matchable"] += 1
-        pred = qty_ok[0]
-        psp = _fnum(pred.get("stop_price"))
-        osp = _fnum(t.get("stop_price"))
-        widen = None
-        if osp and oentry and psp:
-            syn_dist = abs(oentry - osp)
-            orig_dist = abs(oentry - psp)
-            if syn_dist > 0:
-                widen = round((orig_dist - syn_dist) / syn_dist * 100.0, 1)
-                widenings.append(widen)
-        reason = str(t.get("close_reason") or "")
-        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
-        if (("oca_closed_externally" in reason or "external" in reason
-             or "stop" in reason) and (r is not None and r < 0)):
-            bt["addressable"] += 1
-            bt["addressable_leak_r"] += r
-            bt["addressable_leak_usd"] += _fnum(t.get("realized_pnl")) or 0.0
-            if len(bt["samples"]) < 12:
-                bt["samples"].append({
-                    "symbol": t.get("symbol"),
-                    "orphan_stop": osp, "original_stop": psp,
-                    "stop_widening_pct": widen,
-                    "orphan_r": round(r, 2), "close_reason": reason[:28]})
-    bt["addressable_leak_r"] = round(bt["addressable_leak_r"], 2)
-    bt["addressable_leak_usd"] = round(bt["addressable_leak_usd"], 0)
-    if widenings:
-        bt["avg_stop_widening_pct"] = round(sum(widenings) / len(widenings), 1)
-    out["relink_backtest"] = bt
+                qsh = 0
+            best = None
+            for c in by_key.get(key, []):
+                if not str(c.get("close_reason") or "").startswith("stale_pending"):
+                    continue
+                cc = _close_ts(c)
+                if cc is None:
+                    continue
+                gap = (oe - cc).total_seconds() / 60.0
+                if not (0 <= gap <= window_min):
+                    continue
+                psp = _fnum(c.get("stop_price"))
+                if not psp or psp <= 0:
+                    continue
+                if odir == "long" and not (psp < oentry):
+                    continue
+                if odir == "short" and not (psp > oentry):
+                    continue
+                try:
+                    osh = int(c.get("original_shares") or c.get("shares") or 0)
+                except (TypeError, ValueError):
+                    osh = 0
+                if osh > 0 and qsh > 0 and not (0.5 <= qsh / osh <= 2.0):
+                    continue
+                best = c
+                break  # by_key is time-ascending; last valid before entry stays
+            if best is None:
+                continue
+            learn = _is_learning(best)
+            if learn:
+                st["matchable_learning"] += 1
+            else:
+                st["matchable_real"] += 1
+            psp = _fnum(best.get("stop_price"))
+            osp = _fnum(t.get("stop_price"))
+            widen = None
+            if osp and oentry and psp:
+                syn = abs(oentry - osp)
+                if syn > 0:
+                    widen = round((abs(oentry - psp) - syn) / syn * 100.0, 1)
+                    if not learn:
+                        widen_acc.append(widen)
+            reason = str(t.get("close_reason") or "")
+            r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+            is_loss_stop = (("oca_closed_externally" in reason or "external" in reason
+                             or "stop" in reason) and (r is not None and r < 0))
+            if is_loss_stop:
+                if learn:
+                    st["addressable_learning"] += 1
+                    st["addressable_leak_r_learning"] += r
+                else:
+                    st["addressable_real"] += 1
+                    st["addressable_leak_r_real"] += r
+                    st["addressable_leak_usd_real"] += _fnum(t.get("realized_pnl")) or 0.0
+                if len(st["samples"]) < 12:
+                    st["samples"].append({
+                        "symbol": t.get("symbol"), "learning_only": learn,
+                        "setup": best.get("setup_type"),
+                        "orphan_stop": osp, "original_stop": psp,
+                        "stop_widening_pct": widen,
+                        "orphan_r": round(r, 2), "close_reason": reason[:26]})
+        st["addressable_leak_r_real"] = round(st["addressable_leak_r_real"], 2)
+        st["addressable_leak_usd_real"] = round(st["addressable_leak_usd_real"], 0)
+        st["addressable_leak_r_learning"] = round(st["addressable_leak_r_learning"], 2)
+        st["avg_stop_widening_pct_real"] = (round(sum(widen_acc) / len(widen_acc), 1)
+                                            if widen_acc else None)
+        return st
+
+    out["relink_backtest"] = _relink_stats(gap_min)
+    out["relink_window_sensitivity"] = [
+        {"window_min": w,
+         "matchable_real": s["matchable_real"],
+         "matchable_learning": s["matchable_learning"],
+         "addressable_real": s["addressable_real"],
+         "addressable_leak_r_real": s["addressable_leak_r_real"]}
+        for w, s in ((w, _relink_stats(w)) for w in (90, 360, 1440, 2880))]
     return out
 
 
