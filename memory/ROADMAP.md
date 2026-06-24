@@ -1,3 +1,18 @@
+> # 🧭 ACTIVE PROGRAM — ENTRY EDGE SCORE REBUILD (do not drift)
+> **The current top-priority program is the Entry Edge Score rebuild.**
+> Read **`memory/ENTRY_EDGE_SCORE_PLAN.md`** (LOCKED master plan) before doing
+> any scoring/TQS/gate work. Summary:
+> - TQS 5-pillars = proven noise → being REPLACED (do NOT reweight/patch them).
+> - ML gate confidence = noise/inverted → demoted to an input feature.
+> - Score = triple **(EDGE expected-R · GRADE rolling per-archetype %ile, single
+>   number no letter · CONFIDENCE per-cell CI)** on the archetype cell
+>   `setup × dir × style × time_window × market/sector/symbol regime`, with
+>   hierarchical shrinkage.
+> - Sequence: **Phase 0 (persistence, IN PROGRESS)** → P3′ Edge Score v1 (shadow)
+>   → P4′ regime-conditional + shrinkage → promote to single authority → feed finding.
+> - Everything shadow/observe-first, env-flagged, reversible. P3 hinge is RESOLVED.
+
+
 # TradeCommand / SentCom — Roadmap & Backlog
 
 Open priorities, deferred ideas, and backlog. Move items to

@@ -1,3 +1,22 @@
+## 2026-06-24 — ENTRY EDGE SCORE · PHASE 0 (persistence, observe-only) + plan LOCKED
+Rebuild program kicked off. LOCKED PLAN: `memory/ENTRY_EDGE_SCORE_PLAN.md` (future agents:
+do NOT reweight/patch the dead TQS pillars; do NOT trust the inverted gate confidence as an
+authority; stay on this plan). Score = triple (EDGE expected-MFE-R · GRADE rolling per-archetype
+%ile, single number no letter · CONFIDENCE per-cell CI) on the archetype cell
+`setup×direction×style×time_window×market/sector/symbol regime` with hierarchical shrinkage.
+Architecture program updated: P3 hinge RESOLVED (third path — replace both noisy authorities),
+P3′/P4′ inserted into ARC-2, patch-the-pillars premise retired. DATA_INTEGRITY_PLAN: Phase 0 +
+feed rows 14/15/16 added. Concept mockups generated (single number ring, edge drawer, two-TSLA
+GO vs STAND-DOWN, regime cockpit).
+PHASE 0 SHIPPED (backend): `opportunity_evaluator.build_entry_context` stamps `sector_regime`,
+`rs_rating`, `symbol_rs_regime` (new `_classify_rs_regime` static helper), reliable `trigger_price`
+— observe-only, no gate consumes them yet. NEW read-only `services/entry_edge_coverage.py` +
+`GET /api/slow-learning/entry-edge-coverage/report?days=45` (per-field coverage % +
+`archetype_cell.complete_pct`). Verified: py_compile OK, import OK, endpoint 200 (n=0 on preview),
+RS-band cases all green. NEXT: operator pull+restart → run coverage after a live session → if
+sector_regime/rs_rating dark, add sync fallback in build_entry_context → then start P3′.
+
+
 ## 2026-06-24 — ENTRY FEATURE-DISCOVERY (read-only) — what ACTUALLY predicts MFE?
 After proving all 5 TQS pillars are noise vs MFE, this finds the real signal. NEW
 `services/entry_feature_discovery.py` + `GET /api/slow-learning/entry-feature-discovery/report?days=&min_n=&cat_min=`.

@@ -2952,6 +2952,24 @@ class OpportunityEvaluator:
         ctx["market_regime"] = regime
         ctx["regime_score"] = regime_score
 
+        # 2b. PHASE 0 (Entry Edge Score) — persist the regime + chase dimensions the
+        # regime-conditional model needs but build_entry_context historically DROPPED.
+        # OBSERVE-ONLY: stamped for learning; NOT consumed by any live gate yet.
+        # Plan: memory/ENTRY_EDGE_SCORE_PLAN.md
+        # Coverage: GET /api/slow-learning/entry-edge-coverage/report
+        ctx["sector_regime"] = alert.get("sector_regime") or "unknown"
+        _rs = alert.get("rs_rating")
+        try:
+            ctx["rs_rating"] = int(_rs) if _rs is not None else None
+        except (TypeError, ValueError):
+            ctx["rs_rating"] = None
+        ctx["symbol_rs_regime"] = self._classify_rs_regime(ctx["rs_rating"])
+        try:
+            _tp = float(alert.get("trigger_price") or 0.0)
+            ctx["trigger_price"] = round(_tp, 4) if _tp > 0 else None
+        except (TypeError, ValueError):
+            ctx["trigger_price"] = None
+
         # 3. Strategy filter context (smart filter)
         ctx["filter_action"] = filter_action
         ctx["filter_win_rate"] = filter_win_rate
@@ -3342,6 +3360,27 @@ class OpportunityEvaluator:
             return "power_hour"
         else:
             return "after_hours"
+
+    @staticmethod
+    def _classify_rs_regime(rs_rating) -> str:
+        """Phase 0 (Entry Edge Score) — symbol relative-strength regime BAND from
+        the RS rating (1..99). The band, not the raw number, is the archetype-cell
+        dimension the regime-conditional Edge Score (P4') conditions on."""
+        if rs_rating is None:
+            return "unknown"
+        try:
+            r = int(rs_rating)
+        except (TypeError, ValueError):
+            return "unknown"
+        if r >= 80:
+            return "leader"
+        if r >= 60:
+            return "strong"
+        if r >= 41:
+            return "neutral"
+        if r >= 21:
+            return "weak"
+        return "laggard"
 
     def generate_explanation(self, alert: Dict, shares: int, entry: float, stop: float, targets: List[float], intelligence: Dict, bot: 'TradingBotService'):
         """Generate detailed explanation for the trade with intelligence data"""

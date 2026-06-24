@@ -1,6 +1,37 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-24 — ENTRY EDGE SCORE rebuild is the ACTIVE program. LOCKED PLAN: `memory/ENTRY_EDGE_SCORE_PLAN.md` (read before any scoring/TQS/gate work).**
+> TQS deep-dive + entry-feature discovery (n=1002) proved BOTH decision authorities are
+> noise: TQS composite spearman≈0 vs MFE (all 5 pillars dead, root cause = absent→neutral-50
+> variance collapse + anti-predictive hardcoded tables + no setup×regime interaction + zero
+> outcome-calibration), and the ML gate confidence_score is −0.029 vs MFE and INVERTED
+> (`go` worse than `reduce`). DECISION: replace both with ONE outcome-calibrated **Entry Edge
+> Score** = triple **(EDGE expected-MFE-R · GRADE rolling per-archetype percentile 0-100, single
+> number NO letter · CONFIDENCE per-cell eff_n/CI)** on the archetype cell
+> `setup × direction × style × time_window × market/sector/symbol regime`, with hierarchical
+> shrinkage. Grade ranks ("best of its kind"); EDGE decides (GO iff conservative edge > 0).
+> Resolves the architecture program's P3 hinge (third path) and retires the patch-the-pillars
+> premise. Sequence: **Phase 0 persistence (DONE backend, observe-only)** → P3′ Edge Score v1
+> (shadow) → P4′ regime-conditional + shrinkage → promote to single authority → feed the scanner/
+> focus-list (finding). Docs: `TQS_DEEPDIVE_AUDIT_2026-06.md`, `ARCHITECTURE_REVIEW_2026-06.md`
+> (updated), `DATA_INTEGRITY_PLAN_2026-06.md` (Phase 0 folded in). Mockups: design_mockups concepts.
+>
+> **PHASE 0 SHIPPED (backend, observe-only, NO live behavior change):**
+> `opportunity_evaluator.build_entry_context` now stamps `sector_regime`, `rs_rating`,
+> `symbol_rs_regime` (new `_classify_rs_regime` band helper: leader≥80/strong≥60/neutral≥41/
+> weak≥21/laggard/unknown), and reliable `trigger_price` onto entry_context — the regime + chase
+> dimensions the regime-conditional model needs but build_entry_context historically DROPPED
+> (sector_regime was computed on the alert then discarded; rs_rating never persisted). NEW read-only
+> coverage report `services/entry_edge_coverage.py` + `GET /api/slow-learning/entry-edge-coverage/report?days=45`
+> — reports per-field coverage % + `archetype_cell.complete_pct` (fraction of trades with ALL 7
+> dims present = the gate for when P4' has enough fully-dimensioned data). Verified locally
+> (compiles, imports, endpoint 200, RS-band logic green; n=0 on preview pod — real data on DGX).
+> NEXT: operator pulls+restarts → after a live session run the coverage report; new fields should
+> trend up from 0. If sector_regime/rs_rating stay dark, wire a sync fallback
+> (rs_leadership_service.get_rating_cached / sector classifier) in build_entry_context.
+
+
 > **🔧 2026-06-24 (v408) — GENERALIZED orphan relink (Seal #1, env observe default).**
 > Taxonomy proved 87% of the −$5,714 orphan leak = 6 large positions that lost bot
 > tracking and got OCA-stopped on a synthetic 2% stop (ARM −$1,398, ALNY −$1,106,
