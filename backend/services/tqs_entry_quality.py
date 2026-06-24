@@ -219,3 +219,113 @@ def _headline(out):
                 f"avg_mfe_r={best.get('avg_mfe_r')} vs {worst['bucket']} "
                 f"avg_mfe_r={worst.get('avg_mfe_r')})")
     return msg
+
+
+# ── Per-pillar predictiveness ────────────────────────────────────────────────
+# Which of the 5 TQS pillars actually tracks entry quality (MFE_R)? Reads the
+# pillar subscores persisted at entry under bot_trades.entry_context.tqs.
+PILLARS = ["setup", "technical", "fundamental", "context", "execution"]
+
+
+def _tertile_mfe(pairs):
+    """pairs = [(pillar_score, mfe_r)]. avg MFE in low/mid/high score tertiles."""
+    pairs = [(s, m) for s, m in pairs if s is not None and m is not None]
+    if len(pairs) < 9:
+        return None
+    pairs.sort(key=lambda x: x[0])
+    n = len(pairs)
+    a, b = n // 3, 2 * n // 3
+
+    def am(seg):
+        ms = [m for _, m in seg]
+        return round(sum(ms) / len(ms), 3) if ms else None
+    return {"low": am(pairs[:a]), "mid": am(pairs[a:b]), "high": am(pairs[b:])}
+
+
+def generate_pillar_report(db, days: int = 30, min_n: int = 30) -> dict:
+    out = {
+        "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "report_period_days": days,
+        "n": 0, "pillars": [], "current_weights": {},
+        "suggested_weights_by_mfe_signal": {}, "composite_spearman_vs_mfe": None,
+    }
+    if db is None:
+        return out
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    proj = {"_id": 0, "entry_context": 1, "realized_pnl": 1, "risk_amount": 1,
+            "mfe_r": 1, "timestamp": 1, "created_at": 1, "closed_at": 1}
+    data = {p: {"score": [], "r": [], "mfe": []} for p in PILLARS}
+    comp_s, comp_m = [], []
+    weight_votes = {}   # json(weights) -> count
+    n = 0
+    for t in db["bot_trades"].find({"status": "closed"}, proj):
+        ts = t.get("closed_at") or t.get("timestamp") or t.get("created_at")
+        if ts and str(ts) < cutoff:
+            continue
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if r is None:
+            continue
+        ec = t.get("entry_context") or {}
+        tqs = (ec.get("tqs") or {}) if isinstance(ec, dict) else {}
+        ps = tqs.get("pillar_scores")
+        if not isinstance(ps, dict) or not ps:
+            continue
+        mfe = _f(t.get("mfe_r"))
+        if mfe is not None and abs(mfe) > MAX_PLAUSIBLE_R:
+            mfe = None
+        n += 1
+        w = tqs.get("weights")
+        if isinstance(w, dict) and w:
+            key = ",".join(f"{p}:{round(_f(w.get(p)) or 0, 3)}" for p in PILLARS)
+            weight_votes[key] = weight_votes.get(key, 0) + 1
+        for p in PILLARS:
+            sc = _f(ps.get(p))
+            if sc is None:
+                continue
+            data[p]["score"].append(sc)
+            data[p]["r"].append(r)
+            data[p]["mfe"].append(mfe)
+        comp = _f(tqs.get("post_gate_score") or tqs.get("score"))
+        if comp is not None and mfe is not None:
+            comp_s.append(comp)
+            comp_m.append(mfe)
+
+    # modal weights actually in force
+    cur_w = {}
+    if weight_votes:
+        top = max(weight_votes.items(), key=lambda kv: kv[1])[0]
+        cur_w = {kv.split(":")[0]: float(kv.split(":")[1]) for kv in top.split(",")}
+
+    rows = []
+    for p in PILLARS:
+        d = data[p]
+        pairs = [(s, m) for s, m in zip(d["score"], d["mfe"]) if m is not None]
+        rows.append({
+            "pillar": p,
+            "n": len(d["score"]),
+            "current_weight": cur_w.get(p),
+            "spearman_vs_mfe": _spearman([s for s, _ in pairs], [m for _, m in pairs]) if len(pairs) >= min_n else None,
+            "spearman_vs_r": _spearman(d["score"], d["r"]) if len(d["score"]) >= min_n else None,
+            "mfe_by_score_tertile": _tertile_mfe(pairs),
+        })
+    rows.sort(key=lambda x: (x["spearman_vs_mfe"] is None, -(x["spearman_vs_mfe"] or -9.0)))
+
+    pos = {r["pillar"]: r["spearman_vs_mfe"] for r in rows
+           if r["spearman_vs_mfe"] and r["spearman_vs_mfe"] > 0}
+    tot = sum(pos.values())
+    suggested = {p: round(v / tot, 2) for p, v in pos.items()} if tot else {}
+
+    out.update({
+        "n": n, "pillars": rows, "current_weights": cur_w,
+        "suggested_weights_by_mfe_signal": suggested,
+        "composite_spearman_vs_mfe": _spearman(comp_s, comp_m) if len(comp_s) >= min_n else None,
+    })
+    best = rows[0] if rows else {}
+    out["headline"] = (
+        f"Most-predictive pillar: {best.get('pillar')} "
+        f"(spearman_vs_mfe={best.get('spearman_vs_mfe')}, weight={best.get('current_weight')}). "
+        f"Suggested MFE-signal weights: {suggested or 'no pillar shows positive MFE signal'}."
+    )
+    return out
+

@@ -427,6 +427,22 @@ async def get_tqs_entry_quality_report(days: int = Query(30), min_n: int = Query
     return {"success": True, "report": report}
 
 
+@router.get("/tqs-pillar-predictiveness/report")
+async def get_tqs_pillar_predictiveness_report(days: int = Query(30), min_n: int = Query(30)):
+    """Per-pillar TQS predictiveness (read-only) — which of the 5 pillars tracks MFE?
+
+    Reads the pillar subscores persisted at entry under
+    bot_trades.entry_context.tqs.pillar_scores and computes spearman(pillar, MFE_R)
+    + spearman(pillar, realized_R) for each pillar, alongside the weight currently
+    in force. Surfaces the mis-weighting (high weight on low-signal pillars) and a
+    suggested MFE-signal-proportional reweight (advisory — NOT auto-applied).
+    """
+    from services.tqs_entry_quality import generate_pillar_report
+    from database import get_database
+    report = generate_pillar_report(get_database(), days=days, min_n=min_n)
+    return {"success": True, "report": report}
+
+
 
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):

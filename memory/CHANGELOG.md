@@ -15,6 +15,17 @@ n16, -9.52R!), backside (-7.26R), squeeze (-6.78R), rs_leader_break (-4.22R).
    monotonic ±1, tie-ranking, empty-db safe. All green. Endpoint syntax-clean.
  • NEXT: run on DGX; read the verdict. Then (a) kill/suppress daily_breakout (0% win, v403 suppress not
    biting), (b) backside time-decay exit, (c) if TQS non-predictive → TQS pillar re-audit vs MFE target.
+ • RESULT (run on DGX, days=30, n=493 scored): VERDICT=non_predictive. spearman(TQS,realized_R)=0.002,
+   spearman(TQS,MFE_R)=-0.033. Grade ladder scrambled (B avg -0.181R worse than C+/C/D; D positive).
+   61% of trades cluster in the 50-59 score band which alone bleeds -38.74R; lowest band (0-39) is
+   POSITIVE. TQS composite is noise for entry quality → the Confidence-Gate is gating on noise.
+ • PER-PILLAR (v-followup): pillar subscores ARE persisted at bot_trades.entry_context.tqs.pillar_scores
+   (347/509 coverage). Smoking gun in the WEIGHTS: fundamental=0.40 (!) dominates the composite while
+   technical=0.10; setup/technical/execution (the price-action pillars that should drive entry quality)
+   are only 0.40 combined. Built `generate_pillar_report` + `GET /api/slow-learning/tqs-pillar-predictiveness/report`
+   (spearman of each pillar vs MFE_R/realized_R, modal weights in force, MFE-by-score-tertile, advisory
+   MFE-signal reweight). TESTED (test file now 8 green). NEXT: run it → reweight TQS toward the
+   MFE-predictive pillars, drop/down-weight fundamental for intraday/scalp, re-grade calibration.
 
 
 

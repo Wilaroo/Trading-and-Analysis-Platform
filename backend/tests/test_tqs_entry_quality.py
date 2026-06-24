@@ -76,3 +76,39 @@ def test_inverted_when_high_tqs_worse():
 def test_empty_db_safe():
     rep = generate_report(None, days=30)
     assert rep["by_grade"] == [] and rep["overall"] == {}
+
+
+def _ptrade(setup, tech, fund, ctx_, exe, r, mfe):
+    return {"status": "closed", "realized_pnl": r, "risk_amount": 1.0, "mfe_r": mfe,
+            "entry_context": {"tqs": {
+                "pillar_scores": {"setup": setup, "technical": tech, "fundamental": fund,
+                                  "context": ctx_, "execution": exe},
+                "weights": {"setup": 0.15, "technical": 0.10, "fundamental": 0.40,
+                            "context": 0.20, "execution": 0.15},
+                "post_gate_score": 50.0}}}
+
+
+def test_pillar_predictiveness_finds_signal_pillar():
+    from services.tqs_entry_quality import generate_pillar_report
+    docs = []
+    # 'technical' tracks MFE strongly; 'fundamental' is pure noise.
+    for i in range(60):
+        hi = i % 2 == 0
+        tech = 80 if hi else 30
+        fund = 30 if hi else 80          # inversely related to outcome
+        mfe = 1.8 if hi else 0.1
+        r = 1.2 if hi else -0.8
+        docs.append(_ptrade(50, tech, fund, 50, 50, r, mfe))
+    rep = generate_pillar_report(_DB(docs), days=3650, min_n=10)
+    by = {p["pillar"]: p for p in rep["pillars"]}
+    assert by["technical"]["spearman_vs_mfe"] > 0.5
+    assert by["fundamental"]["spearman_vs_mfe"] < 0
+    assert rep["pillars"][0]["pillar"] == "technical"      # ranked most-predictive
+    assert rep["current_weights"]["fundamental"] == 0.40   # modal weights surfaced
+    assert "technical" in rep["suggested_weights_by_mfe_signal"]
+
+
+def test_pillar_report_empty_db_safe():
+    from services.tqs_entry_quality import generate_pillar_report
+    rep = generate_pillar_report(None, days=30)
+    assert rep["pillars"] == [] and rep["n"] == 0
