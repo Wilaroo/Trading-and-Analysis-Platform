@@ -66,16 +66,28 @@ pivot to **B** — system-wide entry quality (−0.306R/trade).
 
 ## Seal #2 forensic shipped (same day) — `services/orphan_lineage_probe.py`
 Read-only endpoint `GET /api/slow-learning/orphan-lineage/probe` classifies every
-closed orphan's lineage by cross-referencing the bot's UNBOUNDED trade history +
-`order_queue` + `ib_executions`:
-- `lineage_recent` — genuine bot_trade within window (relinkable; not record-less).
-- `old_lineage` — genuine bot_trade OLDER than `lineage_window_days` (240) → old
-  swing the taxonomy window missed → widen relink window (benign).
-- `order_no_trade` — `order_queue` has the symbol but NO bot_trade row → the
-  `bot_trades` write/persist gap (the real bug; fix at the write site).
-- `truly_absent` — nothing anywhere → pre-bot legacy or hard-deleted record →
-  retention investigation + contextless-adopt policy.
+closed orphan's lineage against the bot's UNBOUNDED history + `order_queue` +
+`ib_executions`: relinkable_lineage | old_lineage | order_no_trade | truly_absent.
 Tests `tests/test_orphan_lineage_probe.py` (6) green; endpoint 200.
-RUN: `curl -s ".../orphan-lineage/probe?days=120" | python3 -m json.tool`
-→ the dominant class routes Seal #2's source fix.
+
+### DGX RESULT (2026-06-24, days=120) — decisive
+- **relinkable_lineage: 99 orphans / −$4,794 (84%)** — predecessors are
+  `stale_pending_auto_reaper` / `broker_rejected` / `scalp_time_decay` bot trades
+  (null entry_time → recency taken from close/reap). **Seal #1 (v408 relink) heals
+  these** by inheriting the real stop. ⇒ validate observe → flip
+  `RECONCILE_RELINK_ANY_PREDECESSOR=fix`.
+- **order_no_trade: 15 / −$655** — order_queue shows the symbol (SHLD 483 hits
+  latest=filled, CCI filled, AA filled) but NO bot_trade row → the bot_trades
+  write/persist gap.
+- **truly_absent: 6 / −$265** — direct `ib_executions` fills (ALAB ×4, FCX ×11,
+  WFC ×17) with no order_queue + no bot_trade → direct-path fill never created a
+  tracked trade.
+
+### Seal #2 (the remaining −$920) — SAFETY-CRITICAL, deferred-with-care
+The fill→bot_trade write gap lives in the order/fill attribution path
+(pre_submit_at PENDING pre-write + direct/queue fill handling). Per AGENTS.md this
+is safety-critical (`_open_trades`/pending) — must be forked (`_custom`), observe-
+first, never patched in place. Lower $ than the system-wide entry-quality problem
+(−0.306R/trade), so sequence per operator.
+
 

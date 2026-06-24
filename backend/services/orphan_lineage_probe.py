@@ -22,7 +22,7 @@ import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
 
-from services.orphan_leak_rca import _fnum, _clean_r, _entry_ts, _close_ts
+from services.orphan_leak_rca import _fnum, _clean_r, _entry_ts, _close_ts, _parse_ts
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def generate_report(db, days: int = 120, lineage_window_days: int = 240) -> dict
                  "setup_type": {"$nin": list(_RECONCILED_SETUPS)}},
                 {"_id": 0, "id": 1, "setup_type": 1, "entered_by": 1,
                  "close_reason": 1, "entry_time": 1, "closed_at": 1,
-                 "stop_price": 1}).sort("entry_time", -1).limit(8)
+                 "reaped_at": 1, "stop_price": 1}).sort("entry_time", -1).limit(8)
         except Exception:
             return None
         for d in cur:
@@ -114,15 +114,23 @@ def generate_report(db, days: int = 120, lineage_window_days: int = 240) -> dict
         pred = _genuine_lineage(sym, dir_l, o.get("id"))
         ev = {}
         if pred is not None:
+            # Reaped/rejected predecessors have a null entry_time — fall back to
+            # their close/reap time so the recency (and relinkability) is honest.
             pe = _entry_ts(pred)
-            days_ago = (now - pe).days if pe else None
+            pc = _close_ts(pred) or _parse_ts(pred.get("reaped_at"))
+            basis_ts = pe or pc
+            days_ago = (now - basis_ts).days if basis_ts else None
             ev = {"pred_id": pred.get("id"),
                   "pred_setup": pred.get("setup_type"),
                   "pred_close_reason": pred.get("close_reason"),
-                  "pred_entry_days_ago": days_ago}
-            cls = ("lineage_recent" if (days_ago is not None
-                                        and days_ago <= lineage_window_days)
-                   else "old_lineage")
+                  "pred_recency_days_ago": days_ago,
+                  "pred_recency_basis": ("entry" if pe else "close" if pc else None)}
+            # Has lineage → Seal #1 (v408) relinks it, UNLESS it's a genuinely old
+            # swing (older than the relink window).
+            if days_ago is not None and days_ago > lineage_window_days:
+                cls = "old_lineage"
+            else:
+                cls = "relinkable_lineage"
         else:
             oq_n, oq_latest = _order_queue_hits(sym)
             ie_n = _ib_exec_hits(sym)
@@ -160,16 +168,23 @@ def generate_report(db, days: int = 120, lineage_window_days: int = 240) -> dict
     breakdown.sort(key=lambda x: x["leak_usd"])
     out["lineage"] = breakdown
     out["legend"] = {
-        "lineage_recent": "genuine bot_trade within window — relinkable (not record-less).",
-        "old_lineage": "genuine bot_trade older than window — old swing; widen relink window.",
-        "order_no_trade": "order_queue exists but NO bot_trade — the bot_trades write/persist gap.",
-        "truly_absent": "no bot_trade and no order_queue — pre-bot legacy or hard-deleted record.",
+        "relinkable_lineage": "genuine bot_trade predecessor (often a reaped/"
+            "rejected pending) — Seal #1 (v408 relink) heals it by inheriting the "
+            "real stop/context.",
+        "old_lineage": "genuine bot_trade but OLDER than the window — old swing; "
+            "widen RECONCILE_RELINK_ANY_WINDOW_MIN.",
+        "order_no_trade": "order_queue exists (often status=filled) but NO bot_trade "
+            "— the bot_trades write/persist gap (the record-less bug).",
+        "truly_absent": "no bot_trade and no order_queue (may have direct "
+            "ib_executions fills) — direct-path fill that never created a tracked "
+            "trade / legacy / hard-deleted record.",
     }
     worst = breakdown[0] if breakdown else None
     out["verdict"] = (
         (f"{len(orphans)} closed orphans probed. Biggest $ lineage class: "
          f"{worst['lineage_class']} ({worst['n']} orphans, ${int(worst['leak_usd'])}). "
-         "order_no_trade ⇒ fix the bot_trades write gap; truly_absent ⇒ legacy/"
-         "retention + contextless-adopt policy; old_lineage ⇒ widen relink window.")
+         "relinkable_lineage ⇒ Seal #1 (v408) heals it (flip to fix); "
+         "order_no_trade/truly_absent ⇒ Seal #2 source fix (fill→bot_trade write "
+         "gap on the direct/queue path).")
         if worst else "No closed reconciled_orphan rows in the window.")
     return out

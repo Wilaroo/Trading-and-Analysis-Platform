@@ -101,13 +101,13 @@ def test_old_lineage_beyond_window():
     rep = generate_report(db, lineage_window_days=240)
     row = _find(rep, "old_lineage")
     assert row and row["n"] == 1
-    assert row["samples"][0]["evidence"]["pred_entry_days_ago"] > 240
+    assert row["samples"][0]["evidence"]["pred_recency_days_ago"] > 240
 
 
-def test_lineage_recent_within_window():
+def test_relinkable_lineage_within_window():
     db = _DB([_orphan("AAPL", "long", -10.0), _genuine("AAPL", "long", 30)])
     rep = generate_report(db, lineage_window_days=240)
-    assert _find(rep, "lineage_recent")["n"] == 1
+    assert _find(rep, "relinkable_lineage")["n"] == 1
 
 
 def test_order_no_trade():
