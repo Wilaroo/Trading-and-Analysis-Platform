@@ -531,6 +531,65 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
         abt["avg_current_stop_pct"] = round(sum(cur_pcts) / len(cur_pcts), 2)
         abt["avg_proposed_stop_pct"] = round(sum(prop_pcts) / len(prop_pcts), 2)
     out["atr_stop_backtest"] = abt
+
+    # K. ATR source comparison — adv_cache.atr_pct looked inflated for momentum
+    # names (ARM 11.5%, ARMG 24.9%). Compare it against the bot's OWN evaluation
+    # ATR (entry_context.atr_percent / atr) from the most recent real bot_trade on
+    # each orphan symbol, to pick a TRUSTWORTHY stop-sizing source.
+    asc = {"symbols_checked": 0, "with_bot_atr": 0,
+           "with_adv_atr": 0, "rows": []}
+    seen = set()
+    for t in orphans:
+        sym = (t.get("symbol") or "").upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        asc["symbols_checked"] += 1
+        adv = atr_map.get(sym)
+        try:
+            adv = round(float(adv) * 100, 2) if adv is not None else None
+        except (TypeError, ValueError):
+            adv = None
+        if adv:
+            asc["with_adv_atr"] += 1
+        # most recent real (non-artifact) bot_trade on this symbol with an atr
+        bot_atr_pct = bot_atr_abs = None
+        try:
+            for d in db["bot_trades"].find(
+                    {"symbol": sym,
+                     "setup_type": {"$nin": list(ARTIFACT_SETUPS)}},
+                    {"_id": 0, "entry_context": 1, "entry_price": 1,
+                     "fill_price": 1}).sort("created_at", -1).limit(5):
+                ec = d.get("entry_context")
+                if not isinstance(ec, dict):
+                    continue
+                ap = ec.get("atr_percent")
+                aa = ec.get("atr")
+                if ap is not None:
+                    try:
+                        bot_atr_pct = round(float(ap), 2)
+                    except (TypeError, ValueError):
+                        pass
+                if aa is not None and bot_atr_abs is None:
+                    try:
+                        ep = _fnum(d.get("entry_price")) or _fnum(d.get("fill_price"))
+                        bot_atr_abs = (round(float(aa) / ep * 100, 2)
+                                       if ep and ep > 0 else None)
+                    except (TypeError, ValueError):
+                        pass
+                if bot_atr_pct is not None:
+                    break
+        except Exception:
+            pass
+        if bot_atr_pct is not None or bot_atr_abs is not None:
+            asc["with_bot_atr"] += 1
+        if len(asc["rows"]) < 20:
+            asc["rows"].append({
+                "symbol": sym,
+                "adv_cache_atr_pct": adv,
+                "bot_entry_context_atr_percent": bot_atr_pct,
+                "bot_entry_context_atr_as_pct_of_entry": bot_atr_abs})
+    out["atr_source_comparison"] = asc
     return out
 
 
