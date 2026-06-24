@@ -30,6 +30,21 @@
 > NEXT: operator pulls+restarts → after a live session run the coverage report; new fields should
 > trend up from 0. If sector_regime/rs_rating stay dark, wire a sync fallback
 > (rs_leadership_service.get_rating_cached / sector classifier) in build_entry_context.
+>
+> **P3′ EDGE SCORE v1 BUILT (read-only model + OUT-OF-SAMPLE lift proof):**
+> `services/entry_edge_score.py` — additive expected-R = global_mean + Σ shrunk marginal deltas
+> (time_window, direction, timeframe, priority, setup_type + quantile-binned regime_score/rsi/
+> trigger_probability/tape_score; empirical-Bayes K=20; reconciled_* excluded). The score TRIPLE
+> via `score_full()`: EDGE (expected-R) · GRADE (0-100 rolling per-archetype percentile, no letter)
+> · CONFIDENCE (eff_n band) + per-factor "why" contributions. Endpoint
+> `GET /api/slow-learning/entry-edge-score/report?days=120&target=mfe_r|realized_r&k_folds=5`
+> evaluates OUT-OF-SAMPLE via K-fold CV → decile lift, OOS Spearman vs mfe_r AND realized_R,
+> per-factor effects, and a per-(setup×direction) within-archetype grade-reliability check.
+> Synthetic validation GREEN (`tests/test_entry_edge_score.py`): signal → OOS spearman 0.74,
+> top-decile +0.58R vs bottom −0.84R; noise → conservative −0.04 (never invents lift); triple
+> orders good vs bad correctly. NEXT: operator runs the report on the DGX (~808 real entries) to
+> read REAL OOS lift vs the champion gate (−0.029/inverted); beat it → wire the live shadow arm
+> (market-open work).
 
 
 > **🔧 2026-06-24 (v408) — GENERALIZED orphan relink (Seal #1, env observe default).**

@@ -1,3 +1,23 @@
+## 2026-06-24 — ENTRY EDGE SCORE · P3′ v1 model + OUT-OF-SAMPLE lift proof (read-only)
+Built the replacement-spine scorer. NEW `services/entry_edge_score.py`: additive,
+interpretable expected-R model = global_mean + Σ shrunk marginal deltas over the
+robust factors (time_window, direction, timeframe, priority, setup_type + quantile-
+binned regime_score/rsi/trigger_probability/tape_score). Empirical-Bayes shrinkage
+(K=20); continuous binning auto-captures regime_score sign-inversion; reconciled_*
+artifacts excluded. NEW endpoint `GET /api/slow-learning/entry-edge-score/report?
+days=120&target=mfe_r|realized_r&k_folds=5` evaluates OUT-OF-SAMPLE via K-fold CV
+→ decile lift (avg realized_R/mfe_r/win% per predicted-edge decile), OOS Spearman
+vs mfe_r AND realized_R, and per-factor best/worst effects. OOS ranking uses the
+delta-sum (not per-fold baseline) to avoid a CV baseline artifact; estimator has a
+small CONSERVATIVE negative noise floor (~−0.04, never invents positive lift).
+Synthetic validation GREEN (`tests/test_entry_edge_score.py`): planted signal →
+OOS spearman 0.74, top-decile +0.58R vs bottom −0.84R, factors recovered; pure
+noise → −0.04 (no false positive). Verified: py_compile OK, endpoint 200 (n=0 on
+preview; real data on DGX). NEXT: operator runs the report on the DGX (~808 real
+entries) to read REAL OOS lift vs the champion gate (−0.029/inverted); if it beats
+champion → wire the live shadow arm (market-open work). Plan: ENTRY_EDGE_SCORE_PLAN.md (P3′).
+
+
 ## 2026-06-24 — ENTRY EDGE SCORE · PHASE 0 (persistence, observe-only) + plan LOCKED
 Rebuild program kicked off. LOCKED PLAN: `memory/ENTRY_EDGE_SCORE_PLAN.md` (future agents:
 do NOT reweight/patch the dead TQS pillars; do NOT trust the inverted gate confidence as an

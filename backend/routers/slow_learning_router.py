@@ -477,6 +477,26 @@ async def get_entry_edge_coverage_report(days: int = Query(45)):
     return {"success": True, "report": report}
 
 
+@router.get("/entry-edge-score/report")
+async def get_entry_edge_score_report(days: int = Query(120),
+                                      target: str = Query("mfe_r"),
+                                      k_folds: int = Query(5)):
+    """Entry Edge Score v1 (P3') — expected-R model + OUT-OF-SAMPLE lift proof (READ-ONLY).
+
+    Fits an additive, shrunk marginal-factor model (time_window, direction,
+    timeframe, priority, setup_type + binned regime_score/rsi/trigger_prob/tape)
+    on closed real-entry `bot_trades`, evaluated via K-fold CV. Returns OOS decile
+    lift, OOS Spearman vs mfe_r AND realized_R, and per-factor effects. Proves the
+    Edge Score separates winners from losers (vs the champion gate's −0.029/inverted)
+    BEFORE any live gating. target = mfe_r (entry quality) | realized_r.
+    Plan: memory/ENTRY_EDGE_SCORE_PLAN.md
+    """
+    from services.entry_edge_score import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days, target=target, k_folds=k_folds)
+    return {"success": True, "report": report}
+
+
 
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):

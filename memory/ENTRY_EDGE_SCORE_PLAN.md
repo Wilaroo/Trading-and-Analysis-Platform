@@ -5,6 +5,14 @@
 > Companion docs: `TQS_DEEPDIVE_AUDIT_2026-06.md` (why TQS is noise),
 > `ARCHITECTURE_REVIEW_2026-06.md` (program/seams, P3 hinge now closed),
 > `DATA_INTEGRITY_PLAN_2026-06.md` (feed sweep, Phase 0 folded in).
+>
+> **LIVE READ-ONLY ENDPOINTS (P3′, observe-only):**
+> - `GET /api/slow-learning/entry-edge-score/report?days=120&target=mfe_r|realized_r&k_folds=5`
+> - `GET /api/slow-learning/entry-edge-coverage/report?days=45`
+> - Service: `backend/services/entry_edge_score.py` (fit/score/score_full) ·
+>   `backend/services/entry_edge_coverage.py` · tests `backend/tests/test_entry_edge_score.py`.
+> NOTE FOR OPERATOR: these require commit ≥ the P3′ build to be pushed via
+> "Save to Github" before they appear on the DGX (404 = not yet pulled).
 
 ## ⛔ FUTURE AGENTS — READ THIS FIRST
 1. **Do NOT try to "fix" or reweight the 5 TQS pillars.** They are proven
@@ -76,6 +84,18 @@ table (the spine P6 already reads).
   (time_window, direction, priority, timeframe, shrunk per-setup EV, re-signed
   regime_score, rsi, trigger_probability, tape_score). Run SHADOW via the
   existing P3 shadow-arms harness. Promote when size-weighted-R beats champion.
+  - **[BUILT 2026-06-24] model + OOS lift proof** — `services/entry_edge_score.py`
+    (`fit`/`score` additive shrunk-marginal model; empirical-Bayes K=20; continuous
+    quantile-binned so sign-inversion is auto-captured) + read-only report
+    `GET /api/slow-learning/entry-edge-score/report?days=120&target=mfe_r&k_folds=5`.
+    Evaluated OUT-OF-SAMPLE via K-fold CV (reports decile lift + OOS Spearman vs
+    mfe_r AND realized_R + per-factor effects). Excludes reconciled_* artifacts.
+    Synthetic-data validation green (signal OOS spearman 0.74, top-decile +0.58R
+    vs bottom −0.84R; noise conservative ~−0.04, no false lift) —
+    `tests/test_entry_edge_score.py`.
+  - **[TODO] operator runs the report on the DGX** (n≈808 real entries) to read
+    REAL OOS lift vs the champion gate (which was −0.029 / inverted). Beat it → wire
+    the live shadow arm (needs live alerts; market-open work).
 - **P4′ — REGIME-CONDITIONAL EDGE + SHRINKAGE.** Widen to the full archetype
   cell; empirical-Bayes pooling; per-cell CI; rolling per-archetype grade.
   Optionally retrain the ML gate on the clean window.
