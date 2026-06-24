@@ -169,6 +169,7 @@ def _derive_live_execution_state(outcomes) -> Dict:
     consec = 0
     counting = True  # stop counting the trailing streak at the first non-loss
     r_caps = []
+    entry_slips = []  # v401 — entry slippage % for live entry-tendency derivation
     for o in outcomes:  # newest-first (sorted created_at DESC by caller)
         oc = str(_field(o, "outcome", "")).lower()
         if oc == "won":
@@ -185,6 +186,17 @@ def _derive_live_execution_state(outcomes) -> Dict:
               else getattr(ex, "r_capture_percent", 0) if ex else 0)
         if rc and rc > 0:
             r_caps.append(rc)
+        # v401 — entry slippage is a REAL execution metric (0.0 = perfect fill,
+        # negative = price improvement) so we can't filter on >0 like r_capture.
+        # Only collect when a real execution sub-doc carries the key; backfilled
+        # closes store execution={} (no key) → correctly skipped as no-data.
+        es = None
+        if isinstance(ex, dict) and ex:
+            es = ex.get("entry_slippage_percent")
+        elif ex is not None and not isinstance(ex, dict):
+            es = getattr(ex, "entry_slippage_percent", None)
+        if es is not None:
+            entry_slips.append(float(es))
 
     sample = wins + losses
     recent_wr = (wins / sample) if sample else 0.5
@@ -196,6 +208,7 @@ def _derive_live_execution_state(outcomes) -> Dict:
         sev = "mild"
     else:
         sev = "none"
+    avg_slip = (sum(entry_slips) / len(entry_slips)) if entry_slips else None
     return {
         "sample": sample,
         "recent_win_rate": recent_wr,
@@ -203,6 +216,11 @@ def _derive_live_execution_state(outcomes) -> Dict:
         "is_tilted": consec >= 2,
         "tilt_severity": sev,
         "avg_r_capture_pct": (sum(r_caps) / len(r_caps)) if r_caps else None,
+        # v401 — live entry-execution state. avg_entry_slippage_pct=None means no
+        # real fills observed yet; chase mirrors the EOD-profile rule (>0.2%).
+        "avg_entry_slippage_pct": avg_slip,
+        "entry_sample": len(entry_slips),
+        "tends_to_chase": (avg_slip is not None and avg_slip > 0.2),
     }
 
 
@@ -377,6 +395,7 @@ class ExecutionQualityService:
         # learning_loop.get_recent_outcomes() returns EMPTY in the TQS-engine
         # context (deferred init). So read `trade_outcomes` DIRECTLY via pymongo
         # and ALWAYS override these fields when any outcomes exist.
+        _entry_live = False  # v401 — set when live entry-tendency is derived
         try:
             recent = _recent_trade_outcomes(limit=30)
             if not recent and self._learning_loop:
@@ -392,6 +411,19 @@ class ExecutionQualityService:
                 if not profile_has_data and live["avg_r_capture_pct"] is not None:
                     result.avg_r_capture_pct = live["avg_r_capture_pct"]
                     result.tends_to_exit_early = live["avg_r_capture_pct"] < 50
+                # v401 — live ENTRY tendency: when the EOD trader_profiles batch
+                # is empty, derive entry slippage / chase from the same live tape
+                # (trade_outcomes.execution) the exit-tendency path already uses,
+                # turning a 100%-absent 15%-weight sub-score into real signal.
+                if (not profile_has_data and _env_on("TQS_EXEC_ENTRY_LIVE", True)
+                        and live.get("avg_entry_slippage_pct") is not None):
+                    result.avg_entry_slippage_pct = live["avg_entry_slippage_pct"]
+                    result.tends_to_chase = live["tends_to_chase"]
+                    _entry_live = True
+                    result.factors.append(
+                        f"Live entry tendency from {live['entry_sample']} fills "
+                        f"(avg slippage {live['avg_entry_slippage_pct']:.2f}%)"
+                    )
                 result.factors.append(
                     f"Live exec state from {live['sample']} recent closes "
                     f"(win {live['recent_win_rate']*100:.0f}%, "
@@ -478,12 +510,14 @@ class ExecutionQualityService:
             result.warnings.append(f"Down ${abs(result.pnl_today):.0f} today - Consider taking a break")
             
         # 3. Entry Tendency Score (15% weight)
-        # v391 — INTEGRITY FIX: entry slippage / chase ONLY come from the EOD
+        # v391 — INTEGRITY FIX: entry slippage / chase ONLY came from the EOD
         # `trader_profiles` batch (no live derivation, unlike exit-tendency).
         # When that profile is empty, slippage defaulted to 0.0 → scored 85 +
         # "Excellent entry execution (+)" — i.e. ABSENCE was reported as
         # EXCELLENCE. Neutralise to 50 with an honest descriptor instead.
-        _entry_data_absent = not profile_has_data
+        # v401 — but if we DID derive entry slippage live above (_entry_live),
+        # the sub-score is real, not absent: score it instead of neutralising.
+        _entry_data_absent = (not profile_has_data) and not _entry_live
         if _entry_data_absent:
             result.entry_tendency_score = 50
         elif result.tends_to_chase:
