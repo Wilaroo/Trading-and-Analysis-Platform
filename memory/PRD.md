@@ -1,6 +1,25 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🔧 2026-06-24 (v408) — GENERALIZED orphan relink (Seal #1, env observe default).**
+> Taxonomy proved 87% of the −$5,714 orphan leak = 6 large positions that lost bot
+> tracking and got OCA-stopped on a synthetic 2% stop (ARM −$1,398, ALNY −$1,106,
+> SHLD −$815, UAL −$666, ARMG −$531, VRT −$465). Operator confirmed **bot is the SOLE
+> opener** → nothing is truly foreign; an untracked IB position is ALWAYS a bot trade
+> whose lineage broke → RESTORE tracking, never flatten. `position_reconciler.py`:
+> generalizes v405 relink — new `_find_recent_bot_predecessor` (most recent NON-synthetic
+> bot_trade on symbol+dir, any close_reason, window `RECONCILE_RELINK_ANY_WINDOW_MIN`=4320m,
+> excludes reconciled_* / entered_by^reconciled, directional+qty guards). When the v404
+> stale-pending relink misses, inherit the predecessor's REAL stop/target/regime/TQS instead
+> of synthetic 2% OCA; stamps `synthetic_source=relinked_predecessor` + emits
+> `orphan_relink_predecessor_observe`/`orphan_relinked_predecessor`. SAFE: adopt-path
+> stop/context only — NO order/close/reaper/kill-switch touch; existing `breached` guard
+> handles already-fired stops. Env `RECONCILE_RELINK_ANY_PREDECESSOR`=observe(default)|fix|off.
+> Heals the −$3,216 relinkable bucket (readopt/eod_reopen/reaped). Tests 22 green. Doc:
+> `memory/v408_orphan_relink_general_build.md`. ROLLOUT: pull+restart (observe) → watch
+> `orphan_relink_predecessor_observe` → set =fix. NEXT: Seal #2 record-less true_foreign
+> (−$1,897, SHLD/UAL/VRT have no bot_trade in 240d) → then B (entry quality).
+
 > **🧭 2026-06-24 (v407) — orphan CREATION-CAUSE taxonomy (read-only) — "stitch the cut".**
 > v406 MFE/MAE repair APPLIED on DGX (29/29 corrupt rows healed). New read-only endpoint
 > `GET /api/slow-learning/orphan-taxonomy/report` (`services/orphan_taxonomy.py`) classifies

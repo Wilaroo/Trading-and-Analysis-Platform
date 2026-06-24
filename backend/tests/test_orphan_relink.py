@@ -100,3 +100,33 @@ def test_picks_first_valid_when_first_invalid():
     r = _recon(docs)
     m = r._find_reaped_pending("AAPL", "long", 100, avg_cost=100.0)
     assert m is not None and m["id"] == "good"
+
+
+# ── v407 — _find_recent_bot_predecessor (generalized relink) ──
+
+def test_predecessor_matches_any_close_reason():
+    # Not a stale_pending — an eod_auto_close / readopt predecessor still matches.
+    r = _recon([_mk(close_reason="eod_auto_close_v162")])
+    m = r._find_recent_bot_predecessor("AAPL", "long", 100, avg_cost=100.0)
+    assert m is not None and m["stop_price"] == 95.0 and m["target_1"] == 110.0
+
+
+def test_predecessor_excludes_reconciled_entered_by():
+    # A prior synthetic/reconciled row must NOT be inherited (no synthetic stop loop).
+    r = _recon([_mk(entered_by="reconciled_external")])
+    assert r._find_recent_bot_predecessor("AAPL", "long", 100, avg_cost=100.0) is None
+
+
+def test_predecessor_directional_and_qty_guards():
+    # long stop above cost -> skip; qty ratio out of range -> skip.
+    assert _recon([_mk(stop_price=105.0)]) \
+        ._find_recent_bot_predecessor("AAPL", "long", 100, avg_cost=100.0) is None
+    assert _recon([_mk(original_shares=100)]) \
+        ._find_recent_bot_predecessor("AAPL", "long", 10, avg_cost=100.0) is None
+
+
+def test_predecessor_short_match():
+    r = _recon([_mk(direction="short", stop_price=105.0, target_prices=[90.0],
+                    close_reason="oca_closed_externally_v19_31")])
+    m = r._find_recent_bot_predecessor("AAPL", "short", 100, avg_cost=100.0)
+    assert m is not None and m["stop_price"] == 105.0

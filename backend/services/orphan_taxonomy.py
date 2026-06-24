@@ -519,12 +519,15 @@ def generate_report(db, days: int = 120, near_window_min: int = 240,
         relink["state_integrity_events"] = {
             ev: db["state_integrity_events"].count_documents(
                 {"event": ev, "ts": {"$gte": cutoff}})
-            for ev in ("orphan_relink_observe", "orphan_relinked_reaped_pending")}
+            for ev in ("orphan_relink_observe", "orphan_relinked_reaped_pending",
+                       "orphan_relink_predecessor_observe",
+                       "orphan_relinked_predecessor")}
     except Exception as e:
         relink["state_integrity_events_error"] = str(e)[:160]
     relink["note"] = (
-        "observe=0 is expected if all reaped_pending orphans predate the v405 "
-        "deploy — the relink only fires at orphan-CREATION time going forward.")
+        "observe counts are forward-looking (relink fires at orphan-CREATION). "
+        "v407 generalized relink events: orphan_relink_predecessor_observe (would) "
+        "/ orphan_relinked_predecessor (applied in fix mode).")
     out["relink_coverage"] = relink
 
     # Verdict — rank by $ (R is distorted by tiny-risk residuals) + by R.

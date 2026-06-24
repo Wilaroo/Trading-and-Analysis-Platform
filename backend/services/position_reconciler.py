@@ -1038,6 +1038,95 @@ class PositionReconciler:
         return None
 
 
+    def _find_recent_bot_predecessor(
+        self, symbol: str, direction, abs_qty: int, avg_cost: float,
+    ) -> Optional[Dict[str, Any]]:
+        """v407 — GENERALIZED relink (any genuine bot predecessor).
+
+        The operator confirmed (2026-06-24) the bot is the SOLE opener of
+        positions, so an untracked IB position is ALWAYS a bot trade whose
+        tracking broke. The orphan taxonomy showed 87% of the −$5.7k leak is a
+        handful of large positions that lost lineage then got OCA-stopped on a
+        synthetic 2% — across eod_reopen (EOD close didn't flatten), readopt_loop
+        (closed externally then re-appeared) and reaped_pending. When the v404
+        stale-pending relink does NOT match, fall back to the most recent GENUINE
+        (non-synthetic) bot_trade on (symbol, direction) and inherit its REAL
+        stop/target/regime/TQS instead of the synthetic default — the literal
+        'stitch'. Excludes prior reconciled_* rows (never inherit another synthetic
+        stop) and requires a directionally-valid protective stop. READ-ONLY.
+
+        Strictly safer than a tight synthetic stop: a wider real stop lets a
+        still-valid position survive; an already-fired stop is handled by the
+        existing `breached` guard (closes at the real level, never re-rides a
+        fresh tight OCA).
+        """
+        try:
+            window_min = int(os.environ.get("RECONCILE_RELINK_ANY_WINDOW_MIN", "4320"))
+        except (TypeError, ValueError):
+            window_min = 4320
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(minutes=window_min)).isoformat()
+        sym = (symbol or "").upper()
+        dir_val = getattr(direction, "value", str(direction)).lower()
+        try:
+            cur = self.db["bot_trades"].find({
+                "symbol": sym,
+                "direction": dir_val,
+                "setup_type": {"$nin": ["reconciled_orphan", "reconciled_excess_slice"]},
+                "$or": [
+                    {"closed_at": {"$gte": cutoff}},
+                    {"reaped_at": {"$gte": cutoff}},
+                    {"updated_at": {"$gte": cutoff}},
+                ],
+            }).sort("closed_at", -1).limit(20)
+        except Exception as e:
+            logger.debug("v407 _find_recent_bot_predecessor query failed for %s: %s",
+                         sym, e)
+            return None
+        for d in cur:
+            # Never inherit a prior synthetic/reconciled bracket.
+            if str(d.get("entered_by") or "").startswith("reconciled"):
+                continue
+            sp = d.get("stop_price")
+            try:
+                sp = float(sp) if sp is not None else None
+            except (TypeError, ValueError):
+                sp = None
+            if not sp or sp <= 0:
+                continue
+            # Directionally-valid protective stop relative to the live avg_cost.
+            if dir_val == "long" and not (sp < avg_cost):
+                continue
+            if dir_val == "short" and not (sp > avg_cost):
+                continue
+            try:
+                osh = int(d.get("original_shares") or d.get("shares") or 0)
+            except (TypeError, ValueError):
+                osh = 0
+            if osh > 0 and abs_qty > 0:
+                ratio = abs_qty / osh
+                if ratio < 0.5 or ratio > 2.0:
+                    continue
+            t1 = None
+            tp = d.get("target_prices") or []
+            if isinstance(tp, list) and tp:
+                try:
+                    t1 = float(tp[0])
+                except (TypeError, ValueError):
+                    t1 = None
+            return {
+                "id": d.get("id"),
+                "stop_price": sp,
+                "target_1": t1,
+                "close_reason": d.get("close_reason"),
+                "shares": osh,
+                "market_regime": d.get("market_regime"),
+                "entry_context": (d.get("entry_context")
+                                  if isinstance(d.get("entry_context"), dict) else None),
+            }
+        return None
+
+
     async def _flatten_eod_window_orphan(
         self, bot, symbol, direction, abs_qty, avg_cost,
     ) -> Dict[str, Any]:
@@ -1875,6 +1964,7 @@ class PositionReconciler:
                     # Env: RECONCILE_RELINK_REAPED_PENDING = observe (default; log +
                     # forensic event only, NO behavior change) | fix (apply) | off.
                     _relink_applied = False
+                    _relink_tier = None
                     _relink_ctx = None
                     _relink_regime = None
                     try:
@@ -1897,6 +1987,7 @@ class PositionReconciler:
                                             if risk_per_share > 0 else default_rr)
                                 use_smart_stop = True
                                 _relink_applied = True
+                                _relink_tier = "reaped_pending"
                                 _relink_ctx = _relink_match.get("entry_context")
                                 _relink_regime = _relink_match.get("market_regime")
                             logger.warning(
@@ -1944,13 +2035,97 @@ class PositionReconciler:
                         logger.debug("v404 relink check failed for %s: %s",
                                      sym, _relink_err)
 
+                    # ── v407 — GENERALIZED relink (any genuine bot predecessor) ──
+                    # Operator confirmed the bot is the SOLE opener, so an untracked
+                    # IB position is ALWAYS a bot trade whose tracking broke. When
+                    # the v404 stale-pending relink above did NOT match, fall back
+                    # to the most recent genuine bot trade on this symbol+direction
+                    # and inherit its REAL stop/target/context instead of the
+                    # synthetic 2% OCA that knifed the big orphans (taxonomy:
+                    # eod_reopen ALNY −$1,106, readopt ARM −$1,398 / ARMG −$531).
+                    # Strictly safer than a tight 2%: a wider real stop survives;
+                    # an already-fired stop is handled by the existing `breached`
+                    # guard (closes at the real level, never re-rides a fresh OCA).
+                    # Env: RECONCILE_RELINK_ANY_PREDECESSOR = observe (default) | fix | off.
+                    if not _relink_applied:
+                        try:
+                            _gen_policy = os.environ.get(
+                                "RECONCILE_RELINK_ANY_PREDECESSOR", "observe").lower()
+                            _gen_match = (
+                                self._find_recent_bot_predecessor(
+                                    sym, direction, abs_qty, avg_cost)
+                                if _gen_policy != "off" else None
+                            )
+                            if _gen_match:
+                                _pre_stop = stop_price
+                                _orig_stop = float(_gen_match["stop_price"])
+                                if _gen_policy == "fix":
+                                    stop_price = _orig_stop
+                                    if _gen_match.get("target_1"):
+                                        target_1 = float(_gen_match["target_1"])
+                                    risk_per_share = abs(avg_cost - stop_price)
+                                    reward_per_share = abs(target_1 - avg_cost)
+                                    smart_rr = (reward_per_share / risk_per_share
+                                                if risk_per_share > 0 else default_rr)
+                                    use_smart_stop = True
+                                    _relink_applied = True
+                                    _relink_tier = "predecessor"
+                                    _relink_ctx = _gen_match.get("entry_context")
+                                    _relink_regime = _gen_match.get("market_regime")
+                                logger.warning(
+                                    "🔗 [v407 RELINK %s] %s — orphan matches recent bot "
+                                    "trade_id=%s (%s): stop %.4f → %.4f%s",
+                                    "fix" if _relink_applied else "observe", sym,
+                                    _gen_match.get("id"), _gen_match.get("close_reason"),
+                                    _pre_stop, _orig_stop,
+                                    "" if _relink_applied
+                                    else " (set RECONCILE_RELINK_ANY_PREDECESSOR=fix to apply)",
+                                )
+                                report.setdefault("relinked", []).append({
+                                    "symbol": sym, "policy": _gen_policy,
+                                    "tier": "predecessor",
+                                    "applied": _relink_applied,
+                                    "matched_trade_id": _gen_match.get("id"),
+                                    "pred_reason": _gen_match.get("close_reason"),
+                                    "synthetic_stop": round(_pre_stop, 4),
+                                    "relinked_stop": round(_orig_stop, 4),
+                                    "relinked_target": _gen_match.get("target_1"),
+                                })
+                                try:
+                                    if getattr(self, "db", None) is not None:
+                                        self.db["state_integrity_events"].insert_one({
+                                            "event": ("orphan_relinked_predecessor"
+                                                      if _relink_applied
+                                                      else "orphan_relink_predecessor_observe"),
+                                            "severity": "high",
+                                            "symbol": sym,
+                                            "trade_id": _gen_match.get("id"),
+                                            "synthetic_stop": round(_pre_stop, 4),
+                                            "relinked_stop": round(_orig_stop, 4),
+                                            "pred_reason": _gen_match.get("close_reason"),
+                                            "detail": (
+                                                "Orphan re-linked to the bot's most recent "
+                                                "real bracket (stop/target/context restored)."
+                                                if _relink_applied else
+                                                "Orphan WOULD re-link to a recent bot bracket "
+                                                "(observe mode)."
+                                            ),
+                                            "ts": datetime.now(timezone.utc).isoformat(),
+                                        })
+                                except Exception:
+                                    pass
+                        except Exception as _gen_err:
+                            logger.debug("v407 generalized relink failed for %s: %s",
+                                         sym, _gen_err)
+
                     trade.target_prices = [target_1]
                     trade.stop_price = stop_price
                     trade.risk_amount = abs(avg_cost - stop_price) * abs_qty
                     trade.risk_reward_ratio = round(smart_rr, 2)
 
                     trade.synthetic_source = (
-                        "relinked_reaped_pending" if _relink_applied
+                        "relinked_reaped_pending" if _relink_tier == "reaped_pending"
+                        else "relinked_predecessor" if _relink_tier == "predecessor"
                         else ("last_verdict" if use_smart_stop else "default_pct")
                     )
                     trade.prior_verdicts = prior_verdicts
@@ -2081,12 +2256,20 @@ class PositionReconciler:
                     # v404 — when re-linked, mark provenance + inherit the bot's
                     # real regime/TQS so analytics no longer see regime=UNKNOWN.
                     if _relink_applied:
-                        trade.entry_context["relinked_from_reaped_pending"] = True
-                        trade.entry_context["reasoning"].append(
-                            "v404: inherited the bot's real stop/target from a "
-                            "recently-reaped pending whose fill lost attribution "
-                            "(direct-IB flap)."
-                        )
+                        if _relink_tier == "predecessor":
+                            trade.entry_context["relinked_from_predecessor"] = True
+                            trade.entry_context["reasoning"].append(
+                                "v407: bot is the sole opener — inherited the real "
+                                "stop/target/context from the most recent matching "
+                                "bot trade instead of a synthetic stop (lineage stitch)."
+                            )
+                        else:
+                            trade.entry_context["relinked_from_reaped_pending"] = True
+                            trade.entry_context["reasoning"].append(
+                                "v404: inherited the bot's real stop/target from a "
+                                "recently-reaped pending whose fill lost attribution "
+                                "(direct-IB flap)."
+                            )
                         if _relink_regime:
                             trade.entry_context["market_regime"] = _relink_regime
                             try:
