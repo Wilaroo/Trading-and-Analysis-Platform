@@ -64,3 +64,49 @@ Decision: FEED the feedable ones (don't just renorm-drop). Per-sub-score verdict
 - EV threshold 5→3 (self-heals as outcomes accumulate).
 - Fundamentals `growth`/ProjLTGrowthRate parser fix (P2).
 - v393 renorm post-open validation (score_sd widening, scalp inversion).
+
+## ⏰ 2026-06-24 — POST-OPEN PROBE RESULT + SCHEDULED RE-CHECK
+First post-deploy `tqs-integrity` read (days=30, n≈26.9k score samples):
+- ✅ **Compression SOLVED**: score SD **8.99**, `ok_spread` (p10/50/90 = 55/60/80). v393 renorm worked.
+  → **v394 pillar-renorm is NOT needed — do not build it.**
+- ✅ Config fix: `MAX_L2_SLOTS` was 6 but IB entitlement is 3 → set to **3** (was starving desired#2 XBI
+  and nullifying B2). Now `max_l2_slots=3`, cap_rejections cleared.
+- ❌ **Scalp grade still INVERTED** (TQS grade, confirmed via pnl_compute trade_grade=tqs_grade):
+  `grade_by_horizon` scalp = A:-0.081(n29) B:-0.073(n52) C:**+0.116**(n65). Intraday clean/monotonic
+  (A:0.019 B:-0.053 C:-0.189). Swing/position ~flat.
+- ⚠️ **But it's NOT actionable yet — all noise at current n:** scalp inversion t≈0.9 (p≈0.38); every
+  scalp pillar |corr|<0.09 at n=123 (needs ≈0.18 for p<0.05). Reweighting now = overfitting noise.
+- 📊 One consistent (not-yet-significant) signal: **execution = most predictive pillar** (intraday
+  corr 0.209, hi_R 0.223 vs lo_R -0.251 = 0.47R spread; position 0.19) — exactly what v401 Entry-Tendency
+  feeds. Weighted only ~10% scalp / 15% intraday today.
+
+**⏰ RE-CHECK on/after 2026-07-08** (earliest 2026-07-01) once v401-scored closes fill the window. Decision
+rule + likely action (bump execution weight on scalp/intraday, NOT a renorm) recorded in PRD.md top block
+and ROADMAP.md "SCHEDULED RE-CHECKS". Parsers below.
+
+### Probe parsers (reusable — double-quote -c, single quotes inside; DGX terminal mangles escaped quotes)
+grade_by_horizon + headline:
+```
+curl -s "http://localhost:8001/api/slow-learning/tqs-integrity/report?days=30" -o /tmp/tqs.json
+python3 -c "
+import json
+d = json.load(open('/tmp/tqs.json'))['report']
+print('HEADLINE:', d.get('headline'))
+print('score SD :', d.get('score_discrimination',{}).get('sd'), d.get('score_discrimination',{}).get('verdict'))
+print('inverted :', d.get('grade_by_horizon',{}).get('inverted_horizons'))
+for h in d.get('grade_by_horizon',{}).get('horizons',[]):
+    cells = ' '.join('%s:%s(n%s)' % (r['grade'], r['avg_r'], r['n']) for r in h['by_grade'] if r['avg_r'] is not None)
+    print(' ', h['horizon'].ljust(9), cells, ('<<<INV' if h.get('inverted') else ''))
+"
+```
+pillar_predictiveness by horizon:
+```
+python3 -c "
+import json
+d = json.load(open('/tmp/tqs.json'))['report']
+for h in d.get('pillar_predictiveness',{}).get('horizons',[]):
+    print(); print(h['horizon'].upper(), 'n=', h['n'])
+    for p in h['pillars']:
+        print('   %-12s corr=%-7s sd=%-6s hi=%-7s lo=%-7s' % (p['pillar'], str(p.get('corr_with_r')), str(p.get('score_sd')), str(p.get('avg_r_top_half')), str(p.get('avg_r_bottom_half'))))
+"
+```

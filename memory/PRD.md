@@ -1,5 +1,23 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **⏰ 2026-06-24 — SCHEDULED RE-CHECK (DO NOT FORGET): TQS scalp-inversion re-audit.**
+> **WHEN:** on/after **2026-07-08** (≥1 week earliest = 2026-07-01). Needs v401 feeds
+> (Entry-Tendency live + horizon-aware tape, shipped 2026-06-24) to accumulate into the
+> window AND grade samples to grow.
+> **WHY HELD:** as of 2026-06-24 the TQS-integrity probe (`GET /api/slow-learning/tqs-integrity/report?days=30`)
+> showed: ✅ compression FIXED (score SD **8.99**, `ok_spread` — so **v394 pillar-renorm is NOT needed**,
+> do not build it); ❌ scalp grade INVERTED (C +0.116R/n65 > A -0.081R/n29) BUT this is **statistically
+> insignificant** (t≈0.9, p≈0.38) and **every scalp pillar corr is below significance** (|corr|<0.09 at
+> n=123; needs ≈0.18). Reweighting scalp now = fitting to NOISE. Intraday is clean/monotonic (A>B>C).
+> **DECISION RULE for the re-check (only act if ALL hold):** (1) score still `ok_spread`; (2) scalp still
+> inverted in `grade_by_horizon` with LARGER n; (3) a pillar on the SCALP row shows |corr| > ~2/√n AND
+> hi_R < lo_R. The one *consistent* (not-yet-significant) signal is **execution is the most predictive
+> pillar** (intraday corr 0.209, 0.47R hi-vs-lo spread) and v401 strengthens it — so the likely action is
+> **bump execution weight on scalp/intraday** (`STYLE_WEIGHTS` in `services/tqs/tqs_engine.py`), NOT a
+> renorm. Re-run the probe + the pillar parser (see `v401_feed_subscores_build.md`) before changing weights.
+
+
+
 > **🧭 2026-06-23 — HORIZON-FUNNEL DIAGNOSTIC delivered (scalp/intraday under-firing).** Read-only:
 > `GET /api/slow-learning/horizon-funnel/report?days=` builds evaluated(gate)→approved(GO+REDUCE)→taken
 > (bot_trades)→realized-R per horizon class (scalp/intraday/swing/position) with a CHOKE label

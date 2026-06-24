@@ -4,6 +4,24 @@ Open priorities, deferred ideas, and backlog. Move items to
 `CHANGELOG.md` once shipped; promote/demote priority by reordering.
 
 
+## ⏰ SCHEDULED RE-CHECKS (time-gated — do not action early)
+
+### ⏰ 2026-07-08 — TQS scalp-inversion re-audit (held for v401 data to accrue)
+Shipped 2026-06-24 (v401): Entry-Tendency live-derivation + horizon-aware tape drop + L2 fast-horizon
+bias + JIT tape-confirm (dormant) + AI-Model bar pre-warm endpoint. These feed the execution/setup
+pillars going forward. **Re-run on/after 2026-07-08** (earliest 2026-07-01):
+```
+curl -s "http://localhost:8001/api/slow-learning/tqs-integrity/report?days=30" -o /tmp/tqs.json
+# + the grade_by_horizon and pillar_predictiveness parsers (in v401_feed_subscores_build.md)
+```
+**State at hold (2026-06-24):** score SD 8.99 `ok_spread` (compression SOLVED → **do NOT build v394**);
+scalp grade inverted (C+0.116/n65 > A-0.081/n29) but **insignificant** (t≈0.9); all scalp pillar
+|corr|<0.09 at n=123 (insignificant). **Do not reweight on noise.** ACT only if: score still ok_spread
+AND scalp still inverted at larger n AND a scalp pillar shows |corr|>~2/√n with hi_R<lo_R. Likely action
+if it holds: bump **execution** weight on scalp/intraday (`STYLE_WEIGHTS` in `tqs/tqs_engine.py`) — the
+most predictive pillar (intraday corr 0.209) that v401 strengthens. NOT a renorm.
+
+
 ## 🔥 2026-06-23 — NEXT-UP QUEUE (operator-requested, post-P5/P6)
 Tackle in this order after the current shadow-stack (P3–P6) is delivered to DGX.
 
