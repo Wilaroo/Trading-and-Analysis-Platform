@@ -281,14 +281,15 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
 
     # H. relink backtest — replay the v405 _find_reaped_pending match criteria
     # against historical orphans so the benefit is quantifiable BEFORE enabling
-    # RECONCILE_RELINK_REAPED_PENDING=fix. An orphan is "matchable" when a
-    # stale_pending predecessor (same symbol+dir, within window, directionally-
-    # consistent stop, qty 0.5x-2x) exists. "Addressable" = matchable AND the
-    # orphan closed at a loss via an OCA/external stop (the premature stop-outs
-    # the fix targets by restoring the wider original stop).
+    # RECONCILE_RELINK_REAPED_PENDING=fix. Mirrors the helper: scan ALL
+    # stale_pending rows on the same symbol+dir within the window (not just the
+    # single most-recent predecessor), then apply the stop/directional/qty gates.
+    # The `funnel` shows where candidates drop off so we know what to fix.
+    funnel = {"orphans_with_stale_pending_cand": 0, "with_valid_stop": 0,
+              "directionally_ok": 0, "qty_ok": 0}
     bt = {"window_min": gap_min, "matchable": 0, "addressable": 0,
           "addressable_leak_r": 0.0, "addressable_leak_usd": 0.0,
-          "avg_stop_widening_pct": None, "samples": []}
+          "avg_stop_widening_pct": None, "funnel": funnel, "samples": []}
     widenings = []
     for t in orphans:
         oe = _entry_ts(t)
@@ -296,39 +297,60 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
         odir = str(t.get("direction") or "").lower()
         if oe is None or not oentry:
             continue
-        pred = find_predecessor(t)
-        if pred is None:
-            continue
-        if not str(pred.get("close_reason") or "").startswith("stale_pending"):
-            continue
-        psp = _fnum(pred.get("stop_price"))
-        if not psp or psp <= 0:
-            continue
-        # directional consistency of the predecessor's stop vs the orphan entry
-        if odir == "long" and not (psp < oentry):
-            continue
-        if odir == "short" and not (psp > oentry):
-            continue
-        # window: predecessor reaped within `gap_min` before orphan entry
-        pc = _close_ts(pred)
-        if pc is None:
-            continue
-        gap = (oe - pc).total_seconds() / 60.0
-        if not (0 <= gap <= gap_min):
-            continue
-        # qty sanity
-        try:
-            osh = int(pred.get("original_shares") or pred.get("shares") or 0)
-            qsh = int(t.get("shares") or 0)
-            if osh > 0 and qsh > 0 and not (0.5 <= qsh / osh <= 2.0):
+        key = ((t.get("symbol") or "").upper(), odir)
+        # all stale_pending candidates that reaped within the window before entry
+        cands = []
+        for c in by_key.get(key, []):
+            if not str(c.get("close_reason") or "").startswith("stale_pending"):
                 continue
+            cc = _close_ts(c)
+            if cc is None:
+                continue
+            gap = (oe - cc).total_seconds() / 60.0
+            if 0 <= gap <= gap_min:
+                cands.append(c)
+        if not cands:
+            continue
+        funnel["orphans_with_stale_pending_cand"] += 1
+        # stage 2: at least one candidate has a usable stop
+        with_stop = [c for c in cands if (_fnum(c.get("stop_price")) or 0) > 0]
+        if not with_stop:
+            continue
+        funnel["with_valid_stop"] += 1
+        # stage 3: directional consistency vs orphan entry
+        dir_ok = []
+        for c in with_stop:
+            psp = _fnum(c.get("stop_price"))
+            if odir == "long" and psp < oentry:
+                dir_ok.append(c)
+            elif odir == "short" and psp > oentry:
+                dir_ok.append(c)
+        if not dir_ok:
+            continue
+        funnel["directionally_ok"] += 1
+        # stage 4: qty sanity
+        qty_ok = []
+        qsh = 0
+        try:
+            qsh = int(t.get("shares") or 0)
         except (TypeError, ValueError):
-            pass
+            qsh = 0
+        for c in dir_ok:
+            try:
+                osh = int(c.get("original_shares") or c.get("shares") or 0)
+            except (TypeError, ValueError):
+                osh = 0
+            if osh <= 0 or qsh <= 0 or (0.5 <= qsh / osh <= 2.0):
+                qty_ok.append(c)
+        if not qty_ok:
+            continue
+        funnel["qty_ok"] += 1
         bt["matchable"] += 1
-        # stop widening: how much wider the original stop is vs the orphan's stop
+        pred = qty_ok[0]
+        psp = _fnum(pred.get("stop_price"))
         osp = _fnum(t.get("stop_price"))
         widen = None
-        if osp and oentry:
+        if osp and oentry and psp:
             syn_dist = abs(oentry - osp)
             orig_dist = abs(oentry - psp)
             if syn_dist > 0:
@@ -336,9 +358,8 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
                 widenings.append(widen)
         reason = str(t.get("close_reason") or "")
         r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
-        is_loss_stop = (("oca_closed_externally" in reason or "external" in reason
-                         or "stop" in reason) and (r is not None and r < 0))
-        if is_loss_stop:
+        if (("oca_closed_externally" in reason or "external" in reason
+             or "stop" in reason) and (r is not None and r < 0)):
             bt["addressable"] += 1
             bt["addressable_leak_r"] += r
             bt["addressable_leak_usd"] += _fnum(t.get("realized_pnl")) or 0.0
@@ -347,8 +368,7 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
                     "symbol": t.get("symbol"),
                     "orphan_stop": osp, "original_stop": psp,
                     "stop_widening_pct": widen,
-                    "orphan_r": round(r, 2), "close_reason": reason[:28],
-                })
+                    "orphan_r": round(r, 2), "close_reason": reason[:28]})
     bt["addressable_leak_r"] = round(bt["addressable_leak_r"], 2)
     bt["addressable_leak_usd"] = round(bt["addressable_leak_usd"], 0)
     if widenings:
@@ -475,4 +495,46 @@ async def generate_diagnostics(db) -> dict:
     except Exception as e:
         near["error"] = str(e)[:160]
     out["orphan_fill_corroboration"] = near
+
+    # 6) what do reaped stale_pending rows actually CONTAIN? (decides whether the
+    #    v405 re-link can recover a real stop, or whether we need another source.)
+    sp_sample = {"count": 0, "with_stop_price": 0, "with_targets": 0,
+                 "with_entry_context": 0, "samples": []}
+    try:
+        rows = list(db["bot_trades"].find(
+            {"close_reason": {"$regex": "^stale_pending"}},
+            {"_id": 0, "id": 1, "symbol": 1, "direction": 1, "status": 1,
+             "setup_type": 1, "stop_price": 1, "target_prices": 1,
+             "entry_price": 1, "fill_price": 1, "original_shares": 1, "shares": 1,
+             "market_regime": 1, "entry_context": 1, "close_reason": 1,
+             "reaped_at": 1, "closed_at": 1}).sort("reaped_at", -1).limit(40))
+        for d in rows:
+            sp_sample["count"] += 1
+            sp = d.get("stop_price")
+            try:
+                has_stop = sp is not None and float(sp) > 0
+            except (TypeError, ValueError):
+                has_stop = False
+            if has_stop:
+                sp_sample["with_stop_price"] += 1
+            tp = d.get("target_prices") or []
+            if isinstance(tp, list) and tp:
+                sp_sample["with_targets"] += 1
+            ec = d.get("entry_context")
+            if isinstance(ec, dict) and ec:
+                sp_sample["with_entry_context"] += 1
+            if len(sp_sample["samples"]) < 8:
+                sp_sample["samples"].append({
+                    "symbol": d.get("symbol"), "setup_type": d.get("setup_type"),
+                    "direction": d.get("direction"), "stop_price": sp,
+                    "entry_price": d.get("entry_price") or d.get("fill_price"),
+                    "targets": tp[:1] if isinstance(tp, list) else None,
+                    "has_entry_context": bool(isinstance(ec, dict) and ec),
+                    "entry_context_keys": (sorted(ec.keys())[:12]
+                                           if isinstance(ec, dict) else None),
+                    "close_reason": d.get("close_reason"),
+                })
+    except Exception as e:
+        sp_sample["error"] = str(e)[:160]
+    out["stale_pending_sample"] = sp_sample
     return out
