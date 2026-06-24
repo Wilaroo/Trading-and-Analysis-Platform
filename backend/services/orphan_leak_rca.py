@@ -466,6 +466,71 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
             "close_reason": str(t.get("close_reason") or "")[:26]})
     conc["worst_15"] = sorted(scored, key=lambda x: x["r"])[:15]
     out["leak_concentration"] = conc
+
+    # J. ATR-stop backtest — the candidate REAL fix: restore the operator-approved
+    # v19.34.68 `max(2%, 1.5×ATR)` orphan stop, but source ATR from the synchronous
+    # DAILY ATR in symbol_adv_cache.atr_pct (the live _latest_atr_5m source is 5-min
+    # ATR — too small to ever beat the 2% floor, which is why every orphan got 2%).
+    # Quantifies coverage + how much of the 5-30m stop-out leak is addressable.
+    atr_mult, pct_floor = 1.5, 0.02
+    abt = {"atr_mult": atr_mult, "pct_floor_pct": 2.0,
+           "orphans_total": len(orphans), "with_atr_pct": 0, "would_widen": 0,
+           "addressable_5to30m_oca_losers": 0, "addressable_leak_r": 0.0,
+           "addressable_leak_usd": 0.0,
+           "avg_current_stop_pct": None, "avg_proposed_stop_pct": None,
+           "samples": []}
+    osyms = list({(t.get("symbol") or "").upper() for t in orphans if t.get("symbol")})
+    atr_map = {}
+    try:
+        for r in db["symbol_adv_cache"].find(
+                {"symbol": {"$in": osyms}}, {"_id": 0, "symbol": 1, "atr_pct": 1}):
+            atr_map[(r.get("symbol") or "").upper()] = r.get("atr_pct")
+    except Exception as e:
+        abt["error"] = str(e)[:160]
+    cur_pcts, prop_pcts = [], []
+    for t in orphans:
+        sym = (t.get("symbol") or "").upper()
+        e = _fnum(t.get("entry_price")) or _fnum(t.get("fill_price"))
+        s = _fnum(t.get("stop_price"))
+        if not e or e <= 0 or not s:
+            continue
+        cur_pct = abs(e - s) / e
+        ap = atr_map.get(sym)
+        try:
+            ap = float(ap) if ap is not None else None
+        except (TypeError, ValueError):
+            ap = None
+        if not ap or ap <= 0:
+            continue
+        abt["with_atr_pct"] += 1
+        proposed_pct = max(pct_floor, atr_mult * ap)
+        cur_pcts.append(cur_pct * 100)
+        prop_pcts.append(proposed_pct * 100)
+        widen = proposed_pct > cur_pct + 0.0005
+        if widen:
+            abt["would_widen"] += 1
+        oe, oc = _entry_ts(t), _close_ts(t)
+        mins = (oc - oe).total_seconds() / 60.0 if (oe and oc) else None
+        reason = str(t.get("close_reason") or "")
+        r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
+        if (mins is not None and 5 <= mins < 30 and widen
+                and "oca_closed_externally" in reason and r is not None and r < 0):
+            abt["addressable_5to30m_oca_losers"] += 1
+            abt["addressable_leak_r"] += r
+            abt["addressable_leak_usd"] += _fnum(t.get("realized_pnl")) or 0.0
+            if len(abt["samples"]) < 12:
+                abt["samples"].append({
+                    "symbol": sym, "entry": round(e, 2),
+                    "current_stop_pct": round(cur_pct * 100, 2),
+                    "proposed_stop_pct": round(proposed_pct * 100, 2),
+                    "atr_pct": round(ap * 100, 2),
+                    "hold_min": round(mins, 1), "orphan_r": round(r, 2)})
+    abt["addressable_leak_r"] = round(abt["addressable_leak_r"], 2)
+    abt["addressable_leak_usd"] = round(abt["addressable_leak_usd"], 0)
+    if cur_pcts:
+        abt["avg_current_stop_pct"] = round(sum(cur_pcts) / len(cur_pcts), 2)
+        abt["avg_proposed_stop_pct"] = round(sum(prop_pcts) / len(prop_pcts), 2)
+    out["atr_stop_backtest"] = abt
     return out
 
 
