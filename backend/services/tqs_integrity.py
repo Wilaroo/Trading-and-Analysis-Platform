@@ -208,6 +208,25 @@ def _pearson(pairs):
 PILLARS = ["setup", "technical", "fundamental", "context", "execution"]
 
 
+def _sig_threshold(n: int):
+    """n-aware significance floor ≈ 2 standard errors (2/sqrt(n)). A |corr|
+    below this is statistical noise, not signal."""
+    return round(2.0 / (n ** 0.5), 3) if n and n >= 5 else None
+
+
+def _is_significant(corr, n: int) -> bool:
+    """True only when |corr| clears the 2/sqrt(n) noise floor."""
+    thr = _sig_threshold(n)
+    return corr is not None and thr is not None and abs(corr) > thr
+
+
+def _anti_predictive(corr, n: int) -> bool:
+    """A pillar is anti-predictive only when the negative correlation is BOTH
+    materially negative AND statistically significant for its sample size —
+    stops false alarms on noise (the v401 scalp-pillar false flags)."""
+    return corr is not None and corr < -0.05 and _is_significant(corr, n)
+
+
 def _pillar_predictiveness(db, cutoff):
     """Per (horizon × pillar): does a HIGHER pillar score correspond to a HIGHER
     realized R? Reads pillar scores already stamped on each trade at entry
@@ -250,13 +269,23 @@ def _pillar_predictiveness(db, cutoff):
                 hi = [r for _, r in srt[mid:]]
                 avg_lo = round(sum(lo) / len(lo), 3)
                 avg_hi = round(sum(hi) / len(hi), 3)
+            # n-aware significance gate: a correlation is only trustworthy when
+            # |corr| clears the ~2/sqrt(n) noise floor (≈ 2 standard errors).
+            # Without this the probe screamed `anti_predictive` on tiny samples
+            # where |corr| was pure noise (e.g. scalp pillars at n=123, all
+            # |corr|<0.09 < threshold 0.18). Flag anti_predictive ONLY when the
+            # negative correlation is also statistically significant.
+            sig_threshold = _sig_threshold(len(pairs))
+            significant = _is_significant(corr, len(pairs))
             pill.append({
                 "pillar": p, "n": len(pairs),
                 "score_mean": score_mean, "score_sd": score_sd,
                 "corr_with_r": corr,
+                "sig_threshold": sig_threshold,   # 2/sqrt(n) noise floor
+                "significant": significant,       # |corr| clears the floor
                 "avg_r_top_half": avg_hi, "avg_r_bottom_half": avg_lo,
                 "flat_or_defaulted": score_sd is not None and score_sd < 4.0,
-                "anti_predictive": corr is not None and corr < -0.05,
+                "anti_predictive": _anti_predictive(corr, len(pairs)),
             })
         horizons.append({"horizon": h, "n": len(rows), "pillars": pill})
     has = any(hz["n"] for hz in horizons)

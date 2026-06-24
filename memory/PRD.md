@@ -1,5 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
+> **🧭 2026-06-24 (v404) — reconciled_orphan leak RCA tooling + tqs_integrity n-aware gate.**
+> - 🔴 **P0 RCA (in progress):** new read-only `backend/scripts/diag_orphan_leak_rca.py` traces the
+>   `reconciled_orphan` chain (predecessor entry_context → orphan synthetic 2% stop → `oca_closed_externally`).
+>   Reports population/leak-R, close-reason mix, synthetic_source split, predecessor linkage (recoverable
+>   context + stop-tightening), and the re-adopt-loop core (the fixable $). Smoke-tested in preview (empty→clean).
+>   **RUN ON DGX:** `PYTHONPATH=backend .venv/bin/python backend/scripts/diag_orphan_leak_rca.py --days 120`
+>   → result routes the fix (re-link original context+stop on re-adopt, OR refuse fresh OCA on thesis-less
+>   re-adopt). Fix will be env-gated observe→fix.
+> - ✅ **SHIPPED:** `services/tqs_integrity.py` `anti_predictive` now requires an n-aware significance gate
+>   (|corr| > ~2/√n) via pure helpers `_sig_threshold`/`_is_significant`/`_anti_predictive` — stops false
+>   alarms on noise (the held v401 scalp-pillar flags). Report rows add `sig_threshold`+`significant`.
+>   Tests: `tests/test_tqs_integrity_significance.py` (6/6). Build doc: `memory/v404_orphan_rca_tqs_sig_build.md`.
+> - ⏳ NEXT after DGX orphan run: implement the orphan re-link/flatten fix; then MFE/MAE scaling bug (P1)
+>   → backside time-decay (P2). Save-to-GitHub `main-2.0` → DGX pull.
+
+
 > **⏰ 2026-06-24 — SCHEDULED RE-CHECK (DO NOT FORGET): TQS scalp-inversion re-audit.**
 > **WHEN:** on/after **2026-07-08** (≥1 week earliest = 2026-07-01). Needs v401 feeds
 > (Entry-Tendency live + horizon-aware tape, shipped 2026-06-24) to accumulate into the
