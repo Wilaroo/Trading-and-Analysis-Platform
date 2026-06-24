@@ -8,6 +8,27 @@
 > via paste.rs patchers, verified by curl/diag + operator eyes (NO
 > automated tester on DGX hardware).
 
+> ### 🔄 UPDATE 2026-06-24 — ENTRY EDGE SCORE folded in (see `TQS_DEEPDIVE_AUDIT_2026-06.md`)
+> The TQS deep-dive + entry-feature discovery (n=1002) proved BOTH decision
+> authorities are noise: TQS composite spearman≈0 vs MFE (all 5 pillars dead),
+> and the ML gate's `confidence_score` is −0.029 vs MFE and **inverted**
+> (`go` −0.178R worse than `reduce` −0.078R). Consequences for this program:
+> 1. **P3 hinge RESOLVED via a third path** (neither "TQS feeds gate" nor "TQS
+>    is trust lens"): build ONE outcome-calibrated **Entry Edge Score** as the
+>    single authority; demote folklore-TQS AND immature ML-confidence to input
+>    features. See "Open operator decision" below (now closed).
+> 2. **Patch-the-pillars premise RETIRED.** The TQS pillar architecture is the
+>    problem, not its coverage. The reliability item's GOAL (grades that
+>    separate winners from losers) survives; its METHOD flips to replacement.
+> 3. **Two sub-phases inserted into ARC-2: P3′ (Edge Score v1) + P4′
+>    (regime-conditional + hierarchical shrinkage + per-cell CI).**
+> 4. **New Phase-0 persistence fields** (sector_regime, rs_rating/symbol-RS,
+>    reliable trigger_price) added to the Data-Integrity sweep — prerequisites
+>    the model literally can't condition on until logged.
+> The Edge Score is the missing ENGINE behind 4 north-star attributes
+> (reliable · self-improving · understandable · profitable). Everything else in
+> the program (Why-Trace, abstention, thesis-exits, UI, safety) stays & benefits.
+
 ## Original operator intent (verbatim anchor)
 "I need Trade Command and SentCom to be fully reliable to make the right
 trades at the right time in the right stocks across all time horizons, and
@@ -28,7 +49,7 @@ doing what it's doing... reliable and trustworthy to trade my actual money
 | **L2 Universe/In-Play** | Liquidity gates size/feasibility | `in_play_service` (RVOL/Gap/ATR/Spread/Catalyst), ADV≥$2M floor, RVOL≥0.8, ADRP, tier cadences, `rs_leadership` | ✅ Strong |
 | **L3 Signal/Setup** | Detectors per horizon; **style = pattern** | ~40+ detectors, m1–m9 canonical taxonomy, time-window gating, `TRADE_SETUP_MATRIX` | ✅ Strong — but **style resolves off liquidity-tier, not pattern (42% drift)** |
 | **L4 Edge/ML** | Calibrated prob, purged CV, meta-labeling, abstention, edge-decay | `purged_cpcv`, `triple_barrier_labeler`, `composite_label_features`, `deflated_sharpe`, `frozen_holdout`, `fractional_diff`, `cusum_filter`, `temporal_fusion_transformer`, `cnn_lstm`, `ensemble_model`, `model_drift_service`, `edge_decay_check` | ✅✅ Best-in-class — exceeds blueprint |
-| **L5 Decision & Sizing** | ONE explainable verdict + risk-budgeted sizing | 3 hard gates (Time/In-Play/Confidence predicted_R+win_prob), `position_sizer`, `dynamic_risk_engine`, `risk_caps_service` (min-of), `risk_of_ruin_model`, `hrp_allocator`, `portfolio_exposure_guard` | 🟡 Partial — **TQS & ML gate are two parallel authorities** |
+| **L5 Decision & Sizing** | ONE explainable verdict + risk-budgeted sizing | 3 hard gates (Time/In-Play/Confidence predicted_R+win_prob), `position_sizer`, `dynamic_risk_engine`, `risk_caps_service` (min-of), `risk_of_ruin_model`, `hrp_allocator`, `portfolio_exposure_guard` | 🔴 **BROKEN — both authorities are noise** (TQS spearman≈0; gate confidence −0.029 & inverted). Fix = Entry Edge Score (P3′/P4′), not unification of two bad signals. |
 | **L6 Execution** | Smart orders, broker-truth reconcile, horizon brackets | `trade_execution`, `order_intent_dedup`, `order_policy_registry`, `position_reconciler`, `orphan_gtc_reconciler`, bracket governor/reissue/TIF, `execution_tracker` | ✅ Strong — bracket geometry not yet horizon-scaled |
 | **L7 Stewardship** | Trailing/time/scale + **thesis-invalidation** exits | `exit_archetype_service`, `trail_anchor_service`, `bracket_tif`, EOD-flatten, `catalyst_classifier`, `account_guard`, `kill_switch_gate` | 🟡 Partial — **regime-change exit not wired** |
 | **Learning** | Retrain→OOS→shadow→promote→rollback | `training_pipeline`, `post_training_validator`, `preflight_validator`, `frozen_holdout`, `shadow_tracker`, `model_scorecard`, `trial_registry`, `gate_calibrator` (resurrected v399) | ✅ Strong |
@@ -46,7 +67,7 @@ tissue + 3 unmade architectural decisions** — not capability.
 |---|---|---|---|---|
 | 1 | **Style = Pattern, Liquidity = Feasibility** | L3/L5 · Steps 3–4 | Small | Closes the 42% drift; makes TQS trustworthy per-setup (root cause of the original thread) |
 | 2 | **Unified "Why" Trace** (per trade AND non-trade) | Explainability · Step 5/6 | Medium | The thing needed to trust real money |
-| 3 | **Unify TQS ↔ Confidence Gate** → one authority + verdict | L5 · Step 5 | Medium | One answer to "why did it trade" |
+| 3 | **Unify TQS ↔ Confidence Gate** → one authority + verdict | L5 · Step 5 | Medium | One answer to "why did it trade". **RESOLVED 2026-06-24: third path — replace both noisy authorities with the calibrated Entry Edge Score (P3′/P4′).** |
 | 4 | **Regime-Fit Abstention** at decision | L1→L5 · Steps 1–3 | Small–Med | Stops trading into hostile/OOD regimes |
 | 5 | **Thesis-Invalidation Exits** | L7 · Step 6 | Medium | Protects winners→losers when the world changes mid-trade |
 | 6 | **Autonomous Strategy On/Off by Regime** | L1+Learning · Step 3+learn | Larger (capstone) | The "change strategies on its own" goal |
@@ -90,6 +111,31 @@ the next; no half-built seams.
   size-down. Makes regime directive without starving data.
 - Depends on: P3. Verify: count would-be trades abstained in hostile
   regimes (shadow first).
+
+**P3′ · ENTRY EDGE SCORE v1** 🔴 Medium — *the new spine* (added 2026-06-24)
+- Replace the folklore TQS composite + immature ML-confidence as the decision
+  basis with ONE outcome-calibrated score: predicted **expected-MFE-R** from
+  the robust MARGINAL factors discovered at n=1002 (time_window, direction,
+  priority, timeframe, shrunk per-setup EV, re-signed regime_score, rsi,
+  trigger_probability, tape_score). Two layers + reliability:
+  EDGE (absolute R, drives gate+size) · GRADE (rolling per-archetype percentile,
+  0-100 single number — operator wants NO letter) · CONFIDENCE (per-cell eff_n / CI).
+- Rollout: SHADOW via the EXISTING P3 shadow-arms harness (log what it WOULD
+  gate vs actual) before it gates live. Promote when its size-weighted-R beats
+  champion. Demote TQS pillars + gate confidence to input features.
+- Depends on: Phase 0 persistence (sector/symbol-RS/trigger_price) + P3 harness.
+  Verify: `/shadow/arm-report` edge-arm beats champion on weighted-R over an RTH.
+
+**P4′ · REGIME-CONDITIONAL EDGE + SHRINKAGE** 🟠 Larger (added 2026-06-24)
+- Generalize the existing `setup_regime_expectancy` table (the spine P6 already
+  reads) into the full archetype cell: `setup_class × direction × style ×
+  time_window × market_regime × sector_regime × symbol_RS_regime`. Hierarchical
+  shrinkage / partial pooling (empirical-Bayes) so thin cells borrow from their
+  parents; per-cell CI = the explicit reliability/trustability signal. This is
+  "models that generalize," and it makes a 90/A mean "top-decile expected-R FOR
+  THIS ARCHETYPE." Optionally retrain the ML gate on the clean window here.
+- Depends on: P3′ + accrued clean data (Phase 0 fields logging). Verify: per-cell
+  calibration (predicted-R vs realized-R) + grade-ladder monotonic vs MFE.
 
 ### ARC 3 — ADAPT & AUTONOMY (earned last)
 
@@ -152,9 +198,13 @@ S5→thesis-invalidation tag in exit · S6→Strategy Autonomy console.
 
 ---
 
-## Open operator decision (locks P3)
-Should **TQS become an input the ML gate consumes** (one fused decision) or
-**stay the human trust/quality lens** with the ML gate as sole fire-decision?
-Not needed until Arc 2, but it is the hinge of P3.
+## Open operator decision (locks P3) — ✅ RESOLVED 2026-06-24
+~~Should TQS become an input the ML gate consumes, or stay the human trust
+lens with the ML gate as sole decider?~~ **Mooted.** Diagnostics proved BOTH
+are noise, so neither option is valid. **Decision: a THIRD path** — build the
+calibrated **Entry Edge Score** (P3′/P4′) as the single authority; TQS pillars
+and ML `confidence_score` become demoted INPUT features, not authorities. The
+operator-confirmed score object is the triple **(edge: +R · grade: rolling
+per-archetype percentile 0-100, no letter · confidence: per-cell eff_n/CI)**.
 
-_Last updated: 2026-06-19._
+_Last updated: 2026-06-24 (Entry Edge Score folded in; P3 hinge closed)._

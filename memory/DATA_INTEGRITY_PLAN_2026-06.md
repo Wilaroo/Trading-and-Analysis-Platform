@@ -23,6 +23,9 @@
 | 11 | `adrp_20d` | In-Play / liquidity proof | Data Confidence | collector warm-fill | 🟡 partial |
 | 12 | execution_tracker → `trade_outcomes` | Execution pillar (Entry-Tendency) | TQS coverage (0%) | only ~2% carry real entry_slippage | 🟡 plumbing |
 | 13 | P&L accounting | positions, journal, EOD | Positions, Journal | net_pnl finalize (v320h), realized autosync | ✅ mostly |
+| 14 | **sector_regime** (computed, DROPPED) | Edge Score archetype cell | Provenance/Edge drawer | `build_entry_context` does NOT persist it | 🔴 **NEW gap (Phase 0)** |
+| 15 | **rs_rating / symbol-RS regime** | Edge Score archetype cell | Edge drawer | computed for focus list, not on the trade | 🔴 **NEW gap (Phase 0)** |
+| 16 | **trigger_price** (reliable) | trigger_drift / chase % (scalp entry-quality) | Edge drawer "why" | only best-effort persisted today | 🟡 **NEW gap (Phase 0)** |
 
 ## B. Calculation-correctness fixes (honest math)
 - 🔴 **P1 Style = Pattern** (`tqs_engine` weights off `setup_taxonomy.style_of()`,
@@ -34,6 +37,12 @@
 - 🟢 **RSI clamp / min-bars guard** on the Technical snapshot fallback.
 
 ## C. Phased sweep (each shippable + reversible)
+0. **🔴 PHASE 0 — Entry Edge Score persistence (added 2026-06-24, observe-only, NO behavior change):**
+   stamp `sector_regime` + `rs_rating`/symbol-RS regime + reliable `trigger_price`
+   onto `entry_context` at fill, and ship a read-only coverage report so we can
+   see how dark each field is on real DGX data. **Time-sensitive** — every day
+   without these logged is training data the regime-conditional Edge Score
+   (P4′) can never condition on retroactively.
 1. **Read-only audit sweep** — run `diag_tqs_coverage`, `diag_style_integrity`,
    data-schedule, ingest-continuity → snapshot today's true state into the
    Data Confidence page. (no behavior change)
