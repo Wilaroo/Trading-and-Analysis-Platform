@@ -38,12 +38,18 @@ What REMAINS is the TQS *scoring itself*: reliability + integrity audit.
   validate against `bot_trades` realized R (reuse clean_r). Likely a shadow/observe rollout per discipline.
 
 ### 🟠 P1 — Why is the bot under-firing SCALP / INTRADAY vs LONGER-HORIZON trades?
+✅ **RESOLVED 2026-06-24 — NOT under-firing anymore.** Ran the horizon-funnel on the DGX (days=30,
+26,801 evals): scalp 25.2% / intraday 24.8% of evals (fast = ~50% combined — the old "0.6%" premise is
+DEAD), `capacity_rejections: 0` (the 25-cap is NOT biting). Choke labels flagged intraday/swing
+`gate_veto` BUT that's a red herring: post-gate realized R is NEGATIVE on those horizons
+(scalp -0.063 / intraday -0.081 / swing -0.215 / position -0.048), so loosening the gate would only add
+negative-EV flow. The real problem is **edge quality (whole book mildly -EV), worst on SWING** (-0.215R,
+505 taken) — an EV problem, not a routing problem. Tied to the deferred TQS scalp re-audit (2026-07-08).
+NEXT (chasing the swing bleed): `GET /api/slow-learning/setup-ev/report?horizon=swing&days=30` (NEW,
+services/setup_ev.py) → which setup_type(s) leak -R → suppress/tighten (v353–v363 playbook).
 ✅ DIAGNOSTIC DELIVERED 2026-06-23 — `services/horizon_funnel.py` +
 `GET /api/slow-learning/horizon-funnel/report?days=`. Per-horizon funnel (evaluated→approved→taken→
-realized-R) with a CHOKE heuristic (under_emitted | gate_veto | capacity | healthy). NEXT: run it on the
-DGX after an RTH window and act on the choke label — under_emitted ⇒ scanner/ADRP/liquidity thresholds;
-gate_veto ⇒ TQS anchor + horizon-aware gate thresholds (ties to TQS-integrity); capacity ⇒ MFE/MAE +
-raise the 25-position cap. (The actual fix is data-driven — read the report first.)
+realized-R) with a CHOKE heuristic (under_emitted | gate_veto | capacity | healthy).
 
 ### 🟠 P1 — MFE/MAE study → time-decay (long-horizon) and/or RAISE the position cap (currently 25)
 - Compute MFE_R / MAE_R per trade by horizon class (reuse the mfe_r/mae_r tracking in position_manager).

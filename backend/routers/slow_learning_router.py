@@ -380,6 +380,23 @@ async def get_horizon_funnel_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/setup-ev/report")
+async def get_setup_ev_report(horizon: str = Query(None), days: int = Query(30),
+                              min_n: int = Query(1)):
+    """Per-setup realized-R audit (read-only) — which setup_type(s) leak -R.
+
+    Groups closed bot_trades by setup_type (optionally filtered to a horizon
+    class), with win-rate / avg-R / winsorized-R / total-R, a long-vs-short
+    split, and a verdict (bleeding | marginal | healthy | thin). Sorted worst
+    total-R first. Use to pinpoint negative-EV detectors to suppress/tighten.
+    """
+    from services.setup_ev import generate_setup_ev_report
+    from database import get_database
+    report = generate_setup_ev_report(get_database(), days=days, horizon=horizon,
+                                       min_n=min_n)
+    return {"success": True, "report": report}
+
+
 @router.get("/mfe-mae/report")
 async def get_mfe_mae_report(days: int = Query(30)):
     """MFE/MAE study (read-only) — bad ENTRIES vs bad EXITS, by horizon.
