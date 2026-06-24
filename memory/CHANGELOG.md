@@ -13,6 +13,23 @@ categories by avg_r. Reuses tqs_entry_quality helpers + |R|>10 corruption guard.
  • NEXT: run on DGX (days=30+) → rank features; build the new entry score from the top continuous +
    categorical predictors (setup_type/regime/direction already proven to separate via setup-EV). Replaces
    the 5-pillar TQS as the gate's basis. Triage in parallel: kill daily_breakout (0% win), backside time-decay.
+ • RESULT (DGX, days=45, n=1002): real-but-modest signal — no silver bullet, the edge is in COMBINING weak
+   factors. CONTINUOUS spearman_vs_mfe: regime_score -0.234 (STRONGEST, INVERTED — high regime_score → worse
+   entries, likely mis-signed), rsi +0.157, trigger_probability +0.131, tape_score +0.111; gate_confidence_score
+   -0.029 (≈0 — gate score is noise). CATEGORICAL (large-sample, robust): TIME_WINDOW is the best lever —
+   midday (n137) -0.262, opening_drive (n63) -0.486, late_morning (n60) -0.201 BLEED; afternoon (n139) -0.007 &
+   opening_auction (n81) -0.062 ~breakeven; pre_market +0.375 (lottery, 18% win). DIRECTION: long (n729) -0.061
+   vs short (n273) -0.311 — shorts bleed 5x. PRIORITY monotonic: high -0.002 > medium -0.169 > low -0.258.
+   TIMEFRAME: swing -0.023 > position -0.092 > intraday -0.185 > scalp -0.234. GATE_DECISION INVERTED: go -0.178
+   WORSE than reduce -0.078 (gate is anti-predictive, not just noise).
+ • CORRECTION: earlier "kill daily_breakout (0% win)" was a 30-day small-sample artifact. Over 45d (n38) it's
+   the BEST setup by avg_r (+0.807) — a fat-tailed lottery (15.8% win, MFE 1.278, a few huge winners). DO NOT
+   kill; handle high-variance setups with shrinkage/CI, not point estimates. vwap_continuation flipped the
+   other way (30d +4.46R → 45d -0.376R). Setup-level EV is window-sensitive; time/direction/priority are robust.
+ • REBUILD DESIGN (proposed): composite "Entry Edge Score" from robust signals (time_window gate, direction-
+   aware bar, priority gate, shrunk per-setup EV, re-signed regime_score, + rsi/trigger_prob/tape_score) —
+   OBSERVE/shadow mode first (log what it WOULD gate vs actual outcomes) before it gates live. Replaces TQS as
+   the gate basis. Also investigate: regime_score sign inversion + gate GO-inversion as targeted fixes.
 
 
 
