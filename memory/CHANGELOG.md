@@ -1,3 +1,23 @@
+## 2026-06-24 — TQS ENTRY-QUALITY CROSS-TAB (read-only) — does TQS predict entry quality?
+Scoping the system-wide entry-quality bleed (MFE/MAE proved it: ALL horizons `entry_problem`,
+avg_mfe_r ~0.16, avg_mae_r ~-0.25, winner_capture ~0.87 → holding fine, ENTRIES bad). Setup-EV
+named the real-setup bleeders (excluding reconciled_* orphan artifacts): daily_breakout (0% win,
+n16, -9.52R!), backside (-7.26R), squeeze (-6.78R), rs_leader_break (-4.22R).
+ • NEW `services/tqs_entry_quality.py` + `GET /api/slow-learning/tqs-entry-quality/report?days=&min_n=`.
+   Buckets closed bot_trades' realized-R and MFE_R by TQS grade and TQS score band, plus the Spearman
+   rank correlation between TQS score and (realized R, MFE_R). bot_trades persists the FINAL post-gate
+   TQS (`tqs_grade`/`tqs_score`), so this tests the score the bot actually entered on. Reuses the
+   mfe_mae corruption guard (|R|>10 dropped). Verdict: predictive | weak | non_predictive | inverted.
+ • WHY: the original mandate is "audit TQS + unify TQS↔Confidence-Gate ambiguity." If avg_mfe_r is
+   FLAT across grades (high-TQS entries realize the same +0.16R as low-TQS), TQS is noise and the gate
+   is theatre → rework TQS against MFE, not gate thresholds. If monotonic, tighten the gate to top grades.
+ • TESTED `tests/test_tqs_entry_quality.py` (6): predictive/non_predictive/inverted verdicts, spearman
+   monotonic ±1, tie-ranking, empty-db safe. All green. Endpoint syntax-clean.
+ • NEXT: run on DGX; read the verdict. Then (a) kill/suppress daily_breakout (0% win, v403 suppress not
+   biting), (b) backside time-decay exit, (c) if TQS non-predictive → TQS pillar re-audit vs MFE target.
+
+
+
 ## 2026-06-24 — v409 P0 LIVE FIX: stale-alert TTL fail-OPEN (bot took 0 trades for ~28h) — TESTED
 Operator-reported: bot took 0 trades, SentCom showed zeros. Funnel proved the bot was healthy
 (autonomous, 8/25 positions, daily-loss NOT hit) but `confidence-gate/summary.today.evaluated=0`

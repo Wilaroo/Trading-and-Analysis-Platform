@@ -412,6 +412,22 @@ async def get_mfe_mae_report(days: int = Query(30)):
     return {"success": True, "report": report}
 
 
+@router.get("/tqs-entry-quality/report")
+async def get_tqs_entry_quality_report(days: int = Query(30), min_n: int = Query(5)):
+    """TQS entry-quality cross-tab (read-only) — does TQS PREDICT entry quality?
+
+    Buckets closed bot_trades' realized-R and MFE_R by TQS grade and TQS score band,
+    plus the Spearman rank correlation between TQS score and (realized R, MFE_R).
+    Verdict: predictive | weak | non_predictive | inverted. Flat/negative corr =>
+    TQS is noise for entry quality => rework TQS against MFE, not gate thresholds.
+    """
+    from services.tqs_entry_quality import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days, min_n=min_n)
+    return {"success": True, "report": report}
+
+
+
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):
     """One-time repair of physically-impossible mfe_r/mae_r on closed bot_trades
