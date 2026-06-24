@@ -443,6 +443,21 @@ async def get_orphan_leak_report(days: int = Query(120), gap_min: int = Query(12
     return {"success": True, "report": report}
 
 
+@router.get("/orphan-leak/diagnostics")
+async def get_orphan_leak_diagnostics():
+    """Read-only runtime diagnostics for the orphan-leak fix decision.
+
+    Surfaces direct-IB connectivity (the guards depend on it), whether
+    get_positions()/get_open_orders() return data, the pusher position
+    snapshot, fill-tape (ib_executions) health, recent-orphan fill
+    corroboration, and the governing env flags. Calls are best-effort.
+    """
+    from services.orphan_leak_rca import generate_diagnostics
+    from database import get_database
+    diag = await generate_diagnostics(get_database())
+    return {"success": True, "diagnostics": diag}
+
+
 # ==================== STATUS ENDPOINT ====================
 
 @router.get("/status")

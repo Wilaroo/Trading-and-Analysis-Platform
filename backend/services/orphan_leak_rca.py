@@ -263,3 +263,124 @@ def generate_report(db, days: int = 120, gap_min: int = 120) -> dict:
         guard["error"] = str(e)
     out["fill_race_guard_events"] = guard
     return out
+
+
+async def generate_diagnostics(db) -> dict:
+    """Read-only runtime diagnostics for the orphan-leak fix decision.
+
+    Reveals WHY the anti-orphan guards aren't firing on a pusher-only DGX:
+    direct-IB connectivity, whether get_positions()/get_open_orders() return
+    data, the pusher position snapshot, the fill-tape (ib_executions) health,
+    and the relevant env flags. Calls are best-effort + guarded — never raises.
+    """
+    import os
+    out = {"checked_at": datetime.now(timezone.utc).isoformat()}
+
+    # 1) env flags that govern the guards / order path.
+    out["env"] = {k: os.environ.get(k) for k in (
+        "BOT_ORDER_PATH",
+        "PENDING_FILL_ATTRIBUTION_ENABLED",
+        "PENDING_REAPER_ENABLED",
+        "PENDING_REAPER_CANCEL_FIRST",
+        "PENDING_REAPER_MAX_AGE_S",
+        "PENDING_REAPER_INTERVAL_S",
+        "REAPER_PUSHER_FALLBACK",
+        "IB_DIRECT_HOST", "IB_DIRECT_PORT", "IB_DIRECT_CLIENT_ID",
+        "V320H_OCA_FIX_POLICY",
+    )}
+
+    # 2) direct-IB live read-only probes (the guards depend on these).
+    ibd_info = {"available": False, "connected": False}
+    try:
+        from services.ib_direct_service import get_ib_direct_service
+        ibd = get_ib_direct_service()
+        if ibd is not None:
+            ibd_info["available"] = bool(getattr(ibd, "is_available", lambda: True)())
+            try:
+                ibd_info["connected"] = bool(await ibd.ensure_connected())
+            except Exception as e:
+                ibd_info["connect_error"] = str(e)[:160]
+            if ibd_info["connected"]:
+                try:
+                    pos = await ibd.get_positions()
+                    ibd_info["get_positions_count"] = len(pos or [])
+                except Exception as e:
+                    ibd_info["get_positions_error"] = str(e)[:160]
+                try:
+                    oo = await ibd.get_open_orders()
+                    ibd_info["get_open_orders_count"] = len(oo or [])
+                except Exception as e:
+                    ibd_info["get_open_orders_error"] = str(e)[:160]
+                try:
+                    ibd_info["session_fills_count"] = len(ibd._ib.fills() or [])
+                except Exception:
+                    pass
+    except Exception as e:
+        ibd_info["error"] = str(e)[:160]
+    out["ib_direct"] = ibd_info
+
+    # 3) pusher position snapshot (source of truth on the DGX).
+    pusher = {}
+    try:
+        from routers.ib import _pushed_ib_data
+        pos = (_pushed_ib_data or {}).get("positions") or []
+        pusher["pushed_positions_count"] = len(pos)
+        pusher["pushed_last_update"] = (_pushed_ib_data or {}).get("last_update")
+        pusher["sample_symbols"] = [
+            (p.get("symbol") or p.get("Symbol")) for p in pos[:8]]
+    except Exception as e:
+        pusher["error"] = str(e)[:160]
+    try:
+        snap = db["ib_live_snapshot"].find_one({"_id": "current"}, {"_id": 0})
+        if snap:
+            pusher["snapshot_positions_count"] = len((snap or {}).get("positions") or [])
+            pusher["snapshot_last_update"] = (snap or {}).get("last_update")
+    except Exception:
+        pass
+    out["pusher"] = pusher
+
+    # 4) fill tape (ib_executions) health.
+    fills = {}
+    try:
+        from services.ib_executions_persister import get_persister_stats
+        fills["persister_stats"] = get_persister_stats()
+    except Exception:
+        pass
+    try:
+        coll = db["ib_executions"]
+        fills["total"] = coll.count_documents({})
+        wk = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        fills["last_7d"] = coll.count_documents({"time": {"$gte": wk}})
+        latest = list(coll.find({}, {"_id": 0, "time": 1}).sort("time", -1).limit(1))
+        fills["latest_time"] = latest[0]["time"] if latest else None
+    except Exception as e:
+        fills["error"] = str(e)[:160]
+    out["fill_tape"] = fills
+
+    # 5) for recent orphans: was there a real fill near the orphan's entry?
+    #    (proves the position filled; the gap is attribution, not the fill.)
+    near = {"checked": 0, "with_fill_within_15m": 0, "samples": []}
+    try:
+        recent_orphans = list(db["bot_trades"].find(
+            {"setup_type": "reconciled_orphan", "status": "closed"},
+            {"_id": 0, "symbol": 1, "entry_time": 1, "executed_at": 1,
+             "created_at": 1}).sort("created_at", -1).limit(20))
+        for o in recent_orphans:
+            oe = _entry_ts(o)
+            sym = (o.get("symbol") or "").upper()
+            if not oe or not sym:
+                continue
+            near["checked"] += 1
+            lo = (oe - timedelta(minutes=15)).isoformat()
+            hi = (oe + timedelta(minutes=15)).isoformat()
+            n = db["ib_executions"].count_documents(
+                {"symbol": sym, "time": {"$gte": lo, "$lte": hi}})
+            if n > 0:
+                near["with_fill_within_15m"] += 1
+            if len(near["samples"]) < 10:
+                near["samples"].append({"symbol": sym, "orphan_entry": oe.isoformat(),
+                                        "ib_fills_within_15m": n})
+    except Exception as e:
+        near["error"] = str(e)[:160]
+    out["orphan_fill_corroboration"] = near
+    return out
