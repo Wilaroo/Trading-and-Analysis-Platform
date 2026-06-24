@@ -13,6 +13,29 @@
 >   `backend/services/entry_edge_coverage.py` · tests `backend/tests/test_entry_edge_score.py`.
 > NOTE FOR OPERATOR: these require commit ≥ the P3′ build to be pushed via
 > "Save to Github" before they appear on the DGX (404 = not yet pulled).
+>
+> **🟢 P4′ LIVE VETO — WIRED 2026-06-24 (active, env-flagged, fail-open).**
+> The OOS-proven conditional model now gates live in `opportunity_evaluator`
+> right before the `BotTrade` is built. Serving layer: `services/entry_edge_gate.py`
+> (singleton: fits the conditional model once from closed `bot_trades`, caches it
+> with a 24h TTL + a 5:45 PM ET nightly refit, precomputes the bottom-30%
+> predicted-edge cutoff). Every candidate is ALWAYS scored and the triple is
+> stamped onto `entry_context.entry_edge` (observe). It BLOCKS (record_rejection
+> `reason_code="edge_score_veto"` → `return None`) ONLY when
+> `ENTRY_EDGE_VETO_ENABLED=true` AND the trade sits in a REAL archetype cell whose
+> predicted edge ≤ the bottom-30% cutoff. Un-scoreable / thin-prior candidates are
+> NEVER vetoed (we only block archetypes we have evidence against). FAIL-OPEN
+> everywhere — any error/missing model allows the trade (v409 lesson).
+> - Env knobs (defaults = the validated DGX run): `ENTRY_EDGE_VETO_ENABLED` (off),
+>   `ENTRY_EDGE_VETO_PCTILE=30`, `ENTRY_EDGE_VETO_TARGET=realized_r`,
+>   `ENTRY_EDGE_VETO_CLIP=3`, `ENTRY_EDGE_VETO_DAYS=120`, `ENTRY_EDGE_VETO_TTL_HOURS=24`,
+>   `ENTRY_EDGE_VETO_MIN_TRADES=60`.
+> - Operator: `GET /api/slow-learning/entry-edge-gate/status` (armed? model_n,
+>   threshold, fitted_at) · `POST /api/slow-learning/entry-edge-gate/refresh`
+>   (force refit). Arm with `ENTRY_EDGE_VETO_ENABLED=true` in backend env + restart.
+>   Revert instantly = unset the flag (or roll back the commit).
+> - Proof: `tests/test_entry_edge_gate.py` (bad archetype vetoed, good kept,
+>   fail-open safe — DB-free synthetic).
 
 ## ⛔ FUTURE AGENTS — READ THIS FIRST
 1. **Do NOT try to "fix" or reweight the 5 TQS pillars.** They are proven

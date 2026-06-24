@@ -1721,3 +1721,11 @@ Live whole-file SHA after v363: 0d9b24b150296d2bf252da31b2c3da9fe44bce47439d2ef2
   watch: DXCM -5.5% (weakest open hold, still above stop).
 - Also still open from prior: A6 fresh-quote gate now subsumed by A8; scan-loop
   watchdog (offered, not built); TQS<->Confidence gate unify; adrp_20d warm-fill.
+--- 2026-06-24 — P4' LIVE EDGE VETO WIRED (env-flagged, fail-open) ---
+DONE: Conditional Entry Edge Score gates live in opportunity_evaluator (skip
+  bottom 30%, ENTRY_EDGE_VETO_ENABLED, fail-open) via services/entry_edge_gate.py
+  + nightly 5:45pm ET refit. Observe-stamps entry_context.entry_edge always.
+  Status/refresh endpoints added. Synthetic gate test passes; report regression OK.
+NEXT (P0): Operator arm on DGX (ENTRY_EDGE_VETO_ENABLED=true), watch
+  rejection_daily_counts["edge_score_veto"] vs realized book. Then Seal #2
+  (order_no_trade tracking gap, -$920) + backside time-decay exit (P2).

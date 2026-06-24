@@ -235,27 +235,18 @@ def score_conditional(model, factors):
     return {"edge": round(est, 4), "confidence_n": n_used, "contributions": {}}
 
 
-def generate_report(db, days: int = 120, target: str = "mfe_r",
-                    k_folds: int = DEFAULT_K_FOLDS, clip: float = 0.0,
-                    model_type: str = "marginal") -> dict:
-    is_cond = model_type == "conditional"
-    fitfn, scorefn = (fit_conditional, score_conditional) if is_cond else (fit, score)
-    out = {
-        "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        "report_period_days": days, "target": target, "k_folds": k_folds,
-        "clip": clip, "model": "conditional" if is_cond else "marginal",
-        "n_total": 0, "n_used": 0, "headline": "insufficient data",
-    }
+def load_training_rows(db, days: int = 120, target: str = "realized_r", clip: float = 0.0):
+    """Shared loader: closed real-entry `bot_trades` → ([(factors, mfe, realized, tval)], n_total).
+    Identical population/prep the OOS report uses, so the LIVE gate fits on exactly
+    the same trades it was proven on. Reused by generate_report + entry_edge_gate."""
     if db is None:
-        return out
+        return [], 0
     if target not in ("mfe_r", "realized_r", "win"):
         target = "mfe_r"
-
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     proj = {"_id": 0, "entry_context": 1, "realized_pnl": 1, "risk_amount": 1,
             "mfe_r": 1, "setup_type": 1, "timeframe": 1, "direction": 1,
             "tape_score": 1, "timestamp": 1, "created_at": 1, "closed_at": 1}
-
     data = []  # (factors, mfe, realized, target_value)
     n_total = 0
     for t in db["bot_trades"].find({"status": "closed"}, proj):
@@ -285,6 +276,26 @@ def generate_report(db, days: int = 120, target: str = "mfe_r",
         else:  # realized_r
             tval = max(-clip, min(clip, realized)) if clip > 0 else realized
         data.append((_raw_factors(t, ec), mfe, realized, tval))
+    return data, n_total
+
+
+def generate_report(db, days: int = 120, target: str = "mfe_r",
+                    k_folds: int = DEFAULT_K_FOLDS, clip: float = 0.0,
+                    model_type: str = "marginal") -> dict:
+    is_cond = model_type == "conditional"
+    fitfn, scorefn = (fit_conditional, score_conditional) if is_cond else (fit, score)
+    out = {
+        "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "report_period_days": days, "target": target, "k_folds": k_folds,
+        "clip": clip, "model": "conditional" if is_cond else "marginal",
+        "n_total": 0, "n_used": 0, "headline": "insufficient data",
+    }
+    if db is None:
+        return out
+    if target not in ("mfe_r", "realized_r", "win"):
+        target = "mfe_r"
+
+    data, n_total = load_training_rows(db, days, target, clip)
 
     n = len(data)
     out["n_total"] = n_total

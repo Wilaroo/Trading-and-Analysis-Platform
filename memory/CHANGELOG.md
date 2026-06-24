@@ -27760,3 +27760,20 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
     entry_ts/refreshed_ts carried onto cards). Additive, reversible, per-file
     multi-edit; POST_SHA == babel-validated build. Both files babel-validated
     in sandbox (apply + idempotent + rollback byte-identical).
+
+## v411 — Entry Edge LIVE abstention veto wired (2026-06-24)
+- P4' conditional Entry Edge Score now gates live in `opportunity_evaluator.py`
+  immediately before `BotTrade` construction. New serving layer
+  `services/entry_edge_gate.py` (singleton): fits the conditional model once from
+  closed `bot_trades`, caches with 24h TTL + 5:45pm ET nightly refit
+  (`trading_scheduler._run_entry_edge_gate_refresh`), precomputes the bottom-30%
+  predicted-edge cutoff. ALWAYS scores + stamps `entry_context.entry_edge`
+  (observe); BLOCKS only when `ENTRY_EDGE_VETO_ENABLED=true` AND edge ≤ cutoff in a
+  real archetype cell. FAIL-OPEN everywhere (v409 lesson). Reversible via the env
+  flag or commit rollback.
+- Refactor: extracted shared `load_training_rows()` in `entry_edge_score.py` so the
+  live gate fits on the IDENTICAL population the OOS report proved (no drift).
+- Endpoints: `GET /api/slow-learning/entry-edge-gate/status`,
+  `POST /api/slow-learning/entry-edge-gate/refresh`.
+- Proof: `tests/test_entry_edge_gate.py` (bad cell vetoed, good cell kept,
+  fail-open safe). Regression: existing `tests/test_entry_edge_score.py` still ALL_OK.

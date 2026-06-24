@@ -10,6 +10,7 @@ The core trade evaluation pipeline:
 6. Trade Object Creation with rich entry context
 """
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -1949,6 +1950,60 @@ class OpportunityEvaluator:
             )
             unified_grade_final = tqs_grade_final or quality_grade
 
+            # ── Build entry_context UP-FRONT so the Entry Edge gate can score the
+            #    real archetype cell BEFORE we commit a BotTrade. (Was inlined in the
+            #    BotTrade(...) ctor; extracted so the veto can read it.)
+            entry_context = self.build_entry_context(
+                alert, intelligence, current_regime, regime_score,
+                filter_action, filter_win_rate, atr, atr_percent,
+                confidence_gate_result=confidence_gate_result,
+                multipliers_meta={
+                    "position": position_multipliers,
+                    "stop_guard": stop_guard_meta,
+                    "target_snap": target_snap_meta,
+                    # v325 — geometry/reachability stamps (atr basis,
+                    # horizon frac, reach envelope, pt1_env_ratio).
+                    "hsbg": hsbg_meta,
+                },
+                # 2026-04-28f: AI module results mirrored into
+                # entry_context.ai_modules for unified inspection.
+                ai_consultation_result=ai_consultation_result,
+            )
+
+            # ── Entry Edge Score abstention gate (P4' conditional). ALWAYS scores +
+            #    stamps the edge onto entry_context (OBSERVE). BLOCKS the trade only
+            #    when ENTRY_EDGE_VETO_ENABLED=true AND the candidate's predicted edge
+            #    sits in the OOS-proven bottom band (the skip-30% knee that flips the
+            #    book -133R → +EV). Fail-open by construction (any error → no veto).
+            try:
+                from services.entry_edge_gate import get_gate
+                _edge_eval = get_gate().evaluate(
+                    {
+                        "direction": direction_str,
+                        "timeframe": timeframe_str,
+                        "setup_type": setup_type,
+                        "tape_score": alert.get("tape_score"),
+                    },
+                    entry_context,
+                )
+                if _edge_eval:
+                    entry_context["entry_edge"] = _edge_eval  # observe stamp (always)
+                    if _edge_eval.get("veto") and os.environ.get("ENTRY_EDGE_VETO_ENABLED") == "true":
+                        print(
+                            f"   🛑 [EDGE VETO] {symbol} {setup_type} {direction_str} "
+                            f"edge={_edge_eval.get('edge')} < bottom-{_edge_eval.get('pctile')}% "
+                            f"cutoff={_edge_eval.get('threshold')} "
+                            f"(grade={_edge_eval.get('grade')}, cell_n={_edge_eval.get('confidence_n')})"
+                        )
+                        bot.record_rejection(
+                            symbol=symbol, setup_type=setup_type, direction=direction_str,
+                            reason_code="edge_score_veto",
+                            context=_edge_eval,
+                        )
+                        return None
+            except Exception as _edge_err:
+                logger.debug("[EDGE VETO] fail-open (%s)", _edge_err)
+
             # Create trade
             trade = BotTrade(
                 id=str(uuid.uuid4())[:8],
@@ -1994,25 +2049,7 @@ class OpportunityEvaluator:
                 regime_score=regime_score,
                 regime_position_multiplier=regime_multiplier,
                 setup_variant=alert.get("strategy_name", alert.get("setup_variant", setup_type)),
-                entry_context=self.build_entry_context(
-                    alert, intelligence, current_regime, regime_score,
-                    filter_action, filter_win_rate, atr, atr_percent,
-                    confidence_gate_result=confidence_gate_result,
-                    multipliers_meta={
-                        "position": position_multipliers,
-                        "stop_guard": stop_guard_meta,
-                        "target_snap": target_snap_meta,
-                        # v325 — geometry/reachability stamps (atr basis,
-                        # horizon frac, reach envelope, pt1_env_ratio).
-                        "hsbg": hsbg_meta,
-                    },
-                    # 2026-04-28f: AI module results were previously
-                    # only landed under `explanation.ai_consultation`,
-                    # making them invisible to the analytics + the
-                    # Q3 verification curl. Now mirrored into
-                    # `entry_context.ai_modules` for unified inspection.
-                    ai_consultation_result=ai_consultation_result,
-                ),
+                entry_context=entry_context,
                 scale_out_config={
                     "enabled": True,
                     "targets_hit": [],

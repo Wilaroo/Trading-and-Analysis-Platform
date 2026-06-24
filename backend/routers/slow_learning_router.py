@@ -501,6 +501,32 @@ async def get_entry_edge_score_report(days: int = Query(120),
     return {"success": True, "report": report}
 
 
+@router.get("/entry-edge-gate/status")
+async def get_entry_edge_gate_status():
+    """LIVE Entry Edge abstention gate status (P4' conditional). Shows whether the
+    veto is ARMED (ENTRY_EDGE_VETO_ENABLED), the cached model size, the bottom-%
+    cutoff + threshold edge, and last-fit time. Read-only; lazily fits on first call.
+    """
+    from services.entry_edge_gate import get_gate
+    gate = get_gate()
+    try:
+        from database import get_database
+        gate._ensure(get_database())   # lazy warm so status reflects a real fit
+    except Exception:
+        pass
+    return {"success": True, "gate": gate.status()}
+
+
+@router.post("/entry-edge-gate/refresh")
+async def refresh_entry_edge_gate():
+    """Force a refit of the LIVE Entry Edge gate from the latest closed trades.
+    Also wired to the nightly scheduler; this endpoint is for manual/operator use."""
+    from services.entry_edge_gate import get_gate
+    from database import get_database
+    status = get_gate().refresh(get_database(), force=True)
+    return {"success": True, "gate": status}
+
+
 
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):

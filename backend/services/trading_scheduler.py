@@ -407,6 +407,22 @@ class TradingScheduler:
                 replace_existing=True
             )
 
+            # 10. Entry Edge Gate refit — 5:45 PM ET daily (P4' conditional).
+            #     Re-fits the LIVE abstention model from the day's freshly-closed
+            #     trades AFTER the 5:30 learning-stats rebuild has landed outcomes,
+            #     so the bottom-30% veto cutoff tracks the latest book. Fail-open.
+            self._scheduler.add_job(
+                _wrap_async(self._run_entry_edge_gate_refresh),
+                CronTrigger(
+                    hour=17,
+                    minute=45,
+                    timezone='US/Eastern'
+                ),
+                id='entry_edge_gate_refresh',
+                name='Nightly Entry Edge Gate Refit',
+                replace_existing=True
+            )
+
             self._scheduler.start()
             self._is_running = True
             logger.info("Trading scheduler started")
@@ -1105,6 +1121,19 @@ class TradingScheduler:
             result.duration_seconds = (end_time - start_time).total_seconds()
             self._log_task_result(result)
 
+
+    async def _run_entry_edge_gate_refresh(self):
+        """Nightly refit of the LIVE Entry Edge abstention gate (P4' conditional).
+        Re-fits the cached conditional model + bottom-30% veto cutoff from the latest
+        closed trades. Fail-open: the gate itself swallows errors and stays open."""
+        try:
+            from services.entry_edge_gate import get_gate
+            from database import get_database
+            status = get_gate().refresh(get_database(), force=True)
+            logger.info("Entry Edge gate refit: model_n=%s threshold=%s armed=%s",
+                        status.get("model_n"), status.get("threshold"), status.get("armed"))
+        except Exception as e:
+            logger.error(f"Entry Edge gate refit failed (gate stays open): {e}")
 
     async def _run_entry_price_sync(self):
         """v19.34.148 — nightly snap of `entry_price` ← IB.avgCost.
