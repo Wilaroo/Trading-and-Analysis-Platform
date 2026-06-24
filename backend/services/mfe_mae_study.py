@@ -18,6 +18,9 @@ from statistics import median
 logger = logging.getLogger(__name__)
 
 GREEN_R = 1.0   # "the trade worked" threshold (reached +1R favorable)
+MAX_PLAUSIBLE_R = 10.0   # v19.34.401 — drop legacy-corrupt excursions (the pre-fix
+#                           current_price<=0 bug wrote mae_r ~ -50R). Realized R is
+#                           already clamped to ±10; MFE/MAE beyond that is corruption.
 
 
 def _f(v):
@@ -64,6 +67,7 @@ def generate_report(db, days: int = 30) -> dict:
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     buckets = {h: [] for h in HORIZONS}
+    corrupt = 0
     proj = {"setup_type": 1, "status": 1, "realized_pnl": 1, "risk_amount": 1,
             "mfe_r": 1, "mae_r": 1, "timestamp": 1, "created_at": 1,
             "entry_time": 1, "opened_at": 1, "closed_at": 1}
@@ -73,6 +77,14 @@ def generate_report(db, days: int = 30) -> dict:
             continue
         r = _clean_r(t.get("realized_pnl"), t.get("risk_amount"))
         mfe, mae = _f(t.get("mfe_r")), _f(t.get("mae_r"))
+        # v19.34.401 — discard physically-impossible excursions from legacy
+        # corruption so the verdict isn't poisoned by -50R MAE artifacts.
+        if mfe is not None and abs(mfe) > MAX_PLAUSIBLE_R:
+            mfe = None
+            corrupt += 1
+        if mae is not None and abs(mae) > MAX_PLAUSIBLE_R:
+            mae = None
+            corrupt += 1
         if r is None:
             continue
         buckets[horizon_of(t.get("setup_type"))].append((r, mfe, mae))
@@ -83,6 +95,7 @@ def generate_report(db, days: int = 30) -> dict:
         all_rows += rows
         out["horizons"].append(_summarize(h, rows))
     out["overall"] = _summarize("ALL", all_rows)
+    out["corrupt_excursions_dropped"] = corrupt
     return out
 
 
@@ -103,7 +116,10 @@ def _summarize(label, rows):
     avg_r = round(sum(rs) / len(rs), 3)
     losers_green = [1 for r, m in losers if m is not None and m >= GREEN_R]
     frac_losers_green = round(len(losers_green) / len(losers), 3) if losers else None
-    cap = [r / m for r, m in winners if m and m > 0]
+    # v19.34.401 — capture can't exceed 1.0 by definition (you can't keep more
+    # than the peak). Clamp legacy under-sampled mfe (m < r) to r so the metric
+    # is trustworthy on mixed pre/post-fix data.
+    cap = [r / max(m, r) for r, m in winners if m and m > 0]
     winner_capture = round(sum(cap) / len(cap), 3) if cap else None
     giveback = round(avg_mfe - avg_r, 3) if avg_mfe is not None else None
 

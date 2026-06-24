@@ -916,8 +916,14 @@ class PositionManager:
                     trade.unrealized_pnl = (trade.fill_price - _cp) * trade.remaining_shares
 
                 # === MFE/MAE TRACKING ===
-                # Track from moment of fill for the full trade lifecycle
-                if trade.fill_price and trade.fill_price > 0:
+                # Track from moment of fill for the full trade lifecycle.
+                # v19.34.401 — GUARD against current_price <= 0. A stale/missing
+                # quote (symbol dropped from the push, or a freshly-adopted
+                # orphan never marked) used to set mae_price/mfe_price = 0 and
+                # corrupt mae_r to ~ -fill/risk (e.g. -50R) PERMANENTLY (0 < any
+                # later price, so it sticks). Same failure the unrealized_pnl
+                # block above guards (v19.34.226). Only track on a VALID mark.
+                if trade.fill_price and trade.fill_price > 0 and _cp and _cp > 0:
                     risk_per_share = abs(trade.fill_price - trade.stop_price) if trade.stop_price else trade.fill_price * 0.02
                     if risk_per_share == 0:
                         # 2026-04-30 v19.13 — fallback distorts R-multiples.

@@ -1,6 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🔧 2026-06-24 (v406) — MFE/MAE writer fix (P1, the corrupt-data bug).** Two bugs, both reproduced:
+> (1) manage-loop MFE/MAE tracked from `current_price` with no `<=0` guard → a stale/zero quote set
+> `mae_price=0` → `mae_r≈-50R` permanently (the "-3R MAE, closed -0.06R" symptom); (2) winner_capture>1.0
+> from sparse-tick MFE under-sampling. Fixes: `position_manager.py` guards the block (`_cp>0`);
+> `pnl_compute._backfill_excursion_floor` now bounds mfe_r≥realized-favorable / mae_r≤realized-adverse
+> (was: only filled when ==0); `mfe_mae_study` drops `|R|>10` legacy-corrupt rows (reports
+> `corrupt_excursions_dropped`) + clamps capture≤1.0. Writer/read-model only — no order/reaper/close
+> change. Historical corrupt rows excluded from study (not rewritten). Tests: `test_mfe_mae_fix.py` (6),
+> suite 24 green. Unblocks time-decay exit study + the evidence for the orphan stop-width decision.
+> Doc: `memory/v406_mfe_mae_fix_build.md`.
+> **NEXT (user directive): orphan PREVENTION — "stitch the cut, don't band-aid".** Root-cause WHY
+> orphans get created (reconciler guards v185/v264/v260 have gaps), categorize all 120 by creation cause,
+> prevent each class (promote bot's own fills; flatten genuinely-foreign positions) so they never adopt.
+
+
 > **🔧 2026-06-24 (v405) — orphan leak ROOT-CAUSE FIX (env-gated, observe default).**
 > RCA confirmed via DGX diagnostics: order path is `BOT_ORDER_PATH=direct` (clientId=11,
 > no clientId=10); direct-IB flaps 1-3×/day → a filled bot PENDING gets reaped

@@ -114,30 +114,40 @@ def _hold_seconds(trade: Any) -> Optional[float]:
 
 
 def _backfill_excursion_floor(trade: Any, mfe_r_floor: float, mae_r_floor: float) -> None:
-    """v19.34.240 (Part B) — fill mfe_r/mae_r on the trade + bot_trades doc from
-    the realized entry->exit excursion ONLY when the manage loop left them 0
-    (sub-minute closes never accumulated a tick). Never overwrites a real peak."""
+    """v19.34.240 / v19.34.401 — reconcile mfe_r/mae_r on the trade + bot_trades
+    doc against the realized entry->exit excursion.
+
+    mfe_r MUST be at least the realized favorable excursion and mae_r at most the
+    realized adverse one — you cannot CAPTURE more than the peak you reached. We
+    therefore take the more-extreme of (tracked manage-loop peak, realized floor).
+    This never shrinks a genuine peak, but it fixes two bugs:
+      • winner_capture > 1.0 — sparse manage ticks under-sampled the true MFE, so
+        realized_r > mfe_r. (Was: floor only applied when the value == 0, so an
+        under-sampled-but-nonzero mfe_r stayed wrong.)
+      • sub-minute closes that never accumulated a manage tick (mfe==mae==0)."""
     if _get_outcomes_collection() is None or _AO_DB is None:
         return
     cur_mfe = float(getattr(trade, "mfe_r", 0) or 0)
     cur_mae = float(getattr(trade, "mae_r", 0) or 0)
     set_fields: Dict[str, Any] = {}
-    if cur_mfe == 0 and mfe_r_floor:
-        v = round(float(mfe_r_floor), 3)
+    new_mfe = max(cur_mfe, float(mfe_r_floor or 0.0))
+    if abs(new_mfe - cur_mfe) > 1e-9:
+        v = round(new_mfe, 3)
         set_fields["mfe_r"] = v
         try:
             trade.mfe_r = v
         except Exception:
             pass
-    if cur_mae == 0 and mae_r_floor:
-        v = round(float(mae_r_floor), 3)
+    new_mae = min(cur_mae, float(mae_r_floor or 0.0))
+    if abs(new_mae - cur_mae) > 1e-9:
+        v = round(new_mae, 3)
         set_fields["mae_r"] = v
         try:
             trade.mae_r = v
         except Exception:
             pass
     if set_fields:
-        set_fields["excursion_floor_source"] = "pnl_compute_v19_34_240"
+        set_fields["excursion_floor_source"] = "pnl_compute_v19_34_401"
         tid = getattr(trade, "id", None)
         if tid:
             _AO_DB["bot_trades"].update_one(
