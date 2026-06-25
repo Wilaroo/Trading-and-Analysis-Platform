@@ -27809,6 +27809,9 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
 - Env knobs: ENTRY_EDGE_PROMOTE_MODE, ENTRY_EDGE_GO_THRESHOLD (0.0),
   ENTRY_EDGE_SIZE_MIN (0.5), ENTRY_EDGE_SIZE_MAX (1.25).
 - `services/entry_edge_promote.py` + `GET /api/slow-learning/entry-edge-promote/report`:
-  GO/STAND-DOWN split + edge×confidence sizing backtest (validate before active).
+  GO/STAND-DOWN split + edge×confidence sizing backtest, computed **OUT-OF-SAMPLE
+  (k-fold)** as the headline (per-fold train→test; cutoff+grades from train only) so
+  it isn't in-sample-optimistic; `in_sample` kept for reference.
   `diag_edge_gate.py` now prints promote_mode + the PROMOTE backtest.
-- Tests: `tests/test_entry_edge_promote.py` (decision logic), gate test still passes.
+- Tests: `tests/test_entry_edge_promote.py` (decision logic) +
+  `tests/test_entry_edge_promote_report.py` (OOS backtest e2e); gate test still passes.
