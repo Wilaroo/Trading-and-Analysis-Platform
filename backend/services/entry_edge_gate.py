@@ -232,6 +232,7 @@ class _EntryEdgeGate:
             "threshold": round(self._threshold, 4) if self._threshold is not None else None,
             "fitted_at": self._fitted_at.isoformat() if self._fitted_at else None,
             "promote_mode": os.environ.get("ENTRY_EDGE_PROMOTE_MODE", "off"),
+            "size_enabled": os.environ.get("ENTRY_EDGE_SIZE_ENABLED") == "true",
             "config": {
                 "target": os.environ.get("ENTRY_EDGE_VETO_TARGET", "realized_r"),
                 "clip": _envf("ENTRY_EDGE_VETO_CLIP", 3),

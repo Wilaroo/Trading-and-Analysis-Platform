@@ -79,6 +79,24 @@ def _accumulate(items):
     }
 
 
+def _go_threshold_sweep(items, thresholds):
+    """Trade-frequency vs avg-R curve: GO = above veto cutoff AND conservative edge > thr."""
+    curve = []
+    for thr in thresholds:
+        n_go = 0
+        tot = 0.0
+        for realized, dec in items:
+            ce = dec.get("conservative_edge")
+            blocked = dec.get("stand_down_reason") in ("edge_below_veto_cutoff", "unscoreable")
+            if (not blocked) and ce is not None and ce > thr:
+                n_go += 1
+                tot += realized
+        curve.append({"go_threshold": round(thr, 3), "n_go": n_go,
+                      "total_r": round(tot, 2),
+                      "avg_r": round(tot / n_go, 4) if n_go else 0.0})
+    return curve
+
+
 def generate_report(db, days: int = 120, k_folds: int = 5) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -130,6 +148,8 @@ def generate_report(db, days: int = 120, k_folds: int = 5) -> dict:
                                     [(rows[i][0], realized[i]) for i in folds[fi]]))
     oos = _accumulate(oos_items)
     out["oos"] = oos
+    out["oos_go_threshold_sweep"] = _go_threshold_sweep(
+        oos_items, [-0.10, -0.05, 0.0, 0.05, 0.10, 0.15, 0.20])
 
     b, g, sd, sz = oos["baseline_all"], oos["go_only"], oos["stand_down"], oos["sizing"]
     out["verdict"] = (

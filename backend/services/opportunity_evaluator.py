@@ -2022,7 +2022,11 @@ class OpportunityEvaluator:
                                 )
                                 return None
                             _sm = _edge_eval.get("size_mult") or 1.0
-                            if shares and abs(_sm - 1.0) > 1e-9:
+                            # SIZING is opt-in (ENTRY_EDGE_SIZE_ENABLED): OOS showed
+                            # edge×confidence sizing adds ~0 lift, so GO-selection ships
+                            # active with FLAT size unless sizing is explicitly enabled.
+                            if (os.environ.get("ENTRY_EDGE_SIZE_ENABLED") == "true"
+                                    and shares and abs(_sm - 1.0) > 1e-9):
                                 _ns = max(1, int(round(shares * _sm)))
                                 if _ns != shares:
                                     _ratio = _ns / float(shares)

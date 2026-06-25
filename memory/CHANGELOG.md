@@ -27815,3 +27815,12 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   `diag_edge_gate.py` now prints promote_mode + the PROMOTE backtest.
 - Tests: `tests/test_entry_edge_promote.py` (decision logic) +
   `tests/test_entry_edge_promote_report.py` (OOS backtest e2e); gate test still passes.
+
+## v413a — PROMOTE OOS validated; sizing decoupled (2026-06-24)
+- DGX OOS 5-fold (885 trades): GO keeps 131/885 → −133R book flips to +42.7R
+  (+0.326 avg); STAND-DOWN benches 754 (−175.7R). GREEN, robust (in-sample +70R).
+- OOS sizing lift ≈ +0.0002 (in-sample +0.0255) → edge×confidence SIZING does NOT
+  generalize. Decoupled: active mode applies GO stand-down with FLAT size; sizing is
+  opt-in behind `ENTRY_EDGE_SIZE_ENABLED` (default false). status() reports size_enabled.
+- Added `oos_go_threshold_sweep` (trade-frequency vs avg-R operating-point curve) so
+  GO_THRESHOLD can be tuned (GO took only ~15% of trades at thr=0).
