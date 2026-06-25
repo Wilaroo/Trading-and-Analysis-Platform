@@ -1,3 +1,19 @@
+## V6 Plan B bridge — useAppState wires the TopStrip state pill to LIVE health (2026-06-25)
+Frontend-only, additive, NO backend restart (maps an existing endpoint):
+- `hooks/useAppState.js` — polls the existing `GET /api/system/health` (20s) and maps
+  `overall` red→rose / yellow→amber / green→cyan (§3 app-state), surfacing non-green
+  subsystems as `reasons` + a `detail` string + a ready-made `stateMeta` map for the pill.
+  Phase B will later swap the source to a dedicated `GET /api/safety/system-state`
+  (server-side compute_app_state) — same hook contract, callers unchanged.
+- `pages/V6ShellPreview.jsx` — TopStrip + Heartbeat now driven by `useAppState` (LIVE by
+  default); the toggle became a LIVE/cyan/amber/rose override for demos.
+- Verified: eslint clean; webpack compiled; `?preview=v6shell` shows the state pill reading
+  real health (sandbox = `✕ CRITICAL · 1 red · 2 warn`, heartbeat rose) — proves the hook
+  end-to-end. No crash; live V5 cockpit untouched.
+- DEPLOY: frontend-only — DGX `yarn build` (no backend restart).
+
+
+
 ## V6 Plan A→B bridge — TopStrip + Heartbeat + shell skeleton (§4) composed (2026-06-25)
 ADDITIVE only (new files + a new isolated preview route; ZERO live V5 risk — built right
 before market open deliberately safe):

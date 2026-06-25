@@ -15,6 +15,7 @@ import React, { useState } from 'react';
 import { Heartbeat } from '../components/sentcom/v6/Heartbeat';
 import { TopStrip } from '../components/sentcom/v6/TopStrip';
 import { KpiRibbon } from '../components/sentcom/v6/KpiRibbon';
+import { useAppState } from '../hooks/useAppState';
 
 const PIPELINE = {
   scan: 47,
@@ -37,11 +38,14 @@ const PanelSlot = ({ title, width, children }) => (
 );
 
 export const V6ShellPreview = () => {
-  const [state, setState] = useState('cyan');
+  // Live app-state from /api/system/health; `override` lets us demo any halo.
+  const { state: liveState, stateMeta } = useAppState();
+  const [override, setOverride] = useState(null);
+  const state = override || liveState;
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
       <Heartbeat state={state} />
-      <TopStrip pipeline={PIPELINE} appState={state} account="PAPER · DUN615665" />
+      <TopStrip pipeline={PIPELINE} appState={state} stateMeta={stateMeta} account="PAPER · DUN615665" />
       <KpiRibbon
         dayPnl={382.21}
         equity={104230}
@@ -54,16 +58,23 @@ export const V6ShellPreview = () => {
         className="border-b border-white/5"
       />
 
-      {/* halo / state demo toggle (preview-only) */}
+      {/* halo / state demo toggle (preview-only). LIVE = from /api/system/health */}
       <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-600">
-        <span className="uppercase tracking-widest">state demo:</span>
+        <span className="uppercase tracking-widest">state:</span>
+        <button
+          data-testid="v6-shell-state-live"
+          onClick={() => setOverride(null)}
+          className={`uppercase font-bold px-2 py-0.5 rounded transition-colors ${!override ? 'bg-zinc-700/60 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          live
+        </button>
         {['cyan', 'amber', 'rose'].map((opt) => (
           <button
             key={opt}
             data-testid={`v6-shell-state-${opt}`}
-            onClick={() => setState(opt)}
+            onClick={() => setOverride(opt)}
             className={`uppercase font-bold px-2 py-0.5 rounded transition-colors ${
-              state === opt
+              override === opt
                 ? opt === 'cyan' ? 'bg-cyan-700/60 text-cyan-100'
                   : opt === 'amber' ? 'bg-amber-700/60 text-amber-100'
                     : 'bg-rose-700/60 text-rose-100'
