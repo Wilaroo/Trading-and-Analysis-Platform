@@ -9,6 +9,12 @@
   STAMP NOT LIVE (keys absent → predate running code; retest next session) /
   STAMP LIVE but SOURCE DARK (keys present as 'unknown' → alert not carrying it; source-gap
   fix) / STAMPING LIVE. Read-only. `recent_days` query param on the coverage endpoint.
+- DGX CONFIRM: `ec_has_sector_key=False` + key_present_pct=0 on all 244 recent trades →
+  STAMP NOT LIVE (keys absent; predate the running build). Wiring correct; Phase-0 data
+  accrues from the next RTH session. NOT a bug.
+- 2B fix: scorecard `feed_liveness` repointed from the deprecated `ib_historical_data`
+  backfill store (cold off-session → false FAIL) to `system_health_service.build_health`
+  (pusher_rpc / live_bar_cache / ib_gateway), so it agrees with /api/system/health.
 
 
 ## 1C + 2B — per-archetype GRADE triple + unified Data-Integrity Scorecard (2026-06-25)

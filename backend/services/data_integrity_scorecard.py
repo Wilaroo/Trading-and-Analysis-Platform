@@ -23,6 +23,7 @@ from datetime import datetime, timezone, timedelta
 logger = logging.getLogger(__name__)
 
 _RANK = {"fail": 3, "warn": 2, "pass": 1, "info": 0, "unknown": 0}
+_HEALTH_STATUS = {"green": "pass", "yellow": "warn", "red": "fail"}
 
 
 def _band(value, pass_at, warn_at, higher_is_better=True):
@@ -106,30 +107,24 @@ def _tqs_calc_honesty(db, days):
     return {"group": "tqs_calc_honesty", "checks": subs}
 
 
-def _ingest_freshness(db):
-    doc = db["ib_historical_data"].find_one(
-        {}, {"_id": 0, "collected_at": 1}, sort=[("collected_at", -1)])
-    ts_raw = (doc or {}).get("collected_at")
-    if not ts_raw:
-        return {"group": "feed_liveness",
-                "checks": [_check("ingest_freshness", "fail", "none",
-                                  "no ib_historical_data rows found")]}
-    try:
-        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        age_s = int((datetime.now(timezone.utc) - ts).total_seconds())
-    except Exception:
-        return {"group": "feed_liveness",
-                "checks": [_check("ingest_freshness", "unknown", str(ts_raw)[:30])]}
-    # off-hours the newest write can legitimately be hours old → informational;
-    # the morning-report endpoint owns the in-session SLA. Here we only fail when
-    # the feed looks truly stale (> 1 trading day).
-    status = "pass" if age_s <= 6 * 3600 else ("warn" if age_s <= 36 * 3600 else "fail")
-    val = f"{age_s}s ago" if age_s < 3600 else f"{age_s // 3600}h ago"
-    return {"group": "feed_liveness",
-            "checks": [_check("ingest_freshness", status, val,
-                              "age of newest ib_historical_data write")]}
+def _feed_liveness(db):
+    """Canonical live-feed health (pusher push-age + live-bar freshness + IB link),
+    reused from system_health_service so the scorecard agrees with /api/system/health.
+    NOTE: deliberately NOT keyed on `ib_historical_data` — that's the deep BACKFILL
+    store (legitimately cold off-session); the LIVE path is pusher → live_bar_cache."""
+    from services.system_health_service import build_health
+    h = build_health(db)
+    subs = {s.get("name"): s for s in h.get("subsystems", [])}
+    checks = []
+    for name in ("pusher_rpc", "live_bar_cache", "ib_gateway"):
+        s = subs.get(name)
+        if not s:
+            checks.append(_check(name, "unknown", "—", "subsystem not reported"))
+            continue
+        checks.append(_check(
+            name, _HEALTH_STATUS.get(s.get("status"), "unknown"),
+            s.get("status", "—"), (s.get("detail") or "")[:120]))
+    return {"group": "feed_liveness", "overall": h.get("overall"), "checks": checks}
 
 
 def build_scorecard(db, days_edge: int = 45, days_tqs: int = 30) -> dict:
@@ -145,7 +140,7 @@ def build_scorecard(db, days_edge: int = 45, days_tqs: int = 30) -> dict:
         ("phase0_edge_coverage", lambda: _phase0_edge_coverage(db, days_edge)),
         ("tqs_pillar_coverage", lambda: _tqs_pillar_coverage(db, days_tqs)),
         ("tqs_calc_honesty", lambda: _tqs_calc_honesty(db, days_tqs)),
-        ("feed_liveness", lambda: _ingest_freshness(db)),
+        ("feed_liveness", lambda: _feed_liveness(db)),
     ]
     for name, fn in probes:
         try:
