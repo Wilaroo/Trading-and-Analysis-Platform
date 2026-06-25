@@ -1,48 +1,57 @@
-"""Seal #2 — fill→bot_trade WRITE-GAP probe (READ-ONLY, trade_id-keyed).
+"""Seal #2 — fill→bot_trade WRITE-GAP probe (READ-ONLY, base-trade_id-keyed).
 
-WHY: the v407 lineage probe classified `order_no_trade` by ANY `order_queue` row on
-the *symbol* (incl. exit/stop/target/reconciler legs), so it could not tell a TRUE
-entry-write gap from an artifact. This probe keys on the only unambiguous signal:
+WHY v2: the first cut counted ANY filled order_queue row whose `trade_id` lacked a
+`bot_trades` row. On real data that over-flagged badly — `order_queue` carries
+MANAGEMENT orders whose trade_id is a DERIVED string (`CLOSE-<id>`,
+`ADOPT-STOP-<id>`, `SCALE-<id>`…) that can NEVER match a bare `bot_trades.id`, and
+it double-counted the same reconciled_orphan's loss once per leg. Both inflated the
+leak. v2 fixes that:
 
-    an `order_queue` row that the pusher marked FILLED, carrying a `trade_id`,
-    whose `trade_id` has NO `bot_trades` row → a confirmed fill the bot never
-    persisted as a trade (the record-less bug Seal #2 targets).
+  • NORMALIZE every trade_id to its BASE id (strip synthetic prefixes), then group.
+  • A base id is a TRUE entry write gap ONLY when a BARE opening order (BUY/SELL,
+    trade_id == base) was FILLED yet NO `bot_trades` row exists for that base id.
+    (Bases seen only via derived CLOSE-/ADOPT- legs ⇒ `exit_only_orders_no_base`,
+    a different flavor — not an entry-write gap.)
+  • $ leak = sum over DISTINCT downstream reconciled_orphans, each linked by symbol
+    + time-proximity (±3d to the fill), counted ONCE.
 
-The entry path already pre-writes a PENDING `bot_trades` row before the broker call
-(v19.34.6), so a real gap means that pre-write (or every post-fill upsert) was lost
-for that trade_id. This probe proves how many such gaps exist, the $ they leaked
-downstream (linked to the `reconciled_orphan` they became), and previews the
-bot_trade a heal WOULD write. Writes NOTHING — the active heal is a later, flagged step.
-
+Writes NOTHING. Active heal is a later, flag-gated step.
 Endpoint: GET /api/slow-learning/orphan-fill-heal/report?days=120
 """
 import logging
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
 
-from services.orphan_leak_rca import _fnum, _clean_r, _parse_ts
+from services.orphan_leak_rca import _fnum, _parse_ts
 
 logger = logging.getLogger(__name__)
 
 _FILLED_STATES = ("filled", "partial")
 _RECONCILED_SETUPS = ("reconciled_orphan", "reconciled_excess_slice")
+# synthetic / derived order-id prefixes (management legs share the entry's base id)
+_PREFIX = re.compile(
+    r'^(CLOSE|ADOPT-STOP|ADOPT|EXIT|STOP|TGT|TARGET|SCALE|TRIM|FLATTEN|FLAT)-', re.I)
+_MATCH_WINDOW_DAYS = 3
 
 
-def _opening_leg(legs):
-    """The leg that OPENED the position = earliest-executed filled leg. For bracket
-    rows the opening action lives in `parent`; for flat rows it is top-level `action`."""
-    def _exec(l):
-        return _parse_ts(l.get("executed_at")) or _parse_ts(l.get("queued_at")) \
-            or datetime.max.replace(tzinfo=timezone.utc)
-    return sorted(legs, key=_exec)[0] if legs else None
+def _base_id(tid):
+    """Strip stacked synthetic prefixes → the underlying bot_trade id."""
+    if not tid:
+        return tid
+    prev = None
+    t = str(tid)
+    while prev != t:
+        prev = t
+        t = _PREFIX.sub("", t)
+    return t
 
 
-def _leg_action(leg):
+def _opening_action(leg):
     a = (leg.get("action") or "").upper()
     if not a:
-        parent = leg.get("parent") or {}
-        a = (parent.get("action") or "").upper()
-    return a or None
+        a = ((leg.get("parent") or {}).get("action") or "").upper()
+    return a if a in ("BUY", "SELL") else None
 
 
 def _leg_qty(leg):
@@ -54,7 +63,7 @@ def generate_report(db, days: int = 120) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "report_period_days": days,
-        "mode": "observe",  # read-only; no writes
+        "mode": "observe",
     }
     if db is None:
         return out
@@ -62,121 +71,114 @@ def generate_report(db, days: int = 120) -> dict:
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
 
-    # 1. terminal-fill order_queue rows in-window that carry a trade_id
     try:
         rows = list(db["order_queue"].find(
-            {"status": {"$in": list(_FILLED_STATES)},
-             "trade_id": {"$ne": None},
-             "$or": [{"executed_at": {"$gte": cutoff}},
-                     {"queued_at": {"$gte": cutoff}}]},
-            {"_id": 0, "trade_id": 1, "symbol": 1, "action": 1, "status": 1,
-             "order_type": 1, "type": 1, "parent": 1, "quantity": 1, "filled_qty": 1,
-             "fill_price": 1, "executed_at": 1, "queued_at": 1}))
+            {"status": {"$in": list(_FILLED_STATES)}, "trade_id": {"$ne": None},
+             "$or": [{"executed_at": {"$gte": cutoff}}, {"queued_at": {"$gte": cutoff}}]},
+            {"_id": 0, "trade_id": 1, "symbol": 1, "action": 1, "parent": 1,
+             "quantity": 1, "filled_qty": 1, "fill_price": 1,
+             "executed_at": 1, "queued_at": 1}))
     except Exception as e:
         out["error"] = "order_queue scan failed: %s" % (str(e)[:120])
         return out
 
-    by_tid = defaultdict(list)
+    # group filled rows by BASE trade_id
+    grp = defaultdict(lambda: {"rows": [], "entry_leg": None})
     for r in rows:
-        by_tid[r.get("trade_id")].append(r)
-    out["population"] = {"filled_order_queue_trade_ids": len(by_tid),
-                         "filled_order_queue_rows": len(rows)}
+        tid = r.get("trade_id")
+        b = _base_id(tid)
+        g = grp[b]
+        g["rows"].append(r)
+        if tid == b and _opening_action(r):   # a bare opening order = the entry
+            cur = g["entry_leg"]
+            if cur is None or str(r.get("executed_at") or "") < str(cur.get("executed_at") or "~"):
+                g["entry_leg"] = r
 
+    classes = Counter()
     gaps = []
+    orphan_pnl = {}        # distinct downstream orphan id → realized_pnl (counted once)
     bt_cache = {}
-    for tid, legs in by_tid.items():
-        if tid in bt_cache:
-            has_bt = bt_cache[tid]
+    for b, g in grp.items():
+        if b in bt_cache:
+            has_bt = bt_cache[b]
         else:
             try:
-                has_bt = db["bot_trades"].find_one({"id": tid}, {"_id": 1}) is not None
+                has_bt = db["bot_trades"].find_one({"id": b}, {"_id": 1}) is not None
             except Exception:
-                has_bt = True   # fail-safe: don't flag if we can't verify
-            bt_cache[tid] = has_bt
+                has_bt = True   # fail-safe: never flag what we can't verify
+            bt_cache[b] = has_bt
         if has_bt:
-            continue   # trade_id HAS a record → not a write gap
+            classes["has_record"] += 1
+            continue
 
-        open_leg = _opening_leg(legs)
-        action = _leg_action(open_leg) if open_leg else None
+        cls = "entry_write_gap" if g["entry_leg"] is not None else "exit_only_orders_no_base"
+        classes[cls] += 1
+        if cls != "entry_write_gap":
+            continue
+
+        op = g["entry_leg"]
+        sym = (op.get("symbol") or "").upper()
+        fts = _parse_ts(op.get("executed_at") or op.get("queued_at"))
+        action = _opening_action(op)
         direction = "long" if action == "BUY" else "short" if action == "SELL" else None
-        sym = (open_leg.get("symbol") if open_leg else "") or ""
-        sym = sym.upper()
-        entry_px = _fnum(open_leg.get("fill_price")) if open_leg else None
-        qty = _leg_qty(open_leg) if open_leg else None
-        executed_at = (open_leg.get("executed_at") or open_leg.get("queued_at")) if open_leg else None
+        qty = _leg_qty(op)
 
-        # ib_executions corroboration (did the broker really fill this symbol?)
+        # time-matched, deduped downstream reconciled_orphan ($ attribution)
+        best, best_dd = None, None
         try:
-            ie_n = db["ib_executions"].count_documents({"symbol": sym})
-        except Exception:
-            ie_n = -1
-
-        # downstream: did this fill surface as a reconciled_orphan we can $-attribute?
-        downstream = None
-        try:
-            d = db["bot_trades"].find_one(
-                {"symbol": sym, "setup_type": {"$in": list(_RECONCILED_SETUPS)}},
-                {"_id": 0, "id": 1, "status": 1, "realized_pnl": 1, "risk_amount": 1,
-                 "close_reason": 1, "closed_at": 1},
-                sort=[("closed_at", -1)])
-            if d:
-                downstream = {
-                    "orphan_id": d.get("id"), "status": d.get("status"),
-                    "realized_pnl": _fnum(d.get("realized_pnl")),
-                    "realized_r": _clean_r(d.get("realized_pnl"), d.get("risk_amount")),
-                    "close_reason": str(d.get("close_reason") or "")[:32],
-                }
+            for c in db["bot_trades"].find(
+                    {"symbol": sym, "setup_type": {"$in": list(_RECONCILED_SETUPS)}},
+                    {"_id": 0, "id": 1, "realized_pnl": 1, "risk_amount": 1,
+                     "entry_time": 1, "executed_at": 1, "closed_at": 1, "close_reason": 1}):
+                ct = _parse_ts(c.get("entry_time") or c.get("executed_at") or c.get("closed_at"))
+                if fts and ct and abs((ct - fts).days) <= _MATCH_WINDOW_DAYS:
+                    dd = abs((ct - fts).total_seconds())
+                    if best_dd is None or dd < best_dd:
+                        best_dd, best = dd, c
         except Exception:
             pass
+        downstream = None
+        if best:
+            orphan_pnl[best["id"]] = _fnum(best.get("realized_pnl")) or 0.0
+            downstream = {"orphan_id": best["id"],
+                          "realized_pnl": _fnum(best.get("realized_pnl")),
+                          "close_reason": str(best.get("close_reason") or "")[:32]}
 
         gaps.append({
-            "trade_id": tid, "symbol": sym, "direction": direction,
-            "opening_action": action, "entry_price": entry_px,
-            "filled_qty": int(qty) if qty else None, "executed_at": executed_at,
-            "n_queue_legs": len(legs),
-            "leg_statuses": Counter(l.get("status") for l in legs).most_common(),
-            "ib_executions_for_symbol": ie_n,
+            "base_trade_id": b, "symbol": sym, "direction": direction,
+            "filled_qty": int(qty) if qty else None,
+            "entry_price": _fnum(op.get("fill_price")),
+            "executed_at": op.get("executed_at") or op.get("queued_at"),
+            "n_queue_legs": len(g["rows"]),
             "downstream_reconciled_orphan": downstream,
-            "heal_preview": {
-                "would_create_bot_trade": {
-                    "id": tid, "symbol": sym, "direction": direction,
-                    "shares": int(qty) if qty else None, "entry_price": entry_px,
-                    "setup_type": "reconciled_fill_heal", "entered_by": "seal2_fill_heal",
-                },
-                "blocked_reason": (
-                    "downstream reconciled_orphan already records this position — "
-                    "active heal would double-count; prevention belongs in the live "
-                    "write path" if downstream else None),
-            },
         })
 
-    # aggregate
-    leaked_usd = sum((g["downstream_reconciled_orphan"] or {}).get("realized_pnl") or 0.0
-                     for g in gaps)
-    leaked_r = sum((g["downstream_reconciled_orphan"] or {}).get("realized_r") or 0.0
-                   for g in gaps)
-    n_with_orphan = sum(1 for g in gaps if g["downstream_reconciled_orphan"])
+    leaked_usd = round(sum(orphan_pnl.values()), 0)
     sym_counter = Counter(g["symbol"] for g in gaps)
-    gaps.sort(key=lambda g: ((g["downstream_reconciled_orphan"] or {}).get("realized_pnl") or 0.0))
+    gaps.sort(key=lambda x: ((x["downstream_reconciled_orphan"] or {}).get("realized_pnl") or 0.0))
 
+    out["population"] = {
+        "filled_order_queue_rows": len(rows),
+        "distinct_base_trade_ids": len(grp),
+        "classes": dict(classes),
+    }
     out["write_gaps"] = {
-        "n_trade_ids": len(gaps),
-        "n_with_downstream_orphan": n_with_orphan,
-        "n_untracked_no_downstream": len(gaps) - n_with_orphan,
-        "leaked_usd": round(leaked_usd, 0),
-        "leaked_r": round(leaked_r, 2),
+        "n_entry_write_gaps": len(gaps),
+        "n_exit_only_orders_no_base": classes.get("exit_only_orders_no_base", 0),
+        "n_distinct_downstream_orphans": len(orphan_pnl),
+        "leaked_usd_dedup": leaked_usd,
         "top_symbols": sym_counter.most_common(12),
         "samples": gaps[:25],
     }
     out["verdict"] = (
-        ("%d filled order_queue trade_ids have NO bot_trade row (TRUE write gaps). "
-         "%d already became reconciled_orphans (≈$%d / %sR leaked downstream); %d are "
-         "untracked with no downstream record. Real gaps confirmed ⇒ next step: harden "
-         "the live entry pre-write (retry + fill-confirm heal), flag-gated." % (
-             len(gaps), n_with_orphan, int(leaked_usd), round(leaked_r, 1),
-             len(gaps) - n_with_orphan))
+        ("%d TRUE entry-write gaps (a bare opening order FILLED but no bot_trade row). "
+         "%d link to distinct reconciled_orphans ≈ $%d leaked (deduped, time-matched). "
+         "(%d exit-only/derived-id bases excluded as non-gaps.) Real gaps ⇒ next: "
+         "harden the live entry pre-write (retry + fill-confirm heal), flag-gated." % (
+             len(gaps), len(orphan_pnl), int(leaked_usd),
+             classes.get("exit_only_orders_no_base", 0)))
         if gaps else
-        "0 write gaps: every FILLED order_queue trade_id resolves to a bot_trade row. "
-        "The v407 `order_no_trade` bucket was a symbol-level artifact (exit/leg orders), "
-        "NOT an entry write gap — no source fix needed.")
+        "0 entry-write gaps: every FILLED bare opening order resolves to a bot_trade. "
+        "The −$ leak was NOT an entry write gap (derived CLOSE-/ADOPT- legs + symbol-"
+        "level artifacts). No source fix at the entry write site.")
     return out

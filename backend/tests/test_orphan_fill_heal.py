@@ -1,6 +1,10 @@
-"""DB-free proof of the Seal #2 write-gap probe: a FILLED order_queue trade_id with
-no bot_trade is flagged (and $-linked to its reconciled_orphan); a trade_id that HAS
-a bot_trade is ignored; an exit-only/legacy symbol does not produce false gaps."""
+"""DB-free proof of the Seal #2 write-gap probe (v2, base-trade_id-keyed):
+  • a bare FILLED entry with no bot_trade → ONE entry_write_gap, $-linked once
+    even though a derived CLOSE-<id> leg shares its base id;
+  • a trade_id that HAS a bot_trade is ignored;
+  • a base seen ONLY via a derived CLOSE-<id> leg → exit_only (NOT a gap);
+  • a pending (non-fill) order is excluded.
+"""
 from datetime import datetime, timezone
 
 
@@ -30,13 +34,7 @@ class _Coll:
 
     def find_one(self, q=None, proj=None, sort=None):
         res = self.find(q, proj)
-        if sort:
-            key, direction = sort[0]
-            res.sort(key=lambda r: str(r.get(key) or ""), reverse=(direction < 0))
         return res[0] if res else None
-
-    def count_documents(self, q=None):
-        return len(self.find(q or {}))
 
 
 class _DB:
@@ -49,35 +47,30 @@ class _DB:
 
 def run():
     now = datetime.now(timezone.utc).isoformat()
-
     order_queue = [
-        # GAP: filled entry, trade_id 'GHOST1' — no bot_trade exists
-        {"trade_id": "GHOST1", "symbol": "VRT", "status": "filled", "type": "bracket",
-         "parent": {"action": "BUY", "quantity": 100}, "filled_qty": 100,
-         "fill_price": 90.0, "executed_at": now, "queued_at": now},
-        {"trade_id": "GHOST1", "symbol": "VRT", "status": "filled", "action": "SELL",
+        # entry write gap: bare BUY 'GHOST1' filled, no bot_trade
+        {"trade_id": "GHOST1", "symbol": "VRT", "status": "filled", "action": "BUY",
+         "filled_qty": 100, "fill_price": 90.0, "executed_at": now, "queued_at": now},
+        # derived CLOSE leg shares base GHOST1 → must NOT create a second gap
+        {"trade_id": "CLOSE-GHOST1", "symbol": "VRT", "status": "filled", "action": "SELL",
          "filled_qty": 100, "fill_price": 86.0, "executed_at": now, "queued_at": now},
-        # HEALTHY: filled entry, trade_id 'REAL1' — bot_trade exists → must be ignored
+        # healthy: bare BUY 'REAL1' filled, bot_trade exists → ignored
         {"trade_id": "REAL1", "symbol": "AAPL", "status": "filled", "action": "BUY",
          "filled_qty": 50, "fill_price": 200.0, "executed_at": now, "queued_at": now},
-        # NON-FILL: pending order — must not count
+        # exit-only base: only a derived ADOPT-STOP leg, no bare entry, no bot_trade
+        {"trade_id": "ADOPT-STOP-XONLY", "symbol": "GM", "status": "filled", "action": "SELL",
+         "filled_qty": 10, "fill_price": 75.0, "executed_at": now, "queued_at": now},
+        # pending (non-fill) → excluded
         {"trade_id": "PEND1", "symbol": "TSLA", "status": "pending", "action": "BUY",
          "quantity": 10, "queued_at": now},
     ]
     bot_trades = [
         {"id": "REAL1", "symbol": "AAPL", "status": "open"},
-        # the GHOST1 fill became a contextless reconciled_orphan that lost -$400
         {"id": "ORPH9", "symbol": "VRT", "setup_type": "reconciled_orphan",
          "status": "closed", "realized_pnl": -400.0, "risk_amount": 200.0,
-         "close_reason": "oca_closed_externally", "closed_at": now},
+         "close_reason": "oca_closed_externally", "entry_time": now, "closed_at": now},
     ]
-    ib_executions = [{"symbol": "VRT"}, {"symbol": "VRT"}]
-
-    db = _DB({
-        "order_queue": _Coll(order_queue),
-        "bot_trades": _Coll(bot_trades),
-        "ib_executions": _Coll(ib_executions),
-    })
+    db = _DB({"order_queue": _Coll(order_queue), "bot_trades": _Coll(bot_trades)})
 
     from services.orphan_fill_heal import generate_report
     rep = generate_report(db, days=120)
@@ -85,20 +78,16 @@ def run():
     print(json.dumps(rep, indent=2, default=str))
 
     wg = rep["write_gaps"]
-    assert wg["n_trade_ids"] == 1, "exactly one true write gap (GHOST1)"
+    assert wg["n_entry_write_gaps"] == 1, "exactly one entry write gap (GHOST1 base)"
+    assert wg["n_exit_only_orders_no_base"] == 1, "ADOPT-STOP-XONLY = exit-only, not a gap"
+    assert wg["n_distinct_downstream_orphans"] == 1
+    assert wg["leaked_usd_dedup"] == -400.0, "orphan counted ONCE despite the CLOSE leg"
     g = wg["samples"][0]
-    assert g["trade_id"] == "GHOST1"
-    assert g["symbol"] == "VRT"
-    assert g["direction"] == "long", "BUY parent → long"
-    assert g["entry_price"] == 90.0, "opening leg fill price"
-    assert g["filled_qty"] == 100
-    assert g["downstream_reconciled_orphan"]["orphan_id"] == "ORPH9"
-    assert wg["leaked_usd"] == -400.0, "downstream $ attributed to the gap"
-    assert wg["n_with_downstream_orphan"] == 1
-    # REAL1 (has bot_trade) and PEND1 (not filled) must NOT appear
-    assert all(s["trade_id"] != "REAL1" for s in wg["samples"]), "healthy trade ignored"
-
-    print("\n✅ SEAL #2 PROBE OK — true gap flagged + $-linked, healthy/non-fill ignored")
+    assert g["base_trade_id"] == "GHOST1" and g["symbol"] == "VRT"
+    assert g["direction"] == "long" and g["entry_price"] == 90.0 and g["filled_qty"] == 100
+    assert all(s["base_trade_id"] != "REAL1" for s in wg["samples"]), "healthy trade ignored"
+    print("\n✅ SEAL #2 PROBE v2 OK — derived legs normalized, gap $-linked once, "
+          "exit-only excluded, healthy/non-fill ignored")
 
 
 if __name__ == "__main__":
