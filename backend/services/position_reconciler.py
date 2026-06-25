@@ -1126,6 +1126,115 @@ class PositionReconciler:
             }
         return None
 
+    def _find_orphan_source_bracket(
+        self, symbol: str, direction, abs_qty: int, ref_price: float,
+    ) -> Optional[Dict[str, Any]]:
+        """v414 — Seal #2 heal: relink an orphan to the FILLED order_queue bracket
+        that actually opened it, when NO bot_trade row exists (the write-gap case).
+
+        Seal #2 (orphan_fill_heal): a `type=bracket` ENTRY fills at IB but never got
+        the v19.34.6 pre-submit bot_trade write, so it loses all tracking and is
+        adopted here as a synthetic-2%-stop orphan that bleeds on noise (−$2,759 over
+        70 orphans). The REAL stop/target still live on the filled `order_queue`
+        bracket row (`parent`/`stop`/`target` payload). Recover them instead of
+        inventing a stop.
+
+        Distinct from v404/v407 which read `bot_trades`; this reads `order_queue` and
+        is the ONLY tier that can help when the bot_trade was never written at all.
+        Only relinks a bracket whose `trade_id` has NO bot_trade row (the genuine
+        write gap) so a tracked bracket's stop is never stolen. READ-ONLY.
+        """
+        if getattr(self, "db", None) is None:
+            return None
+        try:
+            window_min = int(os.environ.get(
+                "RECONCILE_RELINK_BRACKET_WINDOW_MIN", "1440"))
+        except (TypeError, ValueError):
+            window_min = 1440
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(minutes=window_min)).isoformat()
+        sym = (symbol or "").upper()
+        dir_val = getattr(direction, "value", str(direction)).lower()
+        want_action = "BUY" if dir_val == "long" else "SELL"
+        try:
+            cur = self.db["order_queue"].find({
+                "symbol": sym,
+                "type": "bracket",
+                "status": {"$in": ["filled", "partial"]},
+                "$or": [
+                    {"executed_at": {"$gte": cutoff}},
+                    {"queued_at": {"$gte": cutoff}},
+                ],
+            }).sort("executed_at", -1).limit(20)
+        except Exception as e:
+            logger.debug("v414 _find_orphan_source_bracket query failed for %s: %s",
+                         sym, e)
+            return None
+        for d in cur:
+            parent = d.get("parent") or {}
+            action = (parent.get("action") or "").upper()
+            if action != want_action:
+                continue
+            stop_leg = d.get("stop") or {}
+            sp = stop_leg.get("stop_price")
+            if sp is None:
+                sp = d.get("stop_price")
+            try:
+                sp = float(sp) if sp is not None else None
+            except (TypeError, ValueError):
+                sp = None
+            if not sp or sp <= 0:
+                continue
+            # Directionally-valid protective stop relative to the live anchor price.
+            if dir_val == "long" and not (sp < ref_price):
+                continue
+            if dir_val == "short" and not (sp > ref_price):
+                continue
+            # Quantity sanity: bracket parent/filled qty within 0.5x–2x of orphan.
+            try:
+                osh = int(parent.get("quantity") or d.get("filled_qty") or 0)
+            except (TypeError, ValueError):
+                osh = 0
+            if osh > 0 and abs_qty > 0:
+                ratio = abs_qty / osh
+                if ratio < 0.5 or ratio > 2.0:
+                    continue
+            # Seal #2 guard: only relink when this bracket's trade_id has NO
+            # bot_trade row (the write gap). A tracked bracket is handled by the
+            # bot's own management/relink tiers — never steal its stop here.
+            tid = d.get("trade_id")
+            if tid:
+                try:
+                    if self.db["bot_trades"].find_one(
+                            {"id": tid}, {"_id": 1}) is not None:
+                        continue
+                except Exception:
+                    continue
+            t1 = None
+            tgt_leg = d.get("target") or {}
+            tlp = tgt_leg.get("limit_price")
+            if tlp is None:
+                tlp = d.get("limit_price")
+            try:
+                t1 = float(tlp) if tlp is not None else None
+            except (TypeError, ValueError):
+                t1 = None
+            fp = d.get("fill_price")
+            try:
+                fp = float(fp) if fp is not None else None
+            except (TypeError, ValueError):
+                fp = None
+            return {
+                "order_id": d.get("order_id"),
+                "trade_id": tid,
+                "stop_price": sp,
+                "target_1": t1,
+                "fill_price": fp,
+                "shares": osh,
+            }
+        return None
+
+
 
     async def _flatten_eod_window_orphan(
         self, bot, symbol, direction, abs_qty, avg_cost,
@@ -2118,6 +2227,86 @@ class PositionReconciler:
                             logger.debug("v407 generalized relink failed for %s: %s",
                                          sym, _gen_err)
 
+                    # ── v414 — Seal #2 heal: relink to the FILLED order_queue bracket ──
+                    # The write-gap case (orphan_fill_heal): a type=bracket ENTRY filled
+                    # at IB but never got the v19.34.6 pre-submit bot_trade write, so
+                    # v404/v407 (which read bot_trades) find NOTHING. The REAL stop/
+                    # target still live on the filled order_queue bracket row — inherit
+                    # them instead of stamping a synthetic 2%/ATR stop that bled −$2,759
+                    # over 70 orphans. Strictly safer; the `breached` guard still closes
+                    # an already-fired stop at the real level.
+                    # Env: RECONCILE_RELINK_BRACKET_SOURCE = observe (default) | fix | off.
+                    if not _relink_applied:
+                        try:
+                            _brk_policy = os.environ.get(
+                                "RECONCILE_RELINK_BRACKET_SOURCE", "observe").lower()
+                            _brk_match = (
+                                self._find_orphan_source_bracket(
+                                    sym, direction, abs_qty, avg_cost)
+                                if _brk_policy != "off" else None
+                            )
+                            if _brk_match:
+                                _pre_stop = stop_price
+                                _orig_stop = float(_brk_match["stop_price"])
+                                if _brk_policy == "fix":
+                                    stop_price = _orig_stop
+                                    if _brk_match.get("target_1"):
+                                        target_1 = float(_brk_match["target_1"])
+                                    risk_per_share = abs(avg_cost - stop_price)
+                                    reward_per_share = abs(target_1 - avg_cost)
+                                    smart_rr = (reward_per_share / risk_per_share
+                                                if risk_per_share > 0 else default_rr)
+                                    use_smart_stop = True
+                                    _relink_applied = True
+                                    _relink_tier = "bracket_source"
+                                logger.warning(
+                                    "🔗 [v414 RELINK %s] %s — orphan matches FILLED "
+                                    "order_queue bracket order_id=%s trade_id=%s "
+                                    "(no bot_trade — Seal #2 write gap): stop %.4f → "
+                                    "%.4f%s", "fix" if _relink_applied else "observe",
+                                    sym, _brk_match.get("order_id"),
+                                    _brk_match.get("trade_id"), _pre_stop, _orig_stop,
+                                    "" if _relink_applied
+                                    else " (set RECONCILE_RELINK_BRACKET_SOURCE=fix to apply)",
+                                )
+                                report.setdefault("relinked", []).append({
+                                    "symbol": sym, "policy": _brk_policy,
+                                    "tier": "bracket_source",
+                                    "applied": _relink_applied,
+                                    "matched_order_id": _brk_match.get("order_id"),
+                                    "matched_trade_id": _brk_match.get("trade_id"),
+                                    "synthetic_stop": round(_pre_stop, 4),
+                                    "relinked_stop": round(_orig_stop, 4),
+                                    "relinked_target": _brk_match.get("target_1"),
+                                })
+                                try:
+                                    if getattr(self, "db", None) is not None:
+                                        self.db["state_integrity_events"].insert_one({
+                                            "event": ("orphan_relinked_bracket_source"
+                                                      if _relink_applied
+                                                      else "orphan_relink_bracket_observe"),
+                                            "severity": "high",
+                                            "symbol": sym,
+                                            "order_id": _brk_match.get("order_id"),
+                                            "trade_id": _brk_match.get("trade_id"),
+                                            "synthetic_stop": round(_pre_stop, 4),
+                                            "relinked_stop": round(_orig_stop, 4),
+                                            "detail": (
+                                                "Seal #2 heal: orphan re-linked to its "
+                                                "FILLED order_queue bracket (real stop/"
+                                                "target restored; no bot_trade existed)."
+                                                if _relink_applied else
+                                                "Seal #2: orphan WOULD re-link to its "
+                                                "filled order_queue bracket (observe)."
+                                            ),
+                                            "ts": datetime.now(timezone.utc).isoformat(),
+                                        })
+                                except Exception:
+                                    pass
+                        except Exception as _brk_err:
+                            logger.debug("v414 bracket-source relink failed for %s: %s",
+                                         sym, _brk_err)
+
                     trade.target_prices = [target_1]
                     trade.stop_price = stop_price
                     trade.risk_amount = abs(avg_cost - stop_price) * abs_qty
@@ -2126,6 +2315,7 @@ class PositionReconciler:
                     trade.synthetic_source = (
                         "relinked_reaped_pending" if _relink_tier == "reaped_pending"
                         else "relinked_predecessor" if _relink_tier == "predecessor"
+                        else "relinked_bracket_source" if _relink_tier == "bracket_source"
                         else ("last_verdict" if use_smart_stop else "default_pct")
                     )
                     trade.prior_verdicts = prior_verdicts
@@ -3993,6 +4183,57 @@ class PositionReconciler:
             stop_price = current_price + stop_distance
             target_1 = current_price - target_distance
 
+        # ── v414 — Seal #2 heal (excess-slice path) ──
+        # If this excess is actually a write-gap entry (a FILLED order_queue bracket
+        # with no bot_trade), inherit its REAL stop/target instead of the synthetic
+        # stop_pct above. Same heal/flag as the orphan-reconciler tier; anchors entry
+        # on the bracket fill. Env: RECONCILE_RELINK_BRACKET_SOURCE = observe|fix|off.
+        _brk_relinked = False
+        try:
+            _brk_policy = os.environ.get(
+                "RECONCILE_RELINK_BRACKET_SOURCE", "observe").lower()
+            _brk_src = (self._find_orphan_source_bracket(
+                            sym, direction, excess_abs, current_price)
+                        if _brk_policy != "off" else None)
+            if _brk_src:
+                _pre = stop_price
+                _orig = float(_brk_src["stop_price"])
+                if _brk_policy == "fix":
+                    stop_price = _orig
+                    if _brk_src.get("target_1"):
+                        target_1 = float(_brk_src["target_1"])
+                    if _brk_src.get("fill_price"):
+                        current_price = float(_brk_src["fill_price"])
+                    stop_distance = abs(current_price - stop_price)
+                    target_distance = abs(target_1 - current_price)
+                    _brk_relinked = True
+                logger.warning(
+                    "🔗 [v414 RELINK %s] %s excess-slice matches FILLED order_queue "
+                    "bracket order_id=%s (Seal #2 write gap): stop %.4f → %.4f%s",
+                    "fix" if _brk_relinked else "observe", sym,
+                    _brk_src.get("order_id"), _pre, _orig,
+                    "" if _brk_relinked
+                    else " (set RECONCILE_RELINK_BRACKET_SOURCE=fix to apply)",
+                )
+                try:
+                    if getattr(self, "db", None) is not None:
+                        self.db["state_integrity_events"].insert_one({
+                            "event": ("excess_slice_relinked_bracket_source"
+                                      if _brk_relinked
+                                      else "excess_slice_relink_bracket_observe"),
+                            "severity": "high", "symbol": sym,
+                            "order_id": _brk_src.get("order_id"),
+                            "trade_id": _brk_src.get("trade_id"),
+                            "synthetic_stop": round(_pre, 4),
+                            "relinked_stop": round(_orig, 4),
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        })
+                except Exception:
+                    pass
+        except Exception as _brk_exc:
+            logger.debug("v414 excess-slice bracket relink failed for %s: %s",
+                         sym, _brk_exc)
+
         trade_id = str(uuid.uuid4())[:8]
         trade = BotTrade(
             id=trade_id,
@@ -4042,7 +4283,8 @@ class PositionReconciler:
         except Exception as _acct_exc:
             logger.debug(f"reconciled_excess {sym}: trade_type stamp skipped: {_acct_exc}")
             trade.trade_type = "unknown"
-        trade.synthetic_source = "share_drift_excess"
+        trade.synthetic_source = (
+            "relinked_bracket_source" if _brk_relinked else "share_drift_excess")
         trade.notes = (
             f"v19.34.15b: spawned to claim excess of {excess_abs} sh "
             f"(IB had {ib_qty_signed:+.0f}, bot tracked {bot_q:+.0f}). "

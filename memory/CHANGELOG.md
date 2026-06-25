@@ -27824,3 +27824,27 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   opt-in behind `ENTRY_EDGE_SIZE_ENABLED` (default false). status() reports size_enabled.
 - Added `oos_go_threshold_sweep` (trade-frequency vs avg-R operating-point curve) so
   GO_THRESHOLD can be tuned (GO took only ~15% of trades at thr=0).
+
+## v414 — Seal #2 heal: relink orphan → FILLED order_queue bracket (2026-06-25)
+- Root data (operator DGX dump): the 136 post-fix write-gap entries are `type=bracket`
+  ENTRIES that FILLED at IB but never got the v19.34.6 pre-submit `bot_trades` write,
+  so v404/v407 relink tiers (which read `bot_trades`) find nothing → adopted as
+  synthetic-2%-stop `reconciled_orphan` / `reconciled_excess_slice` → bled on noise
+  (≈ −$2,759 over 70 orphans). The REAL stop/target still live on the filled
+  `order_queue` bracket row (`parent`/`stop`/`target`).
+- NEW relink tier `_find_orphan_source_bracket()` (position_reconciler.py): reads
+  `order_queue` for a FILLED `type=bracket` matching symbol+direction(parent.action)+
+  qty(0.5–2x)+window whose `trade_id` has NO `bot_trades` row (the genuine gap), and
+  inherits `stop.stop_price` + `target.limit_price`. Only fires when v404/v407 missed.
+  Directionally-validated; `breached` guard still closes an already-fired stop at the
+  real level. READ-ONLY lookup.
+- Wired into BOTH adoption paths: `reconcile_orphan_positions` (reconciled_orphan) and
+  `_spawn_excess_slice` (reconciled_excess_slice). Stamps `synthetic_source=
+  relinked_bracket_source` + a `state_integrity_events` row (observe/fix).
+- Env: `RECONCILE_RELINK_BRACKET_SOURCE` = observe (default, log only) | fix (apply) |
+  off. `RECONCILE_RELINK_BRACKET_WINDOW_MIN` (default 1440). Fail-open.
+- Proof: `tests/test_orphan_source_bracket_relink.py` (gap→inherit, tracked→skip,
+  invalid-stop→skip, wrong-dir→skip, qty-band→skip). Regression `test_orphan_fill_heal.py`
+  still OK. NOTE: heal stops the BLEED; the root pre-write fix (bypass site) is the
+  next step once the operator confirms the bypass path is still active (vs the 2026-05-05
+  deploy-window one-off the sample timestamps suggest).
