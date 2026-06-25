@@ -1,3 +1,16 @@
+## 2A follow-up — Phase-0 stamping freshness probe (2026-06-25)
+- DGX 2A showed ALL Phase-0 fields 0.0% over 45d closed trades (n=1002). Stamping
+  IS wired (`opportunity_evaluator.build_entry_context` L3031, added 2026-06-24,
+  reads alert.sector_regime/rs_rating/signal_trigger_price). 0% is ambiguous:
+  just-deployed (old closed trades dominate the window) vs the alert dict not
+  carrying the fields (source gap — section A row 15: "computed for focus list,
+  not on the trade").
+- Added `phase0_recent` block to `entry_edge_coverage.generate_report` (+ `recent_days`
+  query param): scans trades ENTERED in the last N days (ANY status) for the 4
+  Phase-0 fields + 8 samples + a verdict (STAMPING LIVE vs STAMP DARK). Decisive
+  working-vs-broken test that the closed-only 45d window can't show. Read-only.
+
+
 ## 1C + 2B — per-archetype GRADE triple + unified Data-Integrity Scorecard (2026-06-25)
 **1C — Entry Edge score TRIPLE surfaced per-archetype (entry_edge_gate.py, entry_edge_score.py)**
 - `score_conditional()` now returns the finest resolved `cell_key` (archetype label).

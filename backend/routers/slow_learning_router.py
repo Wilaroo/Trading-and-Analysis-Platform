@@ -460,7 +460,8 @@ async def get_entry_feature_discovery_report(days: int = Query(30), min_n: int =
 
 
 @router.get("/entry-edge-coverage/report")
-async def get_entry_edge_coverage_report(days: int = Query(45)):
+async def get_entry_edge_coverage_report(days: int = Query(45),
+                                         recent_days: int = Query(3)):
     """Entry Edge Score — Phase 0 field-coverage (READ-ONLY).
 
     How dark is each dimension the regime-conditional Edge Score needs
@@ -473,7 +474,7 @@ async def get_entry_edge_coverage_report(days: int = Query(45)):
     """
     from services.entry_edge_coverage import generate_report
     from database import get_database
-    report = generate_report(get_database(), days=days)
+    report = generate_report(get_database(), days=days, recent_days=recent_days)
     return {"success": True, "report": report}
 
 

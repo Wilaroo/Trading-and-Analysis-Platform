@@ -63,7 +63,7 @@ def _extractors():
     }
 
 
-def generate_report(db, days: int = 45) -> dict:
+def generate_report(db, days: int = 45, recent_days: int = 3) -> dict:
     out = {
         "report_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "report_period_days": days,
@@ -152,4 +152,62 @@ def generate_report(db, days: int = 45) -> dict:
             darkest["coverage_pct"] if darkest else None,
         )
     )
+
+    # ── Phase-0 STAMPING freshness (decisive working-vs-broken test) ──
+    # The loop above is closed-only over a wide `days` window, so a just-deployed
+    # stamp is invisible until those trades close. This scans trades ENTERED in the
+    # last `recent_days` (ANY status) to see whether NEW fills actually receive the
+    # Phase-0 fields. 0% here too ⇒ the alert dict isn't carrying them (source gap,
+    # not a window artefact). Read-only.
+    out["phase0_recent"] = _recent_stamp_check(db, recent_days)
     return out
+
+
+def _recent_stamp_check(db, recent_days: int) -> dict:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=recent_days)).isoformat()
+    fields = ["sector_regime", "rs_rating", "symbol_rs_regime", "trigger_price"]
+    ext = _extractors()
+    present = {f: 0 for f in fields}
+    rn = 0
+    samples = []
+    proj = {"_id": 0, "entry_context": 1, "setup_type": 1, "direction": 1,
+            "timeframe": 1, "trigger_price": 1, "tape_score": 1, "status": 1,
+            "symbol": 1, "created_at": 1, "timestamp": 1}
+    cur = db["bot_trades"].find(
+        {"$or": [{"created_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}]},
+        proj).sort("created_at", -1).limit(500)
+    for t in cur:
+        ec = t.get("entry_context") or {}
+        if not isinstance(ec, dict):
+            ec = {}
+        rn += 1
+        row = {}
+        for f in fields:
+            try:
+                v = ext[f][2](t, ec)
+            except Exception:
+                v = None
+            if v is not None:
+                present[f] += 1
+            if len(samples) < 8:
+                row[f] = v
+        if len(samples) < 8:
+            samples.append({
+                "symbol": t.get("symbol"),
+                "status": t.get("status"),
+                "created_at": t.get("created_at") or t.get("timestamp"),
+                **row,
+            })
+
+    def pct(x):
+        return round(x / rn * 100, 1) if rn else 0.0
+
+    return {
+        "recent_days": recent_days,
+        "n_recent_trades": rn,
+        "coverage_pct": {f: pct(present[f]) for f in fields},
+        "samples": samples,
+        "verdict": ("no recent trades" if rn == 0 else
+                    "STAMPING LIVE" if present["sector_regime"] > 0 else
+                    "STAMP DARK — alert dict not carrying sector_regime (source gap)"),
+    }
