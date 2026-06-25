@@ -17,6 +17,7 @@ import { V6ConceptsExplained } from './pages/V6ConceptsExplained';
 import { V6NextMockup } from './pages/V6NextMockup';
 import { V6EdgePreview } from './pages/V6EdgePreview';
 import { V6KpiRibbonPreview } from './pages/V6KpiRibbonPreview';
+import { V6ShellPreview } from './pages/V6ShellPreview';
 // v19.34.177 — isolated preview of the portable ClosedTradesTable (?preview=closedfeed).
 // Not in the live tree; renders only behind the flag.
 import ClosedTradesPreview from './components/sentcom/preview/ClosedTradesPreview';
@@ -138,6 +139,8 @@ function App() {
     typeof window !== 'undefined' && window.location.search.includes('preview=v6edge');
   const isV6KpisPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6kpis');
+  const isV6ShellPreview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=v6shell');
   const isClosedFeedPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=closedfeed');
   const isV6Preview =
@@ -147,6 +150,7 @@ function App() {
     !isV6ConceptsPreview &&
     !isV6EdgePreview &&
     !isV6KpisPreview &&
+    !isV6ShellPreview &&
     !isV6MockPreview;
 
   // Startup status dashboard - shows system initialization progress
@@ -505,6 +509,8 @@ function App() {
         <V6EdgePreview />
       ) : isV6KpisPreview ? (
         <V6KpiRibbonPreview />
+      ) : isV6ShellPreview ? (
+        <V6ShellPreview />
       ) : isV6ConceptsPreview ? (
         <V6ConceptsExplained />
       ) : isV6BrainstormPreview ? (

@@ -1,3 +1,27 @@
+## V6 Plan A→B bridge — TopStrip + Heartbeat + shell skeleton (§4) composed (2026-06-25)
+ADDITIVE only (new files + a new isolated preview route; ZERO live V5 risk — built right
+before market open deliberately safe):
+- `components/sentcom/v6/Heartbeat.jsx` — §4 ① 5px state bar (cyan/amber/rose color + pulse
+  speed), pure prop-driven, lifted from V6NextMockup.
+- `components/sentcom/v6/TopStrip.jsx` — §4 strip: SENTCOM | pipeline pills | PAPER |
+  state-pill (✓/⚠/✕ colorblind icons) | AI button. The ORDER pill reuses
+  `utils/orderPipelineSplit` (`6q+3@ib`, never reimplemented). State pill is prop-driven by
+  `appState` — the Phase-B `useAppState()` (/api/safety/system-state) will feed it live.
+  Uses lucide `Bot` icon (no emoji).
+- `pages/V6ShellPreview.jsx` + `?preview=v6shell` route — composes Heartbeat → TopStrip →
+  KpiRibbon → the §4 5-col placeholder grid (Rail|Scanner|Chart+Verdict|Thinking|Open
+  Positions, "Phase B" bodies) + a cyan/amber/rose state-demo toggle.
+- Verified: eslint clean; webpack compiled; screenshot confirms the full frame renders, the
+  ORDER split pill + Open-Risk micro-bar show, and the state toggle flips heartbeat +
+  state pill cyan→rose. No crash. Live V5 cockpit untouched.
+- STATE: V6 header + KPI frame are now real composable components. Phase B = build
+  `/api/safety/system-state` (+ `useAppState`) and drop the extracted V5 panels into the
+  shell's grid slots.
+- DEPLOY: frontend-only — DGX `cd frontend && yarn build` (no backend restart). View at
+  `…/?preview=v6shell`.
+
+
+
 ## V6 Plan A — ORDER tile ack-latency pulse (live HUD "is IB responding?") (2026-06-25)
 Operator-approved enhancement. The live ORDER pipeline tile now shows a small ping-dot
 pulse colored by IB order-ack freshness, reusing the `last_ack_s` already streamed on

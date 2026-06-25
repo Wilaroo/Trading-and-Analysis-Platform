@@ -84,7 +84,7 @@ def compute_app_state():
 ### Phase A — Extract V5 panels into reusable components (1–2 days)
 Goal: zero behavior change, just decompose `App.js`/`v5/*.jsx` into stand-alone components that can be re-composed for V6.
 
-1. `<TopStrip>` (already exists in V6 mockup — port real data)
+1. `<TopStrip>` (already exists in V6 mockup — port real data)  ✅ 2026-06-25 — built real pure composite at `v6/TopStrip.jsx` (SENTCOM | pipeline pills [ORDER reuses `orderPipelineSplit`] | PAPER | state-pill ✓/⚠/✕ | AI). Prop-driven `appState`; Phase-B `useAppState()` will feed it. Also `v6/Heartbeat.jsx` (§4 ① 5px state bar). Shell skeleton composing Heartbeat+TopStrip+KpiRibbon+5-col grid at `?preview=v6shell` (`pages/V6ShellPreview.jsx`).
 2. `<KpiRibbon>` — extract from `MetricsTopRow.jsx` (or wherever in V5)  ✅ 2026-06-25 — built additively at `v6/KpiRibbon.jsx` (composes `KpiMetric` + `formatMoney/formatEquity` + the §v110 `OrderPipelineMicroBar`). Underlying primitives lifted verbatim from `PipelineHUDV5`: `v6/PipelineStageTile.jsx` (+`STAGE_COLOR`) and `v6/KpiMetric.jsx`. Preview: `?preview=v6kpis`. Pure (props in); Phase-B shell feeds it data.
 3. `<ScannerPanel>` — extract from scanner column
 4. `<ChartPanel>` — already isolated TradingView wrapper
