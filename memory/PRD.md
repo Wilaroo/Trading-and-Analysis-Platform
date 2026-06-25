@@ -1,6 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-25 — STATUS (forked session).** PROMOTE Edge Score is LIVE/`active` (TQS demoted).
+> Done this session: (1C) GRADE is now a TRUE per-archetype percentile (graded within the
+> trade's setup×direction "kind" cohort, global fallback) + per-cell confidence CI + a clean
+> `entry_context.entry_edge.triple` UI contract; gate exposes `grade_cohorts` (DGX: 44).
+> (2A/2B) Data-integrity gate CONFIRMED OK: Phase-0 stamping is wired correctly — the 0%
+> coverage was because pre-build trades have NO Phase-0 keys (`ec_has_sector_key=False`); it
+> accrues from the next RTH session. New unified scorecard `GET /api/integrity/data-scorecard`
+> (Phase-0 coverage + TQS pillar darkness + grade honesty + canonical feed liveness).
+> (V6 workstream 3 START) Edge-Score Provenance ring + drawer vertical slice shipped &
+> testing-agent verified 7/7: `GET /api/slow-learning/entry-edge/recent` + `?preview=v6edge`
+> (`EdgeProvenanceRing` decision donut + `EdgeDrawer`). Seal #2 closed/contained (v414 heal).
+> NEXT: V6 Plan A Phase A (extract V5 panels) + verify Phase-0 + Edge triple on real DGX data
+> next session.
+
+
 > **🧭 2026-06-24 — ENTRY EDGE SCORE rebuild is the ACTIVE program. LOCKED PLAN: `memory/ENTRY_EDGE_SCORE_PLAN.md` (read before any scoring/TQS/gate work).**
 > TQS deep-dive + entry-feature discovery (n=1002) proved BOTH decision authorities are
 > noise: TQS composite spearman≈0 vs MFE (all 5 pillars dead, root cause = absent→neutral-50
