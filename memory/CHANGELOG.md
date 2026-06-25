@@ -1,14 +1,14 @@
 ## 2A follow-up — Phase-0 stamping freshness probe (2026-06-25)
-- DGX 2A showed ALL Phase-0 fields 0.0% over 45d closed trades (n=1002). Stamping
-  IS wired (`opportunity_evaluator.build_entry_context` L3031, added 2026-06-24,
-  reads alert.sector_regime/rs_rating/signal_trigger_price). 0% is ambiguous:
-  just-deployed (old closed trades dominate the window) vs the alert dict not
-  carrying the fields (source gap — section A row 15: "computed for focus list,
-  not on the trade").
-- Added `phase0_recent` block to `entry_edge_coverage.generate_report` (+ `recent_days`
-  query param): scans trades ENTERED in the last N days (ANY status) for the 4
-  Phase-0 fields + 8 samples + a verdict (STAMPING LIVE vs STAMP DARK). Decisive
-  working-vs-broken test that the closed-only 45d window can't show. Read-only.
+- DGX recent probe: 244 trades in last 4d ALL dark (sector_regime/rs_rating/symbol_rs_regime/
+  trigger_price = None). Both wiring ends EXIST in code: scanner threads the dims into
+  the auto-exec `trade_request` (enhanced_scanner L2140) → `build_entry_context` stamps
+  them (opportunity_evaluator L3031); both added 2026-06-24. Ambiguity: those 244 trades
+  (06-23/06-24) likely PREDATE the stamp code running on the DGX (no new trades overnight).
+- Upgraded `_recent_stamp_check`: now reports `key_present_pct` (does entry_context contain
+  the Phase-0 KEYS at all) + raw per-sample values, disambiguating three states:
+  STAMP NOT LIVE (keys absent → predate running code; retest next session) /
+  STAMP LIVE but SOURCE DARK (keys present as 'unknown' → alert not carrying it; source-gap
+  fix) / STAMPING LIVE. Read-only. `recent_days` query param on the coverage endpoint.
 
 
 ## 1C + 2B — per-archetype GRADE triple + unified Data-Integrity Scorecard (2026-06-25)

@@ -167,12 +167,17 @@ def _recent_stamp_check(db, recent_days: int) -> dict:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=recent_days)).isoformat()
     fields = ["sector_regime", "rs_rating", "symbol_rs_regime", "trigger_price"]
     ext = _extractors()
-    present = {f: 0 for f in fields}
+    present = {f: 0 for f in fields}          # has a REAL (non-dark) value
+    key_present = {f: 0 for f in fields}      # the entry_context KEY exists at all
     rn = 0
     samples = []
     proj = {"_id": 0, "entry_context": 1, "setup_type": 1, "direction": 1,
             "timeframe": 1, "trigger_price": 1, "tape_score": 1, "status": 1,
             "symbol": 1, "created_at": 1, "timestamp": 1}
+    # entry_context keys for the raw-presence check (trigger_price lives on the trade
+    # OR ec; sector/rs live on ec only).
+    ec_keys = {"sector_regime": "sector_regime", "rs_rating": "rs_rating",
+               "symbol_rs_regime": "symbol_rs_regime", "trigger_price": "trigger_price"}
     cur = db["bot_trades"].find(
         {"$or": [{"created_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}]},
         proj).sort("created_at", -1).limit(500)
@@ -189,25 +194,42 @@ def _recent_stamp_check(db, recent_days: int) -> dict:
                 v = None
             if v is not None:
                 present[f] += 1
+            has_key = (ec_keys[f] in ec) or (f == "trigger_price" and "trigger_price" in t)
+            if has_key:
+                key_present[f] += 1
             if len(samples) < 8:
-                row[f] = v
+                row["raw_" + f] = ec.get(ec_keys[f]) if ec_keys[f] in ec else (
+                    t.get("trigger_price") if f == "trigger_price" else "<no key>")
         if len(samples) < 8:
             samples.append({
                 "symbol": t.get("symbol"),
                 "status": t.get("status"),
                 "created_at": t.get("created_at") or t.get("timestamp"),
+                "ec_has_sector_key": "sector_regime" in ec,
                 **row,
             })
 
     def pct(x):
         return round(x / rn * 100, 1) if rn else 0.0
 
+    sec_keys = key_present["sector_regime"]
+    if rn == 0:
+        verdict = "no recent trades"
+    elif sec_keys == 0:
+        verdict = ("STAMP NOT LIVE for these trades — entry_context has NO Phase-0 keys "
+                   "(they predate the stamp code running on the DGX). Retest after the "
+                   "next RTH session with the current build.")
+    elif present["sector_regime"] == 0:
+        verdict = ("STAMP LIVE but SOURCE DARK — keys are written but sector_regime is "
+                   "'unknown'/empty (the alert isn't carrying it). Source-gap fix needed.")
+    else:
+        verdict = "STAMPING LIVE"
+
     return {
         "recent_days": recent_days,
         "n_recent_trades": rn,
         "coverage_pct": {f: pct(present[f]) for f in fields},
+        "key_present_pct": {f: pct(key_present[f]) for f in fields},
         "samples": samples,
-        "verdict": ("no recent trades" if rn == 0 else
-                    "STAMPING LIVE" if present["sector_regime"] > 0 else
-                    "STAMP DARK — alert dict not carrying sector_regime (source gap)"),
+        "verdict": verdict,
     }
