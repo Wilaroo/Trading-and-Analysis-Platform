@@ -19,9 +19,13 @@
   off. `RECONCILE_RELINK_BRACKET_WINDOW_MIN` (default 1440). Fail-open.
 - Proof: `tests/test_orphan_source_bracket_relink.py` (gap→inherit, tracked→skip,
   invalid-stop→skip, wrong-dir→skip, qty-band→skip). Regression `test_orphan_fill_heal.py`
-  still OK. NOTE: heal stops the BLEED; the root pre-write fix (bypass site) is the
-  next step once the operator confirms the bypass path is still active (vs the 2026-05-05
-  deploy-window one-off the sample timestamps suggest).
+  still OK. VERDICT (DGX histogram 2026-06-25): the 136 gaps are a 2026-05-05→05-15
+  BURST (129/136) aligning with the v19.34.15b excess-slice reconciler-bug window
+  (fixed by the v19.34.42+ idempotency series); only 3 stragglers since (Jun 1/3) and
+  ZERO in the last ~3 weeks → the bypass is DORMANT, not a live leak. Decision: lock
+  v414=fix as permanent insurance (covers orphan + excess-slice paths; self-logs to
+  state_integrity_events if it ever reactivates). Root pre-write hunt DEFERRED unless
+  the integrity events show recurrence.
 
 
 ## 2026-06-24 — P3′ ABSTENTION result + P4′ CONDITIONAL prototype shipped
