@@ -27779,13 +27779,17 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
   fail-open safe). Regression: existing `tests/test_entry_edge_score.py` still ALL_OK.
 
 ## v412 — Seal #2 write-gap probe + DGX diag scripts (2026-06-24)
-- `services/orphan_fill_heal.py` (READ-ONLY, trade_id-keyed): finds order_queue rows
-  the pusher marked FILLED whose `trade_id` has NO `bot_trades` row — the only
-  unambiguous fill→bot_trade write-gap signal (vs v407's symbol-level `order_no_trade`
-  bucket that mixed in exit/leg orders). Links each gap to the reconciled_orphan it
-  became (for $ impact) + heal-preview. Writes nothing; active heal is a later flagged step.
-- Endpoint `GET /api/slow-learning/orphan-fill-heal/report?days=120`.
-- Scripts (HTTP, plain python3): `scripts/diag_edge_gate.py` (verify live veto +
-  abstention proof, `--refresh`), `scripts/diag_seal2_write_gap.py` (Seal #2 probe).
-- Tests: `tests/test_orphan_fill_heal.py` (true gap flagged + $-linked, healthy/
-  non-fill ignored). All synthetic/DB-free.
+- `services/orphan_fill_heal.py` (READ-ONLY, base-trade_id-keyed): finds order_queue
+  rows the pusher marked FILLED whose BASE trade_id (synthetic CLOSE-/ADOPT-/SCALE-
+  prefixes stripped) has NO `bot_trades` row. Splits gaps PRE/POST the v19.34.6
+  pre-submit-write fix (2026-05-05) and buckets each by MECHANISM (consolidated_in_memory
+  via bracket_lifecycle_events.merged_from_siblings / became_reconciled_orphan / truly_untracked);
+  $ deduped over distinct downstream orphans, time-matched ±3d. Writes nothing.
+- DGX RESULT (120d): 420 true entry-write gaps. 136 are POST-fix and became
+  synthetic-stop reconciled_orphans = the LIVE leak ≈ −$2,759 (70 distinct orphans);
+  148 post-fix truly_untracked = $0 (ETF/hedge fills netting flat); 0 consolidation
+  artifacts. Root cause = an entry path that BYPASSES `_execute_trade`'s pre-submit
+  write (the reaper marks rows, never deletes, so a reaped entry would still have a row).
+- Endpoint `GET /api/slow-learning/orphan-fill-heal/report?days=120` (now returns
+  by_period + post_fix_mechanism + live_leak). Scripts: `scripts/diag_edge_gate.py`,
+  `scripts/diag_seal2_write_gap.py`. Test: `tests/test_orphan_fill_heal.py` (synthetic).
