@@ -2001,6 +2001,36 @@ class OpportunityEvaluator:
                             context=_edge_eval,
                         )
                         return None
+                    # ── PROMOTE (Stage 3): Edge Score as GO + SIZE authority.
+                    #    OFF (default)=unchanged. SHADOW=log/stamp what it WOULD do,
+                    #    change nothing. ACTIVE=stand-down non-GO trades + size by
+                    #    edge×confidence. GO/size verdict already on _edge_eval.
+                    _pmode = os.environ.get("ENTRY_EDGE_PROMOTE_MODE", "off")
+                    if _pmode in ("shadow", "active") and _edge_eval.get("edge") is not None:
+                        print(
+                            f"   🎯 [EDGE PROMOTE:{_pmode}] {symbol} {setup_type} {direction_str} "
+                            f"GO={_edge_eval.get('go')} cons_edge={_edge_eval.get('conservative_edge')} "
+                            f"size_x={_edge_eval.get('size_mult')} grade={_edge_eval.get('grade')} "
+                            f"conf={_edge_eval.get('confidence')} reason={_edge_eval.get('stand_down_reason')}"
+                        )
+                        if _pmode == "active":
+                            if not _edge_eval.get("go"):
+                                bot.record_rejection(
+                                    symbol=symbol, setup_type=setup_type, direction=direction_str,
+                                    reason_code="edge_go_standdown",
+                                    context=_edge_eval,
+                                )
+                                return None
+                            _sm = _edge_eval.get("size_mult") or 1.0
+                            if shares and abs(_sm - 1.0) > 1e-9:
+                                _ns = max(1, int(round(shares * _sm)))
+                                if _ns != shares:
+                                    _ratio = _ns / float(shares)
+                                    shares = _ns
+                                    if risk_amount:
+                                        risk_amount = round(risk_amount * _ratio, 2)
+                                    if potential_reward:
+                                        potential_reward = round(potential_reward * _ratio, 2)
             except Exception as _edge_err:
                 logger.debug("[EDGE VETO] fail-open (%s)", _edge_err)
 

@@ -638,6 +638,18 @@ async def get_orphan_fill_heal_report(days: int = Query(120)):
     return {"success": True, "report": report}
 
 
+@router.get("/entry-edge-promote/report")
+async def get_entry_edge_promote_report(days: int = Query(120)):
+    """PROMOTE validation — GO/STAND-DOWN + sizing backtest for the Edge Score.
+    Run before flipping ENTRY_EDGE_PROMOTE_MODE=active: confirms STAND-DOWN trades
+    carry negative R (bleed avoided) and that edge×confidence sizing beats equal-weight.
+    """
+    from services.entry_edge_promote import generate_report
+    from database import get_database
+    report = generate_report(get_database(), days=days)
+    return {"success": True, "report": report}
+
+
 @router.get("/orphan-leak/diagnostics")
 async def get_orphan_leak_diagnostics():
     """Read-only runtime diagnostics for the orphan-leak fix decision.

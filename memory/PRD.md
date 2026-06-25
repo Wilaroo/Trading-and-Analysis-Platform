@@ -1729,3 +1729,13 @@ DONE: Conditional Entry Edge Score gates live in opportunity_evaluator (skip
 NEXT (P0): Operator arm on DGX (ENTRY_EDGE_VETO_ENABLED=true), watch
   rejection_daily_counts["edge_score_veto"] vs realized book. Then Seal #2
   (order_no_trade tracking gap, -$920) + backside time-decay exit (P2).
+
+--- 2026-06-24 — PROMOTE shadow-first (Edge Score → GO + sizing) ---
+DONE: ENTRY_EDGE_PROMOTE_MODE (off|shadow|active). compute_decision() = GO on
+  confidence-discounted conservative edge + size_mult (grade×confidence, 0.5–1.25).
+  Shadow logs/stamps only; active stands-down non-GO + rescales shares. Backtest
+  report /entry-edge-promote/report. Locally tested; NOT yet run/validated on DGX.
+NEXT: Save→pull→restart on DGX. Run diag_edge_gate.py (promote backtest): confirm
+  STAND-DOWN avg_R << 0 and sizing lift > 0. Then set ENTRY_EDGE_PROMOTE_MODE=shadow
+  for a few sessions, then =active. Seal #2 active fix (bypass-path pre-write +
+  fill-confirm reconciler) still pending (−$2,759 live leak).

@@ -49,6 +49,58 @@ def _envi(key, default):
         return int(default)
 
 
+# ── PROMOTE decision logic (shared by the live gate + the backtest report) ──────
+# The plain-English contract (ENTRY_EDGE_SCORE_PLAN.md Stage 3):
+#   • GRADE ranks the trade among its archetype peers; EDGE (in R) decides GO.
+#   • GO uses the CONSERVATIVE edge — edge discounted by confidence — so a high
+#     edge backed by thin data does NOT get a free pass. STAND DOWN if it isn't
+#     positive (a pretty setup in a hostile regime gets benched).
+#   • SIZE scales with edge × confidence: high grade + high confidence → up toward
+#     SIZE_MAX; weak/uncertain → down toward SIZE_MIN.
+_CONF_FACTOR = {"high": 1.0, "medium": 0.6, "low": 0.3}
+
+
+def compute_decision(edge, grade, confidence_n, veto_threshold):
+    """Pure GO/SIZE verdict from a scored candidate. No I/O. Used live + in backtest."""
+    go_threshold = _envf("ENTRY_EDGE_GO_THRESHOLD", 0.0)
+    smin = _envf("ENTRY_EDGE_SIZE_MIN", 0.5)
+    smax = _envf("ENTRY_EDGE_SIZE_MAX", 1.25)
+
+    level = ees.confidence_level(confidence_n) if confidence_n is not None else "low"
+    cf = _CONF_FACTOR.get(level, 0.3)
+    # discount uncertain POSITIVES toward 0; never rescue negatives
+    cons = (edge * cf) if (edge is not None and edge > 0) else edge
+
+    veto = (confidence_n is not None) and (edge is not None) \
+        and (veto_threshold is not None) and (edge <= veto_threshold)
+
+    if edge is None or confidence_n is None:
+        reason = "unscoreable"
+    elif veto:
+        reason = "edge_below_veto_cutoff"
+    elif cons is None or cons <= go_threshold:
+        reason = "nonpositive_conservative_edge"
+    else:
+        reason = None
+    go = reason is None
+
+    if grade is None:
+        size_mult = 1.0
+    else:
+        size_mult = smin + (smax - smin) * (max(0.0, min(100.0, grade)) / 100.0) * cf
+        size_mult = round(max(smin, min(smax, size_mult)), 3)
+
+    return {
+        "confidence": level,
+        "confidence_factor": cf,
+        "conservative_edge": round(cons, 4) if cons is not None else None,
+        "go_threshold": go_threshold,
+        "go": bool(go),
+        "stand_down_reason": reason,
+        "size_mult": size_mult,
+    }
+
+
 class _EntryEdgeGate:
     def __init__(self):
         self._lock = threading.Lock()
@@ -152,9 +204,10 @@ class _EntryEdgeGate:
             # shrinks to the global prior and is NOT vetoed — we only block
             # archetypes we have evidence against.
             veto = (cn is not None) and (edge is not None) and (edge <= self._threshold)
-            return {
+            grade = self._grade(edge)
+            out = {
                 "edge": edge,
-                "grade": self._grade(edge),
+                "grade": grade,
                 "threshold": round(self._threshold, 4),
                 "pctile": self._pctile,
                 "confidence_n": cn,
@@ -162,6 +215,10 @@ class _EntryEdgeGate:
                 "fitted_at": self._fitted_at.isoformat() if self._fitted_at else None,
                 "veto": bool(veto),
             }
+            # PROMOTE verdict (GO + sizing) — always computed so shadow mode can
+            # observe it; the caller decides whether to act on it.
+            out.update(compute_decision(edge, grade, cn, self._threshold))
+            return out
         except Exception as e:
             logger.debug("[edge-gate] evaluate fail-open (%s)", e)
             return None
@@ -174,12 +231,16 @@ class _EntryEdgeGate:
             "skip_bottom_pct": self._pctile,
             "threshold": round(self._threshold, 4) if self._threshold is not None else None,
             "fitted_at": self._fitted_at.isoformat() if self._fitted_at else None,
+            "promote_mode": os.environ.get("ENTRY_EDGE_PROMOTE_MODE", "off"),
             "config": {
                 "target": os.environ.get("ENTRY_EDGE_VETO_TARGET", "realized_r"),
                 "clip": _envf("ENTRY_EDGE_VETO_CLIP", 3),
                 "days": _envi("ENTRY_EDGE_VETO_DAYS", 120),
                 "ttl_hours": _envf("ENTRY_EDGE_VETO_TTL_HOURS", 24),
                 "min_trades": _envi("ENTRY_EDGE_VETO_MIN_TRADES", ees.MIN_TRADES),
+                "go_threshold": _envf("ENTRY_EDGE_GO_THRESHOLD", 0.0),
+                "size_min": _envf("ENTRY_EDGE_SIZE_MIN", 0.5),
+                "size_max": _envf("ENTRY_EDGE_SIZE_MAX", 1.25),
             },
         }
 

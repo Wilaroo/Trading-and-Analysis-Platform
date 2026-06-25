@@ -27793,3 +27793,22 @@ v330 short replay. Next: generalize find→trade-replay→rewrite to hitchhiker,
 - Endpoint `GET /api/slow-learning/orphan-fill-heal/report?days=120` (now returns
   by_period + post_fix_mechanism + live_leak). Scripts: `scripts/diag_edge_gate.py`,
   `scripts/diag_seal2_write_gap.py`. Test: `tests/test_orphan_fill_heal.py` (synthetic).
+
+## v413 — PROMOTE (Edge Score → GO + sizing), shadow-first (2026-06-24)
+- The Edge Score becomes the decision authority (ENTRY_EDGE_SCORE_PLAN Stage 3),
+  behind `ENTRY_EDGE_PROMOTE_MODE` = off (default) | shadow | active:
+  * `entry_edge_gate.compute_decision()` (pure, shared live+backtest): GO uses the
+    CONFIDENCE-DISCOUNTED conservative edge (edge×conf_factor for positives) and must
+    clear the veto cutoff + be > GO_THRESHOLD; SIZE_MULT scales with grade×confidence
+    in [SIZE_MIN, SIZE_MAX]. Stand-down reasons: edge_below_veto_cutoff /
+    nonpositive_conservative_edge / unscoreable.
+  * `evaluate()` now returns the GO/size verdict; it's ALWAYS stamped on
+    entry_context.entry_edge (observe). SHADOW = log only, change nothing.
+    ACTIVE = stand-down non-GO (record_rejection `edge_go_standdown`) + rescale
+    shares (and risk/reward) by size_mult. Fail-open; veto path unchanged.
+- Env knobs: ENTRY_EDGE_PROMOTE_MODE, ENTRY_EDGE_GO_THRESHOLD (0.0),
+  ENTRY_EDGE_SIZE_MIN (0.5), ENTRY_EDGE_SIZE_MAX (1.25).
+- `services/entry_edge_promote.py` + `GET /api/slow-learning/entry-edge-promote/report`:
+  GO/STAND-DOWN split + edge×confidence sizing backtest (validate before active).
+  `diag_edge_gate.py` now prints promote_mode + the PROMOTE backtest.
+- Tests: `tests/test_entry_edge_promote.py` (decision logic), gate test still passes.
