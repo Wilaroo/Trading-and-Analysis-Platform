@@ -25,6 +25,7 @@ import TradeStyleChip from './TradeStyleChip';
 // ring now carries score + grade). TqsBadge import dropped.
 import ScoredAsChip from './ScoredAsChip';
 import ProvenanceRing from './ProvenanceRing';
+import EdgeRingForSymbol from '../v6/EdgeRingForSymbol';
 import { openTqsDrawer } from './tqsDrawerBus';
 // v19.34.29 (2026-05-14, mid-market) — Operator feedback: scanner cards
 // were showing only ONE Bot: line ("45sh · Holding ABNB @ ..."), no
@@ -408,6 +409,14 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
           >
             {card.symbol}
           </span>
+          {/* Entry-Edge decision donut (1C) — appears once the gate scores this
+              candidate; click → Edge drawer. Hidden until scored to keep cards clean. */}
+          <EdgeRingForSymbol
+            symbol={card.symbol}
+            size={22}
+            setupType={card.setup_type}
+            direction={card.direction}
+          />
           <span className={`v5-chip ${chipClass}`}>
             {chipLabel}{age && card.stage === 'order' ? ` · ${age}` : ''}
           </span>

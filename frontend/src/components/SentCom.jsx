@@ -14,6 +14,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import EdgeDrawerHost from './sentcom/v6/EdgeDrawerHost';
 import { 
   Send, Brain, Clock, Zap, Target, AlertCircle, ArrowRight, 
   CheckCircle, Loader, X, TrendingUp, Activity, ChevronUp, 
@@ -444,6 +445,7 @@ const SentCom = ({ embedded = false }) => {
           briefingKey={briefingKey || 'morning'}
           onClose={() => setBriefingKey(null)}
         />
+        <EdgeDrawerHost />
       </>
     );
   }
@@ -462,6 +464,7 @@ const SentCom = ({ embedded = false }) => {
       <div className="relative overflow-auto rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 backdrop-blur-xl" style={{ maxHeight: 'calc(100vh - 120px)' }} data-testid="sentcom-embedded">
         {/* Bot Health Banner — renders only when execution-health is CRITICAL */}
         <BotHealthBanner />
+        <EdgeDrawerHost />
 
         {/* Ambient Background Effects */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">

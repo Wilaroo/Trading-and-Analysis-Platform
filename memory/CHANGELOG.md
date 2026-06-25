@@ -1,3 +1,19 @@
+## V6 Edge ring — embedded into the LIVE V5 cockpit (all surfaces) (2026-06-25)
+- User asked to surface the Edge decision donut in the real app (not just `?preview=v6edge`),
+  on every surface where it matters. Done, additively (no V5 behavior removed):
+  • Open positions (`OpenPositionsV5`) — ring next to the TqsBadge on each position card.
+  • Scanner candidates (`ScannerCardsV5`) — ring next to the symbol on each card.
+  • Shared Edge drawer host mounted once in `SentCom` (both non-embedded + embedded trees).
+- Shared infra (`components/sentcom/v6/`): `edgeTripleStore` (ONE singleton poller of
+  /api/slow-learning/entry-edge/recent → latest triple per symbol, 30s, ref-counted,
+  fail-soft) + `useEdgeTriple` hook + `edgeDrawerBus` (openEdgeDrawer) + `EdgeDrawerHost`
+  + `EdgeRingForSymbol` (drop-in: reads triple by symbol, click → drawer).
+- UX: the ring renders ONLY for symbols the gate has already scored (returns null otherwise)
+  → no clutter; rings populate live as the gate stamps triples (next RTH session on the DGX).
+- Verified: clean webpack compile, app shell loads (no crash). Live visual = DGX (sandbox has
+  no /api/sentcom/positions data). Preview slice already testing-agent verified 7/7.
+
+
 ## V6 workstream 3 (start) — Edge-Score Provenance ring + drawer vertical slice (2026-06-25)
 - Backend: `GET /api/slow-learning/entry-edge/recent?limit=&status=` — recent trades with
   their stamped `entry_context.entry_edge.triple` (edge-R / per-archetype grade / confidence

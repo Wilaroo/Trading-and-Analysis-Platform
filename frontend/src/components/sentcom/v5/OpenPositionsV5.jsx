@@ -45,6 +45,7 @@ import { useTaxonomyVersion } from '../../../utils/useTaxonomy';
 import CloseTradeModal from './CloseTradeModal';
 // v19.34.258 — single trusted TQS score on the face + shared drill-down.
 import TqsBadge from './TqsBadge';
+import EdgeRingForSymbol from '../v6/EdgeRingForSymbol';
 import { openTqsDrawer } from './tqsDrawerBus';
 
 // v19.34.175 — Resolve the canonical (unified) grade for a position.
@@ -377,6 +378,14 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
             gradeFallback={unifiedGrade(position)}
             source="position"
             testIdSuffix={`open-pos-${position.symbol}`}
+          />
+          {/* Entry-Edge decision donut (1C) — the GO authority that replaced TQS.
+              Renders only once the gate has scored this symbol; click → Edge drawer. */}
+          <EdgeRingForSymbol
+            symbol={position.symbol}
+            size={26}
+            setupType={position.setup_type}
+            direction={position.direction}
           />
           {/* 2026-05-04 — ORPHAN/PARTIAL/STALE badge moved inline to the
               left cluster so it stops overlapping the right-aligned PnL.
