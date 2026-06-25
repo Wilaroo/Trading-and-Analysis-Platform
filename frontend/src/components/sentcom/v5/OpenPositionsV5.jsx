@@ -24,6 +24,7 @@ import TradeTypeChip from './TradeTypeChip';
 // swing/investment/position) so the operator sees what kind of trade
 // every open position is at a glance.
 import TradeStyleChip from './TradeStyleChip';
+import { RowMetaChips } from '../v6/RowMetaChips';
 // v19.34.2 (2026-05-04) — quote-freshness chip + legend popover.
 import QuoteFreshnessChip from './QuoteFreshnessChip';
 import OpenPositionsLegend from './OpenPositionsLegend';
@@ -362,13 +363,17 @@ const PositionRow = ({ position, onClick, expanded, onToggle, memberCount }) => 
           {/* v327 — operator wants the SETUP visible on the card face,
               not just "INTRADAY short". TradeStyleChip already knows how
               to render the humanised setup name. */}
-          <TradeStyleChip
-            row={position}
-            compact={true}
-            showSetup={true}
-            size="xs"
-            testIdSuffix={`open-pos-${position.symbol}`}
-          />
+          {/* V6 Plan A §10 — chip cluster now flows through the shared
+              RowMetaChips primitive (single child here = identical render). */}
+          <RowMetaChips testId={`row-meta-chips-open-pos-${position.symbol}`}>
+            <TradeStyleChip
+              row={position}
+              compact={true}
+              showSetup={true}
+              size="xs"
+              testIdSuffix={`open-pos-${position.symbol}`}
+            />
+          </RowMetaChips>
           {/* v19.34.258 — single trusted TQS score on the position face;
               click opens the consolidated drill-down drawer. Replaces the
               standalone SetupGradeChip / SMB display. */}

@@ -1,3 +1,28 @@
+## V6 Plan A · Phase A (start) — shared primitives extracted (§10) — ZERO behavior change (2026-06-25)
+Resumed the V6 migration. Phase A = decompose V5 into pure, re-composable pieces with
+NO behavior change (locked acceptance: "V5 must render identically after the lift").
+Two §10 shared primitives are now lifted (V6_INTEGRATION_v110_v114):
+- `utils/orderPipelineSplit.js` — single source of truth for the v19.34.110 ORDER-tile
+  split (`5q + 3@ib`). Lifted verbatim out of `SentComV5View.jsx :: derivePipelineCounts`;
+  that function now calls the helper and produces byte-identical `{order, order_split,
+  order_sub}`. The V6 TopStrip pipeline pill + KPI ribbon will import the same helper
+  (never reimplement — invariant #1). Proof: `utils/__tests__/orderPipelineSplit.smoke.js`
+  (9/9 cases match an inline oracle copied from the old code).
+- `components/sentcom/v6/RowMetaChips.jsx` — thin inline-flex layout wrapper for the
+  per-row meta-chip cluster (TradeStyleChip + future SetupGradeChip). Children-based per
+  the locked example; a SINGLE child renders byte-identically to the bare chip — which is
+  exactly today's V5 case (only TradeStyleChip is on the card face; SetupGradeChip stays
+  in the TQS drawer). V6 panes can later pass the full duo with no extra wrapper work.
+- Swapped both V5 call-sites to flow through `<RowMetaChips>`: `OpenPositionsV5` (position
+  card) + `ScannerCardsV5` (scanner card). Same chips, same props, same render.
+- Verified: webpack compiled clean (only 2 pre-existing OpenPositionsV5 warnings); smoke
+  test 9/9; V5 cockpit renders without crash (ORDER tile correct empty-state `0`/`—`,
+  scanner + open-positions panels mount fine). Live row visuals = DGX (sandbox has no
+  positions/scanner data). NEXT: continue Phase A extractions (TopStrip/KpiRibbon/
+  ScannerPanel/VerdictBlock/ThinkingPane as pure components) → Phase B V6 shell.
+
+
+
 ## V6 Edge ring — embedded into the LIVE V5 cockpit (all surfaces) (2026-06-25)
 - User asked to surface the Edge decision donut in the real app (not just `?preview=v6edge`),
   on every surface where it matters. Done, additively (no V5 behavior removed):

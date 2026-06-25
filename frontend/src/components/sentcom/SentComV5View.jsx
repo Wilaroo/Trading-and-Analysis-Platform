@@ -73,10 +73,15 @@ import {
   readPausedFlag,
   writePausedFlag,
 } from '../../hooks/useMondayMorningAutoLoad';
+// V6 Plan A Phase A (§10) — single shared ORDER-tile split helper, also
+// consumed by the V6 TopStrip/KPI ribbon. Behavior is byte-identical to the
+// inline logic it replaced below.
+import { orderPipelineSplit } from '../../utils/orderPipelineSplit';
 
 
 const derivePipelineCounts = ({ status, setups, positions, alerts, messages, closedToday, winsToday, lossesToday }) => {
   const pipeline = status?.order_pipeline || {};
+  const orderPipe = orderPipelineSplit(pipeline);
   const openPositions = (positions || []).filter(p => p && p.status !== 'closed');
   // 2026-05-04 v19.31.7 — operator's CLOSE TODAY tile read 0 even when
   // the bot demonstrably closed positions today. Root cause: the
@@ -138,21 +143,14 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages, clo
     eval_sub: withGate.length
       ? `${gatePassPct}% gate pass${avgGate != null ? ` · avg ${avgGate}` : ''}`
       : (alerts?.length ? `${alerts.length} alerts` : 'no alerts'),
-    order: (pipeline.pending ?? 0) + (pipeline.ib_pending ?? 0) + (pipeline.executing ?? 0) + (pipeline.filled ?? pipeline.filled_today ?? 0),
+    order: orderPipe.total,
     // v19.34.110 — Order tile split. The HUD renders this as `5q + 3@ib`
     // so the operator can distinguish locally-queued work (`pending` /
     // `executing`) from orders sitting at IB awaiting a terminal state
     // (`ib_pending` — v109). Falls back to a flat count when neither
-    // bucket is meaningful.
-    order_split: (pipeline.pending != null || pipeline.ib_pending != null || pipeline.executing != null)
-      ? {
-          queued: (pipeline.pending ?? 0) + (pipeline.executing ?? 0),
-          ibPending: pipeline.ib_pending ?? 0,
-        }
-      : null,
-    order_sub: (pipeline.pending != null || pipeline.filled != null || pipeline.filled_today != null)
-      ? `${pipeline.filled ?? pipeline.filled_today ?? 0} filled · ${pipeline.pending ?? 0} pending${pipeline.ib_pending ? ` · ${pipeline.ib_pending}@ib` : ''}${pipeline.last_ack_s != null ? ` · ${pipeline.last_ack_s}s ack` : ''}`
-      : '—',
+    // bucket is meaningful. (V6 Plan A §10 — now via orderPipelineSplit.)
+    order_split: orderPipe.split,
+    order_sub: orderPipe.sub,
     manage: openPositions.length,
     manage_sub: openPositions.length > 0
       ? `${openSymbols || ''}${stopsBreached > 0 ? ` · ${stopsBreached} stops hit` : ' · no stops breached'}`

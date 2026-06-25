@@ -1,6 +1,18 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-25 (cont.) — V6 Plan A · Phase A STARTED (shared-primitive extraction, ZERO behavior change).**
+> Resumed the last in-progress item. Two §10 shared primitives lifted (V6_INTEGRATION_v110_v114):
+> (1) `utils/orderPipelineSplit.js` — the v19.34.110 ORDER-tile split, lifted out of
+> `SentComV5View.derivePipelineCounts` (now calls it; byte-identical output; smoke 9/9 vs an inline
+> oracle). (2) `components/sentcom/v6/RowMetaChips.jsx` — inline-flex chip-cluster wrapper (children-based;
+> single child == bare chip, so V5 is identical). Both V5 call-sites (`OpenPositionsV5`, `ScannerCardsV5`)
+> now route TradeStyleChip through `<RowMetaChips>`. Verified: clean webpack compile + V5 cockpit renders
+> (ORDER tile empty-state `0`/`—`, panels mount, no crash). Live row visuals confirm on the DGX (sandbox has
+> no scanner/position data). NEXT: continue Phase A pure-component extractions → Phase B V6 shell + new
+> `/api/safety/system-state` etc. (needs operator steer on Phase B scope before the multi-day shell build).
+
+
 > **🧭 2026-06-25 — STATUS (forked session).** PROMOTE Edge Score is LIVE/`active` (TQS demoted).
 > Done this session: (1C) GRADE is now a TRUE per-archetype percentile (graded within the
 > trade's setup×direction "kind" cohort, global fallback) + per-cell confidence CI + a clean

@@ -19,6 +19,7 @@ import PreMarketModeBanner from './PreMarketModeBanner';
 // scanner card so the operator sees the setup type + style + horizon at
 // a glance for setups, alerts, open positions, and closed trades.
 import TradeStyleChip from './TradeStyleChip';
+import { RowMetaChips } from '../v6/RowMetaChips';
 // v19.34.258 — TQS is now the single source of truth on the card face.
 // SetupGradeChip / SMB / edge-rank scatter folds into the drill-down drawer.
 // v19.34.279 — TQS badge removed from the scanner card header (the provenance
@@ -426,17 +427,19 @@ const ScannerCard = ({ card, active, previewed, isNew, onClick, hoveredSymbol, o
               from row.setup_type. Renders nothing when style is unknown
               AND no setup_type can be derived (keeps card uncluttered). */}
           {(card.trade_style || card.setup_type || card.tier) && (
-            <TradeStyleChip
-              row={{
-                trade_style: card.trade_style,
-                setup_type: card.setup_type,
-                scan_tier: card.tier,
-              }}
-              compact={true}
-              showSetup={true}
-              size="xs"
-              testIdSuffix={`scanner-${card.symbol}`}
-            />
+            <RowMetaChips testId={`row-meta-chips-scanner-${card.symbol}`}>
+              <TradeStyleChip
+                row={{
+                  trade_style: card.trade_style,
+                  setup_type: card.setup_type,
+                  scan_tier: card.tier,
+                }}
+                compact={true}
+                showSetup={true}
+                size="xs"
+                testIdSuffix={`scanner-${card.symbol}`}
+              />
+            </RowMetaChips>
           )}
           {/* v19.34.279 (UI Track A / A2g) — header TQS badge removed; the
               provenance ring now shows the score + grade, so the chip was

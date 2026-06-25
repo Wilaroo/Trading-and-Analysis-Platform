@@ -162,6 +162,13 @@ days." Default OFF until operator confirms after a week of v113 data.
 the shared `<RowMetaChips>` component (wraps TradeStyleChip +
 SetupGradeChip).
 
+✅ **2026-06-25 — BOTH extracted** (zero behavior change): `utils/orderPipelineSplit.js`
+(lifted verbatim from `SentComV5View.derivePipelineCounts`; byte-identical; smoke 9/9) +
+`components/sentcom/v6/RowMetaChips.jsx` (children-based inline wrapper; single child ==
+bare chip so V5 is identical). V5 `OpenPositionsV5` + `ScannerCardsV5` now route
+TradeStyleChip through `<RowMetaChips>`. SetupGradeChip stays in the TQS drawer on V5;
+V6 panes pass the full duo.
+
 **Phase B** wires `useAppState()` to honor the new amber trigger and
 TopStrip + KPI ribbon to the new split helper.
 
