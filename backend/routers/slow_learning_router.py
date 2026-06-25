@@ -528,6 +528,57 @@ async def refresh_entry_edge_gate():
     return {"success": True, "gate": status}
 
 
+@router.get("/entry-edge/recent")
+async def get_entry_edge_recent(limit: int = Query(24, ge=1, le=200),
+                                status: str = Query(None)):
+    """Recent trades with their stamped Entry-Edge TRIPLE (edge / per-archetype grade /
+    confidence + GO|STAND_DOWN verdict) for the V6 provenance ring + Edge drawer (1C).
+    READ-ONLY.
+
+    Reads `entry_context.entry_edge.triple`; falls back to the flat `entry_edge` shape
+    for trades stamped before the triple existed; `triple=null` when the trade was
+    never scored (the UI shows 'scoring…').
+    """
+    from database import get_database
+    db = get_database()
+    out = []
+    if db is None:
+        return {"success": True, "count": 0, "items": out}
+    q = {}
+    if status:
+        q["status"] = status
+    proj = {"_id": 0, "id": 1, "symbol": 1, "direction": 1, "setup_type": 1,
+            "status": 1, "created_at": 1, "timestamp": 1,
+            "realized_pnl": 1, "entry_context.entry_edge": 1}
+    for t in db["bot_trades"].find(q, proj).sort("created_at", -1).limit(limit):
+        ee = ((t.get("entry_context") or {}).get("entry_edge")) or {}
+        triple = ee.get("triple")
+        if not triple and ee.get("edge") is not None:
+            triple = {
+                "edge_r": ee.get("edge"),
+                "grade": ee.get("grade"),
+                "grade_basis": ee.get("grade_basis"),
+                "grade_cohort": None,
+                "confidence": ee.get("confidence"),
+                "confidence_n": ee.get("confidence_n"),
+                "confidence_ci": ee.get("confidence_ci"),
+                "cell": ee.get("cell_key"),
+                "verdict": ("GO" if ee.get("go") else "STAND_DOWN"),
+                "stand_down_reason": ee.get("stand_down_reason"),
+                "conservative_edge": ee.get("conservative_edge"),
+            }
+        out.append({
+            "id": t.get("id"),
+            "symbol": t.get("symbol"),
+            "direction": t.get("direction"),
+            "setup_type": t.get("setup_type"),
+            "status": t.get("status"),
+            "created_at": t.get("created_at") or t.get("timestamp"),
+            "triple": triple,
+        })
+    return {"success": True, "count": len(out), "items": out}
+
+
 
 @router.post("/mfe-mae/repair")
 async def repair_mfe_mae(apply: bool = Query(False), max_r: float = Query(10.0)):

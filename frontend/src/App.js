@@ -15,6 +15,7 @@ import { V6LayoutPreview } from './pages/V6LayoutPreview';
 import { V6BrainstormPreview } from './pages/V6BrainstormPreview';
 import { V6ConceptsExplained } from './pages/V6ConceptsExplained';
 import { V6NextMockup } from './pages/V6NextMockup';
+import { V6EdgePreview } from './pages/V6EdgePreview';
 // v19.34.177 — isolated preview of the portable ClosedTradesTable (?preview=closedfeed).
 // Not in the live tree; renders only behind the flag.
 import ClosedTradesPreview from './components/sentcom/preview/ClosedTradesPreview';
@@ -132,6 +133,8 @@ function App() {
     typeof window !== 'undefined' && window.location.search.includes('preview=v6concepts');
   const isV6MockPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6mock');
+  const isV6EdgePreview =
+    typeof window !== 'undefined' && window.location.search.includes('preview=v6edge');
   const isClosedFeedPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=closedfeed');
   const isV6Preview =
@@ -139,6 +142,7 @@ function App() {
     window.location.search.includes('preview=v6') &&
     !isV6BrainstormPreview &&
     !isV6ConceptsPreview &&
+    !isV6EdgePreview &&
     !isV6MockPreview;
 
   // Startup status dashboard - shows system initialization progress
@@ -493,6 +497,8 @@ function App() {
         <ClosedTradesPreview />
       ) : isV6MockPreview ? (
         <V6NextMockup />
+      ) : isV6EdgePreview ? (
+        <V6EdgePreview />
       ) : isV6ConceptsPreview ? (
         <V6ConceptsExplained />
       ) : isV6BrainstormPreview ? (

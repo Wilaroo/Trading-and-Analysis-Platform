@@ -1,3 +1,18 @@
+## V6 workstream 3 (start) — Edge-Score Provenance ring + drawer vertical slice (2026-06-25)
+- Backend: `GET /api/slow-learning/entry-edge/recent?limit=&status=` — recent trades with
+  their stamped `entry_context.entry_edge.triple` (edge-R / per-archetype grade / confidence
+  + GO|STAND_DOWN verdict). Falls back to flat `entry_edge` shape; `triple=null` when unscored.
+- Frontend (new `components/sentcom/v6/`): `EdgeProvenanceRing.jsx` (locked-spec ⑧ single-
+  segment DECISION DONUT — center=grade, arc=grade fill, color=verdict, confidence pips,
+  colorblind ✓/✕ glyph) + `EdgeDrawer.jsx` (the "why": edge+conservative, grade+cohort basis,
+  confidence+n+CI, archetype cell chips, stand-down reason, "scoring…" empty state).
+- `pages/V6EdgePreview.jsx` at `?preview=v6edge` (wired in App.js): Verdict block (big ring) +
+  recent rail with C mini-arcs, click → drawer. Reads the live endpoint.
+- Visually verified in sandbox vs seeded data (main view on-spec). Connects to REAL DGX data
+  the moment the gate stamps the triple at entry (no mock path; unscored → muted ring).
+  Next: testing-agent frontend flow, then ship + DGX review.
+
+
 ## 2A follow-up — Phase-0 stamping freshness probe (2026-06-25)
 - DGX recent probe: 244 trades in last 4d ALL dark (sector_regime/rs_rating/symbol_rs_regime/
   trigger_price = None). Both wiring ends EXIST in code: scanner threads the dims into
