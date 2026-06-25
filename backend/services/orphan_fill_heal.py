@@ -181,6 +181,13 @@ def generate_report(db, days: int = 120) -> dict:
     n_post_orphans = len(mech_orphans.get("became_reconciled_orphan", {}))
     gaps.sort(key=lambda x: ((x["downstream_reconciled_orphan"] or {}).get("realized_pnl") or 0.0))
 
+    # v414 — full executed_at date histogram of the post-fix orphan-causing gaps
+    # (NOT capped like `samples`). Answers ongoing-leak vs one-time-deploy-window:
+    # a single dominant date == a restart-window batch; a spread == a live bypass.
+    _post_orphan_gaps = [g for g in gaps if g["period"] == "post_fix"
+                         and g["mechanism"] == "became_reconciled_orphan"]
+    _date_hist = Counter((g.get("executed_at") or "")[:10] for g in _post_orphan_gaps)
+
     out["population"] = {
         "filled_order_queue_rows": len(rows),
         "distinct_base_trade_ids": len(grp),
@@ -199,6 +206,7 @@ def generate_report(db, days: int = 120) -> dict:
         "note": "post-fix filled entries with NO bot_trade that became synthetic-stop "
                 "orphans — the live Seal #2 leak (entry path bypassing the pre-submit write).",
     }
+    out["post_fix_orphan_date_histogram"] = dict(sorted(_date_hist.items()))
     out["samples"] = [g for g in gaps if g["period"] == "post_fix"
                       and g["mechanism"] == "became_reconciled_orphan"][:20]
     out["verdict"] = (
