@@ -1,3 +1,37 @@
+## 1C + 2B — per-archetype GRADE triple + unified Data-Integrity Scorecard (2026-06-25)
+**1C — Entry Edge score TRIPLE surfaced per-archetype (entry_edge_gate.py, entry_edge_score.py)**
+- `score_conditional()` now returns the finest resolved `cell_key` (archetype label).
+- GRADE is now a TRUE rolling per-archetype percentile: the gate grades a candidate's
+  edge within its OWN "kind" cohort = `setup_type × direction` (NOT the global pool).
+  WHY kind, not the finest cell: the cell-mean model gives every trade in one finest
+  cell an identical shrunk edge → zero spread → degenerate percentile; the kind spans
+  multiple cells (time_window/regime) so the ranking is meaningful. Thin kinds
+  (< `ENTRY_EDGE_GRADE_MIN_COHORT`, default 12) fall back to the global pool;
+  `grade_basis` = archetype|global is stamped.
+- CONFIDENCE: per-finest-cell realized-R CI half-width (1.96·σ/√n) exposed as
+  `confidence_ci`, alongside the existing `confidence` band + `confidence_n`.
+- Clean UI contract: `entry_context.entry_edge.triple` = {edge_r, grade, grade_basis,
+  grade_cohort, confidence, confidence_n, confidence_ci, cell, verdict, stand_down_reason,
+  conservative_edge} — the single block the V6 provenance ring + Edge drawer read.
+  `gate.status()` adds `grade_cohorts` + `grade_min_cohort`.
+- NO live behavior change: GO/veto still key on edge/conservative_edge; grade only feeds
+  size_mult which is OFF by default (sizing proven ~0 lift). Proof:
+  `tests/test_entry_edge_grade_archetype.py` (close cell grades 33.3 within its kind vs
+  53.8 global; open cell tops kind at 100; thin/unknown kind → global fallback).
+
+**2B — Unified Data-Integrity Scorecard (services/data_integrity_scorecard.py)**
+- ONE read-only pass/warn/fail roll-up: `GET /api/integrity/data-scorecard?days_edge=&days_tqs=`.
+  Composes (fail-soft, a broken probe → status=unknown, never crashes):
+  Phase-0 Edge coverage (archetype-cell completeness + darkest Phase-0 field),
+  TQS per-pillar % defaulted (live feed darkness: Tape/Fundamental/EV/Execution…),
+  TQS calc honesty (grade ranks realized-R? compressed?), ingest freshness.
+  Top-line verdict = worst real status. Drives the V6 Data&Connections / Data
+  Confidence / Autopilot Go-No-Go pages. Plan: DATA_INTEGRITY_PLAN_2026-06.md.
+- 2A uses the existing `GET /api/slow-learning/entry-edge-coverage/report?days=45`.
+- Local smoke (empty preview DB): shape correct, fail-soft — verdict FAIL only because
+  no ib_historical_data rows exist locally (expected; real numbers come from the DGX).
+
+
 ## v414 — Seal #2 heal: relink orphan → FILLED order_queue bracket (2026-06-25)
 - Root data (operator DGX dump): the 136 post-fix write-gap entries are `type=bracket`
   ENTRIES that FILLED at IB but never got the v19.34.6 pre-submit `bot_trades` write,

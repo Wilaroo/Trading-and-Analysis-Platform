@@ -302,3 +302,23 @@ async def get_integrity_feed(limit: int = Query(30, ge=1, le=200)):
     except Exception as e:
         logger.error(f"integrity feed failed: {e}", exc_info=True)
         return {"success": False, "error": str(e)[:200]}
+
+
+@router.get("/data-scorecard")
+async def get_data_scorecard(days_edge: int = Query(45, ge=1, le=180),
+                             days_tqs: int = Query(30, ge=1, le=180)):
+    """Unified Data-Integrity Scorecard (READ-ONLY) — workstream 2B.
+
+    One pass/warn/fail roll-up proving every feed flows + every calc is honest:
+    Phase-0 Edge coverage, TQS per-pillar feed darkness, TQS grade honesty, and
+    ingest freshness. Fail-soft per probe. Plan: memory/DATA_INTEGRITY_PLAN_2026-06.md
+    """
+    if _db is None:
+        return {"success": False, "error": "db not initialised"}
+    try:
+        from services.data_integrity_scorecard import build_scorecard
+        report = await asyncio.to_thread(build_scorecard, _db, days_edge, days_tqs)
+        return {"success": True, "report": report}
+    except Exception as e:
+        logger.error(f"data-scorecard failed: {e}", exc_info=True)
+        return {"success": False, "error": str(e)[:200]}

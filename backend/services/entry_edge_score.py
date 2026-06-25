@@ -222,6 +222,7 @@ def fit_conditional(rows):
 def score_conditional(model, factors):
     est = model["global_mean"]
     n_used = None
+    cell_key = None
     for dims, acc in model["levels"]:        # coarse → fine
         k = _key(factors, dims)
         if None in k:
@@ -232,7 +233,9 @@ def score_conditional(model, factors):
             w = cell[1] / (cell[1] + SHRINK_K_HIER)
             est = w * cmean + (1.0 - w) * est
             n_used = cell[1]
-    return {"edge": round(est, 4), "confidence_n": n_used, "contributions": {}}
+            cell_key = "|".join("%s=%s" % (d, v) for d, v in zip(dims, k))
+    return {"edge": round(est, 4), "confidence_n": n_used,
+            "cell_key": cell_key, "contributions": {}}
 
 
 def load_training_rows(db, days: int = 120, target: str = "realized_r", clip: float = 0.0):
