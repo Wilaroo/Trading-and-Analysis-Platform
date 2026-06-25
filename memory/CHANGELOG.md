@@ -1,3 +1,27 @@
+## V6 Plan A — ORDER tile ack-latency pulse (live HUD "is IB responding?") (2026-06-25)
+Operator-approved enhancement. The live ORDER pipeline tile now shows a small ping-dot
+pulse colored by IB order-ack freshness, reusing the `last_ack_s` already streamed on
+`order_pipeline` (no new backend, no new data). Bands: ≤2s emerald (fast) · ≤5s amber
+(sluggish) · >5s rose (slow). `null` (no recent order activity) → no pulse, no layout
+change. High-signal glance for market open.
+
+Data path (all additive, reuses the Phase A helper):
+- `utils/orderPipelineSplit.js` → now also returns `lastAckS`.
+- `SentComV5View.derivePipelineCounts` → adds `order_ack_s` and passes `orderAckS` to
+  `<PipelineHUDV5>`.
+- `PipelineHUDV5` → new `orderAckS` prop → `ackLatencyS` on the ORDER `<PipelineStageTile>`.
+- `v6/PipelineStageTile.jsx` → renders the banded ping dot (testid
+  `…-ack-pulse`, `data-ack-band`).
+- Smoke updated (9/9, oracle now includes `lastAckS`); preview `?preview=v6kpis` adds an
+  "ORDER ack-latency pulse" row showing all 3 bands + the no-orders case.
+- Verified: eslint clean, webpack compiled, preview screenshot confirms green/amber/rose
+  dots + no-dot; live cockpit HUD renders with no pulse in sandbox (last_ack_s null) and
+  no crash.
+- DEPLOY: frontend-only — DGX `cd frontend && yarn build` (no backend restart). The pulse
+  appears on the live ORDER tile once IB acks are flowing.
+
+
+
 ## V6 Plan A · Phase A→B bridge — KpiRibbon + Open-Risk micro-bar composed (§4 / §v110) (2026-06-25)
 Third Phase A increment. Composed the V6 KPI ribbon from the extracted primitives —
 ADDITIVE, zero V5 behavior change (new files + a new isolated preview route only):

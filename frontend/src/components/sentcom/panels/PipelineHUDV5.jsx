@@ -39,6 +39,7 @@ export const PipelineHUDV5 = ({
   orderCount = 0,
   orderSplit,
   orderSub,
+  orderAckS,
   manageCount = 0,
   manageSub,
   manageAccent,
@@ -175,6 +176,7 @@ export const PipelineHUDV5 = ({
           <div ref={orderStageRef} className="flex-1 min-w-0 relative">
             <Stage
               stage="order" label="Order" count={orderCount} sub={orderSub} splitCount={orderSplit}
+              ackLatencyS={orderAckS}
               dataTestId="v5-pipeline-stage-order"
               onClick={() => toggle('order')}
             />

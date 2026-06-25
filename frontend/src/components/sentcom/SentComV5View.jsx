@@ -151,6 +151,10 @@ const derivePipelineCounts = ({ status, setups, positions, alerts, messages, clo
     // bucket is meaningful. (V6 Plan A §10 — now via orderPipelineSplit.)
     order_split: orderPipe.split,
     order_sub: orderPipe.sub,
+    // v19.34.x — IB order-ack latency (seconds since last order ack). Drives
+    // the ORDER-tile "is IB responding?" pulse in the HUD. null → no recent
+    // order activity → no pulse. (V6 Plan A — via orderPipelineSplit.)
+    order_ack_s: orderPipe.lastAckS,
     manage: openPositions.length,
     manage_sub: openPositions.length > 0
       ? `${openSymbols || ''}${stopsBreached > 0 ? ` · ${stopsBreached} stops hit` : ' · no stops breached'}`
@@ -471,6 +475,7 @@ export const SentComV5View = ({
         orderCount={counts.order}
         orderSplit={counts.order_split}
         orderSub={counts.order_sub}
+        orderAckS={counts.order_ack_s}
         manageCount={counts.manage}
         manageSub={counts.manage_sub}
         manageAccent={counts.manage_r != null ? {

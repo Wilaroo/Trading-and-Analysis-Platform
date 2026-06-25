@@ -44,7 +44,7 @@ export function orderPipelineSplit(pipeline) {
       }${p.last_ack_s != null ? ` · ${p.last_ack_s}s ack` : ''}`
     : '—';
 
-  return { total, split, sub };
+  return { total, split, sub, lastAckS: p.last_ack_s ?? null };
 }
 
 export default orderPipelineSplit;

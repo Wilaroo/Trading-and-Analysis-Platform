@@ -37,6 +37,7 @@ function oracle(pipeline) {
     sub: (p.pending != null || p.filled != null || p.filled_today != null)
       ? `${p.filled ?? p.filled_today ?? 0} filled · ${p.pending ?? 0} pending${p.ib_pending ? ` · ${p.ib_pending}@ib` : ''}${p.last_ack_s != null ? ` · ${p.last_ack_s}s ack` : ''}`
       : '—',
+    lastAckS: p.last_ack_s ?? null,
   };
 }
 

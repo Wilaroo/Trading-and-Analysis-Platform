@@ -33,13 +33,21 @@ export const V6KpiRibbonPreview = () => {
       <div className="flex gap-2 mb-10 max-w-3xl">
         <PipelineStageTile stage="scan" label="Scan" count={47} sub="47 scored" />
         <PipelineStageTile stage="eval" label="Eval" count={20} sub="20 evaluating" />
-        {/* split mode — orderPipelineSplit drives `5q + 3@ib` */}
+        {/* split mode — orderPipelineSplit drives `5q + 3@ib` + ack pulse */}
         {(() => {
-          const { total, split, sub } = orderPipelineSplit({ pending: 5, ib_pending: 3, executing: 1, filled: 4, last_ack_s: 1 });
-          return <PipelineStageTile stage="order" label="Order" count={total} sub={sub} splitCount={split} />;
+          const { total, split, sub, lastAckS } = orderPipelineSplit({ pending: 5, ib_pending: 3, executing: 1, filled: 4, last_ack_s: 1 });
+          return <PipelineStageTile stage="order" label="Order" count={total} sub={sub} splitCount={split} ackLatencyS={lastAckS} />;
         })()}
         <PipelineStageTile stage="manage" label="Manage" count={9} accent={{ text: '+3.1R', color: 'text-emerald-400' }} sub="9 open" />
         <PipelineStageTile stage="close" label="Close Today" count={3} sub="2W · 1L" />
+      </div>
+
+      <h2 className="text-base font-semibold text-zinc-300 mb-3">ORDER ack-latency pulse (is IB responding?)</h2>
+      <div className="flex gap-2 mb-10 max-w-2xl">
+        <PipelineStageTile stage="order" label="Order" count={6} sub="ack 1s" ackLatencyS={1} />
+        <PipelineStageTile stage="order" label="Order" count={6} sub="ack 4s" ackLatencyS={4} />
+        <PipelineStageTile stage="order" label="Order" count={6} sub="ack 9s" ackLatencyS={9} />
+        <PipelineStageTile stage="order" label="Order" count={0} sub="no orders" />
       </div>
 
       <h2 className="text-base font-semibold text-zinc-300 mb-3">KPI ribbon + §v110 Open-Risk micro-bar</h2>

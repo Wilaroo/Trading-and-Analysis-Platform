@@ -10,6 +10,11 @@
  * tile renders `5q + 3@ib` instead of a flat count. Pair with the shared
  * `utils/orderPipelineSplit` helper that produces `splitCount`.
  *
+ * V6 Plan A — also accepts `ackLatencyS` (seconds since the last IB order
+ * ack): renders a small ping dot colored by freshness band (≤2s emerald,
+ * ≤5s amber, else rose) so the operator can read "is IB responding?" at a
+ * glance. null → no recent order activity → no pulse, no layout change.
+ *
  * Pure presentational — props in, JSX out. Zero behavior change.
  */
 import React from 'react';
@@ -22,7 +27,7 @@ export const STAGE_COLOR = {
   close:   { border: 'border-slate-700',     bg: 'bg-slate-900/20',  text: 'text-slate-400' },
 };
 
-export const PipelineStageTile = ({ stage, label, count, sub, accent, splitCount, onClick, dataTestId }) => {
+export const PipelineStageTile = ({ stage, label, count, sub, accent, splitCount, ackLatencyS, onClick, dataTestId }) => {
   const c = STAGE_COLOR[stage];
   const interactive = typeof onClick === 'function';
   // v19.34.110 — ORDER tile split. When `splitCount = { queued, ibPending }`
@@ -30,6 +35,17 @@ export const PipelineStageTile = ({ stage, label, count, sub, accent, splitCount
   // flat number. Lets the operator see at a glance how much work is
   // locally queued vs. how much is sitting at IB in `PendingSubmit`.
   const hasSplit = splitCount && (splitCount.ibPending ?? 0) > 0;
+  // V6 Plan A — "is IB responding?" pulse. When `ackLatencyS` (seconds since
+  // the last IB order ack) is supplied, render a small ping dot colored by
+  // freshness band. null → no recent order activity → no pulse (no layout
+  // change for non-order tiles).
+  const ackTone = ackLatencyS == null
+    ? null
+    : ackLatencyS <= 2
+      ? { dot: 'bg-emerald-400', band: 'fast' }
+      : ackLatencyS <= 5
+        ? { dot: 'bg-amber-400', band: 'sluggish' }
+        : { dot: 'bg-rose-400', band: 'slow' };
   return (
     <div
       data-testid={dataTestId || `v5-pipeline-stage-${stage}`}
@@ -45,7 +61,20 @@ export const PipelineStageTile = ({ stage, label, count, sub, accent, splitCount
       className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block ${interactive ? 'cursor-pointer' : ''}`}
     >
       <div className="flex items-center justify-between gap-1.5">
-        <span className={`text-[14px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={`text-[14px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
+          {ackTone && (
+            <span
+              data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-ack-pulse`}
+              data-ack-band={ackTone.band}
+              title={`IB order ack ${ackLatencyS}s ago — ${ackTone.band}`}
+              className="relative inline-flex h-1.5 w-1.5 shrink-0"
+            >
+              <span className={`absolute inline-flex h-full w-full rounded-full ${ackTone.dot} opacity-75 animate-ping`} />
+              <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${ackTone.dot}`} />
+            </span>
+          )}
+        </span>
         <div className="flex items-baseline gap-1">
           {accent && (
             <span className={`v5-mono text-[14px] font-bold ${accent.color}`}>{accent.text}</span>
