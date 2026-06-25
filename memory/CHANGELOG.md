@@ -1,3 +1,44 @@
+## V6 Plan A · Phase A→B bridge — KpiRibbon + Open-Risk micro-bar composed (§4 / §v110) (2026-06-25)
+Third Phase A increment. Composed the V6 KPI ribbon from the extracted primitives —
+ADDITIVE, zero V5 behavior change (new files + a new isolated preview route only):
+- `components/sentcom/v6/OrderPipelineMicroBar.jsx` — §v110 stacked micro-bar
+  (pending=amber / ib_pending=blue / executing=emerald); faint empty track when idle.
+- `components/sentcom/v6/KpiRibbon.jsx` — the §4 5-col ribbon (P&L · Equity · Open Risk ·
+  Throttle · RPC) composing `KpiMetric` + `formatMoney/formatEquity` + the micro-bar under
+  Open Risk. Pure (props in); the Phase-B shell will feed it /api/sentcom/status.
+- `pages/V6KpiRibbonPreview.jsx` + `?preview=v6kpis` route in `App.js` — isolated proof page
+  (sandbox has no DGX data). Renders PipelineStageTile flat vs `6q + 3@ib` split and the
+  ribbon across 4 pipeline tuples.
+- Verified: eslint clean on new files; webpack compiled; screenshot confirms split tile +
+  micro-bar segments render correctly (idle empty / amber / amber+blue / full-blue),
+  no crash. Live cockpit untouched (only PipelineHUDV5's internal primitives moved).
+- DEPLOY: frontend-only — DGX needs another `cd frontend && yarn build` (backend restart
+  NOT required). NEXT: Phase B — `/api/safety/system-state` (+ `useAppState`) for the
+  TopStrip state pill, then assemble the V6 shell mounting TopStrip + KpiRibbon + panels.
+
+
+
+## V6 Plan A · Phase A (cont.) — pipeline tile + KPI metric primitives extracted — ZERO behavior change (2026-06-25)
+Second Phase A increment (live-verified on DGX after the first shipped clean). Lifted the
+two remaining building blocks the V6 TopStrip pills + KPI ribbon compose from, both
+verbatim out of `panels/PipelineHUDV5.jsx` (were private module-scope sub-components):
+- `components/sentcom/v6/PipelineStageTile.jsx` — one Scan/Eval/Order/Manage/Close tile
+  (+ exported `STAGE_COLOR`). Honors the v19.34.110 ORDER split (`5q + 3@ib`) and pairs
+  with `utils/orderPipelineSplit`.
+- `components/sentcom/v6/KpiMetric.jsx` — one KPI metric cell (P&L/Equity/…) + the
+  `formatMoney` / `formatEquity` helpers.
+- `PipelineHUDV5.jsx` now imports both (aliased to the prior local names Stage/Metric/
+  formatMoney/formatEquity) and dropped the inline defs → byte-identical render.
+- Verified: eslint clean on all 3 files; webpack compiled (only the 2 pre-existing
+  OpenPositionsV5 warnings); V5 cockpit HUD renders identically (SCAN/EVAL/ORDER/MANAGE/
+  CLOSE tiles + P&L/EQUITY/PWR/PHASE cluster all present, no crash).
+- STATE: the 4 foundational V6 primitives are now extracted (orderPipelineSplit,
+  RowMetaChips, PipelineStageTile, KpiMetric). NEXT Phase A→B bridge: compose the additive
+  V6 `<TopStrip>` + `<KpiRibbon>` (incl. §v110 Open-Risk micro-bar) from these, then the
+  `/api/safety/system-state` endpoint for the state pill / `useAppState()` (Phase B).
+
+
+
 ## V6 Plan A · Phase A (start) — shared primitives extracted (§10) — ZERO behavior change (2026-06-25)
 Resumed the V6 migration. Phase A = decompose V5 into pure, re-composable pieces with
 NO behavior change (locked acceptance: "V5 must render identically after the lift").

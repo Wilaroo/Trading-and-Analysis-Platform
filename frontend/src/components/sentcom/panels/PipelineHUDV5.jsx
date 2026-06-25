@@ -24,85 +24,12 @@ import {
   orderStageConfig,
   manageStageConfig,
 } from '../v5/pipelineStageColumns';
-
-const stageColor = {
-  scan:    { border: 'border-violet-900/60', bg: 'bg-violet-950/20', text: 'text-violet-400' },
-  eval:    { border: 'border-blue-900/60',   bg: 'bg-blue-950/20',   text: 'text-blue-400' },
-  order:   { border: 'border-amber-900/60',  bg: 'bg-amber-950/20',  text: 'text-amber-400' },
-  manage:  { border: 'border-emerald-900/60',bg: 'bg-emerald-950/20',text: 'text-emerald-400' },
-  close:   { border: 'border-slate-700',     bg: 'bg-slate-900/20',  text: 'text-slate-400' },
-};
-
-const Stage = ({ stage, label, count, sub, accent, splitCount, onClick, dataTestId }) => {
-  const c = stageColor[stage];
-  const interactive = typeof onClick === 'function';
-  // v19.34.110 — ORDER tile split. When `splitCount = { queued, ibPending }`
-  // is provided and `ibPending > 0`, render `5q + 3@ib` instead of the
-  // flat number. Lets the operator see at a glance how much work is
-  // locally queued vs. how much is sitting at IB in `PendingSubmit`.
-  const hasSplit = splitCount && (splitCount.ibPending ?? 0) > 0;
-  return (
-    <div
-      data-testid={dataTestId || `v5-pipeline-stage-${stage}`}
-      onClick={onClick}
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onKeyDown={interactive ? (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick(e);
-        }
-      } : undefined}
-      className={`flex-1 min-w-0 px-2 py-1.5 border rounded-sm ${c.border} ${c.bg} transition-colors hover:bg-white/5 v5-hud-block ${interactive ? 'cursor-pointer' : ''}`}
-    >
-      <div className="flex items-center justify-between gap-1.5">
-        <span className={`text-[14px] uppercase tracking-[0.16em] font-bold ${c.text} truncate`}>{label}</span>
-        <div className="flex items-baseline gap-1">
-          {accent && (
-            <span className={`v5-mono text-[14px] font-bold ${accent.color}`}>{accent.text}</span>
-          )}
-          {hasSplit ? (
-            <span
-              className="v5-mono text-xl font-bold text-zinc-100 leading-none whitespace-nowrap"
-              data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split`}
-              title={`${splitCount.queued ?? 0} queued locally · ${splitCount.ibPending ?? 0} awaiting IB terminal state`}
-            >
-              <span data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split-queued`}>{splitCount.queued ?? 0}</span>
-              <span className="text-zinc-500 text-xs font-normal">q</span>
-              <span className="text-zinc-500 text-sm px-0.5">+</span>
-              <span className={c.text} data-testid={`${dataTestId || `v5-pipeline-stage-${stage}`}-split-ibpending`}>{splitCount.ibPending ?? 0}</span>
-              <span className="text-zinc-500 text-xs font-normal">@ib</span>
-            </span>
-          ) : (
-            <span className="v5-mono text-xl font-bold text-zinc-100 leading-none">{count ?? 0}</span>
-          )}
-        </div>
-      </div>
-      {sub && (
-        <div className="text-[14px] text-zinc-500 truncate mt-0.5 v5-mono">{sub}</div>
-      )}
-    </div>
-  );
-};
-
-const Metric = ({ label, value, color = 'text-zinc-100' }) => (
-  <div className="text-right">
-    <div className="text-[14px] uppercase tracking-widest text-zinc-500">{label}</div>
-    <div className={`font-mono text-sm font-bold ${color}`}>{value}</div>
-  </div>
-);
-
-const formatMoney = (v) => {
-  if (v == null || Number.isNaN(Number(v))) return '$—';
-  const n = Number(v);
-  const sign = n >= 0 ? '+' : '−';
-  return `${sign}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-
-const formatEquity = (v) => {
-  if (v == null || Number.isNaN(Number(v))) return '$—';
-  return `$${Math.round(Number(v)).toLocaleString('en-US')}`;
-};
+// V6 Plan A Phase A — pipeline tile + KPI metric primitives lifted into v6/
+// so the V6 TopStrip pills + KPI ribbon share one implementation. Aliased to
+// the prior local names (Stage / Metric / formatMoney / formatEquity) so the
+// rest of this file is untouched → byte-identical render.
+import { PipelineStageTile as Stage } from '../v6/PipelineStageTile';
+import { KpiMetric as Metric, formatMoney, formatEquity } from '../v6/KpiMetric';
 
 export const PipelineHUDV5 = ({
   scanCount = 0,
