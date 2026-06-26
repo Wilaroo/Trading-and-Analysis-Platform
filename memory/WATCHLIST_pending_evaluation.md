@@ -55,10 +55,19 @@ Endpoints assume `http://localhost:8001` on the DGX. Flag rollback is always "un
   edge) is the proven lever; size mult proved ~0 lift (keep OFF).
 - **Check:** `curl -s "localhost:8001/api/slow-learning/entry-edge-score/report?days=120&target=win&clip=3&model=conditional"`
   — compare conditional vs `model=marginal`; read the `abstention_curve` (bleed saved per veto cutoff).
+- **⛔ 2026-06-26 RAN ON DGX (target=mfe_r, n=887, 5-fold) → PROMOTE RULE NOT MET. DO NOT WIRE THE VETO.**
+  Both models predict MFE weakly (+0.08/+0.11 spearman) but are INVERSE to realized R
+  (marginal −0.108, conditional −0.054). The abstention curve does NOT reduce realized bleed —
+  conditional skip-bottom-30% makes avg realized R WORSE (−0.149→−0.175) and stays negative
+  everywhere; marginal only "improves" by trading fewer trades (still −0.076 after skipping 50%).
+  Per the rule below, the veto is NOT ready. The ONLY durable signals are `time_window`
+  (morning ≫ afternoon/power-hour) and `setup_type` — NOT the per-trade score.
 - **Decision:** if conditional beats marginal OOS materially AND abstention curve shows real
   bleed reduction → wire the live SHADOW abstention arm first, then promote veto. Status:
-  `GET /api/slow-learning/entry-edge/recent`.
-- **When:** after Phase-0 coverage (D1) fills + a few RTH sessions of fresh entries.
+  `GET /api/slow-learning/entry-edge/recent`. (As of 2026-06-26: condition FAILED — held.)
+- **When:** revisit only after (1) Phase-0 coverage (D1) fills `sector_regime`/`rs_rating` on new
+  entries, AND (2) the entry-feature-discovery work finds a feature that tracks REALIZED R
+  out-of-sample (current features only weakly track MFE). Until then the veto is dormant by design.
 
 ### B2. TQS scheme-B renorm — `TQS_RENORM_PRESENT` (off / dormant)
 - **What:** recompute pillars over PRESENT sub-scores only (drop "No data", renormalize),

@@ -1,6 +1,40 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🔬 2026-06-26 — "WHY IS THE BOT NOT TRADING?" full read-only diagnostic chain (RTH, ~1h in, 0 trades). NO CODE CHANGE — capital-protection working as designed.**
+> Operator alarmed at 0 trades w/ 981 alerts. Traced the funnel end-to-end (all read-only):
+> (1) `/api/diagnostic/trade-funnel`: 981 alerts → 532 HIGH/CRIT → 0 `auto_execute_eligible` → 0 trades.
+> (2) Root cause is the **EV-quality auto-exec gate** (`_passes_ev_quality_gate`, UPSTREAM of tape, not
+> tape itself): every HIGH/CRIT alert this morning is a proven-NEGATIVE-EV short-fade setup
+> (`vwap_fade_short` −0.67R/n76, `mean_reversion_short` −0.38R/n15, `backside` −0.19R/n37,
+> `trend_continuation_short` −0.08R/n29, `rubber_band_short` −0.05R/n23). The gate CORRECTLY refuses them.
+> The only +EV setups (`gap_give_go` +0.24R, `second_chance` +0.078R) come in MEDIUM/LOW priority.
+> (3) Priority-ceiling cause located: detector gives `second_chance`/`gap_give_go` HIGH on tape-confirm,
+> but `_apply_setup_context` (lines ~7749-7755) DEMOTES one notch (HIGH→MEDIUM→LOW) on out-of-context
+> (Bellafiore matrix) fires → can't reach the HIGH auto-fire bar in a choppy tape. (This was the
+> candidate "C" fix.)
+> (4) `/api/slow-learning/setup-ev/report` (30d): **NO setup is credibly +EV** at n≥20 w/ positive
+> median. Best real-sample setups are ~breakeven (`power_trend_stack` +0.01/n19, `fashionably_late`
+> +0.02/n19 w/ neg median); the +EV-looking ones are thin (`vwap_continuation` n5, `second_chance` n8
+> w/ NEGATIVE median = outlier-driven). ⇒ **C dropped** (would force trades on noise → lose money).
+> (5) `/api/slow-learning/mfe-mae/report` (n=482): **EVERY horizon = `entry_problem`.** avg MFE only
+> +0.16R vs MAE −0.24R; `winner_capture`=0.87 (EXITS ARE FINE); ~0% of losers ever reached +1R. Trades
+> barely move favorably before reversing ⇒ it's an ENTRY-edge problem, NOT an exit problem (so the
+> deferred `backside` time-decay exit would NOT move realized EV).
+> (6) `/api/slow-learning/entry-edge-score/report` (120d, n=887, 5-fold, both models): the rebuilt
+> **Entry Edge Score does NOT generalize to realized R** — pred-vs-realized spearman marginal −0.108 /
+> conditional −0.054 (INVERSE), only weakly tracks MFE (+0.08/+0.11). Abstention curve does NOT reduce
+> realized bleed (conditional skip-bottom-30% → −0.175, WORSE). ⇒ **B1 Entry-Edge veto NOT ready, do
+> NOT wire** (watchlist B1 updated). Only durable signals: `time_window` (morning ≫ afternoon/power_hour)
+> and `setup_type`.
+> **CONCLUSION:** the bot is correctly sitting out a no-edge book; the entry process has no reliable
+> realized edge and the current scorer can't rescue it. This is the core unsolved research problem
+> (the "models that generalize" mandate), NOT a gate to loosen. NEXT (operator's call): time-window /
+> setup selectivity (defensible, generalizing) · entry-feature-discovery for a feature that tracks
+> REALIZED R · loser cleanup. Files touched today: FRONTEND ONLY (V6 `/v6` route + symbol search).
+
+
+
 > **🧭 2026-06-26 — V6 Phase C: `/v6` real route PROMOTED + symbol search shipped (additive, live V5 untouched).**
 > (1A) `ChartVerdictPanel` now has a **symbol search box** (type e.g. TSLA + Enter/"go" → drives
 > ChartPanel + Verdict strip + Thinking/triggers via `onSymbolChange`→`setSelectedSymbol`); fixes the
