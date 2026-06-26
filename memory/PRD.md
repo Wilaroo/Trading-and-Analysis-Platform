@@ -1,6 +1,21 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-26 — V6 Phase C: `/v6` real route PROMOTED + symbol search shipped (additive, live V5 untouched).**
+> (1A) `ChartVerdictPanel` now has a **symbol search box** (type e.g. TSLA + Enter/"go" → drives
+> ChartPanel + Verdict strip + Thinking/triggers via `onSymbolChange`→`setSelectedSymbol`); fixes the
+> "can't pick a chart when the scanner is empty pre-market" gap. Sandbox-verified end-to-end (TSLA
+> switched chart/verdict/thinking; empty data expected). (Phase C) `App.js` `isV6ShellPreview` now also
+> matches the `/^\/v6(\/|$)/` pathname, so the shell is reachable at the clean **`/v6`** route while the
+> legacy `?preview=v6shell` query still works and **V5 stays the default at `/`**. Verified: `/v6` renders
+> the shell, `/` does NOT. SPA deep-link works because the DGX serves the frontend via `yarn start`
+> (webpack historyApiFallback) — no nginx change needed. Files: `components/sentcom/v6/ChartVerdictPanel.jsx`,
+> `pages/V6ShellPreview.jsx`, `App.js`. DEPLOY: Save to GitHub → DGX pull → `yarn build` + hard-refresh
+> (or just navigate to `/v6` on the running dev server). NEXT: vertical layout proportion tuning (1B,
+> deferred by operator), then P0 tape-calibration RTH verification.
+
+
+
 > **🧭 2026-06-26 — V6 Phase B CORE PANELS COMPLETE (additive `?preview=v6shell`, live V5 untouched):**
 > The shell is now a full working cockpit — DLP **Risk rail** (`/api/safety/risk-rail`), real
 > **Scanner** + **Open Positions** (live `useSentCom*` hooks), **Chart+Verdict** center

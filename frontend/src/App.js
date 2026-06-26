@@ -140,7 +140,10 @@ function App() {
   const isV6KpisPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6kpis');
   const isV6ShellPreview =
-    typeof window !== 'undefined' && window.location.search.includes('preview=v6shell');
+    typeof window !== 'undefined' && (
+      window.location.search.includes('preview=v6shell') ||
+      /^\/v6(?:\/|$)/.test(window.location.pathname)
+    );
   const isClosedFeedPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=closedfeed');
   const isV6Preview =

@@ -7,7 +7,8 @@
  * language verdict + universe/tier/RVOL + today's alert/trade counts + the FIRST
  * killing gate (or recomputed intake reasons) so the operator sees the WHY.
  */
-import React from 'react';
+import React, { useState } from 'react';
+import { Search } from 'lucide-react';
 import { ChartPanel } from '../panels/ChartPanel';
 import { useSymbolTrace } from '../hooks/useSymbolTrace';
 
@@ -97,17 +98,51 @@ const VerdictStrip = ({ symbol, trace }) => {
   );
 };
 
-export const ChartVerdictPanel = ({ symbol, position = null, className = '' }) => {
+export const ChartVerdictPanel = ({ symbol, position = null, onSymbolChange = null, className = '' }) => {
   const sym = symbol || 'SPY';
   const { trace } = useSymbolTrace(symbol);
+  const [query, setQuery] = useState('');
+
+  const submitSymbol = (e) => {
+    e.preventDefault();
+    const next = query.trim().toUpperCase();
+    if (next && onSymbolChange) {
+      onSymbolChange(next);
+      setQuery('');
+    }
+  };
+
   return (
     <div
       className={`rounded-md border border-white/10 bg-white/[0.02] flex flex-col h-full min-h-0 overflow-hidden ${className}`}
       data-testid="v6-chart-verdict-panel"
     >
-      <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between shrink-0">
-        <span className="text-[11px] uppercase tracking-widest text-zinc-500">Chart + Verdict</span>
-        <span className="text-[11px] font-mono text-zinc-400">{sym}</span>
+      <div className="px-3 py-2 border-b border-white/5 flex items-center gap-3 shrink-0">
+        <span className="text-[11px] uppercase tracking-widest text-zinc-500 shrink-0">Chart + Verdict</span>
+        {onSymbolChange && (
+          <form onSubmit={submitSymbol} className="flex items-center gap-1 ml-auto" data-testid="v6-symbol-search-form">
+            <div className="relative">
+              <Search className="w-3 h-3 text-zinc-600 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                data-testid="v6-symbol-search-input"
+                value={query}
+                onChange={(e) => setQuery(e.target.value.toUpperCase())}
+                placeholder="SYMBOL"
+                spellCheck={false}
+                className="w-32 bg-black/40 border border-white/10 rounded pl-7 pr-2 py-1 text-[11px] font-mono uppercase tracking-wide text-zinc-200 placeholder:text-zinc-600 placeholder:tracking-widest focus:outline-none focus:border-cyan-500/50 focus:bg-black/60 transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              data-testid="v6-symbol-search-submit"
+              className="text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded bg-white/5 text-zinc-400 hover:bg-cyan-500/20 hover:text-cyan-200 transition-colors disabled:opacity-30 disabled:hover:bg-white/5 disabled:hover:text-zinc-400"
+              disabled={!query.trim()}
+            >
+              go
+            </button>
+          </form>
+        )}
+        <span className="text-[11px] font-mono text-zinc-400 shrink-0">{sym}</span>
       </div>
       <div className="flex-1 min-h-0 flex flex-col">
         <div className="flex-1 min-h-0" data-testid="v6-chart-host">

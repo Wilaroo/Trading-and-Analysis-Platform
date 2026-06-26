@@ -1,6 +1,7 @@
 /**
- * V6ShellPreview — isolated, additive proof of the V6 cockpit SHELL
- * (?preview=v6shell). Zero impact on the live V5 cockpit. Composes the real
+ * V6ShellPreview — the V6 cockpit SHELL, now reachable at the real `/v6` route
+ * (Phase C) AND the legacy `?preview=v6shell` query (kept for back-compat). Zero
+ * impact on the live V5 cockpit, which remains the default at `/`. Composes the real
  * extracted/built primitives into the §4 layout skeleton:
  *
  *   Heartbeat (5px) → TopStrip → KpiRibbon → [Rail | Scanner | Chart+Verdict
@@ -143,6 +144,7 @@ export const V6ShellPreview = () => {
           <ChartVerdictPanel
             symbol={selectedSymbol}
             position={(positions || []).find((p) => p.symbol === selectedSymbol) || null}
+            onSymbolChange={setSelectedSymbol}
             className="h-full"
           />
         </div>
