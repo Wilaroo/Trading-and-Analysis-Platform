@@ -48,6 +48,28 @@ from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger(__name__)
 
+
+def _eod_overnight_anomalies(positions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Open positions whose ORDER POLICY says they should close at EOD
+    (scalp/intraday) yet are still open overnight — a genuine EOD-close bug.
+
+    Resolves the decision from ``policy_close_at_eod`` (set via
+    ``order_policy_registry.should_close_at_eod``) — NOT the stale per-trade
+    ``close_at_eod`` field, which blanket-defaults True for setups missing a
+    config key (v334 / v19.34.245). Swing / position / investment / multi_day
+    holds (``policy_close_at_eod=False``, GTC brackets) are correctly EXCLUDED
+    so the postmortem stops false-flagging legitimate overnight swing holds.
+    """
+    out: List[Dict[str, Any]] = []
+    for p in positions:
+        try:
+            qty = abs(float(p.get("position") or 0))
+        except (TypeError, ValueError):
+            qty = 0.0
+        if qty > 0 and p.get("policy_close_at_eod") is True:
+            out.append(p)
+    return out
+
 router = APIRouter(prefix="/api/diagnostic", tags=["diagnostic"])
 
 
@@ -4076,6 +4098,22 @@ async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
         verdicts_by_oid = {}
 
     # Build the order rows.
+    # v-fix — policy-resolved EOD decision (NOT the stale per-trade
+    # `close_at_eod` field). Swing/position GTC holds resolve to False so the
+    # postmortem stops false-flagging them as "intraday held overnight".
+    try:
+        from services.order_policy_registry import should_close_at_eod as _scae
+    except Exception:
+        _scae = None
+
+    def _policy_eod(t):
+        if not t or _scae is None:
+            return None
+        try:
+            return _scae(t)
+        except Exception:
+            return None
+
     ib_open_orders: List[Dict[str, Any]] = []
     for o in ib_open_orders_raw:
         try:
@@ -4102,6 +4140,7 @@ async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
             "matched_bot_trade_id": (matched or {}).get("id"),
             "matched_setup_type": (matched or {}).get("setup_type"),
             "matched_close_at_eod": (matched or {}).get("close_at_eod"),
+            "matched_policy_close_at_eod": _policy_eod(matched),
             "matched_timeframe": (matched or {}).get("timeframe"),
         })
 
@@ -4121,6 +4160,7 @@ async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
             "unrealized_pnl": p.get("unrealizedPNL") or p.get("unrealized_pnl"),
             "setup_type": trade.get("setup_type"),
             "close_at_eod": trade.get("close_at_eod"),
+            "policy_close_at_eod": _policy_eod(trade),
             "trade_type": trade.get("timeframe") or trade.get("trade_type"),
             "bot_trade_id": trade.get("id"),
         })
@@ -4151,27 +4191,27 @@ async def eod_postmortem(date: Optional[str] = None) -> Dict[str, Any]:
                 "swing/position (close_at_eod=False)."
             )
 
-    # Any intraday position still alive after EOD = bug.
-    intraday_overnight = [
-        p for p in ib_open_positions
-        if abs(p["position"]) > 0 and p.get("close_at_eod") is True
-    ]
+    # Any position the ORDER POLICY classifies as intraday (scalp/intraday)
+    # but still open overnight = genuine EOD-close bug. Policy-resolved so
+    # swing/position GTC holds are NOT false-flagged (v334 / v19.34.245).
+    intraday_overnight = _eod_overnight_anomalies(ib_open_positions)
     if intraday_overnight:
         diagnosis.append(
-            f"🔴 {len(intraday_overnight)} INTRADAY position(s) held "
-            f"overnight despite close_at_eod=True: "
+            f"🔴 {len(intraday_overnight)} position(s) with an INTRADAY order "
+            f"policy (should_close_at_eod=True) held overnight: "
             f"{[p['symbol'] for p in intraday_overnight]}. "
-            "Manual TWS flatten was required. Root cause is in this "
+            "Manual TWS flatten was likely required. Root cause is in this "
             "list — cross-check the failed_symbols in section 1."
         )
 
     # Pending DAY LMT entries for intraday setups still alive — that's
-    # the v19.34.151 fix scope.
+    # the v19.34.151 fix scope. Policy-resolved (matched_policy_close_at_eod)
+    # so swing GTC brackets aren't mistaken for stranded intraday entries.
     pending_intraday_entries = [
         o for o in ib_open_orders
         if (o.get("order_type") or "").upper() == "LMT"
         and (o.get("time_in_force") or "").upper() == "DAY"
-        and o.get("matched_close_at_eod") is True
+        and o.get("matched_policy_close_at_eod") is True
     ]
     if pending_intraday_entries:
         diagnosis.append(
