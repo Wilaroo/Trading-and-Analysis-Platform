@@ -71,12 +71,18 @@ def _classify(cell, params, decaying):
     min_n = float(params.get("min_eff_n", 25.0))
     hard_r = float(params.get("hard_r", -0.50))
     soft_r = float(params.get("soft_r", -0.12))
+    enable_r = float(params.get("enable_r", 0.0))
     if wmr is None or eff_n < min_n:
         return "UNKNOWN", f"insufficient sample (eff_n {eff_n:.0f} < {min_n:.0f})"
     if wmr <= hard_r:
         return "DISABLE", f"hostile in regime: weighted_mean_R {wmr:.2f} <= {hard_r:.2f} (eff_n {eff_n:.0f})"
     if wmr <= soft_r:
         return "WATCH", f"soft-hostile: weighted_mean_R {wmr:.2f} <= {soft_r:.2f}"
+    if wmr < enable_r:
+        # 2026-06-26 — negative/breakeven expectancy is NOT "healthy". Previously this
+        # band (soft_r..0) fell through to ENABLE and mislabeled mild bleeders
+        # (e.g. backside -0.09R) as "healthy → ENABLE".
+        return "WATCH", f"no proven edge: weighted_mean_R {wmr:.2f} < {enable_r:.2f} (negative/breakeven — monitor, do not ENABLE)"
     if decaying:
         return "WATCH", "edge-decay: recent 30d R deteriorating vs 90d"
     return "ENABLE", f"healthy: weighted_mean_R {wmr:.2f} (eff_n {eff_n:.0f})"

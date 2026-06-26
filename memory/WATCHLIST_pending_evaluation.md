@@ -175,10 +175,13 @@ Endpoints assume `http://localhost:8001` on the DGX. Flag rollback is always "un
 - **Note:** original handoff said append `breakout`/`mean_reversion` — superseded by the realized-R
   data (those weren't the leaks; `vwap_bounce`/`off_sides_short` were).
 
-### E1b. 🟢 strategy-autonomy recommender mislabels mild bleeders as "healthy/ENABLE" (low priority)
-- `/api/slow-learning/strategy-autonomy/report` calls −0.09R "healthy" and recommends ENABLE
-  (e.g. backside, stage_2_breakout). Threshold too lenient. Advisory-only (deferred behind flag, no
-  action taken), so cosmetic — fix the "healthy" cutoff when convenient.
+### E1b. ✅ strategy-autonomy recommender no longer mislabels mild bleeders as "healthy/ENABLE" (2026-06-26, pending DGX deploy)
+- **Was:** `_classify` ENABLE band was `wmr > soft_r(-0.12)`, so −0.09R/−0.02R setups (backside,
+  stage_2_breakout) were labeled "healthy → ENABLE".
+- **Fix (code, 7 unit tests pass):** added `enable_r` gate (default 0.0) — any `wmr < enable_r` →
+  WATCH ("no proven edge: …"); only genuinely non-negative expectancy → ENABLE/healthy. Advisory-only,
+  zero live-loop behavior change. Files: `services/strategy_autonomy.py`,
+  `tests/test_strategy_autonomy_enable_r_2026_06_26.py`. Ships with the same DGX deploy as E1.
 
 ### E2. 🟡 `backside` time-decay exit (44% WR, −$935 → +EV)  ← DEFERRED by operator 2026-06-26
 - **Plan:** time-based exit in the exit policy for stalled backside setups; env-gated, observe-first.
