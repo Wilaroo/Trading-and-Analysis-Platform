@@ -102,7 +102,7 @@ export const ChartVerdictPanel = ({ symbol, position = null, className = '' }) =
   const { trace } = useSymbolTrace(symbol);
   return (
     <div
-      className={`rounded-md border border-white/10 bg-white/[0.02] flex flex-col min-h-[420px] overflow-hidden ${className}`}
+      className={`rounded-md border border-white/10 bg-white/[0.02] flex flex-col h-full min-h-0 overflow-hidden ${className}`}
       data-testid="v6-chart-verdict-panel"
     >
       <div className="px-3 py-2 border-b border-white/5 flex items-center justify-between shrink-0">
@@ -113,7 +113,7 @@ export const ChartVerdictPanel = ({ symbol, position = null, className = '' }) =
         <div className="flex-1 min-h-0" data-testid="v6-chart-host">
           <ChartPanel symbol={sym} position={position} className="h-full" />
         </div>
-        <div className="h-[180px] shrink-0 border-t border-white/5 bg-black/20">
+        <div className="h-[150px] shrink-0 border-t border-white/5 bg-black/20">
           <VerdictStrip symbol={symbol} trace={trace} />
         </div>
       </div>

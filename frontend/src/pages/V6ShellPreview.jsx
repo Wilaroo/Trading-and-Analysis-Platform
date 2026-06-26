@@ -43,7 +43,7 @@ const PIPELINE = {
 
 const PanelSlot = ({ title, width, fill, children }) => (
   <div
-    className="rounded-md border border-white/10 bg-white/[0.02] flex flex-col min-h-[420px]"
+    className="rounded-md border border-white/10 bg-white/[0.02] flex flex-col h-full min-h-0"
     style={width ? { width, flexShrink: 0 } : { flex: 1 }}
     data-testid={`v6-shell-slot-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}
   >
@@ -73,7 +73,7 @@ export const V6ShellPreview = () => {
   const [hoveredSymbol, setHoveredSymbol] = useState(null);
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
+    <div className="h-screen overflow-hidden bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
       <Heartbeat state={state} />
       <TopStrip pipeline={PIPELINE} appState={state} stateMeta={stateMeta} account="PAPER · DUN615665" />
       <KpiRibbon
@@ -125,7 +125,7 @@ export const V6ShellPreview = () => {
       </div>
 
       {/* §4 5-col body grid */}
-      <div className="flex-1 flex gap-2 p-2">
+      <div className="flex-1 min-h-0 flex gap-2 p-2 pb-1">
         <RiskRail />
         <PanelSlot title="Scanner" width="230px" fill>
           <ScannerCardsV5
@@ -139,14 +139,14 @@ export const V6ShellPreview = () => {
             onHoverSymbol={setHoveredSymbol}
           />
         </PanelSlot>
-        <div className="flex-1 min-w-0 min-h-[420px]">
+        <div className="flex-1 min-w-0 min-h-0">
           <ChartVerdictPanel
             symbol={selectedSymbol}
             position={(positions || []).find((p) => p.symbol === selectedSymbol) || null}
             className="h-full"
           />
         </div>
-        <div style={{ width: '340px', flexShrink: 0 }} className="min-h-[420px]">
+        <div style={{ width: '340px', flexShrink: 0 }} className="min-h-0">
           <ThinkingPane
             state={state}
             symbol={selectedSymbol}

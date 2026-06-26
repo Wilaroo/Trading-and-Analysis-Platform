@@ -34,7 +34,7 @@ export const RiskRail = () => {
       data-testid="v6-risk-rail"
       data-headroom={Math.round(headroom)}
       data-killswitch={ks ? '1' : '0'}
-      className="rounded-md border border-white/10 bg-white/[0.02] flex flex-col items-center py-3 min-h-[420px]"
+      className="rounded-md border border-white/10 bg-white/[0.02] flex flex-col items-center py-3 h-full min-h-0"
       style={{ width: '46px', flexShrink: 0 }}
       title={title}
     >
