@@ -1,6 +1,13 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **👁️ 2026-06-26 — FLAG/OBSERVE WATCHLIST:** `memory/WATCHLIST_pending_evaluation.md` is the
+> single tracker for every env flag, shadow/observe-mode feature, and data-accruing check that
+> still needs a promote/tune/kill decision (tape deferred A/B, TQS dormant dials, thesis-
+> invalidation, strategy-autonomy, shadow arms, Entry-Edge Phase-0 coverage, scheduled re-checks,
+> loser cleanup). Review it before deciding to switch anything on/off.
+
+
 > **🧭 2026-06-26 — P0 TAPE-CALIBRATION resolved via DEFERRED tape-confirmation (JIT Level-2). ALL env-gated, DEFAULT OFF == byte-identical legacy.**
 > Root cause confirmed: with only a 3–6 symbol L2 entitlement, `_get_tape_reading` falls back
 > to `100/100` sizes (imbalance 0) for ~99% of names → `tape_score 0` → fails the `>=0.2`

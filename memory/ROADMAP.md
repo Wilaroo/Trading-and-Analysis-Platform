@@ -1,4 +1,10 @@
 > # 🧭 ACTIVE PROGRAM — ENTRY EDGE SCORE REBUILD (do not drift)
+> **👁️ BEFORE ANY "is it safe to promote / turn on / off" DECISION:** read
+> **`memory/WATCHLIST_pending_evaluation.md`** — the single tracker of every flag,
+> shadow/observe-mode feature, and data-accruing check that needs a deliberate
+> promote/tune/kill decision (so none of them silently rot).
+>
+
 > **The current top-priority program is the Entry Edge Score rebuild.**
 > Read **`memory/ENTRY_EDGE_SCORE_PLAN.md`** (LOCKED master plan) before doing
 > any scoring/TQS/gate work. Summary:
