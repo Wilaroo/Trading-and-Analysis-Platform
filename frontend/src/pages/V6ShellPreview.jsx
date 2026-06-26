@@ -27,6 +27,7 @@ import { useSentComPositions } from '../components/sentcom/hooks/useSentComPosit
 import { useSentComSetups } from '../components/sentcom/hooks/useSentComSetups';
 import { useSentComAlerts } from '../components/sentcom/hooks/useSentComAlerts';
 import { useSentComStream } from '../components/sentcom/hooks/useSentComStream';
+import { V6ActionBar } from '../components/sentcom/v6/V6ActionBar';
 
 const PIPELINE = {
   scan: 47,
@@ -53,9 +54,10 @@ const PanelSlot = ({ title, width, fill, children }) => (
 );
 
 export const V6ShellPreview = () => {
-  // Live app-state from /api/system/health; `override` lets us demo any halo.
-  const { state: liveState, stateMeta } = useAppState();
+  // Live app-state from /api/safety/system-state; `override` lets us demo any halo.
+  const { state: liveState, stateMeta, signals } = useAppState();
   const [override, setOverride] = useState(null);
+  const [forceBar, setForceBar] = useState(false);
   const state = override || liveState;
 
   // Live SentCom data — same hooks the V5 cockpit uses (DRY; no new fetch path).
@@ -110,6 +112,13 @@ export const V6ShellPreview = () => {
           </button>
         ))}
         <span className="ml-3 text-zinc-700">Additive preview only — live V5 cockpit untouched.</span>
+        <button
+          data-testid="v6-shell-force-actionbar"
+          onClick={() => setForceBar((v) => !v)}
+          className={`ml-auto uppercase font-bold px-2 py-0.5 rounded transition-colors ${forceBar ? 'bg-rose-700/60 text-rose-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          {forceBar ? 'hide action bar' : 'preview action bar'}
+        </button>
       </div>
 
       {/* §4 5-col body grid */}
@@ -138,6 +147,8 @@ export const V6ShellPreview = () => {
           />
         </PanelSlot>
       </div>
+
+      <V6ActionBar state={state} signals={signals} forceShow={forceBar} />
     </div>
   );
 };

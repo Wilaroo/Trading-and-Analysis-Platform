@@ -20,6 +20,7 @@ export const useAppState = () => {
   const [state, setState] = useState('cyan');
   const [reasons, setReasons] = useState([]);
   const [detail, setDetail] = useState('—');
+  const [signals, setSignals] = useState({});
 
   const fromHealth = useCallback(async () => {
     const resp = await fetch(`${BACKEND_URL}/api/system/health`);
@@ -50,6 +51,7 @@ export const useAppState = () => {
       const why = data.reasons || [];
       setState(next);
       setReasons(why);
+      setSignals(data.signals || {});
       const counts = data.health_counts || {};
       setDetail(
         next === 'cyan'
@@ -80,7 +82,7 @@ export const useAppState = () => {
     rose:  { color: 'rose',  icon: '✕', label: STATE_LABEL.rose,  detail },
   };
 
-  return { state, reasons, detail, stateMeta };
+  return { state, reasons, detail, signals, stateMeta };
 };
 
 export default useAppState;

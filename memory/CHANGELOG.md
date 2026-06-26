@@ -38,8 +38,32 @@ all V6 work to date is query-param previews). Live V5 cockpit untouched.
 Save to GitHub → DGX pull → backend `./start_backend.sh --force` (new endpoint is additive) +
 frontend `yarn build` + hard-refresh. View at `?preview=v6shell`.
 ### NEXT (Phase B/C)
-Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · CRITICAL action bar
-(rose-only: FLATTEN/CANCEL-ORPH/RECONNECT) · Risk rail (DLP%) · then Phase C real `/v6` route.
+Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · Risk rail (DLP%) ·
+then Phase C real `/v6` route.
+
+## 2026-06-26 — V6 Phase B: §4-D CRITICAL action bar (consumes /api/safety/system-state)
+- New `components/sentcom/v6/V6ActionBar.jsx`, mounted in `?preview=v6shell`. Auto-appears ONLY
+  when `useAppState().state === 'rose'`; one-click operator remediation, each behind an explicit
+  confirm. CONTEXTUAL buttons:
+  - **FLATTEN ALL** (always on rose) → `POST /api/safety/flatten-all?confirm=FLATTEN`, gated by a
+    typed-confirm modal (must type "FLATTEN").
+  - **CANCEL ORPHAN-GTC** (always) → audits `GET /api/safety/orphan-gtc-orders`, shows the count of
+    naked_no_position/orphan_no_trade ids, then `POST /api/safety/cancel-orphan-gtc`
+    {ib_order_ids, confirm:"CANCEL_ORPHANS"} (backend re-classifies before cancelling).
+  - **RESET KILL-SWITCH** (only when `signals.kill_switch_active`) → `POST /api/safety/reset-kill-switch`.
+  - **PUSHER STATUS** (only when `signals.pusher_push_fresh === false`) → READ-ONLY
+    `GET /api/ib/pusher-health`. NOTE: there is NO backend pusher-reconnect endpoint (pusher is an
+    external :8765 service), so this surfaces health instead of faking a reset — honest by design.
+  - Dismiss (×) hides for the session; re-appears if state stays rose.
+- `useAppState` now also returns `signals` (drives the contextual buttons). Still imported ONLY by
+  the preview — zero V5 risk.
+- Verified (sandbox): bar auto-shows on rose, all 4 contextual buttons render, typed-confirm gate
+  works (Flatten disabled until "FLATTEN" typed), cancel/dismiss clean. NO mutating action fired —
+  the live fire-path (flatten/cancel/reset → IB) must be validated on the DGX with care.
+- Backend regression: 25/25 (system-state + tape suites).
+### NEXT (Phase B/C)
+Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · Risk rail (DLP%) ·
+then Phase C real `/v6` route.
 
 
 
