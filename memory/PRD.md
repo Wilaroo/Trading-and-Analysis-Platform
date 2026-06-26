@@ -1,6 +1,22 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **✅ 2026-06-26 (action shipped, pending DGX deploy) — LOSER CLEANUP via code-default blocklist + audit endpoint.**
+> Decision after the diagnostic chain below: setup_type is the dominant realized-R lever (eta²=0.21), so
+> prune proven bleeders. Operator chose 1b+2a. Changes (sandbox-tested, NOT yet on DGX):
+> (1) `services/entry_gate.py` `DEFAULT_DISABLED_SETUPS` →
+> `daily_breakout, vwap_fade_short, vwap_bounce, off_sides_short` (adds `vwap_bounce` −1.22R/n31 +
+> `off_sides_short` −0.58R/n16; `backside` kept enabled per operator).
+> (2) NEW read-only `GET /api/diagnostic/disabled-setups-audit` — surfaces `env_dropped_from_default`
+> (a custom env silently re-enabling a known bleeder) + bleeding-but-enabled setups. Test:
+> `tests/test_disabled_setups_default_2026_06_26.py` (5 pass). curl-verified in sandbox.
+> **DEPLOY (after market close):** Save-to-GitHub → DGX pull → **delete the `DISABLED_SETUPS=` line in
+> `backend/.env`** (let the code default govern; if kept, the audit WARNS `off_sides_short,vwap_bounce`
+> re-enabled) → `./start_backend.sh --force` → confirm `/api/diagnostic/disabled-setups-audit` lists all
+> 4 with "✅ no proven bleeder is silently enabled".
+
+
+
 > **🔬 2026-06-26 — "WHY IS THE BOT NOT TRADING?" full read-only diagnostic chain (RTH, ~1h in, 0 trades). NO CODE CHANGE — capital-protection working as designed.**
 > Operator alarmed at 0 trades w/ 981 alerts. Traced the funnel end-to-end (all read-only):
 > (1) `/api/diagnostic/trade-funnel`: 981 alerts → 532 HIGH/CRIT → 0 `auto_execute_eligible` → 0 trades.

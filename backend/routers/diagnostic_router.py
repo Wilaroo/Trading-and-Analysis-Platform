@@ -1048,6 +1048,109 @@ def trade_drops(
     }
 
 
+# ===========================================================================
+# /api/diagnostic/disabled-setups-audit — "what's disabled vs what's bleeding?"
+# Read-only safety view so a custom DISABLED_SETUPS env can never silently
+# re-enable a known proven-bleeder setup without it showing up here.
+# ===========================================================================
+@router.get("/disabled-setups-audit")
+def disabled_setups_audit(days: int = 30, min_n: int = 5) -> Dict[str, Any]:
+    """Cross-references the LIVE effective DISABLED_SETUPS against the realized-R
+    audit so the operator can see, at a glance:
+      • which proven-bleeder setups the code default would block,
+      • which the live env has (silently) RE-ENABLED vs that default,
+      • which currently-enabled setups are still BLEEDING (action items),
+      • the recent realized-R verdict for every disabled setup.
+    Pure read-only; no side effects."""
+    import os
+    from services.entry_gate import parse_disabled_setups, DEFAULT_DISABLED_SETUPS
+
+    env_raw = os.environ.get("DISABLED_SETUPS")
+    effective = parse_disabled_setups(env_raw)          # env override OR code default
+    code_default = parse_disabled_setups(None)          # the committed canonical list
+    env_overrides_default = env_raw is not None
+
+    # Proven-bleeders the code default blocks but the live env has dropped → leak risk.
+    env_dropped_from_default = sorted(code_default - effective)
+    # Setups the operator disabled beyond the code default.
+    extra_in_env = sorted(effective - code_default)
+
+    # Realized-R verdicts (worst-first), reused from the setup-ev audit.
+    try:
+        from services.setup_ev import generate_setup_ev_report
+        ev = generate_setup_ev_report(_get_db(), days=days, horizon=None,
+                                      min_n=min_n, setup=None)
+        ev_setups = ev.get("setups", []) or []
+    except Exception as e:  # never let the audit hard-fail
+        logger.warning(f"disabled-setups-audit: setup-ev report failed: {e}")
+        ev_setups = []
+
+    ev_by_setup = {str(s.get("setup_type", "")).lower(): s for s in ev_setups}
+
+    def _row(s: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "setup_type": s.get("setup_type"),
+            "n": s.get("n"),
+            "win_rate": s.get("win_rate"),
+            "avg_r": s.get("avg_r"),
+            "total_r": s.get("total_r"),
+            "verdict": s.get("verdict"),
+        }
+
+    # Currently ENABLED but bleeding → the actionable list.
+    bleeding_but_enabled = sorted(
+        [_row(s) for s in ev_setups
+         if s.get("verdict") == "bleeding"
+         and str(s.get("setup_type", "")).lower() not in effective],
+        key=lambda r: (r["total_r"] if r["total_r"] is not None else 0.0),
+    )
+    marginal_enabled = [
+        _row(s) for s in ev_setups
+        if s.get("verdict") == "marginal"
+        and str(s.get("setup_type", "")).lower() not in effective
+    ]
+
+    # Status of every disabled setup (does the recent audit still confirm it bleeds?).
+    disabled_status = []
+    for name in sorted(effective):
+        s = ev_by_setup.get(name)
+        if s:
+            row = _row(s)
+        else:
+            row = {"setup_type": name, "n": 0, "win_rate": None, "avg_r": None,
+                   "total_r": None, "verdict": "no_recent_data"}
+        row["in_code_default"] = name in code_default
+        disabled_status.append(row)
+
+    # Headline.
+    parts = [f"{len(effective)} setup(s) disabled"]
+    if env_dropped_from_default:
+        parts.append(f"⚠️ env RE-ENABLED proven bleeders: {', '.join(env_dropped_from_default)}")
+    if bleeding_but_enabled:
+        parts.append(f"⚠️ {len(bleeding_but_enabled)} bleeding setup(s) still ENABLED: "
+                     + ", ".join(r["setup_type"] for r in bleeding_but_enabled[:5]))
+    if not env_dropped_from_default and not bleeding_but_enabled:
+        parts.append("✅ no proven bleeder is silently enabled")
+
+    return {
+        "success": True,
+        "report_date": datetime.now(timezone.utc).date().isoformat(),
+        "lookback_days": days,
+        "min_n": min_n,
+        "env_set": env_overrides_default,
+        "effective_disabled": sorted(effective),
+        "code_default_disabled": sorted(code_default),
+        "env_dropped_from_default": env_dropped_from_default,
+        "extra_in_env": extra_in_env,
+        "bleeding_but_enabled": bleeding_but_enabled,
+        "marginal_enabled": marginal_enabled,
+        "disabled_status": disabled_status,
+        "headline": " | ".join(parts),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
 
 # ===========================================================================
 # /api/diagnostic/account-snapshot — why is EQUITY showing $-?

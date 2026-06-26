@@ -159,9 +159,26 @@ Endpoints assume `http://localhost:8001` on the DGX. Flag rollback is always "un
 
 ## ⚪ E. PENDING ACTIONS (deferred, not yet done)
 
-### E1. 🟡 Loser cleanup — append `breakout`, `mean_reversion` to `DISABLED_SETUPS` (0% win)
-- **Action:** add to the DGX `backend/.env` `DISABLED_SETUPS` list (operator) + restart.
-- **Note:** daily_breakout already suppressed. Confirm current `DISABLED_SETUPS` contents on DGX.
+### E1. ✅ Loser cleanup — proven-bleeder blocklist PROMOTED INTO CODE (2026-06-26, pending DGX deploy)
+- **Done (code, sandbox-tested):** `DEFAULT_DISABLED_SETUPS` in `services/entry_gate.py` is now the
+  canonical proven-bleeder list = `daily_breakout, vwap_fade_short, vwap_bounce, off_sides_short`
+  (was env-only `daily_breakout,vwap_fade_short`, which silently left `vwap_bounce` −1.22R/n31 and
+  `off_sides_short` −0.58R/n16 ENABLED). Operator chose 1b (conservative): `backside` stays enabled
+  (see E2). Data justification: setup_type is the dominant realized-R factor (eta²=0.21, 120d audit).
+- **Also built (read-only):** `GET /api/diagnostic/disabled-setups-audit?days=30&min_n=5` — shows
+  effective-vs-default disabled, **`env_dropped_from_default`** (proven bleeders an env silently
+  re-enabled), and currently-enabled-but-bleeding setups. Regression test:
+  `tests/test_disabled_setups_default_2026_06_26.py` (5 pass).
+- **DEPLOY (after close):** Save-to-GitHub → DGX pull → **REMOVE the `DISABLED_SETUPS=` line from
+  `backend/.env`** (so the code default governs; keeping the old line re-enables the 2 bleeders and the
+  audit will WARN) → `./start_backend.sh --force` → verify `disabled-setups-audit` shows all 4 + clean.
+- **Note:** original handoff said append `breakout`/`mean_reversion` — superseded by the realized-R
+  data (those weren't the leaks; `vwap_bounce`/`off_sides_short` were).
+
+### E1b. 🟢 strategy-autonomy recommender mislabels mild bleeders as "healthy/ENABLE" (low priority)
+- `/api/slow-learning/strategy-autonomy/report` calls −0.09R "healthy" and recommends ENABLE
+  (e.g. backside, stage_2_breakout). Threshold too lenient. Advisory-only (deferred behind flag, no
+  action taken), so cosmetic — fix the "healthy" cutoff when convenient.
 
 ### E2. 🟡 `backside` time-decay exit (44% WR, −$935 → +EV)  ← DEFERRED by operator 2026-06-26
 - **Plan:** time-based exit in the exit policy for stalled backside setups; env-gated, observe-first.

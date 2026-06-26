@@ -33,10 +33,21 @@ def per_entry_gate_should_stop(open_count, pending_count, cap, paused: bool) -> 
 
 
 # v19.34.244 — DISABLED_SETUPS blocklist. Confirmed money-losing setup VARIANTS
-# the bot must not TRADE (scanner still surfaces them for monitoring). Default
-# blocks vwap_fade_short (8% win, -4.26R, -$22k/120d); vwap_fade_long (+0.51R)
-# stays enabled. Operator overrides via the DISABLED_SETUPS env var.
-DEFAULT_DISABLED_SETUPS = "vwap_fade_short"
+# the bot must not TRADE (scanner still surfaces them for monitoring). Operator
+# overrides via the DISABLED_SETUPS env var (env REPLACES this default entirely —
+# so the default is the canonical proven-bleeder list; drop the env to use it).
+#
+# 2026-06-26 — promoted the proven-bleeder blocklist into code (was an env-only
+# override of just "daily_breakout,vwap_fade_short", which silently left the
+# other leaks enabled). Justified by the 120d realized-R audits
+# (/api/slow-learning/setup-ev + entry-feature-discovery, where setup_type was the
+# dominant realized-R factor, eta²=0.21):
+#   • vwap_fade_short  — 10% win, -3.82R/n60 (the dominant leak)
+#   • daily_breakout   — 5.9% win, -0.54R/n17 (30d); volatile, outlier-driven +R on 120d
+#   • vwap_bounce      — 16% win, -1.22R/n31
+#   • off_sides_short  — 19% win, -0.58R/n16
+# vwap_fade_long (+0.22R) and backside (mild -0.19R, operator chose to keep) stay enabled.
+DEFAULT_DISABLED_SETUPS = "daily_breakout,vwap_fade_short,vwap_bounce,off_sides_short"
 
 
 def parse_disabled_setups(raw, default: str = DEFAULT_DISABLED_SETUPS) -> set:
