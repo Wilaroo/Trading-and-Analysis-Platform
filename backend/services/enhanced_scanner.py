@@ -1253,6 +1253,33 @@ class EnhancedBackgroundScanner:
         # strategy can't auto-execute → can't earn wins → never clears
         # the floor. Operator-tunable via API in a future commit.
         self._win_rate_grace_min_trades = 20
+
+        # ── 2026-06-26 — auto-exec gate calibration (operator: evaluate-trades).
+        #    Both OFF by default → IDENTICAL legacy behavior. Flip via env on the
+        #    DGX, restart, observe. Instant rollback = unset the env var.
+        #
+        # #3 — TAPE_CONFIRM_SCALP_INTRADAY_ONLY: tape confirmation is an INTRADAY
+        #    microstructure gate; it should not block chart-based holds. When ON,
+        #    only scalp/intraday styled alerts require `tape_confirmation` in the
+        #    intraday scan path (mirrors the v287b daily path which already skips
+        #    tape). Swing/multi_day/position/investment skip it.
+        self._tape_confirm_scalp_intraday_only = self._env_flag(
+            "TAPE_CONFIRM_SCALP_INTRADAY_ONLY", False)
+        # #4 — PER_STYLE_AUTOEXEC_FLOORS: per-style auto-exec EV-R floors instead
+        #    of the single `_auto_execute_min_ev_r`. Scalps demand a higher edge
+        #    (small R); swing/position can pass on a lower EV-R given larger R.
+        #    Overridable per key via env AUTOEXEC_MIN_EV_R_<STYLE> (e.g.
+        #    AUTOEXEC_MIN_EV_R_SCALP=0.20). When OFF → the scalar floor is used.
+        self._per_style_autoexec_floors = self._env_flag(
+            "PER_STYLE_AUTOEXEC_FLOORS", False)
+        self._per_style_min_ev_r = {
+            "scalp": self._env_float("AUTOEXEC_MIN_EV_R_SCALP", 0.15),
+            "intraday": self._env_float("AUTOEXEC_MIN_EV_R_INTRADAY", 0.12),
+            "multi_day": self._env_float("AUTOEXEC_MIN_EV_R_MULTI_DAY", 0.05),
+            "swing": self._env_float("AUTOEXEC_MIN_EV_R_SWING", 0.05),
+            "position": self._env_float("AUTOEXEC_MIN_EV_R_POSITION", 0.03),
+            "investment": self._env_float("AUTOEXEC_MIN_EV_R_INVESTMENT", 0.03),
+        }
         self._trading_bot = None
         
         # AI Assistant for proactive coaching notifications
@@ -1624,6 +1651,51 @@ class EnhancedBackgroundScanner:
         return symbol.upper() in self._blacklisted_symbols
     
     @staticmethod
+    def _env_flag(key, default=False):
+        v = os.environ.get(key)
+        if v is None:
+            return default
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+    @staticmethod
+    def _env_float(key, default):
+        v = os.environ.get(key)
+        if v is None:
+            return float(default)
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return float(default)
+
+    # Styles whose entries are order-flow / microstructure driven → live tape
+    # confirmation is a meaningful gate. Chart-based holds (swing/position) are
+    # NOT order-flow entries, so requiring tape on them is inappropriate (#3).
+    _TAPE_REQUIRED_STYLES = {"scalp", "intraday"}
+
+    @staticmethod
+    def _style_of(alert) -> str:
+        return str(getattr(alert, "trade_style", "") or "").strip().lower()
+
+    @classmethod
+    def _alert_requires_tape(cls, alert, scalp_intraday_only: bool) -> bool:
+        """#3 — does this alert require `tape_confirmation` to auto-execute?
+
+        OFF (legacy): every alert requires tape. ON: only scalp/intraday styles
+        require it; swing/multi_day/position/investment are chart-based holds
+        (mirrors the v287b daily scan path that already skips tape)."""
+        if not scalp_intraday_only:
+            return True
+        return cls._style_of(alert) in cls._TAPE_REQUIRED_STYLES
+
+    @staticmethod
+    def _resolve_min_ev_r(style, base, per_style_on, overrides) -> float:
+        """#4 — per-style auto-exec EV-R floor. OFF → the scalar `base`.
+        ON → per-style override (falls back to `base` for unknown styles)."""
+        if not per_style_on:
+            return float(base)
+        return float((overrides or {}).get((style or "").strip().lower(), base))
+
+    @staticmethod
     def _auto_exec_fail_reasons(priority_value, tape_confirmation, win_rate, min_win_rate):
         """v19.34.287 — which auto-execute eligibility conditions an alert FAILED.
         Pure + unit-testable; mirrors the gate stamped in _scan_symbol_all_setups
@@ -1660,7 +1732,14 @@ class EnhancedBackgroundScanner:
             if outcomes < self._win_rate_grace_min_trades:
                 return True
             ev_r = float(getattr(stats, "expected_value_r", 0.0) or 0.0)
-            return ev_r > float(self._auto_execute_min_ev_r)
+            # #4 — per-style EV-R floor (scalar when the flag is OFF).
+            min_ev = self._resolve_min_ev_r(
+                self._style_of(alert),
+                float(self._auto_execute_min_ev_r),
+                self._per_style_autoexec_floors,
+                self._per_style_min_ev_r,
+            )
+            return ev_r > min_ev
         except Exception:
             return False
 
@@ -4226,10 +4305,18 @@ class EnhancedBackgroundScanner:
                     alert.intraday_bar_age_min = getattr(snapshot, "intraday_bar_age_min", None)
                     
                     # Check auto-execute eligibility
+                    # #3 — tape requirement is scoped to scalp/intraday styles
+                    # when TAPE_CONFIRM_SCALP_INTRADAY_ONLY is ON (else required
+                    # for all, legacy).
+                    _tape_ok = (
+                        alert.tape_confirmation
+                        or not self._alert_requires_tape(
+                            alert, self._tape_confirm_scalp_intraday_only)
+                    )
                     alert.auto_execute_eligible = (
                         self._auto_execute_enabled and
                         alert.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
-                        alert.tape_confirmation and
+                        _tape_ok and
                         not getattr(snapshot, "intraday_stale", False) and
                         self._passes_ev_quality_gate(alert)
                     )
