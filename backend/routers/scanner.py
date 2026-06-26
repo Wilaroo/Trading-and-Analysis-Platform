@@ -5,7 +5,7 @@ Endpoints for real-time trade setup scanning and alerts
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -640,6 +640,82 @@ def get_tape_confirm_status():
         **live_scanner.tape_confirm_status(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/tape-confirm/history")
+def get_tape_confirm_history(days: int = 1, limit: int = 50):
+    """Restart-proof deferred-tape A/B history (READ-ONLY).
+
+    The live `tape-confirm/status` counters + recent_verdicts ring buffer are
+    IN-MEMORY and reset on every backend restart, so a mid-day restart makes the
+    promote/tune/rollback call undecidable. This reads the persisted
+    `tape_confirm_verdicts` collection instead, so a FULL session's confirm /
+    adverse / expired ratio survives restarts. Pair with `tape-confirm/status`
+    for the live (since-boot) view.
+    """
+    from database import get_database
+    db = get_database()
+    out = {
+        "success": True, "days": days, "total": 0,
+        "counts": {}, "by_source": {}, "confirm_rate": None,
+        "read": "no data", "recent": [],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if db is None:
+        return out
+
+    cutoff_ms = int((datetime.now(timezone.utc) - timedelta(days=max(1, days))).timestamp() * 1000)
+    try:
+        docs = list(db["tape_confirm_verdicts"]
+                    .find({"ts_epoch_ms": {"$gte": cutoff_ms}})
+                    .sort("ts_epoch_ms", -1))
+    except Exception as e:
+        logger.warning(f"tape-confirm/history query failed: {e}")
+        return out
+
+    counts: Dict[str, int] = {}
+    by_source: Dict[str, int] = {}
+    for d in docs:
+        v = str(d.get("verdict", "unknown"))
+        counts[v] = counts.get(v, 0) + 1
+        key = f"{v}:{d.get('source', '?')}"
+        by_source[key] = by_source.get(key, 0) + 1
+
+    confirmed = counts.get("confirm", 0)
+    adverse = counts.get("adverse", 0)
+    expired = counts.get("expired", 0)
+    resolved = confirmed + adverse + expired
+
+    out["total"] = len(docs)
+    out["counts"] = counts
+    out["by_source"] = by_source
+    out["confirm_rate"] = round(confirmed / resolved, 4) if resolved else None
+    out["recent"] = [
+        {k: d.get(k) for k in
+         ("ts", "symbol", "setup", "direction", "priority", "verdict", "source", "tqs_score")}
+        for d in docs[: max(1, min(limit, 200))]
+    ]
+
+    # Operator-facing heuristic against the watchlist A1 decision rule.
+    if resolved == 0:
+        out["read"] = ("no resolved verdicts in window — let a full clean RTH session run "
+                       "(TAPE_CONFIRM_DEFERRED=true, no restart) then re-check")
+    elif adverse > 0 and adverse >= max(confirmed, 1):
+        out["read"] = (f"⚠️ ROLLBACK-leaning: adverse={adverse} vs confirm={confirmed} — "
+                       "inspect for an adverse-flow burst before promoting")
+    elif expired > max(confirmed, 1) * 3:
+        out["read"] = (f"TUNE-leaning: expired={expired} dominates confirm={confirmed} — "
+                       "L2 not reaching candidates in TTL; raise TAPE_CONFIRM_PENDING_TTL_S "
+                       "or set TAPE_CONFIRM_MODE=jit")
+    elif confirmed > 0 and expired <= confirmed and adverse == 0:
+        out["read"] = (f"PROMOTE-leaning: confirm={confirmed}, expired={expired}, adverse=0 — "
+                       "confirms present, expired not dominating, no adverse flow")
+    else:
+        out["read"] = (f"MIXED (confirm={confirmed}, expired={expired}, adverse={adverse}) — "
+                       "needs a larger sample")
+    return out
+
+
 
 
 @router.get("/trigger-progress/{symbol}")

@@ -2044,6 +2044,27 @@ class EnhancedBackgroundScanner:
             "direction": getattr(alert, "direction", "?"),
             "verdict": verdict, "source": source,
         })
+        # 2026-06-26 — DURABLE persistence so the deferred-tape A/B survives
+        # backend restarts. The in-memory deque + counters zero out on every
+        # boot (two restarts on 2026-06-26 wiped that day's morning sample and
+        # left the promote/tune/rollback call undecidable). Best-effort insert;
+        # never let telemetry block the resolve path.
+        try:
+            if self.db is not None:
+                self.db["tape_confirm_verdicts"].insert_one({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "ts_epoch_ms": int(time.time() * 1000),
+                    "symbol": getattr(alert, "symbol", None),
+                    "setup": getattr(alert, "setup_type", None),
+                    "direction": getattr(alert, "direction", None),
+                    "priority": getattr(getattr(alert, "priority", None), "value",
+                                        getattr(alert, "priority", None)),
+                    "tqs_score": getattr(alert, "tqs_score", None),
+                    "verdict": verdict,
+                    "source": source,
+                })
+        except Exception:
+            pass
         if verdict == "confirm":
             alert.tape_confirmation = True
             alert.tape_l2_confirmed = source in ("router", "jit")

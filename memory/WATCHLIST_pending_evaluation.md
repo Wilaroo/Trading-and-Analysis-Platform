@@ -13,21 +13,31 @@ Endpoints assume `http://localhost:8001` on the DGX. Flag rollback is always "un
 
 ## 🔴 A. ACTIVE A/B THIS WEEK — flags just turned ON, watch then promote/rollback
 
-### A1. `TAPE_CONFIRM_DEFERRED=true` + `TAPE_CONFIRM_MODE=router`  ← ARMED 2026-06-26
+### A1. `TAPE_CONFIRM_DEFERRED=true` + `TAPE_CONFIRM_MODE=router`  ← ARMED 2026-06-26 · verdict STILL PENDING
 - **What:** deferred tape-confirmation (JIT L2) — tape is now the LAST gate; neutral-no-L2
   scalp/intraday alerts are held `tape_pending` and confirmed on real depth instead of being
   rejected. Fixes the 97% intraday tape rejection (06-25: 656→17→2→0).
-- **Check:**
-  - `curl -s localhost:8001/api/scanner/tape-confirm/status | python3 -m json.tool`
+- **⚠️ 2026-06-26 — could NOT decide: the `stats` counters + `recent_verdicts` were IN-MEMORY only
+  and the day's TWO backend restarts (loser-cleanup deploy) wiped the morning sample. `expired`
+  verdicts were never persisted, so there was no durable full-day record.**
+- **✅ FIXED (2026-06-26, pending DGX deploy):** each resolved verdict (confirm/adverse/expired)
+  now persists to the `tape_confirm_verdicts` collection (`_resolve_tape_pending` in
+  `enhanced_scanner.py`), and a restart-proof read-only endpoint reads the full day:
+  `GET /api/scanner/tape-confirm/history?days=1` → counts by verdict, source split, `confirm_rate`,
+  and a `read` heuristic (PROMOTE/TUNE/ROLLBACK-leaning per the rule below).
+- **Check (NEXT clean session, after the deploy):**
+  - `curl -s localhost:8001/api/scanner/tape-confirm/history?days=1 | python3 -m json.tool`  ← restart-proof, use this
+  - `curl -s localhost:8001/api/scanner/tape-confirm/status | python3 -m json.tool`  ← live since-boot
   - `curl -s localhost:8001/api/diagnostic/trade-funnel | python3 -m json.tool`
-- **Decision rule (after ONE clean RTH session):**
-  - PROMOTE (flip default ON in code, delete the flag) if: `stats.confirmed > 0`, `adverse`
-    is catching bad flow, `expired` is NOT dominating, funnel tape-confirmed climbs off ~17,
-    auto-exec-eligible > 0, and NO adverse-flow burst at the open.
+- **Decision rule (after ONE clean RTH session, NO restart):**
+  - PROMOTE (flip default ON in code, delete the flag) if: `confirm > 0`, `adverse` is catching bad
+    flow, `expired` is NOT dominating, funnel tape-confirmed climbs off ~17, auto-exec-eligible > 0,
+    and NO adverse-flow burst at the open.
   - TUNE if `expired` dominates → L2 not reaching candidates fast enough → raise
     `TAPE_CONFIRM_PENDING_TTL_S` or switch `TAPE_CONFIRM_MODE=jit`.
   - ROLLBACK instantly if adverse-flow burst at open (unset the two env lines).
-- **When:** next RTH session (then ping main agent to do the promotion).
+- **When:** next clean RTH session (flags ON, NO mid-day restart) → read `/tape-confirm/history` near
+  close → ping main agent to do the promotion.
 - **Related dormant knob:** `TAPE_NONADVERSE_GATE` (default OFF) — alternative "block only
   adverse L1+momentum, no L2 wait" mode; only consider after router mode proves out.
 

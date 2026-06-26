@@ -1,6 +1,19 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🔧 2026-06-26 (P0 tape A/B — made DECIDABLE & restart-proof; verdict still pending a clean session).**
+> Could not call the deferred-tape verdict today: `_tape_confirm_stats` + `recent_verdicts` are
+> IN-MEMORY (deque, zeroed on construction) and the day's TWO restarts (loser-cleanup deploy) wiped the
+> morning sample; `expired` verdicts were never persisted → no durable record. FIX (sandbox-tested,
+> pending DGX deploy): (1) `_resolve_tape_pending` (enhanced_scanner.py) now persists every resolved
+> verdict to MongoDB `tape_confirm_verdicts` (best-effort, never blocks the loop). (2) NEW read-only
+> `GET /api/scanner/tape-confirm/history?days=1` — aggregates confirm/adverse/expired + source split +
+> `confirm_rate` + a PROMOTE/TUNE/ROLLBACK `read` heuristic, surviving restarts. curl-verified.
+> NEXT: deploy → run ONE clean RTH session (flags ON, NO mid-day restart) → read `/tape-confirm/history`
+> near close → decide. Files: `services/enhanced_scanner.py`, `routers/scanner.py`.
+
+
+
 > **✅ 2026-06-26 (action shipped, pending DGX deploy) — LOSER CLEANUP via code-default blocklist + audit endpoint.**
 > Decision after the diagnostic chain below: setup_type is the dominant realized-R lever (eta²=0.21), so
 > prune proven bleeders. Operator chose 1b+2a. Changes (sandbox-tested, NOT yet on DGX):
