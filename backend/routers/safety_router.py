@@ -132,6 +132,62 @@ async def safety_status() -> Dict[str, Any]:
     return resp
 
 
+@router.get("/risk-rail")
+async def risk_rail() -> Dict[str, Any]:
+    """Daily-Loss-Protection (DLP) headroom for the V6 §4 Risk rail.
+
+    Cheap + in-memory — mirrors the kill-switch monitor's math EXACTLY
+    (realized from `_daily_stats.net_pnl` + live unrealized, awaiting-quotes
+    gated, PAPER excluded) so the rail and the kill-switch can never disagree.
+    `headroom_pct` = % of the daily-loss budget still UNUSED (100 = full
+    headroom, 0 = limit hit). Never raises."""
+    guard = get_safety_guardrails()
+    cfg = guard.config
+    realized = 0.0
+    unrealized = 0.0
+    awaiting = False
+    equity = 100_000.0
+    ks_active = bool(guard.state.kill_switch_active)
+    try:
+        from services.trading_bot_service import get_trading_bot
+        bot = get_trading_bot()
+        if bot:
+            equity = float(getattr(getattr(bot, "risk_params", None), "starting_capital", 0) or 100_000.0)
+            realized = float(getattr(getattr(bot, "_daily_stats", None), "net_pnl", 0) or 0.0)
+            try:
+                unrealized, awaiting = bot._compute_live_unrealized_pnl()
+            except Exception:
+                unrealized, awaiting = 0.0, False
+    except Exception:
+        pass
+
+    if awaiting:
+        unrealized = 0.0
+    pnl_today = round(realized + float(unrealized or 0.0), 2)
+    pct_limit_usd = equity * (cfg.max_daily_loss_pct / 100.0)
+    effective_limit = -min(cfg.max_daily_loss_usd, pct_limit_usd)   # negative
+    limit_abs = abs(effective_limit) or 1.0
+    loss_used = max(0.0, -pnl_today)
+    used_pct = max(0.0, min(100.0, 100.0 * loss_used / limit_abs))
+    headroom_pct = round(100.0 - used_pct, 1)
+
+    return {
+        "success": True,
+        "kill_switch_active": ks_active,
+        "account_equity": round(equity, 2),
+        "daily_pnl": pnl_today,
+        "realized": round(realized, 2),
+        "unrealized": round(float(unrealized or 0.0), 2),
+        "awaiting_quotes": bool(awaiting),
+        "effective_limit": round(effective_limit, 2),
+        "loss_used": round(loss_used, 2),
+        "used_pct": round(used_pct, 1),
+        "headroom_pct": headroom_pct,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
 @router.get("/effective-risk-caps")
 async def effective_risk_caps() -> Dict[str, Any]:
     """Resolve overlapping risk caps to the effective (most-restrictive)

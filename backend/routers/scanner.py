@@ -642,6 +642,81 @@ def get_tape_confirm_status():
     }
 
 
+@router.get("/trigger-progress/{symbol}")
+def get_trigger_progress(symbol: str):
+    """Per-symbol trigger-condition progress for the V6 §A Thinking-pane micro-bars.
+
+    For the symbol's LIVE setups: distance-to-trigger %, RVOL, minutes-to-trigger,
+    and the LIVE `trigger_probability` (0..1, used as the bar fill), plus a
+    `next_eval_s` countdown derived from the symbol's last scan + the scan
+    interval. Cheap, fully in-memory (reads `_live_alerts` + `_symbol_last_eval`).
+    Never raises."""
+    sym = (symbol or "").upper().strip()
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        sc = get_enhanced_scanner()
+    except Exception:
+        sc = None
+    if not sc:
+        return {"success": True, "symbol": sym, "available": False, "triggers": []}
+
+    interval = float(getattr(sc, "_scan_interval", 15) or 15)
+    next_eval_s = None
+    last_stage = None
+    last_reason = None
+    try:
+        le = (getattr(sc, "_symbol_last_eval", {}) or {}).get(sym)
+        if le:
+            last_stage = le.get("stage")
+            last_reason = le.get("reason")
+            ts = le.get("ts")
+            if ts:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - dt).total_seconds()
+                next_eval_s = max(0.0, round(interval - elapsed, 1))
+    except Exception:
+        pass
+
+    triggers = []
+    try:
+        for a in (getattr(sc, "_live_alerts", {}) or {}).values():
+            if str(getattr(a, "symbol", "")).upper() != sym:
+                continue
+            cur = float(getattr(a, "current_price", 0) or 0)
+            trig = float(getattr(a, "trigger_price", 0) or 0)
+            dist_pct = (abs(cur - trig) / trig * 100.0) if trig else None
+            triggers.append({
+                "setup_type": getattr(a, "setup_type", "?"),
+                "direction": getattr(a, "direction", "long"),
+                "priority": a.priority.value if getattr(a, "priority", None) else None,
+                "current_price": round(cur, 4) if cur else None,
+                "trigger_price": round(trig, 4) if trig else None,
+                "distance_pct": round(dist_pct, 3) if dist_pct is not None else None,
+                "minutes_to_trigger": getattr(a, "minutes_to_trigger", None),
+                "rvol": round(float(getattr(a, "rvol", 0) or 0), 2),
+                "trigger_probability": round(float(getattr(a, "trigger_probability", 0) or 0), 3),
+            })
+    except Exception:
+        pass
+    triggers.sort(key=lambda x: x.get("trigger_probability") or 0, reverse=True)
+
+    return {
+        "success": True,
+        "symbol": sym,
+        "available": True,
+        "running": bool(getattr(sc, "_running", False)),
+        "scan_interval_s": interval,
+        "next_eval_s": next_eval_s,
+        "last_stage": last_stage,
+        "last_reason": last_reason,
+        "triggers": triggers[:6],
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
 
 @router.get("/in-play-health")
 def get_in_play_health(sample: int = 8):

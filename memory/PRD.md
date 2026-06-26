@@ -1,6 +1,18 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-26 — V6 Phase B CORE PANELS COMPLETE (additive `?preview=v6shell`, live V5 untouched):**
+> The shell is now a full working cockpit — DLP **Risk rail** (`/api/safety/risk-rail`), real
+> **Scanner** + **Open Positions** (live `useSentCom*` hooks), **Chart+Verdict** center
+> (`ChartPanel` + `/api/scanner/symbol-trace` gate-funnel verdict), glass-halo **Thinking pane**
+> (`UnifiedStreamV5` + §A **trigger-progress** micro-bars via `/api/scanner/trigger-progress/{sym}`),
+> and the rose-only **CRITICAL action bar** (FLATTEN / CANCEL-ORPHAN / RESET-KS / PUSHER-STATUS) wired
+> to real safety endpoints. App-state via `/api/safety/system-state` (push-fresh recalibrated).
+> All sandbox-verified (empty data) + DGX-deployed; populated visual states validate on DGX.
+> NEXT: Phase C — promote to a real `/v6` route (still behind V5 default). Remaining polish: chart
+> bars need DGX historical data; selected-symbol-driven verdict/triggers exercised live.
+
+
 > **🧭 2026-06-26 — V6 Phase B (slice a+b) shipped (additive `?preview=v6shell`, live V5 untouched):**
 > (a) real `ScannerCardsV5` + `OpenPositionsV5` panels mounted in the shell, fed by the same live
 > `useSentCom*` hooks as V5; (b) new `GET /api/safety/system-state` (cheap, 2s-pollable §3

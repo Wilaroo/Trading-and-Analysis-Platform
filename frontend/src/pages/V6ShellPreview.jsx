@@ -29,6 +29,8 @@ import { useSentComAlerts } from '../components/sentcom/hooks/useSentComAlerts';
 import { useSentComStream } from '../components/sentcom/hooks/useSentComStream';
 import { V6ActionBar } from '../components/sentcom/v6/V6ActionBar';
 import { ThinkingPane } from '../components/sentcom/v6/ThinkingPane';
+import { RiskRail } from '../components/sentcom/v6/RiskRail';
+import { ChartVerdictPanel } from '../components/sentcom/v6/ChartVerdictPanel';
 
 const PIPELINE = {
   scan: 47,
@@ -124,7 +126,7 @@ export const V6ShellPreview = () => {
 
       {/* §4 5-col body grid */}
       <div className="flex-1 flex gap-2 p-2">
-        <PanelSlot title="Rail" width="22px"><span className="rotate-180" style={{ writingMode: 'vertical-rl' }}>DLP</span></PanelSlot>
+        <RiskRail />
         <PanelSlot title="Scanner" width="230px" fill>
           <ScannerCardsV5
             setups={setups}
@@ -137,10 +139,17 @@ export const V6ShellPreview = () => {
             onHoverSymbol={setHoveredSymbol}
           />
         </PanelSlot>
-        <PanelSlot title="Chart + Verdict" />
+        <div className="flex-1 min-w-0 min-h-[420px]">
+          <ChartVerdictPanel
+            symbol={selectedSymbol}
+            position={(positions || []).find((p) => p.symbol === selectedSymbol) || null}
+            className="h-full"
+          />
+        </div>
         <div style={{ width: '340px', flexShrink: 0 }} className="min-h-[420px]">
           <ThinkingPane
             state={state}
+            symbol={selectedSymbol}
             messages={messages}
             loading={streamLoading}
             onSymbolClick={setSelectedSymbol}

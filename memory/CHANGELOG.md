@@ -41,6 +41,52 @@ frontend `yarn build` + hard-refresh. View at `?preview=v6shell`.
 Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · Risk rail (DLP%) ·
 then Phase C real `/v6` route.
 
+## 2026-06-26 — V6 Phase B: §A trigger-progress micro-bars + /api/scanner/trigger-progress/{sym}
+- New `GET /api/scanner/trigger-progress/{symbol}` (scanner.py) — cheap, in-memory: per-symbol
+  live setups from `_live_alerts` (distance-to-trigger %, RVOL, minutes-to-trigger, live
+  `trigger_probability`) + a `next_eval_s` countdown from `_symbol_last_eval.ts` + `_scan_interval`.
+- New `hooks/useTriggerProgress.js` (1s poll while a symbol is selected) +
+  `components/sentcom/v6/TriggerProgress.jsx` — micro progress-bars (bar = trigger_probability,
+  long=emerald/short=rose) + "next eval Xs". Rendered at the top of the Thinking pane; ThinkingPane
+  now takes a `symbol` prop (driven by `selectedSymbol`).
+- Verified (sandbox): endpoint 200 (`next_eval_s` countdown correct, triggers empty — no live SPY
+  alerts), block correctly hidden when no symbol selected, full cockpit intact (rail/scanner/
+  chart-verdict/thinking/positions all mount, no regression). Preview only → zero V5 risk.
+- VALIDATE ON DGX: select a live scanner card → chart + verdict + trigger bars populate.
+
+## 2026-06-26 — V6 Phase B: §4 Chart + Verdict center panel (A)
+- New `components/sentcom/v6/ChartVerdictPanel.jsx` — the real V5 `ChartPanel` (lightweight-charts,
+  self-fetching, draws Entry/SL/PT lines when a focused position is passed) on top + a per-symbol
+  VERDICT strip on the bottom fed by `GET /api/scanner/symbol-trace` (new hook
+  `hooks/useSymbolTrace.js`, refetch-on-symbol + 15s poll). Verdict strip shows the plain-language
+  verdict + universe/tier/in-last-wave/RVOL + today's alert/trade counts + the FIRST killing gate
+  (or recomputed intake reasons) — i.e. "would the bot trade this, and why/why-not".
+- Wired into `?preview=v6shell` center column; `selectedSymbol` (from Scanner/Open-Positions
+  clicks) drives both chart + verdict; the matching open position is passed for price lines.
+- Field mapping verified against live `symbol-trace` (`today_counts`, `rvol.value/fresh`,
+  `gate_funnel`, `intake.by_reason`).
+- Verified (sandbox): panel mounts, ChartPanel renders (shows "no bars" — sandbox has no historical
+  data; real candles on DGX), verdict strip empty-state shows until a symbol is selected. Preview
+  only → zero V5 risk.
+### NEXT (Phase B/C)
+Trigger-progress micro-bars (B, needs `/api/trigger-progress/{sym}`) · Phase C real `/v6` route.
+
+## 2026-06-26 — V6 Phase B: §4 Risk rail (DLP headroom) + /api/safety/risk-rail
+- New `GET /api/safety/risk-rail` (safety_router) — cheap, in-memory, mirrors the kill-switch
+  monitor math EXACTLY (realized from `_daily_stats.net_pnl` + live unrealized via
+  `_compute_live_unrealized_pnl()`, awaiting-quotes gated, PAPER excluded). Returns daily_pnl /
+  realized / unrealized / effective_limit / used_pct / `headroom_pct` (% of daily-loss budget
+  UNUSED) / kill_switch_active. So the rail and kill-switch can never disagree.
+- New `hooks/useRiskRail.js` (5s poll) + `components/sentcom/v6/RiskRail.jsx` — 46px left-edge
+  vertical bar filling from the bottom with headroom%; emerald→amber(<50%)→rose(<20% or
+  kill-switch). Tooltip carries today P&L vs effective limit. Mounted in `?preview=v6shell`
+  (replaced the placeholder rail).
+- Verified (sandbox): endpoint 200 (headroom 100%, ks tripped → rose + "KILL SWITCH" label);
+  rail renders, no regression (thinking/scanner intact). Preview-only → zero V5 risk.
+### NEXT (Phase B/C)
+Chart+Verdict panel (A, next) · trigger-progress (needs `/api/trigger-progress/{sym}`) ·
+then Phase C real `/v6` route.
+
 ## 2026-06-26 — V6 Phase B: §4-④ Thinking pane + GlassHaloPane (halo bound to app-state)
 - New `components/sentcom/v6/GlassHaloPane.jsx` — glass-morphism wrapper with an ambient halo
   whose color + breathe cadence track §3 app-state (cyan 2s / amber 1.2s / rose 0.7s, matching the

@@ -9,10 +9,12 @@
  */
 import React from 'react';
 import { GlassHaloPane, haloColor } from './GlassHaloPane';
+import { TriggerProgress } from './TriggerProgress';
 import UnifiedStreamV5 from '../v5/UnifiedStreamV5';
 
 export const ThinkingPane = ({
   state = 'cyan',
+  symbol = null,
   messages = [],
   loading = false,
   onSymbolClick,
@@ -32,6 +34,7 @@ export const ThinkingPane = ({
         live
       </span>
     </div>
+    <TriggerProgress symbol={symbol} />
     <div className="flex-1 min-h-0 overflow-y-auto" data-testid="v6-thinking-stream">
       <UnifiedStreamV5
         messages={messages}
