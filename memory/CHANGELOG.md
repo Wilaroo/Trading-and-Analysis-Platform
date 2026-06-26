@@ -1,3 +1,55 @@
+## 2026-06-26 — Trade-evaluation (why 0 entries) + EOD false-alarm fix + auto-exec gate calibration (#3/#4)
+Operator asked why June 25 took 0 new entries (close-only) and to evaluate scalp/intraday setups.
+
+### Findings (grounded in /api/diagnostic/trade-funnel + rejection-analytics + setup-winrate-breakdown)
+- The bot was NOT broken — disciplined. June 25 funnel: 987 alerts → 656 HIGH/CRIT →
+  **17 tape-confirmed** → **2 auto-exec-eligible** → 0 trades. Dominant chokepoint:
+  TAPE CONFIRMATION removed 97% (656→17); win-rate/EV floor took 17→2; final
+  `_evaluate_opportunity` (liquidity $10M swing floor / confidence) took the last 2→0.
+- Scalp/intraday setups DID fire in RTH (orb 4,130, gap_give_go 848, opening_drive 447,
+  bouncy_ball 548, mean_reversion 667, vwap_*…) — they're enabled, just all filtered.
+- Setup health (30d): 🔴 KILL daily_breakout 5.9% (1W/16L, −$763), mean_reversion 0% (0/9),
+  breakout 0% (0/5). 🟡 REVIEW breakdown 25%, opening_drive 0%, vwap_bounce 33%.
+  🟢 KEEP (winners, under-traded): vwap_continuation 100% (+$1,038), bouncy_ball 67%,
+  premarket_high_break 67%, orb (+0.93 avgR, +$437), fashionably_late (+$654).
+- HONEST #2 conclusion: the winners are ALL scalp/intraday-styled (vwap_continuation has no
+  registry entry → LiveAlert default trade_style="intraday"). They are blocked by
+  TAPE CONFIRMATION, and since they're intraday, #3 does NOT (and should not) bypass it.
+  The real lever for more intraday entries is the TAPE-CONFIRMATION CALIBRATION (was 17/656
+  reasonable, or too strict?) — a separate next investigation.
+
+### Shipped this session (all verified)
+- **Fix A — EOD-postmortem swing-hold FALSE ALARM** (`routers/diagnostic_router.py`): the
+  "N INTRADAY positions held overnight despite close_at_eod=True" diagnosis now resolves via
+  `order_policy_registry.should_close_at_eod` (policy) instead of the stale per-trade
+  `close_at_eod` field (blanket default True, v334). Swing/position GTC holds (DSGX/FOX/CCK/
+  BOOT/TLT) no longer false-flagged. Helper `_eod_overnight_anomalies` + per-row
+  `policy_close_at_eod`/`matched_policy_close_at_eod`. Verified: iteration_132 (5/5 pytest, 200).
+- **#3 — tape scope** (`services/enhanced_scanner.py`, ENV `TAPE_CONFIRM_SCALP_INTRADAY_ONLY`,
+  DEFAULT OFF): when ON, the intraday eligibility gate requires `tape_confirmation` only for
+  scalp/intraday styles; swing/multi_day/position/investment bypass it (mirrors the v287b
+  daily path). Helper `_alert_requires_tape`.
+- **#4 — per-style auto-exec EV-R floors** (ENV `PER_STYLE_AUTOEXEC_FLOORS`, DEFAULT OFF;
+  per-key `AUTOEXEC_MIN_EV_R_<STYLE>`): `_passes_ev_quality_gate` resolves the floor per
+  style (scalp 0.15 / intraday 0.12 / multi_day 0.05 / swing 0.05 / position 0.03 /
+  investment 0.03) via `_resolve_min_ev_r`; scalar `_auto_execute_min_ev_r` (0.10) when OFF.
+- Verified: iteration_133 — 13/13 pytest (8 new gate + 5 EOD), endpoints 200, DEFAULT-OFF ==
+  legacy confirmed. Tests: `tests/test_autoexec_gate_calibration.py`,
+  `tests/test_eod_postmortem_swing_hold_falsealarm.py`.
+
+### Net effect when flags enabled
+#3+#4 make SWING/MULTI_DAY/POSITION setups easier to auto-execute (no tape + lower EV bar) —
+the EV gate still blocks negative-EV ones. They do NOT loosen scalp/intraday (correct).
+
+### DEPLOY / ACTIVATION
+All three changes need a DGX `./start_backend.sh --force`. Fix A is read-only.
+To activate #3/#4 add to backend env then restart:
+  TAPE_CONFIRM_SCALP_INTRADAY_ONLY=true
+  PER_STYLE_AUTOEXEC_FLOORS=true
+Roll back instantly by unsetting. Watch the funnel after.
+
+
+
 ## V6 Plan B bridge — useAppState wires the TopStrip state pill to LIVE health (2026-06-25)
 Frontend-only, additive, NO backend restart (maps an existing endpoint):
 - `hooks/useAppState.js` — polls the existing `GET /api/system/health` (20s) and maps
