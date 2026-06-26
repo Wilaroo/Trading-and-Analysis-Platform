@@ -615,6 +615,107 @@ def system_health_v2():
         }
 
 
+# ---- 2026-06-26 V6 Phase B — server-side compute_app_state ------------------
+# GET /api/safety/system-state → {state: 'cyan'|'amber'|'rose', reasons:[...]}.
+# Faithful (cheap-signals) impl of the §3 state machine that drives the V6
+# Heartbeat / TopStrip state-pill / CRITICAL action bar. Built ON TOP of the
+# already-cheap `build_health(_db)` snapshot + the in-memory kill-switch state,
+# so it is safe to poll every ~2s (NO IB round-trips, NO heavy DB scans).
+#
+# §3 triggers and how each is sourced here:
+#   ROSE  : kill_switch_active (safety) · pusher dead/blocked (health red) ·
+#           ib_gateway down (health red)
+#   AMBER : scanner_paused / flatten_in_progress (safety) · pusher degraded or
+#           any subsystem yellow (health)
+#   CYAN  : everything green.
+# Triggers that need an IB-heavy audit (orphan_gtc_count, eod_alarm_open_positions)
+# are intentionally NOT polled here — they remain on their own dedicated pills
+# (/api/safety/orphan-gtc-orders) and are listed in `deferred_triggers` so the
+# contract stays honest. The hook falls back to /api/system/health if this 404s.
+
+@router.get("/api/safety/system-state")
+def safety_system_state():
+    """V6 §3 app-state. Never raises; defaults to rose only on total failure."""
+    reasons = []
+    signals = {}
+    try:
+        from services.system_health_service import build_health
+        health = build_health(_db)
+    except Exception as exc:
+        return {
+            "success": False,
+            "state": "rose",
+            "reasons": [f"health snapshot failed: {type(exc).__name__}"],
+            "signals": {},
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
+    subs = {s.get("name"): s for s in (health.get("subsystems") or [])}
+
+    # ── safety guardrails (in-memory, cheap) ──
+    ks_active = False
+    scanner_paused = False
+    flatten_in_progress = False
+    try:
+        from services.safety_guardrails import get_safety_guardrails
+        st = (get_safety_guardrails().status() or {}).get("state", {})
+        ks_active = bool(st.get("kill_switch_active"))
+        scanner_paused = bool(st.get("scanner_paused"))
+        flatten_in_progress = bool(st.get("flatten_in_progress"))
+        if ks_active:
+            reasons.append(f"kill-switch tripped: {st.get('kill_switch_reason') or 'manual'}")
+    except Exception:
+        pass
+    signals.update({
+        "kill_switch_active": ks_active,
+        "scanner_paused": scanner_paused,
+        "flatten_in_progress": flatten_in_progress,
+    })
+
+    pusher = subs.get("pusher_rpc", {})
+    ibgw = subs.get("ib_gateway", {})
+    signals["pusher_rpc_status"] = pusher.get("status")
+    signals["ib_gateway_status"] = ibgw.get("status")
+    signals["health_overall"] = health.get("overall")
+
+    # ── ROSE (critical) ──
+    rose = False
+    if ks_active:
+        rose = True
+    if pusher.get("status") == "red":
+        rose = True
+        reasons.append(f"pusher: {pusher.get('detail') or 'down'}")
+    if ibgw.get("status") == "red":
+        rose = True
+        reasons.append(f"ib_gateway: {ibgw.get('detail') or 'down'}")
+
+    # ── AMBER (elevated) ──
+    amber = False
+    if scanner_paused:
+        amber = True
+        reasons.append("scanner paused (operator brake)")
+    if flatten_in_progress:
+        amber = True
+        reasons.append("flatten in progress")
+    yellow_subs = [n for n, s in subs.items() if s.get("status") == "yellow"]
+    if yellow_subs:
+        amber = True
+        reasons.append(", ".join(
+            f"{n}: {subs[n].get('detail') or 'degraded'}" for n in yellow_subs))
+
+    state = "rose" if rose else ("amber" if amber else "cyan")
+    return {
+        "success": True,
+        "state": state,
+        "reasons": reasons or (["all systems nominal"] if state == "cyan" else []),
+        "signals": signals,
+        "deferred_triggers": ["orphan_gtc_count", "eod_alarm_open_positions"],
+        "health_counts": health.get("counts", {}),
+        "as_of": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
 # ---- 2026-04-30 v19.18 — Morning Readiness aggregator ----------------------
 # One-call "ready for fully automated trading day?" check. Aggregates all
 # subsystems we shipped in v19.14-v19.17 so the operator sees a single

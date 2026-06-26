@@ -1,4 +1,41 @@
-## 2026-06-26 — P0 TAPE-CALIBRATION: DEFERRED tape-confirmation (JIT Level-2) — tape is now the LAST gate
+## 2026-06-26 — V6 Phase B (slice a + b): real panels in the shell + server-side app-state
+Both delivered on the additive `?preview=v6shell` route (NO real `/v6` route yet — that's Phase C;
+all V6 work to date is query-param previews). Live V5 cockpit untouched.
+
+### Slice A — drop the REAL extracted panels into the shell
+- `V6ShellPreview.jsx` now mounts the real `ScannerCardsV5` + `OpenPositionsV5` panels in the
+  5-col grid, fed by the SAME live hooks the V5 cockpit uses (`useSentComPositions` /
+  `useSentComSetups` / `useSentComAlerts` / `useSentComStream`) — DRY, no new fetch path.
+- KpiRibbon `dayPnl` wired to live `totalPnlToday`. Chart+Verdict / Thinking remain Phase-B/C
+  placeholders. State toggle (live/cyan/amber/rose) + Heartbeat + TopStrip pill all working.
+- Verified (sandbox, empty-data): shell mounts, both panels render their empty states, state
+  toggle + halo work, NO crash. Real visual pass = `yarn build` on DGX.
+
+### Slice B — `GET /api/safety/system-state` (server-side §3 compute_app_state) + hook repoint
+- New endpoint in `system_router.py` (uses cached `_db` + cheap `build_health()` + in-memory
+  kill-switch state — safe to poll every 2s, NO IB round-trips). Returns
+  `{state:'cyan'|'amber'|'rose', reasons[], signals, deferred_triggers, health_counts}`.
+  - ROSE: kill_switch_active · pusher dead/blocked (health red) · ib_gateway down (health red).
+  - AMBER: scanner_paused / flatten_in_progress · any subsystem yellow.
+  - CYAN: all green.
+  - `orphan_gtc_count` / `eod_alarm_open_positions` are IB-heavy → intentionally NOT polled here
+    (listed in `deferred_triggers`; stay on their own dedicated pills). Honest by design.
+- `hooks/useAppState.js` repointed to poll `/api/safety/system-state` every 2s, with a transparent
+  FALLBACK to mapping `/api/system/health` if the endpoint 404s (older backend). Contract
+  unchanged `{state,reasons,detail,stateMeta}`. Imported ONLY by `V6ShellPreview.jsx` (the
+  app-wide `contexts/AppStateContext.useAppState` is a DIFFERENT hook — untouched). Zero V5 risk.
+- Verified (sandbox): endpoint 200 (returns rose because the sandbox kill-switch is tripped + no
+  IB — correct; healthy DGX → cyan); shell LIVE pill driven by it end-to-end; frontend compiles.
+
+### DEPLOY
+Save to GitHub → DGX pull → backend `./start_backend.sh --force` (new endpoint is additive) +
+frontend `yarn build` + hard-refresh. View at `?preview=v6shell`.
+### NEXT (Phase B/C)
+Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · CRITICAL action bar
+(rose-only: FLATTEN/CANCEL-ORPH/RECONNECT) · Risk rail (DLP%) · then Phase C real `/v6` route.
+
+
+
 Operator chose Modes **A+B**; market closed. Resolves the 97% intraday rejection (656→17 on 06-25)
 caused by the tape gate running on no-L2 fallback data for ~99% of names (only 3–6 L2 slots).
 

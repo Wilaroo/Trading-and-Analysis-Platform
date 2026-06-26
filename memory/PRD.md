@@ -1,6 +1,14 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-26 — V6 Phase B (slice a+b) shipped (additive `?preview=v6shell`, live V5 untouched):**
+> (a) real `ScannerCardsV5` + `OpenPositionsV5` panels mounted in the shell, fed by the same live
+> `useSentCom*` hooks as V5; (b) new `GET /api/safety/system-state` (cheap, 2s-pollable §3
+> compute_app_state) + `useAppState` repointed to it (graceful health fallback). Sandbox-verified
+> (empty data); real visual pass = `yarn build` on DGX. NEXT: Chart+Verdict, Thinking pane,
+> CRITICAL action bar, Risk rail → Phase C real `/v6` route.
+
+
 > **👁️ 2026-06-26 — FLAG/OBSERVE WATCHLIST:** `memory/WATCHLIST_pending_evaluation.md` is the
 > single tracker for every env flag, shadow/observe-mode feature, and data-accruing check that
 > still needs a promote/tune/kill decision (tape deferred A/B, TQS dormant dials, thesis-

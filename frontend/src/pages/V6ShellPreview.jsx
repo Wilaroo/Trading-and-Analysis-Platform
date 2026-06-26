@@ -1,21 +1,32 @@
 /**
  * V6ShellPreview — isolated, additive proof of the V6 cockpit SHELL
  * (?preview=v6shell). Zero impact on the live V5 cockpit. Composes the real
- * extracted/built primitives into the §4 layout skeleton so we can see the
- * V6 frame coming together:
+ * extracted/built primitives into the §4 layout skeleton:
  *
  *   Heartbeat (5px) → TopStrip → KpiRibbon → [Rail | Scanner | Chart+Verdict
- *   | Thinking | Open Positions] placeholder grid.
+ *   | Thinking | Open Positions] grid.
  *
- * Panel bodies are labelled placeholders for now — Phase B fills them with the
- * extracted V5 panels. The state toggle demos the cyan/amber/rose heartbeat +
- * state pill (the Phase-B `useAppState()` hook will drive these live).
+ * Phase B (slice a, 2026-06-26): the Scanner + Open Positions slots are now
+ * fed by the REAL extracted V5 panels (`ScannerCardsV5`, `OpenPositionsV5`)
+ * against the SAME live data hooks the V5 cockpit uses (`useSentCom*`) — so
+ * the structural V5→V6 transition is real, not mocked. Chart/Verdict/Thinking
+ * remain placeholders for the next increment. The state toggle demos the
+ * cyan/amber/rose heartbeat + state pill; `useAppState()` drives them live.
+ *
+ * Sandbox has no IB/scanner/position data, so panels render their empty states
+ * here — the real visual pass is `yarn build` on the DGX.
  */
 import React, { useState } from 'react';
 import { Heartbeat } from '../components/sentcom/v6/Heartbeat';
 import { TopStrip } from '../components/sentcom/v6/TopStrip';
 import { KpiRibbon } from '../components/sentcom/v6/KpiRibbon';
 import { useAppState } from '../hooks/useAppState';
+import { ScannerCardsV5 } from '../components/sentcom/v5/ScannerCardsV5';
+import { OpenPositionsV5 } from '../components/sentcom/v5/OpenPositionsV5';
+import { useSentComPositions } from '../components/sentcom/hooks/useSentComPositions';
+import { useSentComSetups } from '../components/sentcom/hooks/useSentComSetups';
+import { useSentComAlerts } from '../components/sentcom/hooks/useSentComAlerts';
+import { useSentComStream } from '../components/sentcom/hooks/useSentComStream';
 
 const PIPELINE = {
   scan: 47,
@@ -26,14 +37,18 @@ const PIPELINE = {
   orderPipeline: { pending: 5, ib_pending: 3, executing: 1, filled: 4, last_ack_s: 1 },
 };
 
-const PanelSlot = ({ title, width, children }) => (
+const PanelSlot = ({ title, width, fill, children }) => (
   <div
     className="rounded-md border border-white/10 bg-white/[0.02] flex flex-col min-h-[420px]"
     style={width ? { width, flexShrink: 0 } : { flex: 1 }}
     data-testid={`v6-shell-slot-${title.toLowerCase().replace(/[^a-z]+/g, '-')}`}
   >
     <div className="px-3 py-2 border-b border-white/5 text-[11px] uppercase tracking-widest text-zinc-500">{title}</div>
-    <div className="flex-1 flex items-center justify-center text-zinc-700 text-xs">{children || 'Phase B'}</div>
+    {fill ? (
+      <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+    ) : (
+      <div className="flex-1 flex items-center justify-center text-zinc-700 text-xs">{children || 'Phase B'}</div>
+    )}
   </div>
 );
 
@@ -42,12 +57,22 @@ export const V6ShellPreview = () => {
   const { state: liveState, stateMeta } = useAppState();
   const [override, setOverride] = useState(null);
   const state = override || liveState;
+
+  // Live SentCom data — same hooks the V5 cockpit uses (DRY; no new fetch path).
+  const { positions, totalPnlToday, loading: positionsLoading } = useSentComPositions();
+  const { setups } = useSentComSetups();
+  const { alerts } = useSentComAlerts();
+  const { messages } = useSentComStream();
+
+  const [selectedSymbol, setSelectedSymbol] = useState(null);
+  const [hoveredSymbol, setHoveredSymbol] = useState(null);
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
       <Heartbeat state={state} />
       <TopStrip pipeline={PIPELINE} appState={state} stateMeta={stateMeta} account="PAPER · DUN615665" />
       <KpiRibbon
-        dayPnl={382.21}
+        dayPnl={totalPnlToday ?? 0}
         equity={104230}
         openRisk={1840}
         orderPipeline={PIPELINE.orderPipeline}
@@ -90,10 +115,28 @@ export const V6ShellPreview = () => {
       {/* §4 5-col body grid */}
       <div className="flex-1 flex gap-2 p-2">
         <PanelSlot title="Rail" width="22px"><span className="rotate-180" style={{ writingMode: 'vertical-rl' }}>DLP</span></PanelSlot>
-        <PanelSlot title="Scanner" width="230px" />
+        <PanelSlot title="Scanner" width="230px" fill>
+          <ScannerCardsV5
+            setups={setups}
+            alerts={alerts}
+            positions={positions}
+            messages={messages}
+            selectedSymbol={selectedSymbol}
+            onSelectSymbol={setSelectedSymbol}
+            hoveredSymbol={hoveredSymbol}
+            onHoverSymbol={setHoveredSymbol}
+          />
+        </PanelSlot>
         <PanelSlot title="Chart + Verdict" />
         <PanelSlot title="Thinking" width="340px" />
-        <PanelSlot title="Open Positions" width="280px" />
+        <PanelSlot title="Open Positions" width="280px" fill>
+          <OpenPositionsV5
+            positions={positions}
+            totalPnl={totalPnlToday ?? 0}
+            loading={positionsLoading}
+            onSelectPosition={(p) => setSelectedSymbol(p?.symbol || null)}
+          />
+        </PanelSlot>
       </div>
     </div>
   );
