@@ -633,58 +633,48 @@ def system_health_v2():
 # (/api/safety/orphan-gtc-orders) and are listed in `deferred_triggers` so the
 # contract stays honest. The hook falls back to /api/system/health if this 404s.
 
-@router.get("/api/safety/system-state")
-def safety_system_state():
-    """V6 §3 app-state. Never raises; defaults to rose only on total failure."""
+def _compute_app_state(health: dict, safety_state: dict) -> dict:
+    """Pure §3 state machine. Inputs: `build_health()` output + the safety
+    guardrails `state` dict. Returns {state, reasons, signals}.
+
+    push_fresh nuance (2026-06-26): in the ib-direct deployment the pusher RPC
+    *pull* path (`/rpc/latest-bars`) can 503 — flipping the `pusher_rpc`
+    subsystem yellow/red — while push-only market data keeps flowing fine. That
+    must NOT escalate the cockpit. So the pusher only contributes to amber/rose
+    when pushes are ACTUALLY stale (`push_fresh` False); when data is flowing it
+    is treated as benign (cyan)."""
     reasons = []
-    signals = {}
-    try:
-        from services.system_health_service import build_health
-        health = build_health(_db)
-    except Exception as exc:
-        return {
-            "success": False,
-            "state": "rose",
-            "reasons": [f"health snapshot failed: {type(exc).__name__}"],
-            "signals": {},
-            "as_of": datetime.now(timezone.utc).isoformat(),
-        }
-
     subs = {s.get("name"): s for s in (health.get("subsystems") or [])}
-
-    # ── safety guardrails (in-memory, cheap) ──
-    ks_active = False
-    scanner_paused = False
-    flatten_in_progress = False
-    try:
-        from services.safety_guardrails import get_safety_guardrails
-        st = (get_safety_guardrails().status() or {}).get("state", {})
-        ks_active = bool(st.get("kill_switch_active"))
-        scanner_paused = bool(st.get("scanner_paused"))
-        flatten_in_progress = bool(st.get("flatten_in_progress"))
-        if ks_active:
-            reasons.append(f"kill-switch tripped: {st.get('kill_switch_reason') or 'manual'}")
-    except Exception:
-        pass
-    signals.update({
-        "kill_switch_active": ks_active,
-        "scanner_paused": scanner_paused,
-        "flatten_in_progress": flatten_in_progress,
-    })
+    ks_active = bool(safety_state.get("kill_switch_active"))
+    scanner_paused = bool(safety_state.get("scanner_paused"))
+    flatten_in_progress = bool(safety_state.get("flatten_in_progress"))
 
     pusher = subs.get("pusher_rpc", {})
     ibgw = subs.get("ib_gateway", {})
-    signals["pusher_rpc_status"] = pusher.get("status")
-    signals["ib_gateway_status"] = ibgw.get("status")
-    signals["health_overall"] = health.get("overall")
+    pmetrics = pusher.get("metrics", {}) or {}
+    push_fresh = bool(pmetrics.get("push_fresh"))
+    pusher_status = pusher.get("status")
+
+    signals = {
+        "kill_switch_active": ks_active,
+        "scanner_paused": scanner_paused,
+        "flatten_in_progress": flatten_in_progress,
+        "pusher_rpc_status": pusher_status,
+        "pusher_push_fresh": push_fresh,
+        "ib_gateway_status": ibgw.get("status"),
+        "health_overall": health.get("overall"),
+    }
 
     # ── ROSE (critical) ──
     rose = False
     if ks_active:
         rose = True
-    if pusher.get("status") == "red":
+        reasons.append(f"kill-switch tripped: {safety_state.get('kill_switch_reason') or 'manual'}")
+    # pusher truly dead = subsystem red AND pushes NOT fresh (data actually
+    # stale). An ib-direct RPC-pull 503 WITH fresh push must NOT trip rose.
+    if pusher_status == "red" and not push_fresh:
         rose = True
-        reasons.append(f"pusher: {pusher.get('detail') or 'down'}")
+        reasons.append(f"pusher dead: {pusher.get('detail') or 'no fresh push'}")
     if ibgw.get("status") == "red":
         rose = True
         reasons.append(f"ib_gateway: {ibgw.get('detail') or 'down'}")
@@ -697,18 +687,51 @@ def safety_system_state():
     if flatten_in_progress:
         amber = True
         reasons.append("flatten in progress")
-    yellow_subs = [n for n, s in subs.items() if s.get("status") == "yellow"]
+    # pusher yellow matters ONLY when pushes are actually stale.
+    if pusher_status == "yellow" and not push_fresh:
+        amber = True
+        reasons.append(f"pusher: {pusher.get('detail') or 'degraded'}")
+    # any OTHER yellow subsystem (pusher_rpc handled explicitly above).
+    yellow_subs = [n for n, s in subs.items()
+                   if s.get("status") == "yellow" and n != "pusher_rpc"]
     if yellow_subs:
         amber = True
         reasons.append(", ".join(
             f"{n}: {subs[n].get('detail') or 'degraded'}" for n in yellow_subs))
 
     state = "rose" if rose else ("amber" if amber else "cyan")
+    return {"state": state, "reasons": reasons, "signals": signals}
+
+
+@router.get("/api/safety/system-state")
+def safety_system_state():
+    """V6 §3 app-state. Never raises; defaults to rose only on total failure."""
+    try:
+        from services.system_health_service import build_health
+        health = build_health(_db)
+    except Exception as exc:
+        return {
+            "success": False,
+            "state": "rose",
+            "reasons": [f"health snapshot failed: {type(exc).__name__}"],
+            "signals": {},
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+
+    safety_state = {}
+    try:
+        from services.safety_guardrails import get_safety_guardrails
+        safety_state = (get_safety_guardrails().status() or {}).get("state", {}) or {}
+    except Exception:
+        pass
+
+    verdict = _compute_app_state(health, safety_state)
+    state = verdict["state"]
     return {
         "success": True,
         "state": state,
-        "reasons": reasons or (["all systems nominal"] if state == "cyan" else []),
-        "signals": signals,
+        "reasons": verdict["reasons"] or (["all systems nominal"] if state == "cyan" else []),
+        "signals": verdict["signals"],
         "deferred_triggers": ["orphan_gtc_count", "eod_alarm_open_positions"],
         "health_counts": health.get("counts", {}),
         "as_of": datetime.now(timezone.utc).isoformat(),

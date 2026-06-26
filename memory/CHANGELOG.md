@@ -24,6 +24,13 @@ all V6 work to date is query-param previews). Live V5 cockpit untouched.
   FALLBACK to mapping `/api/system/health` if the endpoint 404s (older backend). Contract
   unchanged `{state,reasons,detail,stateMeta}`. Imported ONLY by `V6ShellPreview.jsx` (the
   app-wide `contexts/AppStateContext.useAppState` is a DIFFERENT hook — untouched). Zero V5 risk.
+- **push_fresh recalibration (2026-06-26, DGX-driven):** decision logic extracted to pure
+  `_compute_app_state(health, safety_state)` (unit-tested, `tests/test_system_state_compute.py`,
+  10/10). In the ib-direct deployment the pusher RPC-PULL path (`/rpc/latest-bars`) 503s →
+  `pusher_rpc` subsystem yellow/red, but push-only data keeps flowing (`push_fresh=true`). The
+  state machine now treats the pusher as benign when `push_fresh` is true (→ cyan); it only
+  escalates to amber (yellow+stale) or rose (red+stale) when pushes are ACTUALLY stale. Other
+  yellow subsystems still drive amber. Prevents a permanently-amber cockpit on healthy ib-direct.
 - Verified (sandbox): endpoint 200 (returns rose because the sandbox kill-switch is tripped + no
   IB — correct; healthy DGX → cyan); shell LIVE pill driven by it end-to-end; frontend compiles.
 
