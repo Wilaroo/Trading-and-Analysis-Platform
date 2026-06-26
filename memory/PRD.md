@@ -1,6 +1,30 @@
 # TradeCommand / SentCom — Product Requirements
 
 
+> **🧭 2026-06-26 — P0 TAPE-CALIBRATION resolved via DEFERRED tape-confirmation (JIT Level-2). ALL env-gated, DEFAULT OFF == byte-identical legacy.**
+> Root cause confirmed: with only a 3–6 symbol L2 entitlement, `_get_tape_reading` falls back
+> to `100/100` sizes (imbalance 0) for ~99% of names → `tape_score 0` → fails the `>=0.2`
+> positive-proof gate → 97% of HIGH/CRIT intraday alerts rejected (656→17 on 06-25). The L2
+> router (`l2_router.py`, already running) rotates the 3 slots onto top scalp/intraday EVAL
+> alerts, but the tape gate ran INLINE at alert-creation — BEFORE L2 arrived. FIX (operator
+> chose "A+B"): tape is now the LAST gate. An alert passing every OTHER gate (auto-exec
+> enabled + priority HIGH/CRIT + not-stale + EV-quality) but lacking live L2 is held
+> `tape_pending` (NOT rejected); the L2 router (Mode A, `TAPE_CONFIRM_MODE=router`) or a
+> per-candidate JIT subscribe (Mode B, `=jit`) puts depth on it, and a confirmation pass
+> auto-executes ONLY on NON-ADVERSE flow (block strong opposite L2 imbalance / momentum-down).
+> ENV (all DEFAULT OFF/legacy): `TAPE_CONFIRM_DEFERRED`, `TAPE_CONFIRM_MODE=router|jit`,
+> `TAPE_NONADVERSE_GATE`, `TAPE_ADVERSE_SCORE` (0.3), `TAPE_ADVERSE_L2_IMBALANCE` (0.25),
+> `TAPE_CONFIRM_PENDING_TTL_S` (90), `TAPE_CONFIRM_TICK_S` (3), `TAPE_JIT_POLL_S` (4),
+> `TAPE_CONFIRM_FALLBACK=expire|nonadverse_l1`. Diagnostic: `GET /api/scanner/tape-confirm/status`.
+> Verified in sandbox: 23/23 new pytest + 37/37 with related suites; runtime Mode-A confirm/
+> adverse/TTL-expire + Mode-B JIT validated; live endpoint shows `deferred_enabled=false`,
+> `loop_running=false` (legacy intact). DEPLOY: Save to GitHub → DGX pull → `./start_backend.sh
+> --force`; activate by setting `TAPE_CONFIRM_DEFERRED=true` (+ `TAPE_CONFIRM_MODE`) then watch
+> the funnel + `/api/scanner/tape-confirm/status`. Files: `services/enhanced_scanner.py`,
+> `routers/scanner.py`, `tests/test_tape_confirm_deferred.py`. NOT YET tested on live DGX/IB.
+> NEXT: backside time-decay exit (P2); loser cleanup (P2); V6 Phase B (P1).
+
+
 > **🧭 2026-06-25 (cont.) — V6 Plan A · Phase A STARTED (shared-primitive extraction, ZERO behavior change).**
 > Resumed the last in-progress item. Two §10 shared primitives lifted (V6_INTEGRATION_v110_v114):
 > (1) `utils/orderPipelineSplit.js` — the v19.34.110 ORDER-tile split, lifted out of

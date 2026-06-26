@@ -22,6 +22,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Set, Any, Tuple
 from dataclasses import dataclass, asdict, field
@@ -505,6 +506,14 @@ class LiveAlert:
     
     # Auto-execution
     auto_execute_eligible: bool = False
+
+    # 2026-06-26 — DEFERRED tape-confirmation (JIT L2). When the deferred flow
+    # holds a scalp/intraday alert that passed every other gate but lacks live
+    # L2 depth, these track its state until the confirmation pass resolves it.
+    tape_pending: bool = False
+    tape_pending_since: Optional[str] = None
+    tape_verdict: str = ""          # "confirm" | "adverse" | "neutral_no_l2" | ""
+    tape_l2_confirmed: bool = False  # True only when a real L2 read confirmed it
 
     # 2026-04-30 v18 — provenance tag for the bar-poll service. Live-tick
     # alerts default to `live_tick`; alerts produced by the bar_poll
@@ -1280,6 +1289,52 @@ class EnhancedBackgroundScanner:
             "position": self._env_float("AUTOEXEC_MIN_EV_R_POSITION", 0.03),
             "investment": self._env_float("AUTOEXEC_MIN_EV_R_INVESTMENT", 0.03),
         }
+
+        # ── 2026-06-26 — DEFERRED TAPE-CONFIRMATION (JIT Level-2).
+        #    Master switch OFF (default) → the inline tape gate is BYTE-IDENTICAL
+        #    to legacy. The L2 entitlement is only 3–6 symbols, so requiring live
+        #    L2/positive tape up-front structurally rejects ~99% of the universe
+        #    (neutral fallback → tape_score 0 → fail). When TAPE_CONFIRM_DEFERRED
+        #    is ON, a scalp/intraday alert that passes EVERY other gate but has
+        #    no live L2 is held `tape_pending` (NOT rejected); the L2 router
+        #    (mode=router) or a per-candidate JIT subscribe (mode=jit) puts depth
+        #    on it, and the confirmation pass auto-executes it only on NON-ADVERSE
+        #    flow — i.e. tape becomes the LAST gate, on real depth, for the few
+        #    that win a slot. Instant rollback: unset the env var.
+        self._tape_confirm_deferred = self._env_flag("TAPE_CONFIRM_DEFERRED", False)
+        self._tape_confirm_mode = (
+            os.environ.get("TAPE_CONFIRM_MODE", "router") or "router").strip().lower()
+        # NON-ADVERSE gate (independent of deferral): confirm unless flow is
+        # clearly AGAINST the side, instead of demanding proof-of-positive tape.
+        # ON by default ONLY takes effect once deferred is ON OR explicitly set;
+        # when deferred is OFF and this is left default we still reproduce legacy
+        # (see _apply_tape_gate: legacy path requires BOTH flags OFF).
+        self._tape_nonadverse_gate = self._env_flag("TAPE_NONADVERSE_GATE", False)
+        # |tape_score| (raw −1..+1) beyond this AGAINST the side ⇒ adverse/block.
+        self._tape_adverse_score = self._env_float("TAPE_ADVERSE_SCORE", 0.3)
+        # live L2 imbalance beyond this AGAINST the side ⇒ adverse/block.
+        self._tape_adverse_l2_imb = self._env_float("TAPE_ADVERSE_L2_IMBALANCE", 0.25)
+        # how long a candidate stays tape_pending waiting for L2 before fallback.
+        self._tape_pending_ttl_s = self._env_float("TAPE_CONFIRM_PENDING_TTL_S", 90.0)
+        # confirmation-pass cadence (Mode A router-driven loop).
+        self._tape_confirm_tick_s = self._env_float("TAPE_CONFIRM_TICK_S", 3.0)
+        # Mode B (jit) per-candidate L2 poll budget + interval.
+        self._tape_jit_poll_s = self._env_float("TAPE_JIT_POLL_S", 4.0)
+        self._tape_jit_poll_interval_s = self._env_float("TAPE_JIT_POLL_INTERVAL_S", 0.5)
+        # what to do if L2 never arrives within the TTL:
+        #   "expire"        → drop the candidate (safe default; no entry)
+        #   "nonadverse_l1" → confirm if the L1+momentum tape is non-adverse
+        self._tape_confirm_fallback = (
+            os.environ.get("TAPE_CONFIRM_FALLBACK", "expire") or "expire").strip().lower()
+        # pending registry (keyed symbol:setup:direction) + telemetry.
+        self._tape_pending: Dict[str, "LiveAlert"] = {}
+        self._tape_confirm_task: Optional[asyncio.Task] = None
+        self._tape_verdict_audit: deque = deque(maxlen=100)
+        self._tape_confirm_stats: Dict[str, int] = {
+            "pending_total": 0, "confirmed": 0, "adverse": 0,
+            "expired": 0, "jit_subscribes": 0,
+        }
+
         self._trading_bot = None
         
         # AI Assistant for proactive coaching notifications
@@ -1815,6 +1870,289 @@ class EnhancedBackgroundScanner:
             )
         except Exception:
             pass
+
+    # ==================== DEFERRED TAPE-CONFIRMATION (JIT L2) ============
+    # 2026-06-26. Tape as the LAST gate, on real Level-2 depth, for the few
+    # candidates that win one of the 3–6 L2 slots. All env-gated; with
+    # TAPE_CONFIRM_DEFERRED + TAPE_NONADVERSE_GATE both OFF this whole block is
+    # inert and _apply_tape_gate reproduces the legacy inline gate exactly.
+
+    @staticmethod
+    def _tape_verdict(direction, l2_available, l2_imbalance, tape_score,
+                      adverse_score, adverse_l2_imb) -> str:
+        """Pure tape verdict for a side. Returns:
+          "adverse"        — flow clearly AGAINST the side ⇒ block.
+          "confirm"        — affirmative confirmation (real L2 not-against, OR a
+                             strongly positive L1+momentum tape for the side).
+          "neutral_no_l2"  — no live L2 depth and tape is neither for nor against
+                             ⇒ candidate to defer for JIT-L2 confirmation.
+        `tape_score`/`l2_imbalance` are the RAW (−1..+1) TapeReading values."""
+        is_long = str(direction or "").strip().lower() != "short"
+        try:
+            imb = float(l2_imbalance or 0.0)
+            ts = float(tape_score or 0.0)
+            adv = float(adverse_score)
+            adv_l2 = float(adverse_l2_imb)
+        except (TypeError, ValueError):
+            return "neutral_no_l2"
+        if l2_available:
+            # Real depth present → block only if it leans against us.
+            if is_long and imb <= -adv_l2:
+                return "adverse"
+            if (not is_long) and imb >= adv_l2:
+                return "adverse"
+            return "confirm"
+        # No live L2 — judge on L1 + momentum tape_score.
+        if is_long:
+            if ts <= -adv:
+                return "adverse"
+            if ts >= 0.2:   # matches legacy confirmation_for_long
+                return "confirm"
+        else:
+            if ts >= adv:
+                return "adverse"
+            if ts <= -0.2:  # matches legacy confirmation_for_short
+                return "confirm"
+        return "neutral_no_l2"
+
+    @staticmethod
+    def _tape_pending_key(alert) -> str:
+        return (f"{getattr(alert, 'symbol', '?')}:"
+                f"{getattr(alert, 'setup_type', '?')}:"
+                f"{getattr(alert, 'direction', 'long')}")
+
+    def _apply_tape_gate(self, alert, tape, passes_else: bool) -> bool:
+        """Set alert.auto_execute_eligible / tape_pending per the tape config.
+
+        DEFAULT (both deferred + nonadverse OFF) == LEGACY: when tape is required
+        for this alert, eligible iff `passes_else AND alert.tape_confirmation`;
+        when not required, eligible == passes_else. Returns True iff the alert
+        should auto-execute NOW (caller fires it)."""
+        requires_tape = self._alert_requires_tape(
+            alert, self._tape_confirm_scalp_intraday_only)
+        if not requires_tape:
+            alert.auto_execute_eligible = bool(passes_else)
+            return alert.auto_execute_eligible
+
+        # ── legacy positive-proof gate (no new behavior) ──
+        if not (self._tape_confirm_deferred or self._tape_nonadverse_gate):
+            alert.auto_execute_eligible = bool(
+                passes_else and getattr(alert, "tape_confirmation", False))
+            return alert.auto_execute_eligible
+
+        # ── new gate(s) — non-adverse and/or deferred ──
+        verdict = self._tape_verdict(
+            getattr(alert, "direction", "long"),
+            bool(getattr(tape, "l2_available", False)),
+            float(getattr(tape, "l2_imbalance", 0.0) or 0.0),
+            float(getattr(tape, "tape_score", 0.0) or 0.0),
+            self._tape_adverse_score, self._tape_adverse_l2_imb,
+        )
+        alert.tape_verdict = verdict
+        alert.tape_l2_confirmed = (verdict == "confirm"
+                                   and bool(getattr(tape, "l2_available", False)))
+        if not passes_else:
+            alert.auto_execute_eligible = False
+            return False
+        if verdict == "adverse":
+            alert.auto_execute_eligible = False
+            return False
+        if verdict == "confirm":
+            alert.auto_execute_eligible = True
+            return True
+        # neutral_no_l2
+        if self._tape_confirm_deferred:
+            alert.auto_execute_eligible = False
+            self._register_tape_pending(alert)
+            return False
+        # non-deferred non-adverse gate: neutral (not-against) passes.
+        alert.auto_execute_eligible = True
+        return True
+
+    def _register_tape_pending(self, alert) -> None:
+        """Hold a passed-everything-else alert for JIT-L2 confirmation."""
+        try:
+            alert.tape_pending = True
+            alert.tape_pending_since = datetime.now(timezone.utc).isoformat()
+            self._tape_pending[self._tape_pending_key(alert)] = alert
+            self._tape_confirm_stats["pending_total"] = \
+                self._tape_confirm_stats.get("pending_total", 0) + 1
+            if self._tape_confirm_mode == "jit":
+                try:
+                    asyncio.create_task(self._jit_confirm_one(alert))
+                except RuntimeError:
+                    pass  # no running loop (unit tests) — router loop covers it
+        except Exception:
+            pass
+
+    async def _jit_subscribe_l2(self, symbol: str) -> None:
+        """Mode B — push `symbol` into an L2 slot immediately (best-effort).
+        Degrades gracefully to the router rotation if the slots are capped."""
+        def _sub():
+            try:
+                from services.ib_pusher_rpc import get_pusher_rpc_client
+                client = get_pusher_rpc_client()
+                if not client.is_configured():
+                    return
+                client._request(
+                    "POST", "/rpc/subscribe-l2",
+                    json_body={"symbols": [symbol]}, timeout=10.0)
+            except Exception:
+                pass
+        await asyncio.to_thread(_sub)
+
+    async def _jit_confirm_one(self, alert) -> None:
+        """Mode B — subscribe L2 for one candidate, poll depth briefly, resolve."""
+        try:
+            self._tape_confirm_stats["jit_subscribes"] = \
+                self._tape_confirm_stats.get("jit_subscribes", 0) + 1
+            await self._jit_subscribe_l2(alert.symbol)
+            deadline = time.monotonic() + self._tape_jit_poll_s
+            while time.monotonic() < deadline:
+                if self._tape_pending_key(alert) not in self._tape_pending:
+                    return  # router loop already resolved it
+                l2 = None
+                try:
+                    from routers.ib import get_level2_for_symbol
+                    l2 = get_level2_for_symbol(alert.symbol)
+                except Exception:
+                    l2 = None
+                if l2:
+                    imb = float(l2.get("imbalance", 0.0) or 0.0)
+                    verdict = self._tape_verdict(
+                        alert.direction, True, imb, 0.0,
+                        self._tape_adverse_score, self._tape_adverse_l2_imb)
+                    await self._resolve_tape_pending(alert, verdict, source="jit")
+                    return
+                await asyncio.sleep(self._tape_jit_poll_interval_s)
+            # timeout — leave to router loop / TTL fallback.
+        except Exception:
+            pass
+
+    async def _resolve_tape_pending(self, alert, verdict: str, source: str) -> None:
+        """Finalize a tape_pending candidate: fire on confirm, drop otherwise."""
+        key = self._tape_pending_key(alert)
+        if key not in self._tape_pending:
+            return  # already resolved (race between jit + router)
+        self._tape_pending.pop(key, None)
+        alert.tape_pending = False
+        alert.tape_verdict = verdict
+        self._tape_verdict_audit.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "symbol": getattr(alert, "symbol", "?"),
+            "setup": getattr(alert, "setup_type", "?"),
+            "direction": getattr(alert, "direction", "?"),
+            "verdict": verdict, "source": source,
+        })
+        if verdict == "confirm":
+            alert.tape_confirmation = True
+            alert.tape_l2_confirmed = source in ("router", "jit")
+            alert.auto_execute_eligible = True
+            self._tape_confirm_stats["confirmed"] = \
+                self._tape_confirm_stats.get("confirmed", 0) + 1
+            await self._auto_execute_alert(alert)
+        elif verdict == "adverse":
+            alert.auto_execute_eligible = False
+            self._tape_confirm_stats["adverse"] = \
+                self._tape_confirm_stats.get("adverse", 0) + 1
+            self._record_auto_exec_ineligible(alert)
+        else:  # "expired" / neutral fallback-drop
+            alert.auto_execute_eligible = False
+            self._tape_confirm_stats["expired"] = \
+                self._tape_confirm_stats.get("expired", 0) + 1
+
+    async def _confirm_tape_pending_once(self) -> None:
+        """Mode A — one confirmation pass over the tape_pending registry."""
+        if not self._tape_pending:
+            return
+        try:
+            from routers.ib import get_level2_for_symbol
+        except Exception:
+            get_level2_for_symbol = None  # noqa: N806
+        now = datetime.now(timezone.utc)
+        for key, alert in list(self._tape_pending.items()):
+            try:
+                # drop alerts that expired / went inactive
+                if getattr(alert, "status", "active") != "active":
+                    self._tape_pending.pop(key, None)
+                    continue
+                since = getattr(alert, "tape_pending_since", None)
+                age = None
+                if since:
+                    try:
+                        dt = datetime.fromisoformat(str(since).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        age = (now - dt).total_seconds()
+                    except Exception:
+                        age = None
+                if age is not None and age > self._tape_pending_ttl_s:
+                    if self._tape_confirm_fallback == "nonadverse_l1":
+                        # confirm only if the (stale) L1 tape wasn't adverse
+                        await self._resolve_tape_pending(
+                            alert,
+                            "confirm" if getattr(alert, "tape_verdict", "") != "adverse"
+                            else "adverse",
+                            source="fallback_l1")
+                    else:
+                        await self._resolve_tape_pending(alert, "expired", source="ttl")
+                    continue
+                # live L2 yet?
+                l2 = get_level2_for_symbol(alert.symbol) if get_level2_for_symbol else None
+                if l2:
+                    imb = float(l2.get("imbalance", 0.0) or 0.0)
+                    verdict = self._tape_verdict(
+                        alert.direction, True, imb, 0.0,
+                        self._tape_adverse_score, self._tape_adverse_l2_imb)
+                    await self._resolve_tape_pending(alert, verdict, source="router")
+            except Exception:
+                continue
+
+    async def _tape_confirm_loop(self) -> None:
+        """Background confirmation pass (started only when deferred is ON)."""
+        logger.info(
+            f"[TAPE-CONFIRM] deferred loop started "
+            f"(mode={self._tape_confirm_mode}, tick={self._tape_confirm_tick_s}s, "
+            f"ttl={self._tape_pending_ttl_s}s, fallback={self._tape_confirm_fallback})")
+        while self._running:
+            try:
+                await self._confirm_tape_pending_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.debug(f"tape-confirm loop tick error: {e}")
+            await asyncio.sleep(self._tape_confirm_tick_s)
+
+    def tape_confirm_status(self) -> Dict[str, Any]:
+        """Read-only snapshot for /api/scanner/tape-confirm/status."""
+        pend = []
+        for k, a in list(self._tape_pending.items()):
+            pend.append({
+                "key": k, "symbol": getattr(a, "symbol", "?"),
+                "setup": getattr(a, "setup_type", "?"),
+                "direction": getattr(a, "direction", "?"),
+                "priority": a.priority.value if getattr(a, "priority", None) else None,
+                "tqs_score": float(getattr(a, "tqs_score", 0.0) or 0.0),
+                "since": getattr(a, "tape_pending_since", None),
+                "verdict": getattr(a, "tape_verdict", ""),
+            })
+        return {
+            "deferred_enabled": self._tape_confirm_deferred,
+            "nonadverse_gate": self._tape_nonadverse_gate,
+            "mode": self._tape_confirm_mode,
+            "fallback": self._tape_confirm_fallback,
+            "adverse_score": self._tape_adverse_score,
+            "adverse_l2_imbalance": self._tape_adverse_l2_imb,
+            "pending_ttl_s": self._tape_pending_ttl_s,
+            "tick_s": self._tape_confirm_tick_s,
+            "jit_poll_s": self._tape_jit_poll_s,
+            "loop_running": self._tape_confirm_task is not None
+                            and not self._tape_confirm_task.done(),
+            "pending_count": len(self._tape_pending),
+            "pending": pend,
+            "stats": dict(self._tape_confirm_stats),
+            "recent_verdicts": list(self._tape_verdict_audit)[-20:],
+        }
 
     async def _is_leveraged_instrument(self, symbol: str) -> Tuple[bool, str]:
         """v322r — is ``symbol`` a leveraged/inverse ETP? (ARMG gap autopsy.)
@@ -3186,6 +3524,15 @@ class EnhancedBackgroundScanner:
         self._scan_task = asyncio.create_task(self._scan_loop())
         logger.info(f"🚀 Enhanced scanner started - {len(self._watchlist)} symbols, {len(self._enabled_setups)} strategies")
 
+        # 2026-06-26 — DEFERRED tape-confirmation loop (Mode A router-driven +
+        # Mode B TTL fallback). Started only when TAPE_CONFIRM_DEFERRED is ON;
+        # otherwise no extra task runs and behavior is fully legacy.
+        if self._tape_confirm_deferred and self._tape_confirm_task is None:
+            try:
+                self._tape_confirm_task = asyncio.create_task(self._tape_confirm_loop())
+            except RuntimeError:
+                self._tape_confirm_task = None
+
         # 2026-05-05 v19.34.6 — Re-hydrate carry-forward gameplan alerts from
         # Mongo so the morning operator workflow has yesterday's after-hours
         # plan in `_live_alerts`. Now runs AFTER the loop is live; if it is
@@ -3204,6 +3551,13 @@ class EnhancedBackgroundScanner:
                 await self._scan_task
             except asyncio.CancelledError:
                 pass
+        if self._tape_confirm_task:
+            self._tape_confirm_task.cancel()
+            try:
+                await self._tape_confirm_task
+            except asyncio.CancelledError:
+                pass
+            self._tape_confirm_task = None
         logger.info("⏹️ Enhanced scanner stopped")
     
     # ==================== MAIN SCAN LOOP ====================
@@ -4304,22 +4658,21 @@ class EnhancedBackgroundScanner:
                     alert.intraday_stale = bool(getattr(snapshot, "intraday_stale", False))
                     alert.intraday_bar_age_min = getattr(snapshot, "intraday_bar_age_min", None)
                     
-                    # Check auto-execute eligibility
-                    # #3 — tape requirement is scoped to scalp/intraday styles
-                    # when TAPE_CONFIRM_SCALP_INTRADAY_ONLY is ON (else required
-                    # for all, legacy).
-                    _tape_ok = (
-                        alert.tape_confirmation
-                        or not self._alert_requires_tape(
-                            alert, self._tape_confirm_scalp_intraday_only)
-                    )
-                    alert.auto_execute_eligible = (
+                    # Check auto-execute eligibility.
+                    # `_passes_else` = every gate EXCEPT tape (auto-exec enabled
+                    # + priority HIGH/CRIT + not stale + EV-quality). Tape is
+                    # applied by `_apply_tape_gate`, which — with the deferred
+                    # flags OFF — reproduces the legacy "tape_confirmation
+                    # required" gate EXACTLY, and with TAPE_CONFIRM_DEFERRED ON
+                    # holds neutral-no-L2 scalp/intraday alerts `tape_pending`
+                    # for the JIT-L2 confirmation pass instead of rejecting them.
+                    _passes_else = (
                         self._auto_execute_enabled and
                         alert.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
-                        _tape_ok and
                         not getattr(snapshot, "intraday_stale", False) and
                         self._passes_ev_quality_gate(alert)
                     )
+                    self._apply_tape_gate(alert, tape, _passes_else)
                     
                     alerts.append(alert)
             
@@ -4346,12 +4699,12 @@ class EnhancedBackgroundScanner:
                                 _tcs.grade_trade(strategy_ev=0.0, market_context_score=0.5)
                             except Exception:
                                 pass
-                            _tcs.auto_execute_eligible = (
+                            _tcs_passes_else = (
                                 self._auto_execute_enabled and
                                 _tcs.priority.value in [AlertPriority.CRITICAL.value, AlertPriority.HIGH.value] and
-                                _tcs.tape_confirmation and
                                 self._passes_ev_quality_gate(_tcs)
                             )
+                            self._apply_tape_gate(_tcs, tape, _tcs_passes_else)
                             alerts.append(_tcs)
                 except Exception:
                     pass
@@ -4372,7 +4725,9 @@ class EnhancedBackgroundScanner:
                     await self._auto_execute_alert(alert)
                 # v19.34.287 — record WHY an otherwise-surfaced alert won't
                 # auto-trade (intake visibility for symbol-trace's gate funnel).
-                elif self._auto_execute_enabled:
+                # Skip alerts held `tape_pending` (deferred JIT-L2 confirm) —
+                # they are NOT dropped, just awaiting the confirmation pass.
+                elif self._auto_execute_enabled and not getattr(alert, "tape_pending", False):
                     self._record_auto_exec_ineligible(alert)
                 
         except Exception as e:

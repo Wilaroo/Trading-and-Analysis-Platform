@@ -611,6 +611,38 @@ def get_detector_stats():
     }
 
 
+@router.get("/tape-confirm/status")
+def get_tape_confirm_status():
+    """Deferred tape-confirmation (JIT Level-2) status + telemetry.
+
+    Answers "is tape now the LAST gate, on real depth?" — shows the config
+    (deferred on/off, mode router|jit, non-adverse gate, thresholds), the live
+    `tape_pending` candidates awaiting L2, per-verdict counters (confirmed /
+    adverse / expired / jit_subscribes), and a ring buffer of recent verdicts.
+    With TAPE_CONFIRM_DEFERRED OFF the gate is fully legacy and this reports
+    `deferred_enabled=false` with empty pending.
+    """
+    try:
+        from services.enhanced_scanner import get_enhanced_scanner
+        live_scanner = get_enhanced_scanner()
+    except Exception:
+        live_scanner = None
+
+    if not live_scanner or not hasattr(live_scanner, "tape_confirm_status"):
+        return {"success": True, "available": False,
+                "deferred_enabled": False, "pending_count": 0, "pending": []}
+
+    return {
+        "success": True,
+        "available": True,
+        "running": bool(getattr(live_scanner, "_running", False)),
+        "auto_execute_enabled": bool(getattr(live_scanner, "_auto_execute_enabled", False)),
+        **live_scanner.tape_confirm_status(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+
 @router.get("/in-play-health")
 def get_in_play_health(sample: int = 8):
     """Live in-play health: wave composition + RVOL freshness + qualify-rate.

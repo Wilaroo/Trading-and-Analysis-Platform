@@ -1,4 +1,50 @@
-## 2026-06-26 — Trade-evaluation (why 0 entries) + EOD false-alarm fix + auto-exec gate calibration (#3/#4)
+## 2026-06-26 — P0 TAPE-CALIBRATION: DEFERRED tape-confirmation (JIT Level-2) — tape is now the LAST gate
+Operator chose Modes **A+B**; market closed. Resolves the 97% intraday rejection (656→17 on 06-25)
+caused by the tape gate running on no-L2 fallback data for ~99% of names (only 3–6 L2 slots).
+
+### Root cause (confirmed by code read)
+- `_get_tape_reading` (enhanced_scanner L2640-2700): with no live L2, bid/ask sizes default to
+  `100/100` → imbalance 0; spread fallback ≈0.2% → NEUTRAL; momentum only +0.3 if `rvol>=2 & >EMA9`.
+  Net `tape_score=0` < the `>=0.2` positive-proof confirmation → fail. So the gate was effectively
+  "do I have a live RVOL burst right now", not "is flow against me".
+- `l2_router.py` (already running, `server.py:4289`) DOES rotate the 3 slots onto top
+  scalp/intraday EVAL alerts (fast→priority→TQS→recency) — but tape was evaluated INLINE at
+  alert-creation, BEFORE the router could place depth. So tape never saw real L2.
+
+### Shipped (all env-gated, DEFAULT OFF → byte-identical legacy; instant rollback by unset)
+- **Deferred flow**: an alert passing every OTHER gate (auto-exec enabled + priority HIGH/CRIT +
+  not-stale + EV-quality) but lacking live L2 is held `tape_pending` (NOT rejected). The L2 router
+  (Mode A) or a per-candidate JIT subscribe (Mode B) puts depth on it; the confirmation pass
+  auto-executes ONLY on NON-ADVERSE flow (block strong opposite L2 imbalance / momentum-down).
+- New `LiveAlert` fields: `tape_pending`, `tape_pending_since`, `tape_verdict`, `tape_l2_confirmed`.
+- New pure `_tape_verdict()` (confirm | adverse | neutral_no_l2) + `_apply_tape_gate()` (legacy when
+  flags OFF) + `_register_tape_pending` / `_resolve_tape_pending` / `_confirm_tape_pending_once` /
+  `_tape_confirm_loop` (Mode A, started only when deferred ON) + `_jit_subscribe_l2` /
+  `_jit_confirm_one` (Mode B) + `tape_confirm_status()`.
+- Inline gate in `_scan_symbol_all_setups` + the `trend_continuation_short` path now route through
+  `_apply_tape_gate`; `tape_pending` alerts are NOT recorded as auto-exec drops.
+- Diagnostic: `GET /api/scanner/tape-confirm/status` (config + pending list + per-verdict counters +
+  recent-verdict ring).
+- ENV: `TAPE_CONFIRM_DEFERRED`(off), `TAPE_CONFIRM_MODE`(router|jit), `TAPE_NONADVERSE_GATE`(off),
+  `TAPE_ADVERSE_SCORE`(0.3), `TAPE_ADVERSE_L2_IMBALANCE`(0.25), `TAPE_CONFIRM_PENDING_TTL_S`(90),
+  `TAPE_CONFIRM_TICK_S`(3), `TAPE_JIT_POLL_S`(4), `TAPE_JIT_POLL_INTERVAL_S`(0.5),
+  `TAPE_CONFIRM_FALLBACK`(expire|nonadverse_l1).
+
+### Verified (sandbox)
+- 23/23 new pytest (`tests/test_tape_confirm_deferred.py`) + 37/37 with autoexec/l2 suites.
+- Runtime: Mode-A confirm→fire / adverse→block / TTL-expire→drop (no fire) + Mode-B JIT confirm→fire.
+- Live endpoint: `deferred_enabled=false`, `loop_running=false` → legacy path fully intact.
+- NOT yet tested on live DGX/IB (sandbox has no IB/pusher).
+
+### DEPLOY / ACTIVATION
+Save to GitHub → DGX pull → `./start_backend.sh --force` (no-op vs legacy until flagged). Activate:
+  TAPE_CONFIRM_DEFERRED=true
+  TAPE_CONFIRM_MODE=router   # or jit
+  (optional) TAPE_NONADVERSE_GATE=true
+Then watch `/api/diagnostic/trade-funnel` + `/api/scanner/tape-confirm/status`. Roll back: unset.
+
+
+
 Operator asked why June 25 took 0 new entries (close-only) and to evaluate scalp/intraday setups.
 
 ### Findings (grounded in /api/diagnostic/trade-funnel + rejection-analytics + setup-winrate-breakdown)
