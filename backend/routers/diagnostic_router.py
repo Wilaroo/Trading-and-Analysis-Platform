@@ -407,6 +407,11 @@ def trade_funnel(date: Optional[str] = None) -> Dict[str, Any]:
             "symbols_skipped_in_play": getattr(scanner, "_symbols_skipped_in_play", None),
             "scan_count": getattr(scanner, "_scan_count", None),
             "running": getattr(scanner, "_running", None),
+            # 2026-06-26 calibration flags (echo for activation verification).
+            "tape_confirm_scalp_intraday_only": getattr(scanner, "_tape_confirm_scalp_intraday_only", None),
+            "per_style_autoexec_floors": getattr(scanner, "_per_style_autoexec_floors", None),
+            "per_style_min_ev_r": getattr(scanner, "_per_style_min_ev_r", None),
+            "auto_execute_min_ev_r": getattr(scanner, "_auto_execute_min_ev_r", None),
         }
         # Resolve the scanner's current time-window so the 0-counters
         # don't look like a bug when the scanner is intentionally idling.
