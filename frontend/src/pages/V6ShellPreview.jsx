@@ -28,6 +28,7 @@ import { useSentComSetups } from '../components/sentcom/hooks/useSentComSetups';
 import { useSentComAlerts } from '../components/sentcom/hooks/useSentComAlerts';
 import { useSentComStream } from '../components/sentcom/hooks/useSentComStream';
 import { V6ActionBar } from '../components/sentcom/v6/V6ActionBar';
+import { ThinkingPane } from '../components/sentcom/v6/ThinkingPane';
 
 const PIPELINE = {
   scan: 47,
@@ -64,7 +65,7 @@ export const V6ShellPreview = () => {
   const { positions, totalPnlToday, loading: positionsLoading } = useSentComPositions();
   const { setups } = useSentComSetups();
   const { alerts } = useSentComAlerts();
-  const { messages } = useSentComStream();
+  const { messages, loading: streamLoading } = useSentComStream();
 
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [hoveredSymbol, setHoveredSymbol] = useState(null);
@@ -137,7 +138,17 @@ export const V6ShellPreview = () => {
           />
         </PanelSlot>
         <PanelSlot title="Chart + Verdict" />
-        <PanelSlot title="Thinking" width="340px" />
+        <div style={{ width: '340px', flexShrink: 0 }} className="min-h-[420px]">
+          <ThinkingPane
+            state={state}
+            messages={messages}
+            loading={streamLoading}
+            onSymbolClick={setSelectedSymbol}
+            hoveredSymbol={hoveredSymbol}
+            onHoverSymbol={setHoveredSymbol}
+            className="h-full"
+          />
+        </div>
         <PanelSlot title="Open Positions" width="280px" fill>
           <OpenPositionsV5
             positions={positions}

@@ -41,6 +41,24 @@ frontend `yarn build` + hard-refresh. View at `?preview=v6shell`.
 Chart+Verdict panel · Thinking pane (GlassHaloPane + trigger progress) · Risk rail (DLP%) ·
 then Phase C real `/v6` route.
 
+## 2026-06-26 — V6 Phase B: §4-④ Thinking pane + GlassHaloPane (halo bound to app-state)
+- New `components/sentcom/v6/GlassHaloPane.jsx` — glass-morphism wrapper with an ambient halo
+  whose color + breathe cadence track §3 app-state (cyan 2s / amber 1.2s / rose 0.7s, matching the
+  Heartbeat). Breathe = opacity pulse on an inset overlay (cheap/smooth, not box-shadow animation).
+  Exports `HALO_STATE` + `haloColor()`.
+- New `components/sentcom/v6/ThinkingPane.jsx` — wraps the REAL live `UnifiedStreamV5`
+  stream-of-consciousness (fed by `useSentComStream` messages) inside `GlassHaloPane`, with a
+  "THINKING ● LIVE" header (dot colored by state). Per spec this is the ONLY pane that carries the
+  ambient halo. Mounted in `?preview=v6shell` (340px column).
+- Verified (sandbox): pane mounts, halo `data-state` flips rose→cyan with the state toggle,
+  UnifiedStreamV5 renders ("Loading stream…" empty state, no crash); Scanner shows real
+  PRE-MARKET MODE. Zero V5 risk (preview-only).
+- DEFERRED (next sub-step): feature **A** — trigger-condition micro progress-bars + `next eval Xs`
+  countdown — needs a NEW backend `GET /api/trigger-progress/{sym}` + `useTriggerProgress` 1s poll.
+### NEXT (Phase B/C)
+Chart+Verdict panel · trigger-progress (A, needs backend endpoint) · Risk rail (DLP%) ·
+then Phase C real `/v6` route.
+
 ## 2026-06-26 — V6 Phase B: §4-D CRITICAL action bar (consumes /api/safety/system-state)
 - New `components/sentcom/v6/V6ActionBar.jsx`, mounted in `?preview=v6shell`. Auto-appears ONLY
   when `useAppState().state === 'rose'`; one-click operator remediation, each behind an explicit
