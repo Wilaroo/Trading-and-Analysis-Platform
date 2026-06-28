@@ -1,15 +1,6 @@
-export { default as DashboardPage } from './DashboardPage';
-export { default as ScannerPage } from './ScannerPage';
-export { default as StrategiesPage } from './StrategiesPage';
-export { default as WatchlistPage } from './WatchlistPage';
-export { default as PortfolioPage } from './PortfolioPage';
-export { default as FundamentalsPage } from './FundamentalsPage';
-export { default as InsiderTradingPage } from './InsiderTradingPage';
-export { default as COTDataPage } from './COTDataPage';
-export { default as AlertsPage } from './AlertsPage';
-export { default as EarningsCalendarPage } from './EarningsCalendarPage';
-export { default as MarketContextPage } from './MarketContextPage';
-export { default as TradeJournalPage } from './TradeJournalPage';
-export { default as TradingRulesPage } from './TradingRulesPage';
-export { default as TradeOpportunitiesPage } from './TradeOpportunitiesPage';
+// Barrel for the live page tree only. 2026-06-26 — removed 13 orphaned pages
+// (Dashboard, Scanner, Strategies, Watchlist, Portfolio, Fundamentals, Insider,
+// COTData, Alerts, EarningsCalendar, MarketContext, TradingRules, TradeOpportunities)
+// that were never rendered (not routed in App.js renderPage). V6 IA simplification.
 export { default as ChartsPage } from './ChartsPage';
+export { default as TradeJournalPage } from './TradeJournalPage';
