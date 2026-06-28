@@ -18,6 +18,7 @@ import { V6NextMockup } from './pages/V6NextMockup';
 import { V6EdgePreview } from './pages/V6EdgePreview';
 import { V6KpiRibbonPreview } from './pages/V6KpiRibbonPreview';
 import { V6ShellPreview } from './pages/V6ShellPreview';
+import IconComparePreview from './pages/IconComparePreview';
 // v19.34.177 — isolated preview of the portable ClosedTradesTable (?preview=closedfeed).
 // Not in the live tree; renders only behind the flag.
 import ClosedTradesPreview from './components/sentcom/preview/ClosedTradesPreview';
@@ -129,6 +130,8 @@ function App() {
   // very top of the JSX render below.
   const isAuraPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=aura');
+  const isIconCompare =
+    typeof window !== 'undefined' && window.location.search.includes('preview=iconcompare');
   const isV6BrainstormPreview =
     typeof window !== 'undefined' && window.location.search.includes('preview=v6next');
   const isV6ConceptsPreview =
@@ -504,6 +507,8 @@ function App() {
           until consumed) so the preview is isolated and reversible. */}
       {isAuraPreview ? (
         <AuraMockupPreview />
+      ) : isIconCompare ? (
+        <IconComparePreview />
       ) : isClosedFeedPreview ? (
         <ClosedTradesPreview />
       ) : isV6MockPreview ? (
