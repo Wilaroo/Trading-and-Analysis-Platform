@@ -14,8 +14,8 @@
  *   equity      number   — account equity ($)
  *   openRisk    number   — aggregate open risk budget ($, abs)
  *   orderPipeline {pending, ib_pending, executing} — drives the micro-bar
- *   throttle    string   — throttle state label (e.g. "1.0×", "PAUSED")
- *   throttleColor string — tailwind text color for throttle value
+ *   buyingPower number   — account buying power ($)
+ *   buyingPowerColor string — tailwind text color for buying-power value
  *   rpc         string   — pusher/RPC freshness label (e.g. "2.1s", "STALE")
  *   rpcColor    string   — tailwind text color for rpc value
  */
@@ -28,8 +28,8 @@ export const KpiRibbon = ({
   equity,
   openRisk,
   orderPipeline,
-  throttle = '—',
-  throttleColor = 'text-zinc-100',
+  buyingPower,
+  buyingPowerColor = 'text-zinc-100',
   rpc = '—',
   rpcColor = 'text-zinc-100',
   className = '',
@@ -50,7 +50,7 @@ export const KpiRibbon = ({
         <OrderPipelineMicroBar orderPipeline={orderPipeline} />
       </div>
 
-      <KpiMetric label="Throttle" value={throttle} color={throttleColor} />
+      <KpiMetric label="Buying Power" value={formatEquity(buyingPower)} color={buyingPowerColor} />
       <KpiMetric label="RPC" value={rpc} color={rpcColor} />
     </div>
   );

@@ -1895,3 +1895,22 @@ NEXT: Save→pull→restart on DGX. Run diag_edge_gate.py (promote backtest): co
   STAND-DOWN avg_R << 0 and sizing lift > 0. Then set ENTRY_EDGE_PROMOTE_MODE=shadow
   for a few sessions, then =active. Seal #2 active fix (bypass-path pre-write +
   fill-confirm reconciler) still pending (−$2,759 live leak).
+
+--- 2026-06-28 — V6 COCKPIT PHASE C1 (DATA WIRING) DONE ---
+DONE: Replaced all hardcoded V6 shell KPIs with live hooks. KpiRibbon now renders
+  P&L · Equity · Open Risk · Buying Power · RPC (Throttle tile dropped — no real
+  backend metric; DLP-redundant Open-Risk literal dropped in favor of true
+  per-position $-at-risk). Wiring in V6ShellPreview.jsx:
+    - equity/buyingPower  <- useSentComStatus (account_equity/account_buying_power),
+                             useSentComContext fallback. BP color = green if >50% equity.
+    - openRisk            <- Σ open-position risk_amount (fallback (entry−stop)×shares).
+    - pipeline pills      <- live scan/eval/manage(+R)/close from setups/alerts/positions/
+                             closedToday; orderPipeline from status.order_pipeline.
+    - rpc                 <- usePusherHealth age_seconds + health color (DEAD/—/Ns).
+    - account pill phase  <- status.trading_phase||phase||PAPER.
+  KpiRibbon.jsx: throttle/throttleColor props -> buyingPower/buyingPowerColor.
+  Smoke-tested at /v6 (sandbox: graceful $— / $0 / — fallbacks, no live IB data).
+  User approved the 5-KPI layout (P&L·Equity·OpenRisk·BuyingPower·RPC).
+NEXT: V6 Phase C2 — bot safety controls (start/stop, mode, kill-switch, pending
+  approve/reject) into the V6 shell. Then C3-C5 (AICoachTab parity, modals, layout
+  tune, fold Mission Control, flip default route).

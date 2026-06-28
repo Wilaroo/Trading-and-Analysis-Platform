@@ -17,7 +17,7 @@
  * Sandbox has no IB/scanner/position data, so panels render their empty states
  * here — the real visual pass is `yarn build` on the DGX.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Heartbeat } from '../components/sentcom/v6/Heartbeat';
 import { TopStrip } from '../components/sentcom/v6/TopStrip';
 import { KpiRibbon } from '../components/sentcom/v6/KpiRibbon';
@@ -28,19 +28,13 @@ import { useSentComPositions } from '../components/sentcom/hooks/useSentComPosit
 import { useSentComSetups } from '../components/sentcom/hooks/useSentComSetups';
 import { useSentComAlerts } from '../components/sentcom/hooks/useSentComAlerts';
 import { useSentComStream } from '../components/sentcom/hooks/useSentComStream';
+import { useSentComStatus } from '../components/sentcom/hooks/useSentComStatus';
+import { useSentComContext } from '../components/sentcom/hooks/useSentComContext';
+import { usePusherHealth } from '../hooks/usePusherHealth';
 import { V6ActionBar } from '../components/sentcom/v6/V6ActionBar';
 import { ThinkingPane } from '../components/sentcom/v6/ThinkingPane';
 import { RiskRail } from '../components/sentcom/v6/RiskRail';
 import { ChartVerdictPanel } from '../components/sentcom/v6/ChartVerdictPanel';
-
-const PIPELINE = {
-  scan: 47,
-  eval: 20,
-  manage: 9,
-  manageAccent: '+3.1R',
-  close: 3,
-  orderPipeline: { pending: 5, ib_pending: 3, executing: 1, filled: 4, last_ack_s: 1 },
-};
 
 const PanelSlot = ({ title, width, fill, children }) => (
   <div
@@ -65,10 +59,72 @@ export const V6ShellPreview = () => {
   const state = override || liveState;
 
   // Live SentCom data — same hooks the V5 cockpit uses (DRY; no new fetch path).
-  const { positions, totalPnlToday, loading: positionsLoading } = useSentComPositions();
+  const { positions, totalPnlToday, closedToday, loading: positionsLoading } = useSentComPositions();
   const { setups } = useSentComSetups();
   const { alerts } = useSentComAlerts();
   const { messages, loading: streamLoading } = useSentComStream();
+  // Phase C1 (2026-06-26) — live KPI/pipeline wiring. Same sources the V5 HUD
+  // reads (account fields off /api/sentcom/status, pusher freshness off
+  // /api/ib/pusher-health) so the V6 ribbon can never disagree with V5.
+  const { status } = useSentComStatus();
+  const { context } = useSentComContext();
+  const pusher = usePusherHealth();
+
+  const openPositions = useMemo(
+    () => (positions || []).filter((p) => p && p.status !== 'closed'),
+    [positions],
+  );
+
+  const equity = status?.account_equity ?? status?.equity ?? context?.account_equity;
+  const buyingPower = status?.account_buying_power ?? status?.buying_power ?? context?.account_buying_power;
+  const buyingPowerColor =
+    buyingPower != null && equity != null && Number(buyingPower) > Number(equity) * 0.5
+      ? 'text-emerald-400'
+      : 'text-amber-400';
+
+  // Open Risk = aggregate $ at-risk across open positions. Prefer the backend's
+  // per-position `risk_amount`; fall back to (entry − stop) × shares.
+  const openRisk = useMemo(
+    () =>
+      openPositions.reduce((sum, p) => {
+        if (p.risk_amount != null) return sum + Math.abs(Number(p.risk_amount) || 0);
+        const sh = Number(p.remaining_shares ?? p.shares ?? p.quantity ?? 0) || 0;
+        const entry = Number(p.entry_price ?? p.fill_price ?? 0) || 0;
+        const stop = Number(p.stop_price ?? 0) || 0;
+        return sh && entry && stop ? sum + Math.abs((entry - stop) * sh) : sum;
+      }, 0),
+    [openPositions],
+  );
+
+  // Pipeline pills — mirrors V5 derivePipelineCounts for the fields the
+  // TopStrip renders (scan→eval→order→manage→close).
+  const pipeline = useMemo(() => {
+    const totalR = openPositions.reduce((s, p) => s + (Number(p.unrealized_r ?? p.pnl_r) || 0), 0);
+    return {
+      scan: (setups?.length ?? 0) > 0 ? setups.length : (alerts?.length ?? 0),
+      eval: alerts?.length ?? 0,
+      manage: openPositions.length,
+      manageAccent: openPositions.length ? ` ${totalR >= 0 ? '+' : ''}${totalR.toFixed(1)}R` : null,
+      close: Array.isArray(closedToday) ? closedToday.length : 0,
+      orderPipeline: status?.order_pipeline || {},
+    };
+  }, [setups, alerts, openPositions, closedToday, status?.order_pipeline]);
+
+  // RPC tile = pusher data-freshness age + health color.
+  const rpcMeta = useMemo(() => {
+    if (!pusher) return { label: '—', color: 'text-zinc-500' };
+    if (pusher.pusher_dead) return { label: 'DEAD', color: 'text-rose-400' };
+    const age = pusher.age_seconds;
+    const label = age == null ? '—' : age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`;
+    const color =
+      pusher.health === 'green' ? 'text-emerald-400'
+        : pusher.health === 'amber' ? 'text-amber-400'
+          : pusher.health === 'red' ? 'text-rose-400'
+            : 'text-zinc-400';
+    return { label, color };
+  }, [pusher]);
+
+  const phase = (status?.trading_phase || status?.phase || 'PAPER').toString().toUpperCase();
 
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [hoveredSymbol, setHoveredSymbol] = useState(null);
@@ -76,16 +132,16 @@ export const V6ShellPreview = () => {
   return (
     <div className="h-screen overflow-hidden bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
       <Heartbeat state={state} />
-      <TopStrip pipeline={PIPELINE} appState={state} stateMeta={stateMeta} account="PAPER · DUN615665" />
+      <TopStrip pipeline={pipeline} appState={state} stateMeta={stateMeta} account={phase} />
       <KpiRibbon
         dayPnl={totalPnlToday ?? 0}
-        equity={104230}
-        openRisk={1840}
-        orderPipeline={PIPELINE.orderPipeline}
-        throttle="1.0×"
-        throttleColor="text-emerald-400"
-        rpc="2.1s"
-        rpcColor="text-emerald-400"
+        equity={equity}
+        openRisk={openRisk}
+        orderPipeline={pipeline.orderPipeline}
+        buyingPower={buyingPower}
+        buyingPowerColor={buyingPowerColor}
+        rpc={rpcMeta.label}
+        rpcColor={rpcMeta.color}
         className="border-b border-white/5"
       />
 
