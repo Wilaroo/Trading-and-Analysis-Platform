@@ -1914,3 +1914,15 @@ DONE: Replaced all hardcoded V6 shell KPIs with live hooks. KpiRibbon now render
 NEXT: V6 Phase C2 — bot safety controls (start/stop, mode, kill-switch, pending
   approve/reject) into the V6 shell. Then C3-C5 (AICoachTab parity, modals, layout
   tune, fold Mission Control, flip default route).
+
+--- 2026-06-28 — V6 KPI FIELD-AUDIT (drift verification tool) DONE ---
+DONE: Added components/sentcom/v6/V6KpiParityPanel.jsx + "field audit" toggle in the
+  V6 shell preview toolbar (data-testid v6-shell-field-audit). Dev/operator overlay
+  that, for every ribbon value, shows: resolved SOURCE FIELD (which fallback fired),
+  RAW value from the live feed, formatted DISPLAY, and ✓/⚠ flag. Summary chip =
+  "N field(s) missing/null". Purpose: open /v6 on the DGX during RTH → instantly
+  verify Equity/BuyingPower/order_pipeline resolve from the live IB payload (green ✓)
+  and catch any field-name drift (amber ⚠ = null). Footer says compare vs V5 HUD at /.
+  Sandbox-verified: correctly flags Equity/BuyingPower/order_pipeline as missing (no
+  live feed), P&L/OpenRisk/pipeline-pills/RPC resolve. Self-contained, V5 untouched.
+NEXT: operator opens /v6 → FIELD AUDIT on DGX during RTH to confirm parity before C2.

@@ -35,6 +35,7 @@ import { V6ActionBar } from '../components/sentcom/v6/V6ActionBar';
 import { ThinkingPane } from '../components/sentcom/v6/ThinkingPane';
 import { RiskRail } from '../components/sentcom/v6/RiskRail';
 import { ChartVerdictPanel } from '../components/sentcom/v6/ChartVerdictPanel';
+import { V6KpiParityPanel } from '../components/sentcom/v6/V6KpiParityPanel';
 
 const PanelSlot = ({ title, width, fill, children }) => (
   <div
@@ -128,9 +129,10 @@ export const V6ShellPreview = () => {
 
   const [selectedSymbol, setSelectedSymbol] = useState(null);
   const [hoveredSymbol, setHoveredSymbol] = useState(null);
+  const [showParity, setShowParity] = useState(false);
 
   return (
-    <div className="h-screen overflow-hidden bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
+    <div className="relative h-screen overflow-hidden bg-[#09090b] text-zinc-100 flex flex-col font-sans" data-testid="v6-shell-preview">
       <Heartbeat state={state} />
       <TopStrip pipeline={pipeline} appState={state} stateMeta={stateMeta} account={phase} />
       <KpiRibbon
@@ -173,13 +175,35 @@ export const V6ShellPreview = () => {
         ))}
         <span className="ml-3 text-zinc-700">Additive preview only — live V5 cockpit untouched.</span>
         <button
+          data-testid="v6-shell-field-audit"
+          onClick={() => setShowParity((v) => !v)}
+          className={`ml-auto uppercase font-bold px-2 py-0.5 rounded transition-colors ${showParity ? 'bg-cyan-700/60 text-cyan-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          {showParity ? 'hide field audit' : 'field audit'}
+        </button>
+        <button
           data-testid="v6-shell-force-actionbar"
           onClick={() => setForceBar((v) => !v)}
-          className={`ml-auto uppercase font-bold px-2 py-0.5 rounded transition-colors ${forceBar ? 'bg-rose-700/60 text-rose-100' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`uppercase font-bold px-2 py-0.5 rounded transition-colors ${forceBar ? 'bg-rose-700/60 text-rose-100' : 'text-zinc-500 hover:text-zinc-300'}`}
         >
           {forceBar ? 'hide action bar' : 'preview action bar'}
         </button>
       </div>
+
+      {showParity && (
+        <V6KpiParityPanel
+          status={status}
+          context={context}
+          openPositions={openPositions}
+          pusher={pusher}
+          equity={equity}
+          buyingPower={buyingPower}
+          openRisk={openRisk}
+          dayPnl={totalPnlToday ?? 0}
+          pipeline={pipeline}
+          onClose={() => setShowParity(false)}
+        />
+      )}
 
       {/* §4 5-col body grid */}
       <div className="flex-1 min-h-0 flex gap-2 p-2 pb-1">
